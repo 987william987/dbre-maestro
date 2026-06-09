@@ -1,0 +1,46 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: maestro-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-changeme_root}
+      MYSQL_DATABASE: maestro
+      MYSQL_USER: maestro_app
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:-changeme_app}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "maestro_app", "-pchangeme_app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: maestro-app
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_DSN: "maestro_app:${MYSQL_APP_PASSWORD:-changeme_app}@tcp(mysql:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC"
+      MIGRATION_DSN: "root:${MYSQL_ROOT_PASSWORD:-changeme_root}@tcp(mysql:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC"
+      DBRE_ENCRYPTION_KEY: ${DBRE_ENCRYPTION_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  mysql_data:

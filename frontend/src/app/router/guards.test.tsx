@@ -1,0 +1,69 @@
+import { render, screen } from '@testing-library/react'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { describe, expect, it, vi } from 'vitest'
+import { ProtectedRoute } from '@/app/router/ProtectedRoute'
+import { RoleRoute } from '@/app/router/RoleRoute'
+
+vi.mock('@/shared/auth/AuthContext', () => ({
+  useAuth: vi.fn(),
+}))
+
+import { useAuth } from '@/shared/auth/AuthContext'
+
+const mockedUseAuth = vi.mocked(useAuth)
+
+describe('route guards', () => {
+  it('未登入時 ProtectedRoute 會導去 /login', () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'anonymous',
+      isAuthenticated: false,
+      user: null,
+      accessToken: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/tickets']}>
+        <Routes>
+          <Route path="/login" element={<div>login page</div>} />
+          <Route element={<ProtectedRoute />}>
+            <Route path="/tickets" element={<div>tickets page</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('login page')).toBeInTheDocument()
+  })
+
+  it('角色不符時 RoleRoute 會導回 /tickets', () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'dev',
+        authGroups: ['developer'],
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/audit-logs']}>
+        <Routes>
+          <Route path="/tickets" element={<div>tickets page</div>} />
+          <Route element={<RoleRoute allowedGroups={['dba', 'admin']} />}>
+            <Route path="/audit-logs" element={<div>audit logs</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('tickets page')).toBeInTheDocument()
+  })
+})

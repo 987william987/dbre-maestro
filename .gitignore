@@ -1,0 +1,6 @@
+.env
+bin/
+*.log
+*.swp
+.DS_Store
+backend/vendor/

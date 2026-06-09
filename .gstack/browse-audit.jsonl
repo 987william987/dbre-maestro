@@ -1,0 +1,3 @@
+{"ts":"2026-06-09T05:40:33.778Z","cmd":"goto","args":"https://example.com","origin":"https://example.com/","durationMs":200,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-09T05:40:37.676Z","cmd":"text","args":"","origin":"https://example.com/","durationMs":4,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-09T05:40:38.255Z","cmd":"screenshot","args":"/tmp/gstack-test.png","origin":"https://example.com/","durationMs":531,"status":"ok","hasCookies":false,"mode":"launched"}
