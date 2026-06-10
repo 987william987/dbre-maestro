@@ -82,3 +82,43 @@ func (r *UserRepo) AddMembership(ctx context.Context, userID uint64, group model
 	)
 	return err
 }
+
+func (r *UserRepo) RemoveMembership(ctx context.Context, userID uint64, group model.AuthGroup) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM auth_group_memberships WHERE user_id = ? AND auth_group = ?`,
+		userID, group,
+	)
+	return err
+}
+
+// Update patches username and/or email. Call separately to update password hash.
+func (r *UserRepo) Update(ctx context.Context, id uint64, username, email string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE users SET username=?, email=?, updated_at=NOW() WHERE id=?`,
+		username, email, id,
+	)
+	return err
+}
+
+func (r *UserRepo) UpdatePassword(ctx context.Context, id uint64, passwordHash string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE users SET password=?, updated_at=NOW() WHERE id=?`,
+		passwordHash, id,
+	)
+	return err
+}
+
+func (r *UserRepo) List(ctx context.Context) ([]model.User, error) {
+	var users []model.User
+	err := r.db.SelectContext(ctx, &users, `SELECT * FROM users ORDER BY created_at DESC`)
+	return users, err
+}
+
+func (r *UserRepo) ListMemberships(ctx context.Context, userID uint64) ([]model.Membership, error) {
+	var memberships []model.Membership
+	err := r.db.SelectContext(ctx, &memberships,
+		`SELECT * FROM auth_group_memberships WHERE user_id = ? ORDER BY created_at DESC`,
+		userID,
+	)
+	return memberships, err
+}

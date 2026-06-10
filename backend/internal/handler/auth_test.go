@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -66,6 +67,44 @@ func TestAuthHandlerMe(t *testing.T) {
 	}
 	if got.AuthGroups[0] != model.AuthGroupReviewer || got.AuthGroups[1] != model.AuthGroupDBA {
 		t.Fatalf("auth_groups = %#v, want [%q %q]", got.AuthGroups, model.AuthGroupReviewer, model.AuthGroupDBA)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerMeReturnsEmptyArrayForNoGroups(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	userRepo := repository.NewUserRepo(sqlxDB)
+	handler := NewAuthHandler(userRepo, nil, nil, nil)
+
+	userID := uint64(7)
+	mock.ExpectQuery(`SELECT auth_group FROM auth_group_memberships`).
+		WithArgs(userID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"auth_group"}))
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	ctx := context.WithValue(req.Context(), middleware.CtxUserID, userID)
+	ctx = context.WithValue(ctx, middleware.CtxUsername, "bob")
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	middleware.InjectAuthGroups(userRepo)(http.HandlerFunc(handler.Me)).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `"auth_groups":[]`) {
+		t.Fatalf("body = %s, want auth_groups to be [] instead of null", body)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

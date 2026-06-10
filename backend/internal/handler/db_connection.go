@@ -29,6 +29,9 @@ func (h *DBConnectionHandler) List(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "list failed")
 		return
 	}
+	if conns == nil {
+		conns = []model.DBConnection{}
+	}
 	jsonOK(w, map[string]any{"connections": conns})
 }
 
@@ -103,19 +106,32 @@ func (h *DBConnectionHandler) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if conn.DBType == "redis" {
+		redisPassword, err := h.repo.DecryptPassword(conn)
+		if err != nil {
+			jsonOK(w, map[string]any{"ok": false, "error": "decrypt error"})
+			return
+		}
+		addr := pool.BuildRedisAddr(conn.Host, conn.Port)
+		client := pool.RedisGlobal().GetOrCreate(conn.ID, addr, redisPassword, 0)
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := client.Ping(ctx).Err(); err != nil {
+			jsonOK(w, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		jsonOK(w, map[string]any{"ok": true})
+		return
+	}
+
 	password, err := h.repo.DecryptPassword(conn)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "decrypt error")
 		return
 	}
 
-	dbName := ""
-	if conn.DatabaseName != nil {
-		dbName = *conn.DatabaseName
-	}
-	dsn := pool.BuildMySQLDSN(conn.Host, conn.Port, conn.Username, password, dbName)
-
-	pools, err := pool.Global().GetOrCreate(conn.ID, dsn)
+	driver, dsn := pool.BuildDSN(conn, password)
+	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
 	if err != nil {
 		jsonOK(w, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -131,6 +147,94 @@ func (h *DBConnectionHandler) Test(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"ok": true})
 }
 
+// PATCH /db-connections/{id}
+// All fields are optional; omit to leave unchanged.
+// Password is only updated when provided and non-empty.
+func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	existing, err := h.repo.GetByID(r.Context(), id)
+	if err != nil || existing == nil {
+		jsonErr(w, http.StatusNotFound, "connection not found")
+		return
+	}
+
+	var req struct {
+		Name         *string `json:"name"`
+		DBType       *string `json:"db_type"`
+		Host         *string `json:"host"`
+		Port         *uint16 `json:"port"`
+		DatabaseName *string `json:"database_name"`
+		Username     *string `json:"username"`
+		Password     *string `json:"password"`
+		SSLMode      *string `json:"ssl_mode"`
+	}
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	name := existing.Name
+	if req.Name != nil {
+		name = *req.Name
+	}
+	dbType := existing.DBType
+	if req.DBType != nil {
+		dbType = *req.DBType
+	}
+	host := existing.Host
+	if req.Host != nil {
+		host = *req.Host
+	}
+	port := existing.Port
+	if req.Port != nil {
+		port = *req.Port
+	}
+	databaseName := existing.DatabaseName
+	if req.DatabaseName != nil {
+		databaseName = req.DatabaseName
+	}
+	username := existing.Username
+	if req.Username != nil {
+		username = *req.Username
+	}
+	sslMode := existing.SSLMode
+	if req.SSLMode != nil {
+		sslMode = *req.SSLMode
+	}
+
+	if err := h.repo.Update(r.Context(), id, name, dbType, host, port, databaseName, username, sslMode); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "update failed")
+		return
+	}
+	if req.Password != nil && *req.Password != "" {
+		if err := h.repo.UpdatePassword(r.Context(), id, *req.Password); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "update password failed")
+			return
+		}
+	}
+
+	pool.Global().Invalidate(id)
+	pool.RedisGlobal().Invalidate(id)
+
+	userID := middleware.UserIDFromCtx(r.Context())
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "setting_change",
+		ResourceType: "db_connection",
+		ResourceID:   &id,
+		Details:      map[string]string{"action": "update", "name": name},
+	})
+
+	updated, _ := h.repo.GetByID(r.Context(), id)
+	jsonOK(w, updated)
+}
+
 // DELETE /db-connections/{id}
 func (h *DBConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
@@ -140,6 +244,7 @@ func (h *DBConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pool.Global().Invalidate(id)
+	pool.RedisGlobal().Invalidate(id)
 
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "delete failed")

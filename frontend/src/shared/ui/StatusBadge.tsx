@@ -29,7 +29,7 @@ export function StatusBadge({ status }: { status: TicketStatus }) {
   return (
     <span
       className={cn(
-        'inline-flex rounded-pill border px-2.5 py-1 text-[11px] font-semibold tracking-wide',
+        'inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em]',
         STATUS_STYLES[status],
       )}
     >

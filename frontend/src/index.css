@@ -3,29 +3,29 @@
 @tailwind utilities;
 
 :root {
-  --page:          #f6f7fb;
+  --page:          #eef2f6;
   --panel:         #ffffff;
-  --panel-muted:   #fbfcfe;
-  --panel-soft:    #f7f9fc;
-  --sidebar:       #ffffff;
-  --editor:        #f9fbfd;
-  --editor-border: #dbe3ec;
-  --editor-toolbar:#f3f6fa;
-  --editor-code-bg:#eef3f8;
+  --panel-muted:   #f6f8fb;
+  --panel-soft:    #f2f5f8;
+  --sidebar:       rgba(246,248,251,0.9);
+  --editor:        #f8fafc;
+  --editor-border: #d8e0ea;
+  --editor-toolbar:#f2f5f8;
+  --editor-code-bg:#edf2f7;
   --editor-code-text:#1f2937;
-  --text:          #101828;
-  --text-secondary:#667085;
-  --text-muted:    #98a2b3;
-  --brand:         #111827;
+  --text:          #0f1728;
+  --text-secondary:#5f6b7a;
+  --text-muted:    #8b97a8;
+  --brand:         #0f1728;
   --accent:        #2563eb;
-  --accent-soft:   #eff6ff;
+  --accent-soft:   #ebf3ff;
   --success:       #12b76a;
   --warning:       #f79009;
   --danger:        #f04438;
-  --border:        #e7ebf0;
-  --border-strong: #d0d5dd;
-  --shadow:        0 18px 38px rgba(16,24,40,0.06);
-  --shadow-soft:   0 4px 14px rgba(16,24,40,0.05);
+  --border:        #dfe6ef;
+  --border-strong: #c7d0db;
+  --shadow:        0 24px 64px rgba(15,23,42,0.08);
+  --shadow-soft:   0 10px 28px rgba(15,23,42,0.05);
 }
 
 * {
@@ -35,11 +35,14 @@
 body {
   margin: 0;
   font-family: 'Manrope', 'Noto Sans TC', sans-serif;
-  background: var(--page);
+  background:
+    radial-gradient(circle at top left, rgba(37,99,235,0.06), transparent 22%),
+    linear-gradient(180deg, #f8fafc 0%, var(--page) 54%, #e9eef4 100%);
   color: var(--text);
   font-size: 13px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
 }
 
 button,
@@ -56,4 +59,36 @@ a {
 
 #root {
   min-height: 100vh;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(148,163,184,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148,163,184,0.05) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(180deg, rgba(0,0,0,0.18), transparent 38%);
+}
+
+::selection {
+  background: rgba(37,99,235,0.16);
+}
+
+@keyframes surface-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.surface-enter {
+  animation: surface-enter 360ms ease-out;
 }

@@ -5,23 +5,40 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
+	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	ticketsm "github.com/dbre-maestro/maestro/internal/ticket"
+	"github.com/dbre-maestro/maestro/internal/sqlreview"
 	"github.com/go-chi/chi/v5"
 )
 
 type TicketHandler struct {
-	tickets *repository.TicketRepo
-	audit   *repository.AuditRepo
-	lark    *notification.Client // nil = notifications disabled
+	tickets        *repository.TicketRepo
+	audit          *repository.AuditRepo
+	dbConns        *repository.DBConnectionRepo
+	sqlReviewRules *repository.SQLReviewRuleRepo
+	lark           *notification.Client // nil = notifications disabled
 }
 
-func NewTicketHandler(tickets *repository.TicketRepo, audit *repository.AuditRepo, lark *notification.Client) *TicketHandler {
-	return &TicketHandler{tickets: tickets, audit: audit, lark: lark}
+func NewTicketHandler(
+	tickets *repository.TicketRepo,
+	audit *repository.AuditRepo,
+	dbConns *repository.DBConnectionRepo,
+	sqlReviewRules *repository.SQLReviewRuleRepo,
+	lark *notification.Client,
+) *TicketHandler {
+	return &TicketHandler{
+		tickets:        tickets,
+		audit:          audit,
+		dbConns:        dbConns,
+		sqlReviewRules: sqlReviewRules,
+		lark:           lark,
+	}
 }
 
 // notifyLark sends a Lark notification and logs failures to audit_logs.
@@ -64,6 +81,14 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.TicketType != model.TicketTypeDDL && req.TicketType != model.TicketTypeDML {
 		jsonErr(w, http.StatusUnprocessableEntity, "ticket_type must be ddl or dml")
 		return
+	}
+
+	// SQL Review: run EXPLAIN-based checks if a target DB is specified
+	if req.DBConnectionID != nil {
+		if issues := h.runTicketSQLReview(r.Context(), *req.DBConnectionID, req.SQLContent); len(issues) > 0 {
+			jsonErr(w, http.StatusUnprocessableEntity, "SQL review failed: "+strings.Join(issues, "; "))
+			return
+		}
 	}
 
 	t := &model.Ticket{
@@ -127,6 +152,9 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "list tickets failed")
 		return
+	}
+	if tickets == nil {
+		tickets = []model.Ticket{}
 	}
 
 	jsonOK(w, map[string]any{"tickets": tickets, "limit": limit, "offset": offset})
@@ -317,7 +345,7 @@ func (h *TicketHandler) RequestExecution(w http.ResponseWriter, r *http.Request)
 	jsonOK(w, updated)
 }
 
-// POST /tickets/{id}/execute — T9: OCC protected
+// POST /tickets/{id}/execute — T9: OCC protected; runs SQL on target DB
 func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	id := parseTicketID(w, r)
 	if id == 0 {
@@ -332,6 +360,11 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 
 	if ticket.Status != model.TicketStatusPendingExecution {
 		jsonErr(w, http.StatusUnprocessableEntity, "ticket is not pending execution")
+		return
+	}
+
+	if ticket.DBConnectionID == nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "ticket has no target db_connection")
 		return
 	}
 
@@ -351,14 +384,192 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
-		ActionType:   "ticket_execute",
+		ActionType:   "ticket_execute_start",
 		ResourceType: "ticket",
 		ResourceID:   &id,
 		IPAddress:    clientIP(r),
 	})
 
+	// Run SQL asynchronously so the HTTP response returns immediately.
+	// Status is persisted to DB; the client polls GET /tickets/{id} for progress.
+	go h.runTicketSQL(ticket, userID)
+
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
+}
+
+// runTicketSQL splits the ticket SQL into statements and executes each one serially
+// against the target DB, recording results in ticket_executions.
+func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
+	ctx := context.Background()
+
+	conn, err := h.dbConns.GetByID(ctx, *ticket.DBConnectionID)
+	if err != nil || conn == nil {
+		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "db connection not found")
+		return
+	}
+	password, err := h.dbConns.DecryptPassword(conn)
+	if err != nil {
+		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "decrypt password failed")
+		return
+	}
+
+	driver, dsn := pool.BuildDSN(conn, password)
+	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
+	if err != nil {
+		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "cannot connect: "+err.Error())
+		return
+	}
+
+	stmts := splitSQLStatements(ticket.SQLContent)
+	finalStatus := model.TicketStatusCompleted
+
+	for seq, stmt := range stmts {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+
+		execRow := &model.TicketExecution{
+			TicketID: ticket.ID,
+			Seq:      seq + 1,
+			SQLStmt:  stmt,
+		}
+		execID, err := h.tickets.CreateExecution(ctx, execRow)
+		if err != nil {
+			h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "record execution failed")
+			return
+		}
+		_ = h.tickets.MarkExecutionRunning(ctx, execID)
+
+		res, execErr := pools.ExecPool.ExecContext(ctx, stmt)
+		var rowsAffected int64
+		var errMsg *string
+		if execErr != nil {
+			msg := execErr.Error()
+			errMsg = &msg
+			finalStatus = model.TicketStatusFailed
+		} else {
+			rowsAffected, _ = res.RowsAffected()
+		}
+		_ = h.tickets.MarkExecutionDone(ctx, execID, rowsAffected, errMsg)
+
+		if execErr != nil {
+			break
+		}
+	}
+
+	h.finishTicket(ctx, ticket.ID, finalStatus, "")
+
+	actionType := "ticket_execute_complete"
+	if finalStatus == model.TicketStatusFailed {
+		actionType = "ticket_execute_failed"
+	}
+	h.audit.Log(ctx, repository.AuditEntry{
+		ActorID:      &executorID,
+		ActorName:    "",
+		ActionType:   actionType,
+		ResourceType: "ticket",
+		ResourceID:   &ticket.ID,
+	})
+
+	if finalStatus == model.TicketStatusCompleted {
+		h.notifyLark(ctx, "工單執行完成",
+			fmt.Sprintf("工單 %s 已成功執行", ticket.TicketNo))
+	}
+}
+
+func (h *TicketHandler) finishTicket(ctx context.Context, id uint64, status model.TicketStatus, _ string) {
+	_ = h.tickets.MarkCompleted(ctx, id, status)
+}
+
+// runTicketSQLReview connects to the target DB and runs EXPLAIN-based checks
+// against each SQL statement. Returns a list of blocking issue messages.
+// Returns nil (no block) when rules are disabled, the DB is unreachable, or
+// EXPLAIN fails (e.g., DDL statements).
+func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64, sqlContent string) []string {
+	rules, err := h.sqlReviewRules.List(ctx)
+	if err != nil {
+		return nil // fail open on meta DB error
+	}
+
+	ruleMap := make(map[string]bool, len(rules))
+	var rowThreshold int64 = sqlreview.DefaultRowThreshold
+	for _, r := range rules {
+		if r.Enabled {
+			ruleMap[r.RuleName] = true
+			if r.RuleName == "high_row_count" && r.Threshold != nil {
+				rowThreshold = *r.Threshold
+			}
+		}
+	}
+	if !ruleMap["full_table_scan"] && !ruleMap["high_row_count"] {
+		return nil
+	}
+
+	conn, err := h.dbConns.GetByID(ctx, dbConnID)
+	if err != nil || conn == nil {
+		return nil // fail open: can't connect, let the ticket through
+	}
+	password, err := h.dbConns.DecryptPassword(conn)
+	if err != nil {
+		return nil
+	}
+	driver, dsn := pool.BuildDSN(conn, password)
+	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
+	if err != nil {
+		return nil // fail open
+	}
+
+	var allIssues []string
+	for _, stmt := range splitSQLStatements(sqlContent) {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		issues, err := sqlreview.CheckExplain(ctx, pools.QueryPool, stmt, rowThreshold)
+		if err != nil {
+			continue // EXPLAIN not supported for this statement type (DDL etc.), skip
+		}
+		for _, issue := range issues {
+			if ruleMap[issue.Kind] {
+				allIssues = append(allIssues, issue.Msg)
+			}
+		}
+	}
+	return allIssues
+}
+
+// splitSQLStatements splits a multi-statement SQL string by semicolons.
+func splitSQLStatements(sql string) []string {
+	var stmts []string
+	var cur strings.Builder
+	depth := 0
+	for _, ch := range sql {
+		switch ch {
+		case '(':
+			depth++
+			cur.WriteRune(ch)
+		case ')':
+			depth--
+			cur.WriteRune(ch)
+		case ';':
+			if depth == 0 {
+				if s := strings.TrimSpace(cur.String()); s != "" {
+					stmts = append(stmts, s)
+				}
+				cur.Reset()
+			} else {
+				cur.WriteRune(ch)
+			}
+		default:
+			cur.WriteRune(ch)
+		}
+	}
+	if s := strings.TrimSpace(cur.String()); s != "" {
+		stmts = append(stmts, s)
+	}
+	return stmts
 }
 
 func parseTicketID(w http.ResponseWriter, r *http.Request) uint64 {

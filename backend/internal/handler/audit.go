@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/repository"
 )
 
@@ -81,6 +82,9 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "list audit logs failed")
 		return
+	}
+	if logs == nil {
+		logs = []model.AuditLog{}
 	}
 
 	jsonOK(w, map[string]any{

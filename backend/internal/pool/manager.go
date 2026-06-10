@@ -3,17 +3,19 @@ package pool
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"sync"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/dbre-maestro/maestro/internal/model"
 )
 
 // InstancePools holds two separate connection pools per target DB instance.
 // T7: exec_pool (MaxOpenConns=3) is reserved for ticket execution;
 // query_pool (MaxOpenConns=10) is used by the SQL Editor.
-// Keeping them separate ensures that a burst of Editor queries never starves
-// an in-flight ticket execution (or vice versa).
 type InstancePools struct {
 	ExecPool  *sql.DB
 	QueryPool *sql.DB
@@ -29,7 +31,8 @@ var global = &Manager{pools: make(map[uint64]*InstancePools)}
 func Global() *Manager { return global }
 
 // GetOrCreate returns existing pools or creates new ones for connID.
-func (m *Manager) GetOrCreate(connID uint64, dsn string) (*InstancePools, error) {
+// driver must be "mysql" or "pgx".
+func (m *Manager) GetOrCreate(connID uint64, driver, dsn string) (*InstancePools, error) {
 	m.mu.RLock()
 	if p, ok := m.pools[connID]; ok {
 		m.mu.RUnlock()
@@ -43,11 +46,11 @@ func (m *Manager) GetOrCreate(connID uint64, dsn string) (*InstancePools, error)
 		return p, nil
 	}
 
-	exec, err := openPool(dsn, 3)
+	exec, err := openPool(driver, dsn, 3)
 	if err != nil {
 		return nil, fmt.Errorf("exec_pool open: %w", err)
 	}
-	query, err := openPool(dsn, 10)
+	query, err := openPool(driver, dsn, 10)
 	if err != nil {
 		exec.Close()
 		return nil, fmt.Errorf("query_pool open: %w", err)
@@ -58,7 +61,7 @@ func (m *Manager) GetOrCreate(connID uint64, dsn string) (*InstancePools, error)
 	return p, nil
 }
 
-// Invalidate closes and removes the pools for connID (call after updating a connection).
+// Invalidate closes and removes the pools for connID.
 func (m *Manager) Invalidate(connID uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -69,8 +72,8 @@ func (m *Manager) Invalidate(connID uint64) {
 	}
 }
 
-func openPool(dsn string, maxOpen int) (*sql.DB, error) {
-	db, err := sql.Open("mysql", dsn)
+func openPool(driver, dsn string, maxOpen int) (*sql.DB, error) {
+	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +84,22 @@ func openPool(dsn string, maxOpen int) (*sql.DB, error) {
 	return db, nil
 }
 
-// BuildMySQLDSN constructs a DSN string from individual fields.
+// BuildDSN returns the driver name and DSN for a connection.
+// Redis connections are not handled here; use RedisGlobal() instead.
+func BuildDSN(conn *model.DBConnection, password string) (driver, dsn string) {
+	switch conn.DBType {
+	case "postgres", "postgresql":
+		return "pgx", BuildPostgresDSN(conn.Host, conn.Port, conn.Username, password, conn.DatabaseName, conn.SSLMode)
+	default: // mysql
+		dbName := ""
+		if conn.DatabaseName != nil {
+			dbName = *conn.DatabaseName
+		}
+		return "mysql", BuildMySQLDSN(conn.Host, conn.Port, conn.Username, password, dbName)
+	}
+}
+
+// BuildMySQLDSN constructs a MySQL DSN string.
 func BuildMySQLDSN(host string, port uint16, user, password, dbName string) string {
 	db := ""
 	if dbName != "" {
@@ -89,6 +107,26 @@ func BuildMySQLDSN(host string, port uint16, user, password, dbName string) stri
 	}
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)%s?parseTime=true&charset=utf8mb4&loc=UTC",
 		user, password, host, port, db)
+}
+
+// BuildPostgresDSN constructs a PostgreSQL connection URL for pgx/v5/stdlib.
+func BuildPostgresDSN(host string, port uint16, user, password string, dbName *string, sslMode string) string {
+	u := url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(user, password),
+		Host:   fmt.Sprintf("%s:%d", host, port),
+	}
+	if dbName != nil && *dbName != "" {
+		u.Path = "/" + *dbName
+	}
+	q := url.Values{}
+	if sslMode != "" {
+		q.Set("sslmode", sslMode)
+	} else {
+		q.Set("sslmode", "prefer")
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func max(a, b int) int {

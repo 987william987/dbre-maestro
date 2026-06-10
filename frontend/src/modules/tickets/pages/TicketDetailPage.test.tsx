@@ -16,6 +16,12 @@ vi.mock('@/modules/tickets/api', () => ({
   executeTicket: vi.fn(),
 }))
 
+vi.mock('@/shared/ui/ToastContext', () => ({
+  useToast: () => ({
+    pushToast: vi.fn(),
+  }),
+}))
+
 import { useAuth } from '@/shared/auth/AuthContext'
 import { getTicket } from '@/modules/tickets/api'
 

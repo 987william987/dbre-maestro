@@ -22,7 +22,10 @@ type CreateConnectionPayload = {
 }
 
 export function listDBConnections() {
-  return apiClient.get<ConnectionsResponse>('/db-connections')
+  return apiClient.get<ConnectionsResponse>('/db-connections').then((response) => ({
+    ...response,
+    connections: Array.isArray(response.connections) ? response.connections : [],
+  }))
 }
 
 export function createDBConnection(payload: CreateConnectionPayload) {

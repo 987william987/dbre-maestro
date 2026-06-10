@@ -1,7 +1,13 @@
-.PHONY: dev build test migrate lint
+.PHONY: dev dev-backend dev-frontend db-only build test test-frontend migrate lint
 
 dev:
 	docker compose up --build
+
+dev-backend:
+	docker compose up --build mysql app
+
+dev-frontend:
+	cd frontend && npm run dev
 
 db-only:
 	docker compose up mysql
@@ -11,6 +17,9 @@ build:
 
 test:
 	cd backend && go test ./...
+
+test-frontend:
+	cd frontend && npm test
 
 lint:
 	cd backend && golangci-lint run ./...

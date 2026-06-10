@@ -31,5 +31,8 @@ export function listAuditLogs(params: AuditListParams) {
   query.set('limit', String(params.limit ?? 50))
   query.set('offset', String(params.offset ?? 0))
 
-  return apiClient.get<AuditLogsResponse>(`/audit-logs?${query.toString()}`)
+  return apiClient.get<AuditLogsResponse>(`/audit-logs?${query.toString()}`).then((response) => ({
+    ...response,
+    logs: Array.isArray(response.logs) ? response.logs : [],
+  }))
 }

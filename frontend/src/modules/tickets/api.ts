@@ -27,7 +27,12 @@ export async function listTickets(status?: TicketStatus) {
   }
 
   const path = query.size > 0 ? `/tickets?${query.toString()}` : '/tickets'
-  return apiClient.get<TicketsResponse>(path)
+  const response = await apiClient.get<TicketsResponse>(path)
+
+  return {
+    ...response,
+    tickets: Array.isArray(response.tickets) ? response.tickets : [],
+  }
 }
 
 export async function getTicket(id: string) {
@@ -59,5 +64,10 @@ export async function executeTicket(id: number) {
 }
 
 export async function listConnections() {
-  return apiClient.get<DBConnectionsResponse>('/db-connections')
+  const response = await apiClient.get<DBConnectionsResponse>('/db-connections')
+
+  return {
+    ...response,
+    connections: Array.isArray(response.connections) ? response.connections : [],
+  }
 }

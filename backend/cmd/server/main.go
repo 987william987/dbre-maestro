@@ -15,6 +15,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/config"
 	"github.com/dbre-maestro/maestro/internal/db"
 	"github.com/dbre-maestro/maestro/internal/handler"
+	"github.com/dbre-maestro/maestro/internal/masking"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
@@ -89,12 +90,26 @@ func main() {
 		slog.Info("lark notifications enabled")
 	}
 
+	maskingRuleRepo := repository.NewMaskingRuleRepo(metaDB)
+	sqlReviewRuleRepo := repository.NewSQLReviewRuleRepo(metaDB)
+
+	maskingEngine, err := masking.NewEngine(cfg.EncryptionKey, masking.GlobalCache())
+	if err != nil {
+		slog.Error("masking engine init failed", "err", err)
+		os.Exit(1)
+	}
+
 	healthH := handler.NewHealthHandler(metaDB)
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret)
-	ticketH := handler.NewTicketHandler(ticketRepo, auditRepo, larkClient)
+	ticketH := handler.NewTicketHandler(ticketRepo, auditRepo, dbConnRepo, sqlReviewRuleRepo, larkClient)
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, auditRepo)
 	exportH := handler.NewExportHandler(exportRepo, dbConnRepo, auditRepo)
 	auditH := handler.NewAuditHandler(auditRepo)
+	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
+	sqlReviewRuleH := handler.NewSQLReviewRuleHandler(sqlReviewRuleRepo, auditRepo)
+	queryH := handler.NewQueryHandler(dbConnRepo, maskingRuleRepo, auditRepo, maskingEngine)
+	userH := handler.NewUserHandler(userRepo, auditRepo)
+	metadataH := handler.NewMetadataHandler(dbConnRepo)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -129,6 +144,7 @@ func main() {
 
 		r.Get("/", dbConnH.List)
 		r.Post("/", dbConnH.Create)
+		r.Patch("/{id}", dbConnH.Patch)
 		r.Post("/{id}/test", dbConnH.Test)
 		r.Delete("/{id}", dbConnH.Delete)
 	})
@@ -138,6 +154,48 @@ func main() {
 		r.Use(middleware.InjectAuthGroups(userRepo))
 		r.Use(requireDBAOrAbove)
 		r.Get("/", auditH.List)
+	})
+
+	r.Route("/users", func(r chi.Router) {
+		r.Use(middleware.RequireAuth(cfg.JWTSecret))
+		r.Use(middleware.InjectAuthGroups(userRepo))
+		r.Use(requireAdminOnly)
+		r.Get("/", userH.List)
+		r.Post("/", userH.Create)
+		r.Get("/{id}", userH.Get)
+		r.Patch("/{id}", userH.Patch)
+		r.Post("/{id}/memberships", userH.AddMembership)
+		r.Delete("/{id}/memberships/{group}", userH.RemoveMembership)
+	})
+
+	r.Route("/masking-rules", func(r chi.Router) {
+		r.Use(middleware.RequireAuth(cfg.JWTSecret))
+		r.Use(middleware.InjectAuthGroups(userRepo))
+		r.Use(requireDBAOrAbove)
+		r.Get("/", maskingRuleH.List)
+		r.Post("/", maskingRuleH.Create)
+		r.Delete("/{id}", maskingRuleH.Delete)
+	})
+
+	r.Route("/sql-review-rules", func(r chi.Router) {
+		r.Use(middleware.RequireAuth(cfg.JWTSecret))
+		r.Use(middleware.InjectAuthGroups(userRepo))
+		r.Use(requireDBAOrAbove)
+		r.Get("/", sqlReviewRuleH.List)
+		r.Patch("/{name}", sqlReviewRuleH.Patch)
+	})
+
+	r.Route("/query", func(r chi.Router) {
+		r.Use(middleware.RequireAuth(cfg.JWTSecret))
+		r.Use(middleware.InjectAuthGroups(userRepo))
+		r.Post("/", queryH.Execute)
+	})
+
+	r.Route("/db-connections/{id}/metadata", func(r chi.Router) {
+		r.Use(middleware.RequireAuth(cfg.JWTSecret))
+		r.Use(middleware.InjectAuthGroups(userRepo))
+		r.Get("/", metadataH.Tables)
+		r.Get("/{schema}/{table}/columns", metadataH.Columns)
 	})
 
 	r.Route("/tickets", func(r chi.Router) {
@@ -195,4 +253,8 @@ func requireDBAOrAbove(next http.Handler) http.Handler {
 		model.AuthGroupDBA,
 		model.AuthGroupAdmin,
 	)(next)
+}
+
+func requireAdminOnly(next http.Handler) http.Handler {
+	return middleware.RequireGroup(model.AuthGroupAdmin)(next)
 }

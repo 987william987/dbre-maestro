@@ -118,6 +118,38 @@ func (r *TicketRepo) MarkCompleted(ctx context.Context, id uint64, status model.
 	return err
 }
 
+func (r *TicketRepo) CreateExecution(ctx context.Context, e *model.TicketExecution) (uint64, error) {
+	res, err := r.db.ExecContext(ctx,
+		`INSERT INTO ticket_executions (ticket_id, seq, sql_stmt, status) VALUES (?, ?, ?, 'pending')`,
+		e.TicketID, e.Seq, e.SQLStmt,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("create ticket_execution: %w", err)
+	}
+	id, _ := res.LastInsertId()
+	return uint64(id), nil
+}
+
+func (r *TicketRepo) MarkExecutionRunning(ctx context.Context, id uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE ticket_executions SET status = 'running', started_at = ? WHERE id = ?`,
+		time.Now(), id,
+	)
+	return err
+}
+
+func (r *TicketRepo) MarkExecutionDone(ctx context.Context, id uint64, rowsAffected int64, errMsg *string) error {
+	status := "completed"
+	if errMsg != nil {
+		status = "failed"
+	}
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE ticket_executions SET status = ?, rows_affected = ?, error_msg = ?, completed_at = ? WHERE id = ?`,
+		status, rowsAffected, errMsg, time.Now(), id,
+	)
+	return err
+}
+
 // Crash recovery: on startup, scan executing → mark interrupted
 func (r *TicketRepo) MarkInterruptedAll(ctx context.Context) (int64, error) {
 	res, err := r.db.ExecContext(ctx,

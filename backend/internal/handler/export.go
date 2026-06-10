@@ -106,12 +106,8 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbName := ""
-	if conn.DatabaseName != nil {
-		dbName = *conn.DatabaseName
-	}
-	dsn := pool.BuildMySQLDSN(conn.Host, conn.Port, conn.Username, password, dbName)
-	pools, err := pool.Global().GetOrCreate(conn.ID, dsn)
+	driver, dsn := pool.BuildDSN(conn, password)
+	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
 	if err != nil {
 		http.Error(w, "pool error", http.StatusInternalServerError)
 		return

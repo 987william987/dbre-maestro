@@ -47,7 +47,7 @@ function normalizeMe(payload: MeResponse): CurrentUser {
   return {
     id: payload.id,
     username: payload.username,
-    authGroups: payload.auth_groups,
+    authGroups: Array.isArray(payload.auth_groups) ? payload.auth_groups : [],
   }
 }
 

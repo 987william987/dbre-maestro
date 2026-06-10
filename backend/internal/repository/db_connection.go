@@ -80,3 +80,14 @@ func (r *DBConnectionRepo) UpdatePassword(ctx context.Context, id uint64, plainP
 	)
 	return err
 }
+
+// Update patches non-sensitive fields. Call UpdatePassword separately if password changed.
+func (r *DBConnectionRepo) Update(ctx context.Context, id uint64, name, dbType, host string, port uint16, databaseName *string, username, sslMode string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE db_connections
+         SET name=?, db_type=?, host=?, port=?, database_name=?, username=?, ssl_mode=?, updated_at=NOW()
+         WHERE id=?`,
+		name, dbType, host, port, databaseName, username, sslMode, id,
+	)
+	return err
+}
