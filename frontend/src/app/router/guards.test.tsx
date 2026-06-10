@@ -46,6 +46,11 @@ describe('route guards', () => {
         id: 1,
         username: 'dev',
         authGroups: ['developer'],
+        authGroupDetails: [],
+        permissions: ['tickets.apply'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
       },
       accessToken: 'token',
       login: vi.fn(),
@@ -57,7 +62,7 @@ describe('route guards', () => {
       <MemoryRouter initialEntries={['/audit-logs']}>
         <Routes>
           <Route path="/tickets" element={<div>tickets page</div>} />
-          <Route element={<RoleRoute allowedGroups={['dba', 'admin']} />}>
+          <Route element={<RoleRoute allowedPermissions={['audit_logs.read']} />}>
             <Route path="/audit-logs" element={<div>audit logs</div>} />
           </Route>
         </Routes>

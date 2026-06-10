@@ -6,14 +6,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
-	ticketsm "github.com/dbre-maestro/maestro/internal/ticket"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
+	ticketsm "github.com/dbre-maestro/maestro/internal/ticket"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -22,6 +23,7 @@ type TicketHandler struct {
 	audit          *repository.AuditRepo
 	dbConns        *repository.DBConnectionRepo
 	sqlReviewRules *repository.SQLReviewRuleRepo
+	notifRepo      *repository.NotificationRepo
 	lark           *notification.Client // nil = notifications disabled
 }
 
@@ -31,12 +33,14 @@ func NewTicketHandler(
 	dbConns *repository.DBConnectionRepo,
 	sqlReviewRules *repository.SQLReviewRuleRepo,
 	lark *notification.Client,
+	notifRepo *repository.NotificationRepo,
 ) *TicketHandler {
 	return &TicketHandler{
 		tickets:        tickets,
 		audit:          audit,
 		dbConns:        dbConns,
 		sqlReviewRules: sqlReviewRules,
+		notifRepo:      notifRepo,
 		lark:           lark,
 	}
 }
@@ -57,6 +61,13 @@ func (h *TicketHandler) notifyLark(ctx context.Context, title, body string) {
 			},
 		})
 	}
+}
+
+func (h *TicketHandler) sendInApp(ctx context.Context, userID uint64, notifType, title, body, resType string, resID uint64) {
+	if h.notifRepo == nil {
+		return
+	}
+	_ = h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
 }
 
 // POST /tickets
@@ -83,7 +94,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// SQL Review: run EXPLAIN-based checks if a target DB is specified
+	// SQL Review: run static + EXPLAIN-based checks if a target DB is specified
 	if req.DBConnectionID != nil {
 		if issues := h.runTicketSQLReview(r.Context(), *req.DBConnectionID, req.SQLContent); len(issues) > 0 {
 			jsonErr(w, http.StatusUnprocessableEntity, "SQL review failed: "+strings.Join(issues, "; "))
@@ -121,7 +132,6 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 // GET /tickets
 func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
-	groups, _ := r.Context().Value(middleware.CtxAuthGroups).([]model.AuthGroup)
 
 	limit := 20
 	offset := 0
@@ -142,9 +152,9 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 		statusFilter = &ts
 	}
 
-	// T5: IDOR — developers only see their own tickets
+	// T5: IDOR — only reviewers/executors can see the full queue.
 	var submitterFilter *uint64
-	if !hasGroup(groups, model.AuthGroupDBA, model.AuthGroupAdmin) {
+	if !middleware.HasPermission(r.Context(), "tickets.review", "tickets.execute") {
 		submitterFilter = &userID
 	}
 
@@ -177,17 +187,24 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// T5: IDOR — developers can only view their own tickets
+	// T5: IDOR — only reviewers/executors can view arbitrary tickets.
 	userID := middleware.UserIDFromCtx(r.Context())
-	groups, _ := r.Context().Value(middleware.CtxAuthGroups).([]model.AuthGroup)
-	if !hasGroup(groups, model.AuthGroupDBA, model.AuthGroupAdmin, model.AuthGroupReviewer) {
+	if !middleware.HasPermission(r.Context(), "tickets.review", "tickets.execute") {
 		if ticket.SubmitterID != userID {
 			jsonErr(w, http.StatusForbidden, "forbidden")
 			return
 		}
 	}
 
-	jsonOK(w, ticket)
+	executions, _ := h.tickets.ListExecutions(r.Context(), id)
+	if executions == nil {
+		executions = []model.TicketExecution{}
+	}
+
+	jsonOK(w, map[string]any{
+		"ticket":     ticket,
+		"executions": executions,
+	})
 }
 
 // POST /tickets/{id}/approve
@@ -246,6 +263,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		body += " — " + *req.Comment
 	}
 	h.notifyLark(r.Context(), "工單審核通過", body)
+	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_approved", "工單審核通過", body, "ticket", id)
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
@@ -301,8 +319,9 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	h.notifyLark(r.Context(), "工單已拒絕",
-		fmt.Sprintf("工單 %s 已拒絕：%s", ticket.TicketNo, req.Reason))
+	rejectBody := fmt.Sprintf("工單 %s 已拒絕：%s", ticket.TicketNo, req.Reason)
+	h.notifyLark(r.Context(), "工單已拒絕", rejectBody)
+	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_rejected", "工單已拒絕", rejectBody, "ticket", id)
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
@@ -345,12 +364,48 @@ func (h *TicketHandler) RequestExecution(w http.ResponseWriter, r *http.Request)
 	jsonOK(w, updated)
 }
 
+// POST /tickets/{id}/stop — DBA/Admin only; stops an executing ticket
+func (h *TicketHandler) Stop(w http.ResponseWriter, r *http.Request) {
+	id := parseTicketID(w, r)
+	if id == 0 {
+		return
+	}
+
+	ok, err := h.tickets.MarkStopped(r.Context(), id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "stop failed")
+		return
+	}
+	if !ok {
+		jsonErr(w, http.StatusConflict, "ticket is not currently executing")
+		return
+	}
+
+	userID := middleware.UserIDFromCtx(r.Context())
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "ticket_stop",
+		ResourceType: "ticket",
+		ResourceID:   &id,
+		IPAddress:    clientIP(r),
+	})
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // POST /tickets/{id}/execute — T9: OCC protected; runs SQL on target DB
+// Body (optional): { "scheduled_at": "2026-06-11T10:00:00Z" }
 func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	id := parseTicketID(w, r)
 	if id == 0 {
 		return
 	}
+
+	var req struct {
+		ScheduledAt *time.Time `json:"scheduled_at"`
+	}
+	bindJSON(r, &req) // optional body; ignore parse errors
 
 	ticket, err := h.tickets.GetByID(r.Context(), id)
 	if err != nil || ticket == nil {
@@ -369,6 +424,26 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := middleware.UserIDFromCtx(r.Context())
+
+	// Scheduled execution: store scheduled_at and return without running
+	if req.ScheduledAt != nil && req.ScheduledAt.After(time.Now()) {
+		if err := h.tickets.SetScheduled(r.Context(), id, userID, *req.ScheduledAt); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "set scheduled time failed")
+			return
+		}
+		h.audit.Log(r.Context(), repository.AuditEntry{
+			ActorID:      &userID,
+			ActorName:    middleware.UsernameFromCtx(r.Context()),
+			ActionType:   "ticket_schedule",
+			ResourceType: "ticket",
+			ResourceID:   &id,
+			Details:      map[string]any{"scheduled_at": req.ScheduledAt},
+			IPAddress:    clientIP(r),
+		})
+		updated, _ := h.tickets.GetByID(r.Context(), id)
+		jsonOK(w, updated)
+		return
+	}
 
 	// T9: OCC — WHERE status='pending_execution', returns 409 if 0 rows affected
 	ok, err := h.tickets.StartExecution(r.Context(), id, userID)
@@ -430,6 +505,12 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 			continue
 		}
 
+		// Check if ticket was stopped between statements
+		current, err := h.tickets.GetByID(ctx, ticket.ID)
+		if err == nil && current != nil && current.Status == model.TicketStatusStopped {
+			return
+		}
+
 		execRow := &model.TicketExecution{
 			TicketID: ticket.ID,
 			Seq:      seq + 1,
@@ -474,8 +555,12 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 	})
 
 	if finalStatus == model.TicketStatusCompleted {
-		h.notifyLark(ctx, "工單執行完成",
-			fmt.Sprintf("工單 %s 已成功執行", ticket.TicketNo))
+		body := fmt.Sprintf("工單 %s 已成功執行", ticket.TicketNo)
+		h.notifyLark(ctx, "工單執行完成", body)
+		h.sendInApp(ctx, ticket.SubmitterID, "ticket_executed", "工單執行完成", body, "ticket", ticket.ID)
+	} else {
+		body := fmt.Sprintf("工單 %s 執行失敗", ticket.TicketNo)
+		h.sendInApp(ctx, ticket.SubmitterID, "ticket_executed", "工單執行失敗", body, "ticket", ticket.ID)
 	}
 }
 
@@ -483,10 +568,13 @@ func (h *TicketHandler) finishTicket(ctx context.Context, id uint64, status mode
 	_ = h.tickets.MarkCompleted(ctx, id, status)
 }
 
-// runTicketSQLReview connects to the target DB and runs EXPLAIN-based checks
-// against each SQL statement. Returns a list of blocking issue messages.
-// Returns nil (no block) when rules are disabled, the DB is unreachable, or
-// EXPLAIN fails (e.g., DDL statements).
+// RunScheduledTicket is the public entry point for the background scheduler.
+func (h *TicketHandler) RunScheduledTicket(ticket *model.Ticket, executorID uint64) {
+	h.runTicketSQL(ticket, executorID)
+}
+
+// runTicketSQLReview runs static + EXPLAIN-based checks against each SQL statement.
+// Returns a list of blocking issue messages.
 func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64, sqlContent string) []string {
 	rules, err := h.sqlReviewRules.List(ctx)
 	if err != nil {
@@ -503,25 +591,47 @@ func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64,
 			}
 		}
 	}
+
+	var allIssues []string
+
+	// Static checks (no DB connection required)
+	staticNames := []string{"dml_no_where", "ddl_no_comment", "require_utf8mb4"}
+	hasStatic := false
+	for _, name := range staticNames {
+		if ruleMap[name] {
+			hasStatic = true
+			break
+		}
+	}
+	if hasStatic {
+		for _, stmt := range splitSQLStatements(sqlContent) {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			allIssues = append(allIssues, sqlreview.RunStaticChecks(stmt, ruleMap)...)
+		}
+	}
+
+	// EXPLAIN-based checks (need DB connection)
 	if !ruleMap["full_table_scan"] && !ruleMap["high_row_count"] {
-		return nil
+		return allIssues
 	}
 
 	conn, err := h.dbConns.GetByID(ctx, dbConnID)
 	if err != nil || conn == nil {
-		return nil // fail open: can't connect, let the ticket through
+		return allIssues // fail open: can't connect, let static issues through
 	}
 	password, err := h.dbConns.DecryptPassword(conn)
 	if err != nil {
-		return nil
+		return allIssues
 	}
 	driver, dsn := pool.BuildDSN(conn, password)
 	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
 	if err != nil {
-		return nil // fail open
+		return allIssues // fail open
 	}
 
-	var allIssues []string
 	for _, stmt := range splitSQLStatements(sqlContent) {
 		stmt = strings.TrimSpace(stmt)
 		if stmt == "" {

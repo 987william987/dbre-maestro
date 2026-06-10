@@ -21,6 +21,8 @@ type CreateConnectionPayload = {
   ssl_mode?: string
 }
 
+type PatchConnectionPayload = Partial<CreateConnectionPayload>
+
 export function listDBConnections() {
   return apiClient.get<ConnectionsResponse>('/db-connections').then((response) => ({
     ...response,
@@ -38,4 +40,8 @@ export function testDBConnection(id: number) {
 
 export function deleteDBConnection(id: number) {
   return apiClient.delete<void>(`/db-connections/${id}`)
+}
+
+export function patchDBConnection(id: number, payload: PatchConnectionPayload) {
+  return apiClient.patch<DBConnection>(`/db-connections/${id}`, payload)
 }

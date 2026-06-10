@@ -1,7 +1,8 @@
-import { useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useCallback, useEffect } from 'react'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, CheckCircle2, Circle, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getSetupStatus } from '@/shared/setup/api'
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -428,6 +429,42 @@ function CompleteStep({ username }: { username: string }) {
 export function SetupWizard() {
   const [step, setStep] = useState<Step>(0)
   const [adminUsername, setAdminUsername] = useState('')
+  const [setupCompleted, setSetupCompleted] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let active = true
+
+    void getSetupStatus()
+      .then((result) => {
+        if (active) {
+          setSetupCompleted(result.setup_completed)
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSetupCompleted(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  if (setupCompleted === true) {
+    return <Navigate to="/login" replace />
+  }
+
+  if (setupCompleted === null) {
+    return (
+      <div className="min-h-screen bg-page flex items-center justify-center px-4 py-10">
+        <div className="rounded-card border border-border bg-panel px-6 py-5 shadow-soft">
+          <p className="text-sm font-semibold text-ink">正在檢查平台初始化狀態…</p>
+          <p className="mt-1 text-xs text-muted">請稍候，系統正在確認是否仍可進入 Setup Wizard。</p>
+        </div>
+      </div>
+    )
+  }
 
   const next = () => setStep(s => (s < 3 ? (s + 1) as Step : s))
   const back = () => setStep(s => (s > 0 ? (s - 1) as Step : s))

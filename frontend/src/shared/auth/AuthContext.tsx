@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { configureApiClient } from '@/shared/api/client'
-import type { AuthStatus, CurrentUser } from '@/shared/types/auth'
+import type { AuthStatus, CurrentAuthGroup, CurrentUser } from '@/shared/types/auth'
 
 const ACCESS_TOKEN_KEY = 'dbre_maestro.access_token'
 
@@ -22,7 +22,11 @@ type AuthContextValue = {
 type MeResponse = {
   id: number
   username: string
-  auth_groups: CurrentUser['authGroups']
+  protected?: boolean
+  is_active?: boolean
+  auth_groups: Array<CurrentUser['authGroups'][number] | CurrentAuthGroup> | null
+  permissions?: string[] | null
+  db_connection_ids?: number[] | null
 }
 
 type LoginResponse = {
@@ -44,10 +48,43 @@ function writeStoredToken(token: string | null) {
 }
 
 function normalizeMe(payload: MeResponse): CurrentUser {
+  const authGroupDetails = Array.isArray(payload.auth_groups)
+    ? payload.auth_groups.flatMap((group) => {
+        if (typeof group === 'string') {
+          return []
+        }
+        if (group && typeof group === 'object' && typeof group.group_key === 'string') {
+          return [{
+            id: typeof group.id === 'number' ? group.id : 0,
+            group_key: group.group_key,
+            name: typeof group.name === 'string' ? group.name : group.group_key,
+            is_system: group.is_system === true,
+            is_protected: group.is_protected === true,
+          }]
+        }
+        return []
+      })
+    : []
+
   return {
     id: payload.id,
     username: payload.username,
-    authGroups: Array.isArray(payload.auth_groups) ? payload.auth_groups : [],
+    authGroups: Array.isArray(payload.auth_groups)
+      ? payload.auth_groups.flatMap((group) => {
+          if (typeof group === 'string') {
+            return [group]
+          }
+          if (group && typeof group === 'object' && typeof group.group_key === 'string') {
+            return [group.group_key]
+          }
+          return []
+        })
+      : [],
+    authGroupDetails,
+    permissions: Array.isArray(payload.permissions) ? payload.permissions.filter((item): item is string => typeof item === 'string') : [],
+    dbConnectionIds: Array.isArray(payload.db_connection_ids) ? payload.db_connection_ids.filter((item): item is number => typeof item === 'number') : [],
+    protected: payload.protected === true,
+    isActive: payload.is_active !== false,
   }
 }
 

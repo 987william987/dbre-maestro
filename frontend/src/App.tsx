@@ -5,9 +5,13 @@ import { RoleRoute } from '@/app/router/RoleRoute'
 import { AuditLogsPage } from '@/modules/audit/pages/AuditLogsPage'
 import { LoginPage } from '@/modules/auth/pages/LoginPage'
 import { DBConnectionsPage } from '@/modules/db-connections/pages/DBConnectionsPage'
+import { MaskingRulesPage } from '@/modules/masking-rules/pages/MaskingRulesPage'
+import { SQLEditorPage } from '@/modules/sql-editor/pages/SQLEditorPage'
+import { SQLReviewRulesPage } from '@/modules/sql-review-rules/pages/SQLReviewRulesPage'
 import { TicketDetailPage } from '@/modules/tickets/pages/TicketDetailPage'
 import { NewTicketPage } from '@/modules/tickets/pages/NewTicketPage'
 import { TicketsPage } from '@/modules/tickets/pages/TicketsPage'
+import { UsersPage } from '@/modules/users/pages/UsersPage'
 import { SetupWizard } from '@/pages/setup/SetupWizard'
 
 export default function App() {
@@ -20,11 +24,19 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route path="/" element={<Navigate to="/tickets" replace />} />
             <Route path="/tickets" element={<TicketsPage />} />
-            <Route path="/tickets/new" element={<NewTicketPage />} />
+            <Route element={<RoleRoute allowedPermissions={['tickets.apply']} />}>
+              <Route path="/tickets/new" element={<NewTicketPage />} />
+            </Route>
             <Route path="/tickets/:id" element={<TicketDetailPage />} />
-            <Route element={<RoleRoute allowedGroups={['dba', 'admin']} />}>
+            <Route element={<RoleRoute allowedPermissions={['users.read', 'users.write']} />}>
+              <Route path="/users" element={<UsersPage />} />
+            </Route>
+            <Route element={<RoleRoute allowedPermissions={['sql_editor.query', 'db_connections.read', 'db_connections.write', 'masking_rules.read', 'masking_rules.write', 'sql_review.read', 'sql_review.write', 'audit_logs.read', 'audit_logs.write']} />}>
+              <Route path="/sql-editor" element={<SQLEditorPage />} />
               <Route path="/db-connections" element={<DBConnectionsPage />} />
               <Route path="/audit-logs" element={<AuditLogsPage />} />
+              <Route path="/masking-rules" element={<MaskingRulesPage />} />
+              <Route path="/sql-review-rules" element={<SQLReviewRulesPage />} />
             </Route>
           </Route>
         </Route>

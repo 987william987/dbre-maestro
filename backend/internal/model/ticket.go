@@ -45,13 +45,13 @@ type Ticket struct {
 }
 
 type TicketExecution struct {
-	ID           uint64     `db:"id"`
-	TicketID     uint64     `db:"ticket_id"`
-	Seq          int        `db:"seq"`
-	SQLStmt      string     `db:"sql_stmt"`
-	Status       string     `db:"status"`
-	RowsAffected *int64     `db:"rows_affected"`
-	ErrorMsg     *string    `db:"error_msg"`
-	StartedAt    *time.Time `db:"started_at"`
-	CompletedAt  *time.Time `db:"completed_at"`
+	ID           uint64     `db:"id"            json:"id"`
+	TicketID     uint64     `db:"ticket_id"     json:"ticket_id"`
+	Seq          int        `db:"seq"           json:"seq"`
+	SQLStmt      string     `db:"sql_stmt"      json:"sql_stmt"`
+	Status       string     `db:"status"        json:"status"`
+	RowsAffected *int64     `db:"rows_affected" json:"rows_affected,omitempty"`
+	ErrorMsg     *string    `db:"error_msg"     json:"error_msg,omitempty"`
+	StartedAt    *time.Time `db:"started_at"    json:"started_at,omitempty"`
+	CompletedAt  *time.Time `db:"completed_at"  json:"completed_at,omitempty"`
 }

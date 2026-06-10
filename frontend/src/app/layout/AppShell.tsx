@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Database, FileClock, FilePlus2, LogOut, Ticket } from 'lucide-react'
+import { ChevronDown, Database, FileClock, FilePlus2, LogOut, ShieldAlert, ShieldCheck, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/shared/auth/AuthContext'
@@ -8,7 +8,7 @@ type NavItem = {
   to: string
   label: string
   icon: typeof Ticket
-  allowed: (groups: string[]) => boolean
+  allowed: (permissions: string[]) => boolean
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -22,30 +22,54 @@ const NAV_ITEMS: NavItem[] = [
     to: '/tickets/new',
     label: 'New Ticket',
     icon: FilePlus2,
-    allowed: () => true,
+    allowed: (permissions) => permissions.includes('tickets.apply'),
+  },
+  {
+    to: '/sql-editor',
+    label: 'SQL Editor',
+    icon: SquareTerminal,
+    allowed: (permissions) => permissions.includes('sql_editor.query'),
+  },
+  {
+    to: '/users',
+    label: 'Users',
+    icon: Users,
+    allowed: (permissions) => permissions.includes('users.read') || permissions.includes('users.write'),
   },
   {
     to: '/db-connections',
     label: 'DB Connections',
     icon: Database,
-    allowed: (groups) => groups.includes('dba') || groups.includes('admin'),
+    allowed: (permissions) => permissions.includes('db_connections.read') || permissions.includes('db_connections.write'),
+  },
+  {
+    to: '/masking-rules',
+    label: 'Masking Rules',
+    icon: ShieldAlert,
+    allowed: (permissions) => permissions.includes('masking_rules.read') || permissions.includes('masking_rules.write'),
+  },
+  {
+    to: '/sql-review-rules',
+    label: 'SQL Review',
+    icon: ShieldCheck,
+    allowed: (permissions) => permissions.includes('sql_review.read') || permissions.includes('sql_review.write'),
   },
   {
     to: '/audit-logs',
     label: 'Audit Logs',
     icon: FileClock,
-    allowed: (groups) => groups.includes('dba') || groups.includes('admin'),
+    allowed: (permissions) => permissions.includes('audit_logs.read') || permissions.includes('audit_logs.write'),
   },
 ]
 
 const NAV_GROUPS = [
   {
     title: 'Workbench',
-    items: ['/tickets', '/tickets/new'],
+    items: ['/tickets', '/tickets/new', '/sql-editor'],
   },
   {
     title: 'Governance',
-    items: ['/db-connections', '/audit-logs'],
+    items: ['/users', '/db-connections', '/masking-rules', '/sql-review-rules', '/audit-logs'],
   },
 ]
 
@@ -86,7 +110,7 @@ export function AppShell() {
     navigate('/login', { replace: true })
   }
 
-  const navItems = NAV_ITEMS.filter((item) => item.allowed(user.authGroups))
+  const navItems = NAV_ITEMS.filter((item) => item.allowed(user.permissions))
 
   return (
     <div className="min-h-screen text-ink">

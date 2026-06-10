@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/go-chi/chi/v5"
@@ -13,10 +14,27 @@ import (
 
 type MetadataHandler struct {
 	dbConns *repository.DBConnectionRepo
+	users   *repository.UserRepo
 }
 
-func NewMetadataHandler(dbConns *repository.DBConnectionRepo) *MetadataHandler {
-	return &MetadataHandler{dbConns: dbConns}
+func NewMetadataHandler(dbConns *repository.DBConnectionRepo, users *repository.UserRepo) *MetadataHandler {
+	return &MetadataHandler{dbConns: dbConns, users: users}
+}
+
+// checkMetadataAccess returns true if the user may access the given connection.
+// Access is derived from the caller's effective DB connection bindings.
+func (h *MetadataHandler) checkMetadataAccess(r *http.Request, connID uint64) (bool, error) {
+	userID := middleware.UserIDFromCtx(r.Context())
+	accessibleIDs, err := h.users.GetEffectiveDBConnectionIDs(r.Context(), userID)
+	if err != nil {
+		return false, err
+	}
+	for _, accessibleID := range accessibleIDs {
+		if accessibleID == connID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 type tableInfo struct {
@@ -44,6 +62,16 @@ func (h *MetadataHandler) Tables(w http.ResponseWriter, r *http.Request) {
 	connID, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	ok, err := h.checkMetadataAccess(r, connID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "db scope check failed")
+		return
+	}
+	if !ok {
+		jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
 		return
 	}
 
@@ -125,6 +153,16 @@ func (h *MetadataHandler) Columns(w http.ResponseWriter, r *http.Request) {
 	table := chi.URLParam(r, "table")
 	if schema == "" || table == "" {
 		jsonErr(w, http.StatusBadRequest, "schema and table are required")
+		return
+	}
+
+	ok, err := h.checkMetadataAccess(r, connID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "db scope check failed")
+		return
+	}
+	if !ok {
+		jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
 		return
 	}
 

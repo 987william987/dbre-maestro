@@ -77,8 +77,9 @@ export function TicketDetailPage() {
     return null
   }
 
-  const canReview = user.authGroups.some((group) => group === 'reviewer' || group === 'dba' || group === 'admin')
-  const canOperateDBA = user.authGroups.some((group) => group === 'dba' || group === 'admin')
+  const canReview = user.permissions.includes('tickets.review')
+  const canOperateDBA = user.permissions.includes('tickets.execute')
+  const canExport = user.permissions.includes('sql_editor.export')
 
   async function runAction(
     type: 'approve' | 'reject' | 'request-execution' | 'execute',
@@ -334,46 +335,48 @@ export function TicketDetailPage() {
               </div>
             ) : null}
 
-            <div className="rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
-              <div className="border-b border-border/80 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <Send className="h-4 w-4 text-accent" />
-                  <p className="text-[13px] font-semibold text-ink">Export</p>
-                </div>
-                <p className="mt-1 text-[12px] text-muted">
-                  會使用這筆工單的 SQL 與 DB 連線建立匯出請求。後端目前會直接回傳下載連結，不保存前端歷史列表。
-                </p>
-              </div>
-
-              <div className="px-4 py-4">
-                <button
-                  type="button"
-                  disabled={exporting || !ticket.db_connection_id}
-                  onClick={() => void handleExport()}
-                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[12px] border border-border bg-panel-soft px-4 text-[13px] font-bold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  建立匯出請求
-                </button>
-
-                {!ticket.db_connection_id ? (
-                  <p className="mt-2 text-[12px] text-muted">這筆工單沒有指定 `db_connection_id`，因此目前無法直接匯出。</p>
-                ) : null}
-
-                {exportState ? (
-                  <div className="mt-4 rounded-[14px] border border-border bg-panel-soft p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-faint">Download URL</p>
-                    <a
-                      href={exportState.url}
-                      className="mt-2 block break-all text-[13px] font-semibold text-accent hover:text-blue-700"
-                    >
-                      {exportState.url}
-                    </a>
-                    <p className="mt-2 text-[12px] text-muted">Expires at: {formatDateTime(exportState.expiresAt, true)}</p>
+            {canExport ? (
+              <div className="rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
+                <div className="border-b border-border/80 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Send className="h-4 w-4 text-accent" />
+                    <p className="text-[13px] font-semibold text-ink">Export</p>
                   </div>
-                ) : null}
+                  <p className="mt-1 text-[12px] text-muted">
+                    會使用這筆工單的 SQL 與 DB 連線建立匯出請求。後端目前會直接回傳下載連結，不保存前端歷史列表。
+                  </p>
+                </div>
+
+                <div className="px-4 py-4">
+                  <button
+                    type="button"
+                    disabled={exporting || !ticket.db_connection_id}
+                    onClick={() => void handleExport()}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[12px] border border-border bg-panel-soft px-4 text-[13px] font-bold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    建立匯出請求
+                  </button>
+
+                  {!ticket.db_connection_id ? (
+                    <p className="mt-2 text-[12px] text-muted">這筆工單沒有指定 `db_connection_id`，因此目前無法直接匯出。</p>
+                  ) : null}
+
+                  {exportState ? (
+                    <div className="mt-4 rounded-[14px] border border-border bg-panel-soft p-4">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-faint">Download URL</p>
+                      <a
+                        href={exportState.url}
+                        className="mt-2 block break-all text-[13px] font-semibold text-accent hover:text-blue-700"
+                      >
+                        {exportState.url}
+                      </a>
+                      <p className="mt-2 text-[12px] text-muted">Expires at: {formatDateTime(exportState.expiresAt, true)}</p>
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            </div>
+            ) : null}
           </section>
         </div>
       )}

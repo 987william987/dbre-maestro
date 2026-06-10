@@ -26,22 +26,28 @@ const (
 
 type QueryHandler struct {
 	dbConns      *repository.DBConnectionRepo
+	users        *repository.UserRepo
 	maskingRules *repository.MaskingRuleRepo
 	audit        *repository.AuditRepo
 	engine       *masking.Engine
+	whitelist    *repository.MaskingWhitelistRepo
 }
 
 func NewQueryHandler(
 	dbConns *repository.DBConnectionRepo,
+	users *repository.UserRepo,
 	maskingRules *repository.MaskingRuleRepo,
 	audit *repository.AuditRepo,
 	engine *masking.Engine,
+	whitelist *repository.MaskingWhitelistRepo,
 ) *QueryHandler {
 	return &QueryHandler{
 		dbConns:      dbConns,
+		users:        users,
 		maskingRules: maskingRules,
 		audit:        audit,
 		engine:       engine,
+		whitelist:    whitelist,
 	}
 }
 
@@ -77,6 +83,24 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	conn, err := h.dbConns.GetByID(r.Context(), req.DBConnectionID)
 	if err != nil || conn == nil {
 		jsonErr(w, http.StatusNotFound, "db connection not found")
+		return
+	}
+
+	userID := middleware.UserIDFromCtx(r.Context())
+	accessibleIDs, err := h.users.GetEffectiveDBConnectionIDs(r.Context(), userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "db scope check failed")
+		return
+	}
+	hasAccess := false
+	for _, accessibleID := range accessibleIDs {
+		if accessibleID == req.DBConnectionID {
+			hasAccess = true
+			break
+		}
+	}
+	if !hasAccess {
+		jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
 		return
 	}
 
@@ -128,19 +152,27 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	if len(dbRules) > 0 {
 		maskRules := make([]masking.Rule, 0, len(dbRules))
 		for _, mr := range dbRules {
+			// Check whitelist: if user is exempt for this column, skip masking
+			if h.whitelist != nil {
+				exempt, err := h.whitelist.IsExempt(r.Context(), userID, conn.ID, mr.TableName, mr.ColumnName)
+				if err == nil && exempt {
+					continue
+				}
+			}
 			maskRules = append(maskRules, masking.Rule{
 				Table:  mr.TableName,
 				Column: mr.ColumnName,
 				Mode:   masking.MaskMode(mr.MaskMode),
 			})
 		}
-		if err := h.engine.MaskResult(result, maskRules); err != nil {
-			jsonErr(w, http.StatusUnprocessableEntity, "masking failed")
-			return
+		if len(maskRules) > 0 {
+			if err := h.engine.MaskResult(result, maskRules); err != nil {
+				jsonErr(w, http.StatusUnprocessableEntity, "masking failed")
+				return
+			}
 		}
 	}
 
-	userID := middleware.UserIDFromCtx(r.Context())
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),

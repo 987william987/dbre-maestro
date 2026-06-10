@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LoginPage } from '@/modules/auth/pages/LoginPage'
 
 vi.mock('@/shared/auth/AuthContext', () => ({
@@ -12,6 +12,13 @@ import { useAuth } from '@/shared/auth/AuthContext'
 const mockedUseAuth = vi.mocked(useAuth)
 
 describe('LoginPage', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ setup_completed: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+  })
+
   it('送出帳密後會呼叫 login 並導向 /tickets', async () => {
     const login = vi.fn().mockResolvedValue(undefined)
 
@@ -66,5 +73,27 @@ describe('LoginPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '登入' }))
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('invalid credentials'))
+  })
+
+  it('setup 已完成時不顯示 Setup Wizard 入口', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'anonymous',
+      isAuthenticated: false,
+      user: null,
+      accessToken: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Setup Wizard' })).not.toBeInTheDocument()
+    })
   })
 })

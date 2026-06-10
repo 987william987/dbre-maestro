@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Eye, EyeOff, Loader2, ShieldCheck } from 'lucide-react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/shared/auth/AuthContext'
+import { getSetupStatus } from '@/shared/setup/api'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 
 export function LoginPage() {
@@ -14,6 +15,27 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [setupCompleted, setSetupCompleted] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let active = true
+
+    void getSetupStatus()
+      .then((result) => {
+        if (active) {
+          setSetupCompleted(result.setup_completed)
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSetupCompleted(null)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
 
   if (status !== 'loading' && isAuthenticated) {
     const nextPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
@@ -44,10 +66,10 @@ export function LoginPage() {
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-faint">DBRE Maestro</p>
               <h1 className="mt-4 max-w-md font-display text-[34px] font-black leading-tight tracking-tight text-ink">
-                資料庫治理流程，從登入後的第一個操作開始一致化。
+                Edgex DevSecOps
               </h1>
               <p className="mt-4 max-w-md text-sm text-muted">
-                這個工作台聚焦在工單審核、執行節點切換、稽核追蹤與資料匯出控管，不把 DBA 工作流程拆散在多個工具裡。
+                資料庫治理流程，從登入後的第一個操作開始一致化。
               </p>
             </div>
 
@@ -59,7 +81,7 @@ export function LoginPage() {
                 <div>
                   <p className="text-sm font-semibold text-ink">登入後可立即確認角色能力</p>
                   <p className="mt-1 text-xs text-muted">
-                    `GET /auth/me` 會載入目前身份與 `auth_groups`，前端依此決定側欄入口與工單操作按鈕。
+                    `GET /auth/me` 會載入目前身份、`auth_groups` 與 `permissions`，前端依此決定側欄入口與工單操作按鈕。
                   </p>
                 </div>
               </div>
@@ -127,20 +149,22 @@ export function LoginPage() {
                 </button>
               </form>
 
-              <div className="mt-6 rounded-card border border-border bg-panel-soft px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">First Time?</p>
-                <p className="mt-1 text-sm text-muted">
-                  若平台尚未完成初始設定，請先前往
-                  <button
-                    type="button"
-                    onClick={() => navigate('/setup')}
-                    className="ml-1 font-semibold text-accent transition hover:text-blue-700"
-                  >
-                    Setup Wizard
-                  </button>
-                  。
-                </p>
-              </div>
+              {setupCompleted === false ? (
+                <div className="mt-6 rounded-card border border-border bg-panel-soft px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">First Time?</p>
+                  <p className="mt-1 text-sm text-muted">
+                    平台尚未完成初始設定，請先前往
+                    <button
+                      type="button"
+                      onClick={() => navigate('/setup')}
+                      className="ml-1 font-semibold text-accent transition hover:text-blue-700"
+                    >
+                      Setup Wizard
+                    </button>
+                    。
+                  </p>
+                </div>
+              ) : null}
             </div>
           </section>
         </div>

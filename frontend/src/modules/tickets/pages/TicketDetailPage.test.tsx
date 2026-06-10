@@ -69,7 +69,7 @@ describe('TicketDetailPage role visibility', () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
       isAuthenticated: true,
-      user: { id: 2, username: 'reviewer', authGroups: ['reviewer'] },
+      user: { id: 2, username: 'reviewer', authGroups: ['reviewer'], authGroupDetails: [], permissions: ['tickets.review'], dbConnectionIds: [], protected: false, isActive: true },
       accessToken: 'token',
       login: vi.fn(),
       logout: vi.fn(),
@@ -88,7 +88,7 @@ describe('TicketDetailPage role visibility', () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
       isAuthenticated: true,
-      user: { id: 3, username: 'dba', authGroups: ['dba'] },
+      user: { id: 3, username: 'dba', authGroups: ['dba'], authGroupDetails: [], permissions: ['tickets.execute'], dbConnectionIds: [], protected: false, isActive: true },
       accessToken: 'token',
       login: vi.fn(),
       logout: vi.fn(),
@@ -106,7 +106,7 @@ describe('TicketDetailPage role visibility', () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
       isAuthenticated: true,
-      user: { id: 1, username: 'dev', authGroups: ['developer'] },
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
       accessToken: 'token',
       login: vi.fn(),
       logout: vi.fn(),

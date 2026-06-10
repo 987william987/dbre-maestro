@@ -6,15 +6,15 @@ import (
 	"strings"
 
 	"github.com/dbre-maestro/maestro/internal/auth"
-	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/repository"
 )
 
 type contextKey string
 
 const (
-	CtxUserID     contextKey = "user_id"
-	CtxUsername   contextKey = "username"
-	CtxAuthGroups contextKey = "auth_groups"
+	CtxUserID      contextKey = "user_id"
+	CtxUsername    contextKey = "username"
+	CtxPermissions contextKey = "permissions"
 )
 
 func RequireAuth(secret []byte) func(http.Handler) http.Handler {
@@ -39,16 +39,44 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 	}
 }
 
-func RequireGroup(groups ...model.AuthGroup) func(http.Handler) http.Handler {
-	allowed := make(map[model.AuthGroup]bool, len(groups))
-	for _, g := range groups {
-		allowed[g] = true
-	}
+func RequireActiveUser(users *repository.UserRepo) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userGroups, _ := r.Context().Value(CtxAuthGroups).([]model.AuthGroup)
-			for _, g := range userGroups {
-				if allowed[g] {
+			userID := UserIDFromCtx(r.Context())
+			if userID == 0 {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+
+			user, err := users.GetByID(r.Context(), userID)
+			if err != nil {
+				http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+				return
+			}
+			if user == nil {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+			if !user.IsActive {
+				http.Error(w, `{"error":"user is disabled"}`, http.StatusForbidden)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func RequirePermission(permissionKeys ...string) func(http.Handler) http.Handler {
+	allowed := make(map[string]bool, len(permissionKeys))
+	for _, key := range permissionKeys {
+		allowed[key] = true
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, key := range PermissionsFromCtx(r.Context()) {
+				if allowed[key] {
 					next.ServeHTTP(w, r)
 					return
 				}
@@ -66,6 +94,24 @@ func UserIDFromCtx(ctx context.Context) uint64 {
 func UsernameFromCtx(ctx context.Context) string {
 	v, _ := ctx.Value(CtxUsername).(string)
 	return v
+}
+
+func PermissionsFromCtx(ctx context.Context) []string {
+	v, _ := ctx.Value(CtxPermissions).([]string)
+	return v
+}
+
+func HasPermission(ctx context.Context, permissionKeys ...string) bool {
+	allowed := make(map[string]bool, len(permissionKeys))
+	for _, key := range permissionKeys {
+		allowed[key] = true
+	}
+	for _, key := range PermissionsFromCtx(ctx) {
+		if allowed[key] {
+			return true
+		}
+	}
+	return false
 }
 
 func extractBearer(r *http.Request) string {

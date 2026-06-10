@@ -24,6 +24,19 @@ func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo
 	return &AuthHandler{users: users, sessions: sessions, audit: audit, jwtSecret: jwtSecret}
 }
 
+// GET /setup/status
+func (h *AuthHandler) SetupStatus(w http.ResponseWriter, r *http.Request) {
+	count, err := h.users.CountUsers(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	jsonOK(w, map[string]any{
+		"setup_completed": count > 0,
+	})
+}
+
 // POST /setup — first-time admin creation (no auth required, blocked after setup)
 func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	count, err := h.users.CountUsers(r.Context())
@@ -61,7 +74,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.users.Create(r.Context(), req.Username, req.Email, string(hash))
+	user, err := h.users.Create(r.Context(), req.Username, req.Email, string(hash), true)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "create user failed")
 		return
@@ -90,6 +103,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	user, err := h.users.GetByUsername(r.Context(), req.Username)
 	if err != nil || user == nil {
 		jsonErr(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	if !user.IsActive {
+		jsonErr(w, http.StatusForbidden, "user is disabled")
 		return
 	}
 
@@ -164,6 +181,11 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnauthorized, "user not found")
 		return
 	}
+	if !user.IsActive {
+		h.sessions.RevokeAllForUser(r.Context(), user.ID)
+		jsonErr(w, http.StatusUnauthorized, "user is disabled")
+		return
+	}
 
 	accessToken, err := auth.NewAccessToken(user.ID, user.Username, h.jwtSecret)
 	if err != nil {
@@ -232,15 +254,63 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	groups, _ := r.Context().Value(middleware.CtxAuthGroups).([]model.AuthGroup)
-	if groups == nil {
-		groups = []model.AuthGroup{}
+	user, err := h.users.GetByID(r.Context(), userID)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	authGroupRecords, err := h.users.GetAuthGroupRecords(r.Context(), userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load auth groups failed")
+		return
+	}
+
+	permissions, err := h.users.GetEffectivePermissionKeys(r.Context(), userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load permissions failed")
+		return
+	}
+	if permissions == nil {
+		permissions = []string{}
+	}
+
+	dbConnectionIDs, err := h.users.GetEffectiveDBConnectionIDs(r.Context(), userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load db scopes failed")
+		return
+	}
+	if dbConnectionIDs == nil {
+		dbConnectionIDs = []uint64{}
+	}
+
+	type authGroupView struct {
+		ID          uint64 `json:"id"`
+		GroupKey    string `json:"group_key"`
+		Name        string `json:"name"`
+		IsSystem    bool   `json:"is_system"`
+		IsProtected bool   `json:"is_protected"`
+	}
+
+	authGroupViews := make([]authGroupView, 0, len(authGroupRecords))
+	for _, record := range authGroupRecords {
+		authGroupViews = append(authGroupViews, authGroupView{
+			ID:          record.ID,
+			GroupKey:    record.GroupKey,
+			Name:        record.Name,
+			IsSystem:    record.IsSystem,
+			IsProtected: record.IsProtected,
+		})
 	}
 
 	jsonOK(w, map[string]any{
-		"id":          userID,
-		"username":    middleware.UsernameFromCtx(r.Context()),
-		"auth_groups": groups,
+		"id":                userID,
+		"username":          middleware.UsernameFromCtx(r.Context()),
+		"protected":         user.IsProtected,
+		"is_active":         user.IsActive,
+		"auth_groups":       authGroupViews,
+		"permissions":       permissions,
+		"db_connection_ids": dbConnectionIDs,
 	})
 }
 

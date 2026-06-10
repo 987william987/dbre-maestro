@@ -17,7 +17,6 @@ import (
 	"github.com/dbre-maestro/maestro/internal/handler"
 	"github.com/dbre-maestro/maestro/internal/masking"
 	"github.com/dbre-maestro/maestro/internal/middleware"
-	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/go-chi/chi/v5"
@@ -80,6 +79,9 @@ func main() {
 	auditRepo := repository.NewAuditRepo(metaDB)
 	dbConnRepo := repository.NewDBConnectionRepo(metaDB, cfg.EncryptionKey)
 	exportRepo := repository.NewExportRepo(metaDB)
+	notifRepo := repository.NewNotificationRepo(metaDB)
+	whitelistRepo := repository.NewMaskingWhitelistRepo(metaDB)
+	authGroupRepo := repository.NewAuthGroupRepo(metaDB)
 
 	var larkClient *notification.Client
 	if cfg.LarkWebhookURL != "" {
@@ -101,15 +103,21 @@ func main() {
 
 	healthH := handler.NewHealthHandler(metaDB)
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret)
-	ticketH := handler.NewTicketHandler(ticketRepo, auditRepo, dbConnRepo, sqlReviewRuleRepo, larkClient)
-	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, auditRepo)
-	exportH := handler.NewExportHandler(exportRepo, dbConnRepo, auditRepo)
+	ticketH := handler.NewTicketHandler(ticketRepo, auditRepo, dbConnRepo, sqlReviewRuleRepo, larkClient, notifRepo)
+	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, auditRepo)
+	exportH := handler.NewExportHandler(exportRepo, dbConnRepo, auditRepo, maskingRuleRepo, notifRepo, larkClient)
 	auditH := handler.NewAuditHandler(auditRepo)
 	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
 	sqlReviewRuleH := handler.NewSQLReviewRuleHandler(sqlReviewRuleRepo, auditRepo)
-	queryH := handler.NewQueryHandler(dbConnRepo, maskingRuleRepo, auditRepo, maskingEngine)
-	userH := handler.NewUserHandler(userRepo, auditRepo)
-	metadataH := handler.NewMetadataHandler(dbConnRepo)
+	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, maskingEngine, whitelistRepo)
+	userH := handler.NewUserHandler(userRepo, authGroupRepo, sessionRepo, auditRepo)
+	metadataH := handler.NewMetadataHandler(dbConnRepo, userRepo)
+	authGroupH := handler.NewAuthGroupHandler(authGroupRepo, userRepo, auditRepo)
+	notifH := handler.NewNotificationHandler(notifRepo)
+	whitelistH := handler.NewMaskingWhitelistHandler(whitelistRepo, authGroupRepo, auditRepo)
+
+	// Background scheduler: poll every 30s for due scheduled tickets
+	go runScheduler(ticketRepo, dbConnRepo, ticketH)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -120,98 +128,163 @@ func main() {
 
 	r.Get("/health", healthH.ServeHTTP)
 
+	r.Get("/setup/status", authH.SetupStatus)
 	r.Post("/setup", authH.Setup)
 	r.Route("/auth", func(r chi.Router) {
 		r.Post("/login", authH.Login)
 		r.Post("/refresh", authH.Refresh)
 		r.With(
 			middleware.RequireAuth(cfg.JWTSecret),
-			middleware.InjectAuthGroups(userRepo),
+			middleware.RequireActiveUser(userRepo),
+			middleware.InjectPermissions(userRepo),
 		).Get("/me", authH.Me)
-		r.With(middleware.RequireAuth(cfg.JWTSecret)).Post("/logout", authH.Logout)
+		r.With(
+			middleware.RequireAuth(cfg.JWTSecret),
+			middleware.RequireActiveUser(userRepo),
+		).Post("/logout", authH.Logout)
 	})
 
 	r.Route("/exports", func(r chi.Router) {
-		r.With(middleware.RequireAuth(cfg.JWTSecret)).Post("/", exportH.Create)
+		r.With(
+			middleware.RequireAuth(cfg.JWTSecret),
+			middleware.RequireActiveUser(userRepo),
+			middleware.InjectPermissions(userRepo),
+			middleware.RequirePermission("sql_editor.export"),
+		).Post("/", exportH.Create)
+		r.With(
+			middleware.RequireAuth(cfg.JWTSecret),
+			middleware.RequireActiveUser(userRepo),
+			middleware.InjectPermissions(userRepo),
+			middleware.RequirePermission("sql_editor.export"),
+		).Get("/", exportH.List)
 		// Download is token-authenticated — no JWT required
 		r.Get("/download/{token}", exportH.Download)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireSensitiveReview).Post("/approve", exportH.Approve)
+			r.With(requireSensitiveReview).Post("/reject", exportH.Reject)
+		})
 	})
 
 	r.Route("/db-connections", func(r chi.Router) {
 		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.InjectAuthGroups(userRepo))
-		r.Use(requireDBAOrAbove)
+		r.Use(middleware.RequireActiveUser(userRepo))
+		r.Use(middleware.InjectPermissions(userRepo))
 
-		r.Get("/", dbConnH.List)
-		r.Post("/", dbConnH.Create)
-		r.Patch("/{id}", dbConnH.Patch)
-		r.Post("/{id}/test", dbConnH.Test)
-		r.Delete("/{id}", dbConnH.Delete)
+		r.With(requireDBConnectionsRead).Get("/", dbConnH.List)
+		r.With(requireDBConnectionsWrite).Post("/", dbConnH.Create)
+		r.With(requireDBConnectionsWrite).Patch("/{id}", dbConnH.Patch)
+		r.With(requireDBConnectionsWrite).Post("/{id}/test", dbConnH.Test)
+		r.With(requireDBConnectionsWrite).Delete("/{id}", dbConnH.Delete)
 	})
 
 	r.Route("/audit-logs", func(r chi.Router) {
 		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.InjectAuthGroups(userRepo))
-		r.Use(requireDBAOrAbove)
-		r.Get("/", auditH.List)
+		r.Use(middleware.RequireActiveUser(userRepo))
+		r.Use(middleware.InjectPermissions(userRepo))
+		r.With(requireAuditLogsRead).Get("/", auditH.List)
 	})
 
 	r.Route("/users", func(r chi.Router) {
 		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.InjectAuthGroups(userRepo))
-		r.Use(requireAdminOnly)
-		r.Get("/", userH.List)
-		r.Post("/", userH.Create)
-		r.Get("/{id}", userH.Get)
-		r.Patch("/{id}", userH.Patch)
-		r.Post("/{id}/memberships", userH.AddMembership)
-		r.Delete("/{id}/memberships/{group}", userH.RemoveMembership)
+		r.Use(middleware.RequireActiveUser(userRepo))
+		r.Use(middleware.InjectPermissions(userRepo))
+		r.With(requireUsersRead).Get("/", userH.List)
+		r.With(requireUsersWrite).Post("/", userH.Create)
+		r.With(requireUsersRead).Get("/{id}", userH.Get)
+		r.With(requireUsersWrite).Patch("/{id}", userH.Patch)
+		r.With(requireUsersWrite).Delete("/{id}", userH.Delete)
+		r.With(requireUsersWrite).Post("/{id}/memberships", userH.AddMembership)
+		r.With(requireUsersWrite).Delete("/{id}/memberships/{group}", userH.RemoveMembership)
+		r.With(requireUsersWrite).Post("/{id}/permissions", userH.AddDirectPermission)
+		r.With(requireUsersWrite).Delete("/{id}/permissions/{permissionKey}", userH.RemoveDirectPermission)
+		r.With(requireUsersWrite).Post("/{id}/db-connections", userH.AddDirectDBConnection)
+		r.With(requireUsersWrite).Delete("/{id}/db-connections/{connID}", userH.RemoveDirectDBConnection)
+	})
+
+	r.Route("/auth-groups", func(r chi.Router) {
+		r.Use(middleware.RequireAuth(cfg.JWTSecret))
+		r.Use(middleware.RequireActiveUser(userRepo))
+		r.Use(middleware.InjectPermissions(userRepo))
+		r.With(requireUsersRead).Get("/", authGroupH.List)
+		r.With(requireUsersWrite).Post("/", authGroupH.Create)
+		r.With(requireUsersRead).Get("/{group}", authGroupH.Get)
+		r.With(requireUsersWrite).Patch("/{group}", authGroupH.Patch)
+		r.With(requireUsersWrite).Delete("/{group}", authGroupH.Delete)
+		r.With(requireUsersWrite).Post("/{group}/permissions", authGroupH.AddPermission)
+		r.With(requireUsersWrite).Delete("/{group}/permissions/{permissionKey}", authGroupH.RemovePermission)
+		r.With(requireUsersWrite).Post("/{group}/db-connections", authGroupH.AddDBConnection)
+		r.With(requireUsersWrite).Delete("/{group}/db-connections/{connID}", authGroupH.RemoveDBConnection)
 	})
 
 	r.Route("/masking-rules", func(r chi.Router) {
 		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.InjectAuthGroups(userRepo))
-		r.Use(requireDBAOrAbove)
-		r.Get("/", maskingRuleH.List)
-		r.Post("/", maskingRuleH.Create)
-		r.Delete("/{id}", maskingRuleH.Delete)
+		r.Use(middleware.RequireActiveUser(userRepo))
+		r.Use(middleware.InjectPermissions(userRepo))
+		r.With(requireMaskingRulesRead).Get("/", maskingRuleH.List)
+		r.With(requireMaskingRulesWrite).Post("/", maskingRuleH.Create)
+		r.With(requireMaskingRulesWrite).Delete("/{id}", maskingRuleH.Delete)
+	})
+
+	r.Route("/masking-whitelist", func(r chi.Router) {
+		r.Use(middleware.RequireAuth(cfg.JWTSecret))
+		r.Use(middleware.RequireActiveUser(userRepo))
+		r.Use(middleware.InjectPermissions(userRepo))
+		r.With(requireMaskingRulesRead).Get("/", whitelistH.List)
+		r.With(requireMaskingRulesWrite).Post("/", whitelistH.Create)
+		r.With(requireMaskingRulesWrite).Delete("/{id}", whitelistH.Delete)
 	})
 
 	r.Route("/sql-review-rules", func(r chi.Router) {
 		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.InjectAuthGroups(userRepo))
-		r.Use(requireDBAOrAbove)
-		r.Get("/", sqlReviewRuleH.List)
-		r.Patch("/{name}", sqlReviewRuleH.Patch)
+		r.Use(middleware.RequireActiveUser(userRepo))
+		r.Use(middleware.InjectPermissions(userRepo))
+		r.With(requireSQLReviewRead).Get("/", sqlReviewRuleH.List)
+		r.With(requireSQLReviewWrite).Patch("/{name}", sqlReviewRuleH.Patch)
 	})
 
 	r.Route("/query", func(r chi.Router) {
 		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.InjectAuthGroups(userRepo))
-		r.Post("/", queryH.Execute)
+		r.Use(middleware.RequireActiveUser(userRepo))
+		r.Use(middleware.InjectPermissions(userRepo))
+		r.With(requireSQLEditorQuery).Post("/", queryH.Execute)
 	})
 
 	r.Route("/db-connections/{id}/metadata", func(r chi.Router) {
 		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.InjectAuthGroups(userRepo))
-		r.Get("/", metadataH.Tables)
-		r.Get("/{schema}/{table}/columns", metadataH.Columns)
+		r.Use(middleware.RequireActiveUser(userRepo))
+		r.Use(middleware.InjectPermissions(userRepo))
+		r.With(requireSQLEditorQuery).Get("/", metadataH.Tables)
+		r.With(requireSQLEditorQuery).Get("/{schema}/{table}/columns", metadataH.Columns)
 	})
 
 	r.Route("/tickets", func(r chi.Router) {
 		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.InjectAuthGroups(userRepo))
+		r.Use(middleware.RequireActiveUser(userRepo))
+		r.Use(middleware.InjectPermissions(userRepo))
 
 		r.Get("/", ticketH.List)
-		r.Post("/", ticketH.Create)
+		r.With(requireTicketsApply).Post("/", ticketH.Create)
 
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", ticketH.Get)
-			r.With(requireReviewerOrAbove).Post("/approve", ticketH.Approve)
-			r.With(requireReviewerOrAbove).Post("/reject", ticketH.Reject)
-			r.With(requireDBAOrAbove).Post("/request-execution", ticketH.RequestExecution)
-			r.With(requireDBAOrAbove).Post("/execute", ticketH.Execute)
+			r.With(requireTicketsReview).Post("/approve", ticketH.Approve)
+			r.With(requireTicketsReview).Post("/reject", ticketH.Reject)
+			r.With(requireTicketsExecute).Post("/request-execution", ticketH.RequestExecution)
+			r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)
+			r.With(requireTicketsExecute).Post("/stop", ticketH.Stop)
 		})
+	})
+
+	r.Route("/notifications", func(r chi.Router) {
+		r.Use(middleware.RequireAuth(cfg.JWTSecret))
+		r.Use(middleware.RequireActiveUser(userRepo))
+		r.Use(middleware.InjectPermissions(userRepo))
+		r.Get("/", notifH.List)
+		r.Post("/read-all", notifH.MarkAllRead)
+		r.Post("/{id}/read", notifH.MarkRead)
 	})
 
 	srv := &http.Server{
@@ -240,21 +313,73 @@ func main() {
 	srv.Shutdown(ctx)
 }
 
-func requireReviewerOrAbove(next http.Handler) http.Handler {
-	return middleware.RequireGroup(
-		model.AuthGroupReviewer,
-		model.AuthGroupDBA,
-		model.AuthGroupAdmin,
-	)(next)
+// runScheduler polls every 30 seconds for scheduled tickets whose scheduled_at has passed,
+// then triggers immediate execution for each.
+func runScheduler(tickets *repository.TicketRepo, dbConns *repository.DBConnectionRepo, ticketH *handler.TicketHandler) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		due, err := tickets.GetDueScheduled(context.Background())
+		if err != nil {
+			slog.Warn("scheduler: GetDueScheduled failed", "err", err)
+			continue
+		}
+		for i := range due {
+			t := due[i]
+			// Use executor_id stored in the ticket; fall back to 0 (system)
+			executorID := uint64(0)
+			if t.ExecutorID != nil {
+				executorID = *t.ExecutorID
+			}
+			ok, err := tickets.StartExecution(context.Background(), t.ID, executorID)
+			if err != nil || !ok {
+				continue // already taken or error
+			}
+			slog.Info("scheduler: starting execution", "ticket_id", t.ID, "ticket_no", t.TicketNo)
+			go ticketH.RunScheduledTicket(&t, executorID)
+		}
+	}
 }
 
-func requireDBAOrAbove(next http.Handler) http.Handler {
-	return middleware.RequireGroup(
-		model.AuthGroupDBA,
-		model.AuthGroupAdmin,
-	)(next)
+func requireUsersRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission("users.read", "users.write")(next)
 }
-
-func requireAdminOnly(next http.Handler) http.Handler {
-	return middleware.RequireGroup(model.AuthGroupAdmin)(next)
+func requireUsersWrite(next http.Handler) http.Handler {
+	return middleware.RequirePermission("users.write")(next)
+}
+func requireAuditLogsRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission("audit_logs.read", "audit_logs.write")(next)
+}
+func requireDBConnectionsRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission("db_connections.read", "db_connections.write")(next)
+}
+func requireDBConnectionsWrite(next http.Handler) http.Handler {
+	return middleware.RequirePermission("db_connections.write")(next)
+}
+func requireMaskingRulesRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission("masking_rules.read", "masking_rules.write")(next)
+}
+func requireMaskingRulesWrite(next http.Handler) http.Handler {
+	return middleware.RequirePermission("masking_rules.write")(next)
+}
+func requireSQLReviewRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission("sql_review.read", "sql_review.write")(next)
+}
+func requireSQLReviewWrite(next http.Handler) http.Handler {
+	return middleware.RequirePermission("sql_review.write")(next)
+}
+func requireSQLEditorQuery(next http.Handler) http.Handler {
+	return middleware.RequirePermission("sql_editor.query")(next)
+}
+func requireSensitiveReview(next http.Handler) http.Handler {
+	return middleware.RequirePermission("sql_editor.sensitive_review")(next)
+}
+func requireTicketsApply(next http.Handler) http.Handler {
+	return middleware.RequirePermission("tickets.apply")(next)
+}
+func requireTicketsReview(next http.Handler) http.Handler {
+	return middleware.RequirePermission("tickets.review")(next)
+}
+func requireTicketsExecute(next http.Handler) http.Handler {
+	return middleware.RequirePermission("tickets.execute")(next)
 }

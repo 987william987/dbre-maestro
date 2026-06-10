@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"database/sql"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
@@ -12,12 +15,14 @@ import (
 )
 
 type UserHandler struct {
-	users *repository.UserRepo
-	audit *repository.AuditRepo
+	users    *repository.UserRepo
+	auths    *repository.AuthGroupRepo
+	sessions *repository.SessionRepo
+	audit    *repository.AuditRepo
 }
 
-func NewUserHandler(users *repository.UserRepo, audit *repository.AuditRepo) *UserHandler {
-	return &UserHandler{users: users, audit: audit}
+func NewUserHandler(users *repository.UserRepo, auths *repository.AuthGroupRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo) *UserHandler {
+	return &UserHandler{users: users, auths: auths, sessions: sessions, audit: audit}
 }
 
 // GET /users — Admin only
@@ -29,18 +34,55 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	// Strip password hash before returning
 	type userView struct {
-		ID        uint64 `json:"id"`
-		Username  string `json:"username"`
-		Email     string `json:"email"`
-		CreatedAt string `json:"created_at"`
+		ID              uint64            `json:"id"`
+		Username        string            `json:"username"`
+		Email           string            `json:"email"`
+		AuthGroups      []model.AuthGroup `json:"auth_groups"`
+		Permissions     []string          `json:"permissions"`
+		DBConnectionIDs []uint64          `json:"db_connection_ids"`
+		Protected       bool              `json:"protected"`
+		IsActive        bool              `json:"is_active"`
+		CreatedAt       string            `json:"created_at"`
+		UpdatedAt       string            `json:"updated_at"`
 	}
 	views := make([]userView, 0, len(users))
 	for _, u := range users {
+		groups, err := h.users.GetAuthGroups(r.Context(), u.ID)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "list user groups failed")
+			return
+		}
+		if groups == nil {
+			groups = []model.AuthGroup{}
+		}
+		permissionKeys, err := h.users.GetEffectivePermissionKeys(r.Context(), u.ID)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "list user permissions failed")
+			return
+		}
+		if permissionKeys == nil {
+			permissionKeys = []string{}
+		}
+		dbConnectionIDs, err := h.users.GetEffectiveDBConnectionIDs(r.Context(), u.ID)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "list user db scope failed")
+			return
+		}
+		if dbConnectionIDs == nil {
+			dbConnectionIDs = []uint64{}
+		}
+
 		views = append(views, userView{
-			ID:        u.ID,
-			Username:  u.Username,
-			Email:     u.Email,
-			CreatedAt: u.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			ID:              u.ID,
+			Username:        u.Username,
+			Email:           u.Email,
+			AuthGroups:      groups,
+			Permissions:     permissionKeys,
+			DBConnectionIDs: dbConnectionIDs,
+			Protected:       u.IsProtected,
+			IsActive:        u.IsActive,
+			CreatedAt:       u.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:       u.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}
 	jsonOK(w, map[string]any{"users": views})
@@ -72,7 +114,7 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.users.Create(r.Context(), req.Username, req.Email, string(hash))
+	user, err := h.users.Create(r.Context(), req.Username, req.Email, string(hash), false)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "create user failed")
 		return
@@ -114,13 +156,51 @@ func (h *UserHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if memberships == nil {
 		memberships = []model.Membership{}
 	}
-
+	permissions, err := h.users.GetEffectivePermissionKeys(r.Context(), id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list user permissions failed")
+		return
+	}
+	if permissions == nil {
+		permissions = []string{}
+	}
+	dbConnectionIDs, err := h.users.GetEffectiveDBConnectionIDs(r.Context(), id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list user db scope failed")
+		return
+	}
+	if dbConnectionIDs == nil {
+		dbConnectionIDs = []uint64{}
+	}
+	directPermissions, err := h.users.ListDirectPermissionKeys(r.Context(), id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list direct user permissions failed")
+		return
+	}
+	if directPermissions == nil {
+		directPermissions = []string{}
+	}
+	directDBConnectionIDs, err := h.users.ListDirectDBConnectionIDs(r.Context(), id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list direct user db scope failed")
+		return
+	}
+	if directDBConnectionIDs == nil {
+		directDBConnectionIDs = []uint64{}
+	}
 	jsonOK(w, map[string]any{
-		"id":          user.ID,
-		"username":    user.Username,
-		"email":       user.Email,
-		"created_at":  user.CreatedAt,
-		"memberships": memberships,
+		"id":                       user.ID,
+		"username":                 user.Username,
+		"email":                    user.Email,
+		"protected":                user.IsProtected,
+		"is_active":                user.IsActive,
+		"created_at":               user.CreatedAt,
+		"updated_at":               user.UpdatedAt,
+		"memberships":              memberships,
+		"permissions":              permissions,
+		"db_connection_ids":        dbConnectionIDs,
+		"direct_permissions":       directPermissions,
+		"direct_db_connection_ids": directDBConnectionIDs,
 	})
 }
 
@@ -141,11 +221,18 @@ func (h *UserHandler) AddMembership(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	group := model.AuthGroup(req.AuthGroup)
-	switch group {
-	case model.AuthGroupDeveloper, model.AuthGroupReviewer, model.AuthGroupDBA, model.AuthGroupAdmin:
-	default:
-		jsonErr(w, http.StatusUnprocessableEntity, "auth_group must be developer, reviewer, dba, or admin")
+	group := model.AuthGroup(strings.TrimSpace(req.AuthGroup))
+	if h.auths == nil {
+		jsonErr(w, http.StatusInternalServerError, "auth group repo unavailable")
+		return
+	}
+	authGroup, err := h.auths.GetByKey(r.Context(), string(group))
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load auth group failed")
+		return
+	}
+	if authGroup == nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "invalid auth_group")
 		return
 	}
 
@@ -154,9 +241,23 @@ func (h *UserHandler) AddMembership(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "user not found")
 		return
 	}
+	if user.IsProtected && group != model.AuthGroupAdmin {
+		jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
+		return
+	}
+
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
+		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
+		if err != nil {
+			jsonErr(w, http.StatusUnprocessableEntity, "expires_at must be RFC3339 format (e.g. 2026-12-31T00:00:00Z)")
+			return
+		}
+		expiresAt = &t
+	}
 
 	actorID := middleware.UserIDFromCtx(r.Context())
-	if err := h.users.AddMembership(r.Context(), id, group, &actorID, nil); err != nil {
+	if err := h.users.AddMembership(r.Context(), id, group, &actorID, expiresAt); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "add membership failed")
 		return
 	}
@@ -175,7 +276,7 @@ func (h *UserHandler) AddMembership(w http.ResponseWriter, r *http.Request) {
 }
 
 // PATCH /users/{id} — Admin only
-// Body: { "username": "...", "email": "...", "password": "..." }  — all optional
+// Body: { "username": "...", "email": "...", "password": "...", "is_active": true }  — all optional
 func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
@@ -190,13 +291,26 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Username *string `json:"username"`
-		Email    *string `json:"email"`
-		Password *string `json:"password"`
+		Username              *string   `json:"username"`
+		Email                 *string   `json:"email"`
+		Password              *string   `json:"password"`
+		IsActive              *bool     `json:"is_active"`
+		AuthGroups            *[]string `json:"auth_groups"`
+		DirectPermissions     *[]string `json:"direct_permissions"`
+		DirectDBConnectionIDs *[]uint64 `json:"direct_db_connection_ids"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+	if user.IsProtected {
+		onlyPasswordChange := req.Password != nil && strings.TrimSpace(*req.Password) != "" &&
+			req.Username == nil && req.Email == nil && req.IsActive == nil &&
+			req.AuthGroups == nil && req.DirectPermissions == nil && req.DirectDBConnectionIDs == nil
+		if !onlyPasswordChange {
+			jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
+			return
+		}
 	}
 
 	username := user.Username
@@ -229,18 +343,134 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	isActive := user.IsActive
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+		if err := h.users.UpdateActive(r.Context(), id, isActive); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "update user status failed")
+			return
+		}
+		if !isActive {
+			if err := h.sessions.RevokeAllForUser(r.Context(), id); err != nil {
+				jsonErr(w, http.StatusInternalServerError, "revoke sessions failed")
+				return
+			}
+		}
+	}
+
 	actorID := middleware.UserIDFromCtx(r.Context())
+	if req.AuthGroups != nil {
+		if h.auths == nil {
+			jsonErr(w, http.StatusInternalServerError, "auth group repo unavailable")
+			return
+		}
+		nextGroups := make([]model.AuthGroup, 0, len(*req.AuthGroups))
+		seen := map[string]bool{}
+		for _, groupKey := range *req.AuthGroups {
+			normalized := strings.TrimSpace(groupKey)
+			if normalized == "" || seen[normalized] {
+				continue
+			}
+			group, err := h.auths.GetByKey(r.Context(), normalized)
+			if err != nil {
+				jsonErr(w, http.StatusInternalServerError, "load auth group failed")
+				return
+			}
+			if group == nil {
+				jsonErr(w, http.StatusUnprocessableEntity, "invalid auth_group")
+				return
+			}
+			seen[normalized] = true
+			nextGroups = append(nextGroups, model.AuthGroup(normalized))
+		}
+		if err := h.users.ReplaceMemberships(r.Context(), id, nextGroups, &actorID); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "replace memberships failed")
+			return
+		}
+	}
+	if req.DirectPermissions != nil {
+		nextPermissions := make([]string, 0, len(*req.DirectPermissions))
+		seen := map[string]bool{}
+		for _, permissionKey := range *req.DirectPermissions {
+			trimmed := strings.TrimSpace(permissionKey)
+			if trimmed == "" || seen[trimmed] {
+				continue
+			}
+			seen[trimmed] = true
+			nextPermissions = append(nextPermissions, trimmed)
+		}
+		if err := h.users.ReplaceDirectPermissionKeys(r.Context(), id, nextPermissions, &actorID); err != nil {
+			if err == sql.ErrNoRows {
+				jsonErr(w, http.StatusUnprocessableEntity, "invalid permission_key")
+				return
+			}
+			jsonErr(w, http.StatusInternalServerError, "replace direct permissions failed")
+			return
+		}
+	}
+	if req.DirectDBConnectionIDs != nil {
+		nextConnectionIDs := make([]uint64, 0, len(*req.DirectDBConnectionIDs))
+		seen := map[uint64]bool{}
+		for _, connectionID := range *req.DirectDBConnectionIDs {
+			if connectionID == 0 || seen[connectionID] {
+				continue
+			}
+			seen[connectionID] = true
+			nextConnectionIDs = append(nextConnectionIDs, connectionID)
+		}
+		if err := h.users.ReplaceDirectDBConnectionIDs(r.Context(), id, nextConnectionIDs, &actorID); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "replace direct db connections failed")
+			return
+		}
+	}
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &actorID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
 		ActionType:   "user_update",
 		ResourceType: "user",
 		ResourceID:   &id,
-		Details:      map[string]string{"username": username, "email": email},
+		Details:      map[string]string{"username": username, "email": email, "is_active": strconv.FormatBool(isActive)},
 		IPAddress:    clientIP(r),
 	})
 
-	jsonOK(w, map[string]any{"id": id, "username": username, "email": email})
+	jsonOK(w, map[string]any{"id": id, "username": username, "email": email, "is_active": isActive})
+}
+
+// DELETE /users/{id} — Admin only
+func (h *UserHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if user.IsProtected {
+		jsonErr(w, http.StatusConflict, "protected system user cannot be deleted")
+		return
+	}
+
+	if err := h.users.Delete(r.Context(), id); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "delete user failed")
+		return
+	}
+
+	actorID := middleware.UserIDFromCtx(r.Context())
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "user_delete",
+		ResourceType: "user",
+		ResourceID:   &id,
+		Details:      map[string]string{"username": user.Username, "email": user.Email},
+		IPAddress:    clientIP(r),
+	})
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // DELETE /users/{id}/memberships/{group} — Admin only
@@ -250,10 +480,17 @@ func (h *UserHandler) RemoveMembership(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid user id")
 		return
 	}
-	group := model.AuthGroup(chi.URLParam(r, "group"))
-	switch group {
-	case model.AuthGroupDeveloper, model.AuthGroupReviewer, model.AuthGroupDBA, model.AuthGroupAdmin:
-	default:
+	group := model.AuthGroup(strings.TrimSpace(chi.URLParam(r, "group")))
+	if h.auths == nil {
+		jsonErr(w, http.StatusInternalServerError, "auth group repo unavailable")
+		return
+	}
+	authGroup, err := h.auths.GetByKey(r.Context(), string(group))
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load auth group failed")
+		return
+	}
+	if authGroup == nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "invalid auth_group")
 		return
 	}
@@ -261,6 +498,10 @@ func (h *UserHandler) RemoveMembership(w http.ResponseWriter, r *http.Request) {
 	user, err := h.users.GetByID(r.Context(), id)
 	if err != nil || user == nil {
 		jsonErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if user.IsProtected {
+		jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
 		return
 	}
 
@@ -280,5 +521,140 @@ func (h *UserHandler) RemoveMembership(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /users/{id}/permissions
+func (h *UserHandler) AddDirectPermission(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if user.IsProtected {
+		jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
+		return
+	}
+
+	var req struct {
+		PermissionKey string `json:"permission_key"`
+	}
+	if err := bindJSON(r, &req); err != nil || strings.TrimSpace(req.PermissionKey) == "" {
+		jsonErr(w, http.StatusBadRequest, "permission_key is required")
+		return
+	}
+
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := h.users.AddDirectPermission(r.Context(), id, strings.TrimSpace(req.PermissionKey), &actorID); err != nil {
+		if err == sql.ErrNoRows {
+			jsonErr(w, http.StatusUnprocessableEntity, "invalid permission_key")
+			return
+		}
+		jsonErr(w, http.StatusInternalServerError, "add direct permission failed")
+		return
+	}
+
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "user_permission_add",
+		ResourceType: "user",
+		ResourceID:   &id,
+		Details:      map[string]string{"permission_key": strings.TrimSpace(req.PermissionKey)},
+		IPAddress:    clientIP(r),
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DELETE /users/{id}/permissions/{permissionKey}
+func (h *UserHandler) RemoveDirectPermission(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if user.IsProtected {
+		jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
+		return
+	}
+	permissionKey := strings.TrimSpace(chi.URLParam(r, "permissionKey"))
+	if permissionKey == "" {
+		jsonErr(w, http.StatusBadRequest, "invalid permissionKey")
+		return
+	}
+	if err := h.users.RemoveDirectPermission(r.Context(), id, permissionKey); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "remove direct permission failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /users/{id}/db-connections
+func (h *UserHandler) AddDirectDBConnection(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if user.IsProtected {
+		jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
+		return
+	}
+	var req struct {
+		DBConnectionID uint64 `json:"db_connection_id"`
+	}
+	if err := bindJSON(r, &req); err != nil || req.DBConnectionID == 0 {
+		jsonErr(w, http.StatusBadRequest, "db_connection_id is required")
+		return
+	}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := h.users.AddDirectDBConnection(r.Context(), id, req.DBConnectionID, &actorID); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "add direct db connection failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DELETE /users/{id}/db-connections/{connID}
+func (h *UserHandler) RemoveDirectDBConnection(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if user.IsProtected {
+		jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
+		return
+	}
+	connID, err := strconv.ParseUint(chi.URLParam(r, "connID"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid connID")
+		return
+	}
+	if err := h.users.RemoveDirectDBConnection(r.Context(), id, connID); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "remove direct db connection failed")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

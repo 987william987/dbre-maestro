@@ -3,6 +3,7 @@ import { ArrowRight, RefreshCcw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { EmptyState } from '@/components/tickets/EmptyState'
 import { ApiError } from '@/shared/api/client'
+import { useAuth } from '@/shared/auth/AuthContext'
 import { formatDateTime } from '@/shared/lib/format'
 import type { Ticket, TicketStatus } from '@/shared/types/ticket'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
@@ -24,6 +25,7 @@ const STATUS_OPTIONS: Array<{ value: '' | TicketStatus; label: string }> = [
 ]
 
 export function TicketsPage() {
+  const { user } = useAuth()
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [status, setStatus] = useState<'' | TicketStatus>('')
   const [loading, setLoading] = useState(true)
@@ -46,6 +48,8 @@ export function TicketsPage() {
   useEffect(() => {
     void loadTickets(status)
   }, [status])
+
+  const canCreateTicket = user?.permissions.includes('tickets.apply') ?? false
 
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
@@ -75,13 +79,15 @@ export function TicketsPage() {
                 <RefreshCcw className="h-4 w-4" />
                 重新整理
               </button>
-              <Link
-                to="/tickets/new"
-                className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition-colors hover:bg-slate-800"
-              >
-                建立新工單
-                <ArrowRight className="h-4 w-4" />
-              </Link>
+              {canCreateTicket ? (
+                <Link
+                  to="/tickets/new"
+                  className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition-colors hover:bg-slate-800"
+                >
+                  建立新工單
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              ) : null}
             </div>
           </div>
         </div>

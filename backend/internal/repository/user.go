@@ -15,14 +15,22 @@ type UserRepo struct {
 	db *sqlx.DB
 }
 
+type AuthGroupRecord struct {
+	ID          uint64 `db:"id"`
+	GroupKey    string `db:"group_key"`
+	Name        string `db:"name"`
+	IsSystem    bool   `db:"is_system"`
+	IsProtected bool   `db:"is_protected"`
+}
+
 func NewUserRepo(db *sqlx.DB) *UserRepo {
 	return &UserRepo{db: db}
 }
 
-func (r *UserRepo) Create(ctx context.Context, username, email, passwordHash string) (*model.User, error) {
+func (r *UserRepo) Create(ctx context.Context, username, email, passwordHash string, isProtected bool) (*model.User, error) {
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO users (username, email, password) VALUES (?, ?, ?)`,
-		username, email, passwordHash,
+		`INSERT INTO users (username, email, password, is_protected, is_active) VALUES (?, ?, ?, ?, 1)`,
+		username, email, passwordHash, isProtected,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
@@ -66,12 +74,95 @@ func (r *UserRepo) CountUsers(ctx context.Context) (int, error) {
 
 func (r *UserRepo) GetAuthGroups(ctx context.Context, userID uint64) ([]model.AuthGroup, error) {
 	var groups []model.AuthGroup
-	err := r.db.SelectContext(ctx, &groups,
-		`SELECT auth_group FROM auth_group_memberships
-         WHERE user_id = ? AND (expires_at IS NULL OR expires_at > ?)`,
-		userID, time.Now(),
-	)
+	err := r.db.SelectContext(ctx, &groups, `
+		SELECT DISTINCT auth_group
+		FROM (
+			SELECT ag.group_key AS auth_group
+			FROM user_auth_groups uag
+			INNER JOIN auth_groups ag ON ag.id = uag.auth_group_id
+			WHERE uag.user_id = ? AND (uag.expires_at IS NULL OR uag.expires_at > ?)
+			UNION
+			SELECT agm.auth_group
+			FROM auth_group_memberships agm
+			WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+		) AS groups
+		ORDER BY auth_group
+	`, userID, time.Now(), userID, time.Now())
 	return groups, err
+}
+
+func (r *UserRepo) GetAuthGroupRecords(ctx context.Context, userID uint64) ([]AuthGroupRecord, error) {
+	var groups []AuthGroupRecord
+	err := r.db.SelectContext(ctx, &groups, `
+		SELECT DISTINCT ag.id, ag.group_key, ag.name, ag.is_system, ag.is_protected
+		FROM auth_groups ag
+		INNER JOIN user_auth_groups uag ON uag.auth_group_id = ag.id
+		WHERE uag.user_id = ? AND (uag.expires_at IS NULL OR uag.expires_at > ?)
+		ORDER BY ag.id
+	`, userID, time.Now())
+	if err == nil && len(groups) > 0 {
+		return groups, nil
+	}
+
+	err = r.db.SelectContext(ctx, &groups, `
+		SELECT DISTINCT ag.id, ag.group_key, ag.name, ag.is_system, ag.is_protected
+		FROM auth_groups ag
+		INNER JOIN auth_group_memberships agm ON agm.auth_group = ag.group_key
+		WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+		ORDER BY ag.id
+	`, userID, time.Now())
+	return groups, err
+}
+
+func (r *UserRepo) GetEffectivePermissionKeys(ctx context.Context, userID uint64) ([]string, error) {
+	var permissionKeys []string
+	err := r.db.SelectContext(ctx, &permissionKeys, `
+		SELECT DISTINCT permission_key FROM (
+			SELECT p.permission_key
+			FROM permissions p
+			INNER JOIN user_permissions up ON up.permission_id = p.id
+			WHERE up.user_id = ?
+			UNION
+			SELECT p.permission_key
+			FROM permissions p
+			INNER JOIN auth_group_permissions agp ON agp.permission_id = p.id
+			INNER JOIN user_auth_groups uag ON uag.auth_group_id = agp.auth_group_id
+			WHERE uag.user_id = ? AND (uag.expires_at IS NULL OR uag.expires_at > ?)
+			UNION
+			SELECT p.permission_key
+			FROM permissions p
+			INNER JOIN auth_group_permissions agp ON agp.permission_id = p.id
+			INNER JOIN auth_groups ag ON ag.id = agp.auth_group_id
+			INNER JOIN auth_group_memberships agm ON agm.auth_group = ag.group_key
+			WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+		) AS effective_permissions
+		ORDER BY permission_key
+	`, userID, userID, time.Now(), userID, time.Now())
+	return permissionKeys, err
+}
+
+func (r *UserRepo) GetEffectiveDBConnectionIDs(ctx context.Context, userID uint64) ([]uint64, error) {
+	var ids []uint64
+	err := r.db.SelectContext(ctx, &ids, `
+		SELECT DISTINCT db_connection_id FROM (
+			SELECT udc.db_connection_id
+			FROM user_db_connections udc
+			WHERE udc.user_id = ?
+			UNION
+			SELECT agdc.db_connection_id
+			FROM auth_group_db_connections agdc
+			INNER JOIN user_auth_groups uag ON uag.auth_group_id = agdc.auth_group_id
+			WHERE uag.user_id = ? AND (uag.expires_at IS NULL OR uag.expires_at > ?)
+			UNION
+			SELECT agdc.db_connection_id
+			FROM auth_group_db_connections agdc
+			INNER JOIN auth_groups ag ON ag.id = agdc.auth_group_id
+			INNER JOIN auth_group_memberships agm ON agm.auth_group = ag.group_key
+			WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+		) AS effective_db_connections
+		ORDER BY db_connection_id
+	`, userID, userID, time.Now(), userID, time.Now())
+	return ids, err
 }
 
 func (r *UserRepo) AddMembership(ctx context.Context, userID uint64, group model.AuthGroup, grantedBy *uint64, expiresAt *time.Time) error {
@@ -84,11 +175,94 @@ func (r *UserRepo) AddMembership(ctx context.Context, userID uint64, group model
 }
 
 func (r *UserRepo) RemoveMembership(ctx context.Context, userID uint64, group model.AuthGroup) error {
-	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM auth_group_memberships WHERE user_id = ? AND auth_group = ?`,
-		userID, group,
-	)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM auth_group_memberships WHERE user_id = ? AND auth_group = ?`, userID, group); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE uag FROM user_auth_groups uag
+		INNER JOIN auth_groups ag ON ag.id = uag.auth_group_id
+		WHERE uag.user_id = ? AND ag.group_key = ?
+	`, userID, group); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *UserRepo) AddDirectPermission(ctx context.Context, userID uint64, permissionKey string, grantedBy *uint64) error {
+	res, err := r.db.ExecContext(ctx, `
+		INSERT IGNORE INTO user_permissions (user_id, permission_id, granted_by)
+		SELECT ?, p.id, ?
+		FROM permissions p
+		WHERE p.permission_key = ?
+	`, userID, grantedBy, permissionKey)
+	if err != nil {
+		return err
+	}
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		var exists int
+		if err := r.db.GetContext(ctx, &exists, `SELECT COUNT(*) FROM permissions WHERE permission_key = ?`, permissionKey); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return sql.ErrNoRows
+		}
+	}
+	return nil
+}
+
+func (r *UserRepo) RemoveDirectPermission(ctx context.Context, userID uint64, permissionKey string) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE up FROM user_permissions up
+		INNER JOIN permissions p ON p.id = up.permission_id
+		WHERE up.user_id = ? AND p.permission_key = ?
+	`, userID, permissionKey)
 	return err
+}
+
+func (r *UserRepo) AddDirectDBConnection(ctx context.Context, userID, dbConnectionID uint64, grantedBy *uint64) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT IGNORE INTO user_db_connections (user_id, db_connection_id, granted_by)
+		VALUES (?, ?, ?)
+	`, userID, dbConnectionID, grantedBy)
+	return err
+}
+
+func (r *UserRepo) RemoveDirectDBConnection(ctx context.Context, userID, dbConnectionID uint64) error {
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM user_db_connections
+		WHERE user_id = ? AND db_connection_id = ?
+	`, userID, dbConnectionID)
+	return err
+}
+
+func (r *UserRepo) ListDirectPermissionKeys(ctx context.Context, userID uint64) ([]string, error) {
+	var permissionKeys []string
+	err := r.db.SelectContext(ctx, &permissionKeys, `
+		SELECT p.permission_key
+		FROM permissions p
+		INNER JOIN user_permissions up ON up.permission_id = p.id
+		WHERE up.user_id = ?
+		ORDER BY p.permission_key
+	`, userID)
+	return permissionKeys, err
+}
+
+func (r *UserRepo) ListDirectDBConnectionIDs(ctx context.Context, userID uint64) ([]uint64, error) {
+	var ids []uint64
+	err := r.db.SelectContext(ctx, &ids, `
+		SELECT db_connection_id
+		FROM user_db_connections
+		WHERE user_id = ?
+		ORDER BY db_connection_id
+	`, userID)
+	return ids, err
 }
 
 // Update patches username and/or email. Call separately to update password hash.
@@ -96,6 +270,14 @@ func (r *UserRepo) Update(ctx context.Context, id uint64, username, email string
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE users SET username=?, email=?, updated_at=NOW() WHERE id=?`,
 		username, email, id,
+	)
+	return err
+}
+
+func (r *UserRepo) UpdateActive(ctx context.Context, id uint64, isActive bool) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE users SET is_active=?, updated_at=NOW() WHERE id=?`,
+		isActive, id,
 	)
 	return err
 }
@@ -116,9 +298,162 @@ func (r *UserRepo) List(ctx context.Context) ([]model.User, error) {
 
 func (r *UserRepo) ListMemberships(ctx context.Context, userID uint64) ([]model.Membership, error) {
 	var memberships []model.Membership
-	err := r.db.SelectContext(ctx, &memberships,
-		`SELECT * FROM auth_group_memberships WHERE user_id = ? ORDER BY created_at DESC`,
-		userID,
-	)
+	err := r.db.SelectContext(ctx, &memberships, `
+		SELECT membership_id AS id, user_id, auth_group, granted_by, expires_at, created_at
+		FROM (
+			SELECT
+				uag.id AS membership_id,
+				uag.user_id,
+				ag.group_key AS auth_group,
+				uag.granted_by,
+				uag.expires_at,
+				uag.created_at
+			FROM user_auth_groups uag
+			INNER JOIN auth_groups ag ON ag.id = uag.auth_group_id
+			WHERE uag.user_id = ? AND (uag.expires_at IS NULL OR uag.expires_at > ?)
+			UNION
+			SELECT
+				agm.id AS membership_id,
+				agm.user_id,
+				agm.auth_group,
+				agm.granted_by,
+				agm.expires_at,
+				agm.created_at
+			FROM auth_group_memberships agm
+			WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+		) AS memberships
+		ORDER BY created_at DESC
+	`, userID, time.Now(), userID, time.Now())
 	return memberships, err
+}
+
+func (r *UserRepo) Delete(ctx context.Context, id uint64) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	queries := []struct {
+		query string
+		args  []any
+	}{
+		{
+			query: `DELETE FROM auth_group_memberships WHERE user_id = ?`,
+			args:  []any{id},
+		},
+		{
+			query: `DELETE FROM resource_group_users WHERE user_id = ?`,
+			args:  []any{id},
+		},
+		{
+			query: `DELETE FROM sessions WHERE user_id = ?`,
+			args:  []any{id},
+		},
+		{
+			query: `DELETE FROM users WHERE id = ?`,
+			args:  []any{id},
+		},
+	}
+
+	for _, item := range queries {
+		if _, err := tx.ExecContext(ctx, item.query, item.args...); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (r *UserRepo) ListUsersByAuthGroup(ctx context.Context, group model.AuthGroup) ([]model.User, error) {
+	var users []model.User
+	err := r.db.SelectContext(ctx, &users, `
+		SELECT DISTINCT u.*
+		FROM users u
+		WHERE u.id IN (
+			SELECT uag.user_id
+			FROM user_auth_groups uag
+			INNER JOIN auth_groups ag ON ag.id = uag.auth_group_id
+			WHERE ag.group_key = ? AND (uag.expires_at IS NULL OR uag.expires_at > ?)
+			UNION
+			SELECT agm.user_id
+			FROM auth_group_memberships agm
+			WHERE agm.auth_group = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+		)
+		ORDER BY u.username
+	`, group, time.Now(), group, time.Now())
+	return users, err
+}
+
+func (r *UserRepo) ReplaceMemberships(ctx context.Context, userID uint64, groups []model.AuthGroup, grantedBy *uint64) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM auth_group_memberships WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_auth_groups WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	for _, group := range groups {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO auth_group_memberships (user_id, auth_group, granted_by, expires_at)
+			VALUES (?, ?, ?, NULL)
+		`, userID, group, grantedBy); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *UserRepo) ReplaceDirectPermissionKeys(ctx context.Context, userID uint64, permissionKeys []string, grantedBy *uint64) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_permissions WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	for _, permissionKey := range permissionKeys {
+		res, err := tx.ExecContext(ctx, `
+			INSERT INTO user_permissions (user_id, permission_id, granted_by)
+			SELECT ?, p.id, ?
+			FROM permissions p
+			WHERE p.permission_key = ?
+		`, userID, grantedBy, permissionKey)
+		if err != nil {
+			return err
+		}
+		rowsAffected, _ := res.RowsAffected()
+		if rowsAffected == 0 {
+			return sql.ErrNoRows
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *UserRepo) ReplaceDirectDBConnectionIDs(ctx context.Context, userID uint64, dbConnectionIDs []uint64, grantedBy *uint64) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_db_connections WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
+	for _, connectionID := range dbConnectionIDs {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO user_db_connections (user_id, db_connection_id, granted_by)
+			VALUES (?, ?, ?)
+		`, userID, connectionID, grantedBy); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

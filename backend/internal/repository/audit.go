@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -74,12 +75,60 @@ func (r *AuditRepo) List(ctx context.Context, f AuditListFilter, limit, offset i
 	}
 
 	listArgs := append(args, limit, offset)
-	var logs []model.AuditLog
 	q := "SELECT id, actor_id, actor_name, action_type, resource_type, resource_id, details, ip_address, created_at FROM audit_logs" +
 		where + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-	if err := r.db.SelectContext(ctx, &logs, q, listArgs...); err != nil {
+
+	rows, err := r.db.QueryxContext(ctx, q, listArgs...)
+	if err != nil {
 		return nil, 0, fmt.Errorf("audit_logs list: %w", err)
 	}
+	defer rows.Close()
+
+	logs := make([]model.AuditLog, 0, limit)
+	for rows.Next() {
+		var (
+			log          model.AuditLog
+			actorName    sql.NullString
+			resourceType sql.NullString
+			ipAddress    sql.NullString
+			details      []byte
+		)
+
+		if err := rows.Scan(
+			&log.ID,
+			&log.ActorID,
+			&actorName,
+			&log.ActionType,
+			&resourceType,
+			&log.ResourceID,
+			&details,
+			&ipAddress,
+			&log.CreatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("audit_logs scan: %w", err)
+		}
+
+		if actorName.Valid {
+			log.ActorName = actorName.String
+		}
+		if resourceType.Valid {
+			value := resourceType.String
+			log.ResourceType = &value
+		}
+		if len(details) > 0 {
+			log.Details = json.RawMessage(details)
+		}
+		if ipAddress.Valid {
+			value := ipAddress.String
+			log.IPAddress = &value
+		}
+
+		logs = append(logs, log)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("audit_logs rows: %w", err)
+	}
+
 	return logs, total, nil
 }
 

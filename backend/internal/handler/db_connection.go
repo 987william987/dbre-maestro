@@ -15,14 +15,16 @@ import (
 
 type DBConnectionHandler struct {
 	repo  *repository.DBConnectionRepo
+	users *repository.UserRepo
 	audit *repository.AuditRepo
 }
 
-func NewDBConnectionHandler(repo *repository.DBConnectionRepo, audit *repository.AuditRepo) *DBConnectionHandler {
-	return &DBConnectionHandler{repo: repo, audit: audit}
+func NewDBConnectionHandler(repo *repository.DBConnectionRepo, users *repository.UserRepo, audit *repository.AuditRepo) *DBConnectionHandler {
+	return &DBConnectionHandler{repo: repo, users: users, audit: audit}
 }
 
 // GET /db-connections
+// Users with write permission see all connections; readers are filtered by their effective DB scope.
 func (h *DBConnectionHandler) List(w http.ResponseWriter, r *http.Request) {
 	conns, err := h.repo.List(r.Context())
 	if err != nil {
@@ -32,6 +34,30 @@ func (h *DBConnectionHandler) List(w http.ResponseWriter, r *http.Request) {
 	if conns == nil {
 		conns = []model.DBConnection{}
 	}
+
+	if !middleware.HasPermission(r.Context(), "db_connections.write") {
+		userID := middleware.UserIDFromCtx(r.Context())
+		accessibleIDs, err := h.users.GetEffectiveDBConnectionIDs(r.Context(), userID)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "db scope check failed")
+			return
+		}
+		accessible := make(map[uint64]bool, len(accessibleIDs))
+		for _, id := range accessibleIDs {
+			accessible[id] = true
+		}
+		filtered := conns[:0]
+		for _, c := range conns {
+			if accessible[c.ID] {
+				filtered = append(filtered, c)
+			}
+		}
+		conns = filtered
+		if conns == nil {
+			conns = []model.DBConnection{}
+		}
+	}
+
 	jsonOK(w, map[string]any{"connections": conns})
 }
 

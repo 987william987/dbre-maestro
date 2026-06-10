@@ -150,6 +150,50 @@ func (r *TicketRepo) MarkExecutionDone(ctx context.Context, id uint64, rowsAffec
 	return err
 }
 
+// ListExecutions returns all execution rows for a ticket, ordered by seq.
+func (r *TicketRepo) ListExecutions(ctx context.Context, ticketID uint64) ([]model.TicketExecution, error) {
+	var execs []model.TicketExecution
+	err := r.db.SelectContext(ctx, &execs,
+		`SELECT * FROM ticket_executions WHERE ticket_id = ? ORDER BY seq`,
+		ticketID,
+	)
+	return execs, err
+}
+
+// MarkStopped transitions an executing ticket to stopped.
+// Returns false if the ticket was not in executing state (idempotent).
+func (r *TicketRepo) MarkStopped(ctx context.Context, id uint64) (bool, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE tickets SET status = 'stopped', updated_at = ? WHERE id = ? AND status = 'executing'`,
+		time.Now(), id,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// SetScheduled stores executor_id and scheduled_at for deferred execution.
+// The ticket must be in pending_execution status.
+func (r *TicketRepo) SetScheduled(ctx context.Context, id, executorID uint64, scheduledAt time.Time) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tickets SET executor_id = ?, scheduled_at = ?, updated_at = ? WHERE id = ? AND status = 'pending_execution'`,
+		executorID, scheduledAt, time.Now(), id,
+	)
+	return err
+}
+
+// GetDueScheduled returns pending_execution tickets whose scheduled_at has arrived.
+func (r *TicketRepo) GetDueScheduled(ctx context.Context) ([]model.Ticket, error) {
+	var tickets []model.Ticket
+	err := r.db.SelectContext(ctx, &tickets,
+		`SELECT * FROM tickets WHERE status = 'pending_execution' AND scheduled_at IS NOT NULL AND scheduled_at <= ?`,
+		time.Now(),
+	)
+	return tickets, err
+}
+
 // Crash recovery: on startup, scan executing → mark interrupted
 func (r *TicketRepo) MarkInterruptedAll(ctx context.Context) (int64, error) {
 	res, err := r.db.ExecContext(ctx,
