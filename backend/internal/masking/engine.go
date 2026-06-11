@@ -24,7 +24,15 @@ func NewEngine(encryptionKey []byte, cache *RuleCache) (*Engine, error) {
 // QueryResult holds the columns and rows returned by a SQL Editor query.
 type QueryResult struct {
 	Columns []string
+	Origins []ColumnOrigin
 	Rows    [][]any
+}
+
+type ColumnOrigin struct {
+	Database string
+	Schema   string
+	Table    string
+	Column   string
 }
 
 // MaskResult applies masking rules to a query result in-place.
@@ -35,15 +43,9 @@ func (e *Engine) MaskResult(result *QueryResult, rules []Rule) error {
 		return nil
 	}
 
-	// Build a lookup: lowercase column name → rule
-	colRules := make(map[string]Rule, len(rules))
-	for _, r := range rules {
-		colRules[strings.ToLower(r.Column)] = r
-	}
-
 	for rowIdx, row := range result.Rows {
 		for colIdx, colName := range result.Columns {
-			rule, ok := colRules[strings.ToLower(colName)]
+			rule, ok := e.matchRule(result, colIdx, colName, rules)
 			if !ok {
 				continue
 			}
@@ -60,6 +62,69 @@ func (e *Engine) MaskResult(result *QueryResult, rules []Rule) error {
 		}
 	}
 	return nil
+}
+
+func (e *Engine) matchRule(result *QueryResult, colIdx int, colName string, rules []Rule) (Rule, bool) {
+	for _, rule := range rules {
+		if !equalFold(rule.Column, colName) {
+			origin := ColumnOrigin{}
+			if colIdx < len(result.Origins) {
+				origin = result.Origins[colIdx]
+			}
+			if matchesOrigin(rule, origin) || matchesColumnLabel(rule, colName) {
+				return rule, true
+			}
+			continue
+		}
+
+		origin := ColumnOrigin{}
+		if colIdx < len(result.Origins) {
+			origin = result.Origins[colIdx]
+		}
+		if matchesOrigin(rule, origin) || matchesColumnLabel(rule, colName) {
+			return rule, true
+		}
+	}
+	return Rule{}, false
+}
+
+func matchesOrigin(rule Rule, origin ColumnOrigin) bool {
+	if origin.Column == "" {
+		return false
+	}
+	if !equalFold(rule.Column, origin.Column) {
+		return false
+	}
+	if rule.Database != "" && !equalFold(rule.Database, origin.Database) {
+		return false
+	}
+	if rule.Schema != "" && !equalFold(rule.Schema, origin.Schema) {
+		return false
+	}
+	if rule.Table != "" && !equalFold(rule.Table, origin.Table) {
+		return false
+	}
+	return true
+}
+
+func matchesColumnLabel(rule Rule, columnLabel string) bool {
+	if rule.Database != "" || rule.Schema != "" {
+		return false
+	}
+
+	labelParts := strings.Split(columnLabel, ".")
+	switch len(labelParts) {
+	case 1:
+		return rule.Table == "" && equalFold(rule.Column, labelParts[0])
+	default:
+		tableName := labelParts[len(labelParts)-2]
+		columnName := labelParts[len(labelParts)-1]
+		return equalFold(rule.Table, tableName) && equalFold(rule.Column, columnName)
+	}
+}
+
+func equalFold(left, right string) bool {
+	return strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right))
 }
 
 // ErrMaskingFailed is returned when masking cannot be completed safely.

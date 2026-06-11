@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/dbre-maestro/maestro/internal/masking"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
@@ -18,29 +19,34 @@ import (
 )
 
 type ExportHandler struct {
-	exports      *repository.ExportRepo
-	dbConns      *repository.DBConnectionRepo
-	audit        *repository.AuditRepo
-	maskingRules *repository.MaskingRuleRepo
-	notifRepo    *repository.NotificationRepo
-	lark         *notification.Client
+	exports   *repository.ExportRepo
+	dbConns   *repository.DBConnectionRepo
+	users     *repository.UserRepo
+	audit     *repository.AuditRepo
+	masking   *maskingRuntime
+	notifRepo *repository.NotificationRepo
+	lark      *notification.Client
 }
 
 func NewExportHandler(
 	exports *repository.ExportRepo,
 	dbConns *repository.DBConnectionRepo,
+	users *repository.UserRepo,
 	audit *repository.AuditRepo,
 	maskingRules *repository.MaskingRuleRepo,
+	whitelist *repository.MaskingWhitelistRepo,
+	engine *masking.Engine,
 	notifRepo *repository.NotificationRepo,
 	lark *notification.Client,
 ) *ExportHandler {
 	return &ExportHandler{
-		exports:      exports,
-		dbConns:      dbConns,
-		audit:        audit,
-		maskingRules: maskingRules,
-		notifRepo:    notifRepo,
-		lark:         lark,
+		exports:   exports,
+		dbConns:   dbConns,
+		users:     users,
+		audit:     audit,
+		masking:   newMaskingRuntime(users, maskingRules, whitelist, engine),
+		notifRepo: notifRepo,
+		lark:      lark,
 	}
 }
 
@@ -82,19 +88,39 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "sql_content and db_connection_id are required")
 		return
 	}
+	conn, err := h.dbConns.GetByID(r.Context(), req.DBConnectionID)
+	if err != nil || conn == nil {
+		jsonErr(w, http.StatusNotFound, "db connection not found")
+		return
+	}
 
 	if err := sqlreview.CheckReadOnly(req.SQLContent); err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
-	// Determine sensitivity: if any masking rules exist for the connection, require approval.
-	rules, err := h.maskingRules.ListForConnection(r.Context(), req.DBConnectionID)
+	accessibleIDs, err := h.users.GetEffectiveDBConnectionIDs(r.Context(), userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "db scope check failed")
+		return
+	}
+	hasAccess := false
+	for _, accessibleID := range accessibleIDs {
+		if accessibleID == req.DBConnectionID {
+			hasAccess = true
+			break
+		}
+	}
+	if !hasAccess {
+		jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
+		return
+	}
+
+	sensitive, err := h.masking.isSensitiveConnection(r.Context(), conn)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "check masking rules failed")
 		return
 	}
-	sensitive := len(rules) > 0
 
 	status := model.ExportStatusReady
 	if sensitive {
@@ -129,7 +155,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"sensitive": sensitive,
 	}
 	if !sensitive {
-		resp["download_url"] = fmt.Sprintf("/exports/download/%s", token)
+		resp["download_url"] = fmt.Sprintf("/api/exports/download/%s", token)
 		resp["expires_at"] = time.Now().Add(24 * time.Hour)
 	}
 	jsonCreated(w, resp)
@@ -196,7 +222,7 @@ func (h *ExportHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{
 		"id":           id,
 		"status":       string(model.ExportStatusReady),
-		"download_url": fmt.Sprintf("/exports/download/%s", req.DownloadToken),
+		"download_url": fmt.Sprintf("/api/exports/download/%s", req.DownloadToken),
 		"expires_at":   req.ExpiresAt,
 	})
 }
@@ -284,16 +310,13 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	rows, err := pools.QueryPool.QueryContext(ctx, req.SQLContent)
+	result, err := executeQueryForConnection(ctx, conn, password, pools.QueryPool, req.SQLContent, queryExecutionContext{})
 	if err != nil {
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
-
-	cols, err := rows.Columns()
-	if err != nil {
-		http.Error(w, "columns error", http.StatusInternalServerError)
+	if _, err := h.masking.applyResult(r.Context(), conn, req.RequesterID, result); err != nil {
+		http.Error(w, "masking failed", http.StatusUnprocessableEntity)
 		return
 	}
 
@@ -301,26 +324,17 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="export-%s.csv"`, token[:8]))
 
 	cw := csv.NewWriter(w)
-	cw.Write(cols)
-
-	vals := make([]any, len(cols))
-	ptrs := make([]any, len(cols))
-	for i := range vals {
-		ptrs[i] = &vals[i]
-	}
-	for rows.Next() {
-		if err := rows.Scan(ptrs...); err != nil {
-			break
-		}
-		record := make([]string, len(cols))
-		for i, v := range vals {
+	_ = cw.Write(result.Columns)
+	for _, row := range result.Rows {
+		record := make([]string, len(row))
+		for i, v := range row {
 			if v == nil {
 				record[i] = ""
 			} else {
 				record[i] = fmt.Sprintf("%v", v)
 			}
 		}
-		cw.Write(record)
+		_ = cw.Write(record)
 	}
 	cw.Flush()
 

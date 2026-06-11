@@ -112,11 +112,16 @@ export function TicketDetailPage() {
         sql_content: ticket.sql_content,
         db_connection_id: ticket.db_connection_id,
       })
-      setExportState({
-        url: result.download_url,
-        expiresAt: result.expires_at,
-      })
-      pushToast('已建立匯出請求', 'success')
+      if (result.download_url && result.expires_at) {
+        setExportState({
+          url: result.download_url,
+          expiresAt: result.expires_at,
+        })
+        pushToast('已建立匯出請求', 'success')
+      } else {
+        setExportState(null)
+        pushToast(result.status === 'pending' ? '匯出申請已送出，待審批後才能下載。' : '已建立匯出請求', 'success')
+      }
     } catch (exportError) {
       setError(exportError instanceof ApiError ? exportError.message : '建立匯出請求失敗。')
     } finally {

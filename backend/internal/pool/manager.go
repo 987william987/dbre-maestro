@@ -101,11 +101,11 @@ func BuildDSN(conn *model.DBConnection, password string) (driver, dsn string) {
 
 // BuildMySQLDSN constructs a MySQL DSN string.
 func BuildMySQLDSN(host string, port uint16, user, password, dbName string) string {
-	db := ""
+	db := "/"
 	if dbName != "" {
 		db = "/" + dbName
 	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)%s?parseTime=true&charset=utf8mb4&loc=UTC",
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)%s?parseTime=true&charset=utf8mb4&loc=UTC&columnsWithAlias=true",
 		user, password, host, port, db)
 }
 
@@ -116,9 +116,11 @@ func BuildPostgresDSN(host string, port uint16, user, password string, dbName *s
 		User:   url.UserPassword(user, password),
 		Host:   fmt.Sprintf("%s:%d", host, port),
 	}
+	targetDatabase := "postgres"
 	if dbName != nil && *dbName != "" {
-		u.Path = "/" + *dbName
+		targetDatabase = *dbName
 	}
+	u.Path = "/" + targetDatabase
 	q := url.Values{}
 	if sslMode != "" {
 		q.Set("sslmode", sslMode)

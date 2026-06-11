@@ -2,8 +2,10 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/middleware"
@@ -77,12 +79,16 @@ func (h *DBConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Name == "" || req.Host == "" || req.Username == "" || req.Password == "" || req.Port == 0 {
-		jsonErr(w, http.StatusUnprocessableEntity, "name, host, port, username, password are required")
-		return
-	}
 	if req.DBType == "" {
 		req.DBType = "mysql"
+	}
+	if req.Name == "" || req.Host == "" || req.Password == "" || req.Port == 0 {
+		jsonErr(w, http.StatusUnprocessableEntity, "name, host, port, password are required")
+		return
+	}
+	if req.DBType != "redis" && req.Username == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "username is required for mysql/postgres connections")
+		return
 	}
 	if req.SSLMode == "" {
 		req.SSLMode = "prefer"
@@ -94,7 +100,7 @@ func (h *DBConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		DBType:       req.DBType,
 		Host:         req.Host,
 		Port:         req.Port,
-		DatabaseName: req.DatabaseName,
+		DatabaseName: normalizeDatabaseName(req.DBType, req.DatabaseName),
 		Username:     req.Username,
 		SSLMode:      req.SSLMode,
 		CreatedBy:    userID,
@@ -138,11 +144,17 @@ func (h *DBConnectionHandler) Test(w http.ResponseWriter, r *http.Request) {
 			jsonOK(w, map[string]any{"ok": false, "error": "decrypt error"})
 			return
 		}
-		addr := pool.BuildRedisAddr(conn.Host, conn.Port)
-		client := pool.RedisGlobal().GetOrCreate(conn.ID, addr, redisPassword, 0)
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		if err := client.Ping(ctx).Err(); err != nil {
+		if err := pool.RedisGlobal().Ping(ctx, pool.RedisConnOptions{
+			ConnID:   conn.ID,
+			Host:     conn.Host,
+			Port:     conn.Port,
+			Username: conn.Username,
+			Password: redisPassword,
+			DB:       0,
+			SSLMode:  conn.SSLMode,
+		}); err != nil {
 			jsonOK(w, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
@@ -190,14 +202,14 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name         *string `json:"name"`
-		DBType       *string `json:"db_type"`
-		Host         *string `json:"host"`
-		Port         *uint16 `json:"port"`
-		DatabaseName *string `json:"database_name"`
-		Username     *string `json:"username"`
-		Password     *string `json:"password"`
-		SSLMode      *string `json:"ssl_mode"`
+		Name         *string         `json:"name"`
+		DBType       *string         `json:"db_type"`
+		Host         *string         `json:"host"`
+		Port         *uint16         `json:"port"`
+		DatabaseName json.RawMessage `json:"database_name"`
+		Username     *string         `json:"username"`
+		Password     *string         `json:"password"`
+		SSLMode      *string         `json:"ssl_mode"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -222,8 +234,18 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 	databaseName := existing.DatabaseName
 	if req.DatabaseName != nil {
-		databaseName = req.DatabaseName
+		if string(req.DatabaseName) == "null" {
+			databaseName = nil
+		} else {
+			var nextDatabaseName string
+			if err := json.Unmarshal(req.DatabaseName, &nextDatabaseName); err != nil {
+				jsonErr(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			databaseName = &nextDatabaseName
+		}
 	}
+	databaseName = normalizeDatabaseName(dbType, databaseName)
 	username := existing.Username
 	if req.Username != nil {
 		username = *req.Username
@@ -259,6 +281,18 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 
 	updated, _ := h.repo.GetByID(r.Context(), id)
 	jsonOK(w, updated)
+}
+
+func normalizeDatabaseName(dbType string, databaseName *string) *string {
+	if dbType != "postgres" && dbType != "postgresql" {
+		return databaseName
+	}
+	if databaseName == nil || strings.TrimSpace(*databaseName) == "" {
+		defaultDatabase := "postgres"
+		return &defaultDatabase
+	}
+	trimmed := strings.TrimSpace(*databaseName)
+	return &trimmed
 }
 
 // DELETE /db-connections/{id}

@@ -105,7 +105,7 @@ func main() {
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret)
 	ticketH := handler.NewTicketHandler(ticketRepo, auditRepo, dbConnRepo, sqlReviewRuleRepo, larkClient, notifRepo)
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, auditRepo)
-	exportH := handler.NewExportHandler(exportRepo, dbConnRepo, auditRepo, maskingRuleRepo, notifRepo, larkClient)
+	exportH := handler.NewExportHandler(exportRepo, dbConnRepo, userRepo, auditRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, larkClient)
 	auditH := handler.NewAuditHandler(auditRepo)
 	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
 	sqlReviewRuleH := handler.NewSQLReviewRuleHandler(sqlReviewRuleRepo, auditRepo)
@@ -114,7 +114,7 @@ func main() {
 	metadataH := handler.NewMetadataHandler(dbConnRepo, userRepo)
 	authGroupH := handler.NewAuthGroupHandler(authGroupRepo, userRepo, auditRepo)
 	notifH := handler.NewNotificationHandler(notifRepo)
-	whitelistH := handler.NewMaskingWhitelistHandler(whitelistRepo, authGroupRepo, auditRepo)
+	whitelistH := handler.NewMaskingWhitelistHandler(dbConnRepo, whitelistRepo, auditRepo)
 
 	// Background scheduler: poll every 30s for due scheduled tickets
 	go runScheduler(ticketRepo, dbConnRepo, ticketH)
@@ -126,165 +126,169 @@ func main() {
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Timeout(30 * time.Second))
 
-	r.Get("/health", healthH.ServeHTTP)
+	r.Route("/api", func(r chi.Router) {
+		r.Get("/health", healthH.ServeHTTP)
 
-	r.Get("/setup/status", authH.SetupStatus)
-	r.Post("/setup", authH.Setup)
-	r.Route("/auth", func(r chi.Router) {
-		r.Post("/login", authH.Login)
-		r.Post("/refresh", authH.Refresh)
-		r.With(
-			middleware.RequireAuth(cfg.JWTSecret),
-			middleware.RequireActiveUser(userRepo),
-			middleware.InjectPermissions(userRepo),
-		).Get("/me", authH.Me)
-		r.With(
-			middleware.RequireAuth(cfg.JWTSecret),
-			middleware.RequireActiveUser(userRepo),
-		).Post("/logout", authH.Logout)
-	})
+		r.Get("/setup/status", authH.SetupStatus)
+		r.Post("/setup", authH.Setup)
+		r.Route("/auth", func(r chi.Router) {
+			r.Post("/login", authH.Login)
+			r.Post("/refresh", authH.Refresh)
+			r.With(
+				middleware.RequireAuth(cfg.JWTSecret),
+				middleware.RequireActiveUser(userRepo),
+				middleware.InjectPermissions(userRepo),
+			).Get("/me", authH.Me)
+			r.With(
+				middleware.RequireAuth(cfg.JWTSecret),
+				middleware.RequireActiveUser(userRepo),
+			).Post("/logout", authH.Logout)
+		})
 
-	r.Route("/exports", func(r chi.Router) {
-		r.With(
-			middleware.RequireAuth(cfg.JWTSecret),
-			middleware.RequireActiveUser(userRepo),
-			middleware.InjectPermissions(userRepo),
-			middleware.RequirePermission("sql_editor.export"),
-		).Post("/", exportH.Create)
-		r.With(
-			middleware.RequireAuth(cfg.JWTSecret),
-			middleware.RequireActiveUser(userRepo),
-			middleware.InjectPermissions(userRepo),
-			middleware.RequirePermission("sql_editor.export"),
-		).Get("/", exportH.List)
-		// Download is token-authenticated — no JWT required
-		r.Get("/download/{token}", exportH.Download)
-		r.Route("/{id}", func(r chi.Router) {
+		r.Route("/exports", func(r chi.Router) {
+			r.With(
+				middleware.RequireAuth(cfg.JWTSecret),
+				middleware.RequireActiveUser(userRepo),
+				middleware.InjectPermissions(userRepo),
+				middleware.RequirePermission("sql_editor.export"),
+			).Post("/", exportH.Create)
+			r.With(
+				middleware.RequireAuth(cfg.JWTSecret),
+				middleware.RequireActiveUser(userRepo),
+				middleware.InjectPermissions(userRepo),
+				middleware.RequirePermission("sql_editor.export"),
+			).Get("/", exportH.List)
+			r.Get("/download/{token}", exportH.Download)
+			r.Route("/{id}", func(r chi.Router) {
+				r.Use(middleware.RequireAuth(cfg.JWTSecret))
+				r.Use(middleware.RequireActiveUser(userRepo))
+				r.Use(middleware.InjectPermissions(userRepo))
+				r.With(requireSensitiveReview).Post("/approve", exportH.Approve)
+				r.With(requireSensitiveReview).Post("/reject", exportH.Reject)
+			})
+		})
+
+		r.Route("/db-connections", func(r chi.Router) {
 			r.Use(middleware.RequireAuth(cfg.JWTSecret))
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
-			r.With(requireSensitiveReview).Post("/approve", exportH.Approve)
-			r.With(requireSensitiveReview).Post("/reject", exportH.Reject)
+
+			r.With(requireDBConnectionsRead).Get("/", dbConnH.List)
+			r.With(requireDBConnectionsWrite).Post("/", dbConnH.Create)
+			r.With(requireDBConnectionsWrite).Patch("/{id}", dbConnH.Patch)
+			r.With(requireDBConnectionsWrite).Post("/{id}/test", dbConnH.Test)
+			r.With(requireDBConnectionsWrite).Delete("/{id}", dbConnH.Delete)
 		})
-	})
 
-	r.Route("/db-connections", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.RequireActiveUser(userRepo))
-		r.Use(middleware.InjectPermissions(userRepo))
-
-		r.With(requireDBConnectionsRead).Get("/", dbConnH.List)
-		r.With(requireDBConnectionsWrite).Post("/", dbConnH.Create)
-		r.With(requireDBConnectionsWrite).Patch("/{id}", dbConnH.Patch)
-		r.With(requireDBConnectionsWrite).Post("/{id}/test", dbConnH.Test)
-		r.With(requireDBConnectionsWrite).Delete("/{id}", dbConnH.Delete)
-	})
-
-	r.Route("/audit-logs", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.RequireActiveUser(userRepo))
-		r.Use(middleware.InjectPermissions(userRepo))
-		r.With(requireAuditLogsRead).Get("/", auditH.List)
-	})
-
-	r.Route("/users", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.RequireActiveUser(userRepo))
-		r.Use(middleware.InjectPermissions(userRepo))
-		r.With(requireUsersRead).Get("/", userH.List)
-		r.With(requireUsersWrite).Post("/", userH.Create)
-		r.With(requireUsersRead).Get("/{id}", userH.Get)
-		r.With(requireUsersWrite).Patch("/{id}", userH.Patch)
-		r.With(requireUsersWrite).Delete("/{id}", userH.Delete)
-		r.With(requireUsersWrite).Post("/{id}/memberships", userH.AddMembership)
-		r.With(requireUsersWrite).Delete("/{id}/memberships/{group}", userH.RemoveMembership)
-		r.With(requireUsersWrite).Post("/{id}/permissions", userH.AddDirectPermission)
-		r.With(requireUsersWrite).Delete("/{id}/permissions/{permissionKey}", userH.RemoveDirectPermission)
-		r.With(requireUsersWrite).Post("/{id}/db-connections", userH.AddDirectDBConnection)
-		r.With(requireUsersWrite).Delete("/{id}/db-connections/{connID}", userH.RemoveDirectDBConnection)
-	})
-
-	r.Route("/auth-groups", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.RequireActiveUser(userRepo))
-		r.Use(middleware.InjectPermissions(userRepo))
-		r.With(requireUsersRead).Get("/", authGroupH.List)
-		r.With(requireUsersWrite).Post("/", authGroupH.Create)
-		r.With(requireUsersRead).Get("/{group}", authGroupH.Get)
-		r.With(requireUsersWrite).Patch("/{group}", authGroupH.Patch)
-		r.With(requireUsersWrite).Delete("/{group}", authGroupH.Delete)
-		r.With(requireUsersWrite).Post("/{group}/permissions", authGroupH.AddPermission)
-		r.With(requireUsersWrite).Delete("/{group}/permissions/{permissionKey}", authGroupH.RemovePermission)
-		r.With(requireUsersWrite).Post("/{group}/db-connections", authGroupH.AddDBConnection)
-		r.With(requireUsersWrite).Delete("/{group}/db-connections/{connID}", authGroupH.RemoveDBConnection)
-	})
-
-	r.Route("/masking-rules", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.RequireActiveUser(userRepo))
-		r.Use(middleware.InjectPermissions(userRepo))
-		r.With(requireMaskingRulesRead).Get("/", maskingRuleH.List)
-		r.With(requireMaskingRulesWrite).Post("/", maskingRuleH.Create)
-		r.With(requireMaskingRulesWrite).Delete("/{id}", maskingRuleH.Delete)
-	})
-
-	r.Route("/masking-whitelist", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.RequireActiveUser(userRepo))
-		r.Use(middleware.InjectPermissions(userRepo))
-		r.With(requireMaskingRulesRead).Get("/", whitelistH.List)
-		r.With(requireMaskingRulesWrite).Post("/", whitelistH.Create)
-		r.With(requireMaskingRulesWrite).Delete("/{id}", whitelistH.Delete)
-	})
-
-	r.Route("/sql-review-rules", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.RequireActiveUser(userRepo))
-		r.Use(middleware.InjectPermissions(userRepo))
-		r.With(requireSQLReviewRead).Get("/", sqlReviewRuleH.List)
-		r.With(requireSQLReviewWrite).Patch("/{name}", sqlReviewRuleH.Patch)
-	})
-
-	r.Route("/query", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.RequireActiveUser(userRepo))
-		r.Use(middleware.InjectPermissions(userRepo))
-		r.With(requireSQLEditorQuery).Post("/", queryH.Execute)
-	})
-
-	r.Route("/db-connections/{id}/metadata", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.RequireActiveUser(userRepo))
-		r.Use(middleware.InjectPermissions(userRepo))
-		r.With(requireSQLEditorQuery).Get("/", metadataH.Tables)
-		r.With(requireSQLEditorQuery).Get("/{schema}/{table}/columns", metadataH.Columns)
-	})
-
-	r.Route("/tickets", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.RequireActiveUser(userRepo))
-		r.Use(middleware.InjectPermissions(userRepo))
-
-		r.Get("/", ticketH.List)
-		r.With(requireTicketsApply).Post("/", ticketH.Create)
-
-		r.Route("/{id}", func(r chi.Router) {
-			r.Get("/", ticketH.Get)
-			r.With(requireTicketsReview).Post("/approve", ticketH.Approve)
-			r.With(requireTicketsReview).Post("/reject", ticketH.Reject)
-			r.With(requireTicketsExecute).Post("/request-execution", ticketH.RequestExecution)
-			r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)
-			r.With(requireTicketsExecute).Post("/stop", ticketH.Stop)
+		r.Route("/audit-logs", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireAuditLogsRead).Get("/", auditH.List)
+			r.With(requireAuditLogsWrite).Get("/export", auditH.Export)
 		})
-	})
 
-	r.Route("/notifications", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(cfg.JWTSecret))
-		r.Use(middleware.RequireActiveUser(userRepo))
-		r.Use(middleware.InjectPermissions(userRepo))
-		r.Get("/", notifH.List)
-		r.Post("/read-all", notifH.MarkAllRead)
-		r.Post("/{id}/read", notifH.MarkRead)
+		r.Route("/users", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireUsersRead).Get("/", userH.List)
+			r.With(requireUsersWrite).Post("/", userH.Create)
+			r.With(requireUsersRead).Get("/{id}", userH.Get)
+			r.With(requireUsersWrite).Patch("/{id}", userH.Patch)
+			r.With(requireUsersWrite).Delete("/{id}", userH.Delete)
+			r.With(requireUsersWrite).Post("/{id}/memberships", userH.AddMembership)
+			r.With(requireUsersWrite).Delete("/{id}/memberships/{group}", userH.RemoveMembership)
+			r.With(requireUsersWrite).Post("/{id}/permissions", userH.AddDirectPermission)
+			r.With(requireUsersWrite).Delete("/{id}/permissions/{permissionKey}", userH.RemoveDirectPermission)
+			r.With(requireUsersWrite).Post("/{id}/db-connections", userH.AddDirectDBConnection)
+			r.With(requireUsersWrite).Delete("/{id}/db-connections/{connID}", userH.RemoveDirectDBConnection)
+		})
+
+		r.Route("/auth-groups", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireUsersRead).Get("/", authGroupH.List)
+			r.With(requireUsersWrite).Post("/", authGroupH.Create)
+			r.With(requireUsersRead).Get("/{group}", authGroupH.Get)
+			r.With(requireUsersWrite).Patch("/{group}", authGroupH.Patch)
+			r.With(requireUsersWrite).Delete("/{group}", authGroupH.Delete)
+			r.With(requireUsersWrite).Post("/{group}/permissions", authGroupH.AddPermission)
+			r.With(requireUsersWrite).Delete("/{group}/permissions/{permissionKey}", authGroupH.RemovePermission)
+			r.With(requireUsersWrite).Post("/{group}/db-connections", authGroupH.AddDBConnection)
+			r.With(requireUsersWrite).Delete("/{group}/db-connections/{connID}", authGroupH.RemoveDBConnection)
+		})
+
+		r.Route("/masking-rules", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireMaskingRulesRead).Get("/", maskingRuleH.List)
+			r.With(requireMaskingRulesWrite).Post("/", maskingRuleH.Create)
+			r.With(requireMaskingRulesWrite).Patch("/{id}", maskingRuleH.Patch)
+			r.With(requireMaskingRulesWrite).Delete("/{id}", maskingRuleH.Delete)
+		})
+
+		r.Route("/masking-whitelist", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireMaskingRulesRead).Get("/", whitelistH.List)
+			r.With(requireMaskingRulesWrite).Post("/", whitelistH.Create)
+			r.With(requireMaskingRulesWrite).Patch("/{id}", whitelistH.Patch)
+			r.With(requireMaskingRulesWrite).Delete("/{id}", whitelistH.Delete)
+		})
+
+		r.Route("/sql-review-rules", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireSQLReviewRead).Get("/", sqlReviewRuleH.List)
+			r.With(requireSQLReviewWrite).Patch("/{name}", sqlReviewRuleH.Patch)
+		})
+
+		r.Route("/query", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireSQLEditorQuery).Post("/", queryH.Execute)
+		})
+
+		r.Route("/db-connections/{id}/metadata", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireSQLEditorQuery).Get("/", metadataH.Tables)
+			r.With(requireSQLEditorQuery).Get("/{schema}/{table}/columns", metadataH.Columns)
+		})
+
+		r.Route("/tickets", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+
+			r.Get("/", ticketH.List)
+			r.With(requireTicketsApply).Post("/", ticketH.Create)
+
+			r.Route("/{id}", func(r chi.Router) {
+				r.Get("/", ticketH.Get)
+				r.With(requireTicketsReview).Post("/approve", ticketH.Approve)
+				r.With(requireTicketsReview).Post("/reject", ticketH.Reject)
+				r.With(requireTicketsExecute).Post("/request-execution", ticketH.RequestExecution)
+				r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)
+				r.With(requireTicketsExecute).Post("/stop", ticketH.Stop)
+			})
+		})
+
+		r.Route("/notifications", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.Get("/", notifH.List)
+			r.Post("/read-all", notifH.MarkAllRead)
+			r.Post("/{id}/read", notifH.MarkRead)
+		})
 	})
 
 	srv := &http.Server{
@@ -349,6 +353,9 @@ func requireUsersWrite(next http.Handler) http.Handler {
 }
 func requireAuditLogsRead(next http.Handler) http.Handler {
 	return middleware.RequirePermission("audit_logs.read", "audit_logs.write")(next)
+}
+func requireAuditLogsWrite(next http.Handler) http.Handler {
+	return middleware.RequirePermission("audit_logs.write")(next)
 }
 func requireDBConnectionsRead(next http.Handler) http.Handler {
 	return middleware.RequirePermission("db_connections.read", "db_connections.write")(next)

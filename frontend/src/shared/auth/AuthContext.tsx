@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { configureApiClient } from '@/shared/api/client'
+import { configureApiClient, withApiPath } from '@/shared/api/client'
 import type { AuthStatus, CurrentAuthGroup, CurrentUser } from '@/shared/types/auth'
 
 const ACCESS_TOKEN_KEY = 'dbre_maestro.access_token'
@@ -89,7 +89,7 @@ function normalizeMe(payload: MeResponse): CurrentUser {
 }
 
 async function fetchJSON<T>(path: string, init: RequestInit = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(withApiPath(path), {
     ...init,
     credentials: 'same-origin',
   })
@@ -241,7 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const token = accessToken
 
     try {
-      await fetch('/auth/logout', {
+    await fetch(withApiPath('/auth/logout'), {
         method: 'POST',
         credentials: 'same-origin',
         headers: token

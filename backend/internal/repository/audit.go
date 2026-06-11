@@ -33,8 +33,10 @@ type AuditEntry struct {
 type AuditListFilter struct {
 	ActionType   *string
 	ActorID      *uint64
+	ActorName    *string
 	ResourceType *string
 	ResourceID   *uint64
+	ResourceName *string
 	From         *time.Time
 	To           *time.Time
 }
@@ -52,6 +54,10 @@ func (r *AuditRepo) List(ctx context.Context, f AuditListFilter, limit, offset i
 		where += " AND actor_id = ?"
 		args = append(args, *f.ActorID)
 	}
+	if f.ActorName != nil {
+		where += " AND actor_name LIKE ?"
+		args = append(args, "%"+*f.ActorName+"%")
+	}
 	if f.ResourceType != nil {
 		where += " AND resource_type = ?"
 		args = append(args, *f.ResourceType)
@@ -59,6 +65,10 @@ func (r *AuditRepo) List(ctx context.Context, f AuditListFilter, limit, offset i
 	if f.ResourceID != nil {
 		where += " AND resource_id = ?"
 		args = append(args, *f.ResourceID)
+	}
+	if f.ResourceName != nil {
+		where += " AND JSON_UNQUOTE(JSON_EXTRACT(details, '$.name')) LIKE ?"
+		args = append(args, "%"+*f.ResourceName+"%")
 	}
 	if f.From != nil {
 		where += " AND created_at >= ?"

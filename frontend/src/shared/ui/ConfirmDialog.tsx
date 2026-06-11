@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 type ConfirmDialogProps = {
   open: boolean
@@ -27,7 +28,7 @@ export function ConfirmDialog({
     return null
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4">
       <div className="w-full max-w-md rounded-card border border-border bg-panel p-5 shadow-card">
         <h3 className="font-display text-xl font-black tracking-tight text-ink">{title}</h3>
@@ -53,6 +54,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

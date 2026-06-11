@@ -85,7 +85,7 @@ func (r *UserRepo) GetAuthGroups(ctx context.Context, userID uint64) ([]model.Au
 			SELECT agm.auth_group
 			FROM auth_group_memberships agm
 			WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
-		) AS groups
+		) AS membership_groups
 		ORDER BY auth_group
 	`, userID, time.Now(), userID, time.Now())
 	return groups, err
@@ -142,8 +142,24 @@ func (r *UserRepo) GetEffectivePermissionKeys(ctx context.Context, userID uint64
 }
 
 func (r *UserRepo) GetEffectiveDBConnectionIDs(ctx context.Context, userID uint64) ([]uint64, error) {
+	user, err := r.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user != nil && user.IsProtected {
+		var allIDs []uint64
+		if err := r.db.SelectContext(ctx, &allIDs, `
+			SELECT id
+			FROM db_connections
+			ORDER BY id
+		`); err != nil {
+			return nil, err
+		}
+		return allIDs, nil
+	}
+
 	var ids []uint64
-	err := r.db.SelectContext(ctx, &ids, `
+	err = r.db.SelectContext(ctx, &ids, `
 		SELECT DISTINCT db_connection_id FROM (
 			SELECT udc.db_connection_id
 			FROM user_db_connections udc

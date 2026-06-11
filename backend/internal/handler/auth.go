@@ -20,6 +20,8 @@ type AuthHandler struct {
 	jwtSecret []byte
 }
 
+const refreshCookiePath = "/api/auth/refresh"
+
 func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, jwtSecret []byte) *AuthHandler {
 	return &AuthHandler{users: users, sessions: sessions, audit: audit, jwtSecret: jwtSecret}
 }
@@ -137,7 +139,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    rawRefresh,
-		Path:     "/auth/refresh",
+		Path:     refreshCookiePath,
 		Expires:  expiresAt,
 		HttpOnly: true,
 		Secure:   r.TLS != nil,
@@ -206,7 +208,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    rawRefresh,
-		Path:     "/auth/refresh",
+		Path:     refreshCookiePath,
 		Expires:  expiresAt,
 		HttpOnly: true,
 		Secure:   r.TLS != nil,
@@ -227,7 +229,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    "",
-		Path:     "/auth/refresh",
+		Path:     refreshCookiePath,
 		MaxAge:   -1,
 		HttpOnly: true,
 	})

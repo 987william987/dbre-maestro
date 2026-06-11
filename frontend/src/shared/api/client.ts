@@ -15,6 +15,16 @@ const defaultConfig: ApiClientConfig = {
 
 let config = defaultConfig
 
+export const API_PREFIX = '/api'
+
+export function withApiPath(path: string) {
+  if (path.startsWith(API_PREFIX)) {
+    return path
+  }
+
+  return `${API_PREFIX}${path}`
+}
+
 export class ApiError extends Error {
   status: number
   data: JsonValue | null
@@ -44,9 +54,10 @@ async function parseResponse<T>(response: Response): Promise<T | undefined> {
   return response.text() as Promise<T>
 }
 
-async function request<T>(path: string, init: RequestInit = {}, canRetry = true): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, canRetry = true, tokenOverride?: string | null): Promise<T> {
   const headers = new Headers(init.headers)
-  const token = config.getAccessToken()
+  const token = tokenOverride ?? config.getAccessToken()
+  const apiPath = withApiPath(path)
 
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
@@ -56,7 +67,7 @@ async function request<T>(path: string, init: RequestInit = {}, canRetry = true)
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(path, {
+  const response = await fetch(apiPath, {
     ...init,
     headers,
     credentials: 'same-origin',
@@ -65,7 +76,7 @@ async function request<T>(path: string, init: RequestInit = {}, canRetry = true)
   if (response.status === 401 && canRetry) {
     const refreshedToken = await config.refreshAccessToken()
     if (refreshedToken) {
-      return request<T>(path, init, false)
+      return request<T>(apiPath, init, false, refreshedToken)
     }
     config.handleAuthFailure()
   }
@@ -85,6 +96,48 @@ async function request<T>(path: string, init: RequestInit = {}, canRetry = true)
 
 export const apiClient = {
   get: <T>(path: string) => request<T>(path),
+  download: async (path: string) => {
+    const headers = new Headers()
+    const token = config.getAccessToken()
+    const apiPath = withApiPath(path)
+
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`)
+    }
+
+    let response = await fetch(apiPath, {
+      method: 'GET',
+      headers,
+      credentials: 'same-origin',
+    })
+
+    if (response.status === 401) {
+      const refreshedToken = await config.refreshAccessToken()
+      if (refreshedToken) {
+        const retryHeaders = new Headers()
+        retryHeaders.set('Authorization', `Bearer ${refreshedToken}`)
+        response = await fetch(apiPath, {
+          method: 'GET',
+          headers: retryHeaders,
+          credentials: 'same-origin',
+        })
+      } else {
+        config.handleAuthFailure()
+      }
+    }
+
+    if (!response.ok) {
+      const contentType = response.headers.get('content-type') ?? ''
+      const data = contentType.includes('application/json') ? await response.json() as JsonValue : null
+      const message =
+        typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string'
+          ? data.error
+          : `Request failed with status ${response.status}`
+      throw new ApiError(response.status, message, data)
+    }
+
+    return response
+  },
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, {
       method: 'POST',

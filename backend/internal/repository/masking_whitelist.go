@@ -4,7 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"time"
+	"fmt"
+	"strings"
 
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/jmoiron/sqlx"
@@ -21,16 +22,26 @@ func NewMaskingWhitelistRepo(db *sqlx.DB) *MaskingWhitelistRepo {
 func (r *MaskingWhitelistRepo) List(ctx context.Context) ([]model.MaskingWhitelist, error) {
 	var entries []model.MaskingWhitelist
 	err := r.db.SelectContext(ctx, &entries,
-		`SELECT * FROM masking_whitelist ORDER BY table_name, column_name`,
+		`SELECT id, db_connection_id, database_name, table_name, column_name, created_by, created_at
+		 FROM masking_whitelist
+		 ORDER BY db_connection_id, database_name, table_name, column_name`,
 	)
 	return entries, err
 }
 
 func (r *MaskingWhitelistRepo) Create(ctx context.Context, entry *model.MaskingWhitelist) (*model.MaskingWhitelist, error) {
+	exists, err := r.Exists(ctx, entry.DBConnectionID, entry.DatabaseName, entry.TableName, entry.ColumnName, 0)
+	if err != nil {
+		return nil, fmt.Errorf("check masking whitelist exists: %w", err)
+	}
+	if exists {
+		return nil, fmt.Errorf("masking whitelist already exists")
+	}
+
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO masking_whitelist (db_connection_id, table_name, column_name, user_id, auth_group_id, auth_group, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		entry.DBConnectionID, entry.TableName, entry.ColumnName, entry.UserID, entry.AuthGroupID, entry.AuthGroup, entry.CreatedBy,
+		`INSERT INTO masking_whitelist (db_connection_id, database_name, table_name, column_name, created_by)
+         VALUES (?, ?, ?, ?, ?)`,
+		entry.DBConnectionID, entry.DatabaseName, entry.TableName, entry.ColumnName, entry.CreatedBy,
 	)
 	if err != nil {
 		return nil, err
@@ -41,7 +52,12 @@ func (r *MaskingWhitelistRepo) Create(ctx context.Context, entry *model.MaskingW
 
 func (r *MaskingWhitelistRepo) GetByID(ctx context.Context, id uint64) (*model.MaskingWhitelist, error) {
 	var e model.MaskingWhitelist
-	err := r.db.GetContext(ctx, &e, `SELECT * FROM masking_whitelist WHERE id = ?`, id)
+	err := r.db.GetContext(ctx, &e,
+		`SELECT id, db_connection_id, database_name, table_name, column_name, created_by, created_at
+		 FROM masking_whitelist
+		 WHERE id = ?`,
+		id,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -53,28 +69,56 @@ func (r *MaskingWhitelistRepo) Delete(ctx context.Context, id uint64) error {
 	return err
 }
 
-// IsExempt returns true if the given user is directly whitelisted or belongs to a
-// whitelisted auth group for the target table.column on the target connection.
-func (r *MaskingWhitelistRepo) IsExempt(ctx context.Context, userID uint64, connID uint64, tableName, columnName string) (bool, error) {
+func (r *MaskingWhitelistRepo) Patch(ctx context.Context, entry *model.MaskingWhitelist) (*model.MaskingWhitelist, error) {
+	exists, err := r.Exists(ctx, entry.DBConnectionID, entry.DatabaseName, entry.TableName, entry.ColumnName, entry.ID)
+	if err != nil {
+		return nil, fmt.Errorf("check masking whitelist exists: %w", err)
+	}
+	if exists {
+		return nil, fmt.Errorf("masking whitelist already exists")
+	}
+
+	_, err = r.db.ExecContext(ctx,
+		`UPDATE masking_whitelist
+		 SET db_connection_id = ?, database_name = ?, table_name = ?, column_name = ?
+		 WHERE id = ?`,
+		entry.DBConnectionID, entry.DatabaseName, entry.TableName, entry.ColumnName, entry.ID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return r.GetByID(ctx, entry.ID)
+}
+
+func (r *MaskingWhitelistRepo) Match(ctx context.Context, connID uint64, databaseName, tableName, columnName string) (bool, error) {
 	var count int
 	err := r.db.GetContext(ctx, &count, `
-		SELECT COUNT(*) FROM masking_whitelist mw
-		WHERE (mw.db_connection_id IS NULL OR mw.db_connection_id = ?)
-		  AND mw.table_name = ? AND mw.column_name = ?
-		  AND (
-			mw.user_id = ?
-			OR mw.auth_group IN (
-				SELECT DISTINCT ag.group_key
-				FROM auth_groups ag
-				INNER JOIN user_auth_groups uag ON uag.auth_group_id = ag.id
-				WHERE uag.user_id = ? AND (uag.expires_at IS NULL OR uag.expires_at > ?)
-				UNION
-				SELECT DISTINCT ag.group_key
-				FROM auth_groups ag
-				INNER JOIN auth_group_memberships agm ON agm.auth_group = ag.group_key
-				WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
-			)
-		  )
-	`, connID, tableName, columnName, userID, userID, time.Now(), userID, time.Now())
+		SELECT COUNT(*)
+		FROM masking_whitelist
+		WHERE db_connection_id = ?
+		  AND LOWER(database_name) = LOWER(?)
+		  AND LOWER(table_name) = LOWER(?)
+		  AND LOWER(column_name) = LOWER(?)
+	`, connID, strings.TrimSpace(databaseName), strings.TrimSpace(tableName), strings.TrimSpace(columnName))
 	return count > 0, err
+}
+
+func (r *MaskingWhitelistRepo) Exists(ctx context.Context, connID uint64, databaseName, tableName, columnName string, excludeID uint64) (bool, error) {
+	var count int
+	query := `
+		SELECT COUNT(*)
+		FROM masking_whitelist
+		WHERE db_connection_id = ?
+		  AND LOWER(database_name) = LOWER(?)
+		  AND LOWER(table_name) = LOWER(?)
+		  AND LOWER(column_name) = LOWER(?)`
+	args := []any{connID, strings.TrimSpace(databaseName), strings.TrimSpace(tableName), strings.TrimSpace(columnName)}
+	if excludeID != 0 {
+		query += ` AND id <> ?`
+		args = append(args, excludeID)
+	}
+	if err := r.db.GetContext(ctx, &count, query, args...); err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }

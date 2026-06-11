@@ -21,9 +21,11 @@ const (
 
 // Rule describes how one column should be masked.
 type Rule struct {
-	Table  string   // table name (case-insensitive)
-	Column string   // column name (case-insensitive)
-	Mode   MaskMode
+	Database string   // database name (case-insensitive)
+	Schema   string   // schema name (case-insensitive)
+	Table    string   // table name (case-insensitive)
+	Column   string   // column name (case-insensitive)
+	Mode     MaskMode
 }
 
 // TE5: Apply masks a string value according to the rule's mode.

@@ -1,9 +1,11 @@
+import { withApiPath } from '@/shared/api/client'
+
 export type SetupStatusResponse = {
   setup_completed: boolean
 }
 
 export async function getSetupStatus(): Promise<SetupStatusResponse> {
-  const response = await fetch('/setup/status', {
+  const response = await fetch(withApiPath('/setup/status'), {
     credentials: 'same-origin',
   })
 

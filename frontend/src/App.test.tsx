@@ -49,7 +49,7 @@ describe('App routing', () => {
           ? input.toString()
           : input.url
 
-      if (url === '/auth/me') {
+      if (url === '/api/auth/me') {
         expect(init?.headers).toMatchObject({
           Authorization: 'Bearer test-token',
         })
@@ -61,7 +61,7 @@ describe('App routing', () => {
         })
       }
 
-      if (url === '/tickets') {
+      if (url === '/api/tickets') {
         return jsonResponse({
           tickets: null,
           limit: 20,
@@ -85,7 +85,7 @@ describe('App routing', () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        '/tickets',
+        '/api/tickets',
         expect.objectContaining({
           credentials: 'same-origin',
           headers: expect.any(Headers),

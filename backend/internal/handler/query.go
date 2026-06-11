@@ -15,6 +15,9 @@ import (
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -29,8 +32,13 @@ type QueryHandler struct {
 	users        *repository.UserRepo
 	maskingRules *repository.MaskingRuleRepo
 	audit        *repository.AuditRepo
-	engine       *masking.Engine
-	whitelist    *repository.MaskingWhitelistRepo
+	masking      *maskingRuntime
+}
+
+type queryExecutionContext struct {
+	DatabaseName string
+	SchemaName   string
+	RedisDBIndex *int
 }
 
 func NewQueryHandler(
@@ -46,8 +54,7 @@ func NewQueryHandler(
 		users:        users,
 		maskingRules: maskingRules,
 		audit:        audit,
-		engine:       engine,
-		whitelist:    whitelist,
+		masking:      newMaskingRuntime(users, maskingRules, whitelist, engine),
 	}
 }
 
@@ -59,6 +66,9 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		DBConnectionID uint64 `json:"db_connection_id"`
 		SQL            string `json:"sql"`
 		Limit          int    `json:"limit"`
+		Database       string `json:"database"`
+		Schema         string `json:"schema"`
+		RedisDBIndex   *int   `json:"redis_db_index"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -106,7 +116,10 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 
 	// Redis takes a completely different path
 	if conn.DBType == "redis" {
-		h.executeRedis(w, r, conn, req.SQL)
+		h.executeRedis(w, r, conn, req.SQL, queryExecutionContext{
+			DatabaseName: strings.TrimSpace(req.Database),
+			RedisDBIndex: req.RedisDBIndex,
+		})
 		return
 	}
 
@@ -133,44 +146,24 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// Inject LIMIT if not present (simple heuristic for SELECT statements)
-	execSQL := injectLimit(req.SQL, limit)
+	execSQL := injectLimit(req.SQL, limit, conn.DBType)
+	queryCtx := queryExecutionContext{
+		DatabaseName: strings.TrimSpace(req.Database),
+		SchemaName:   strings.TrimSpace(req.Schema),
+	}
 
 	start := time.Now()
-	result, err := executeQuery(ctx, pools.QueryPool, execSQL)
+	result, err := executeQueryForConnection(ctx, conn, password, pools.QueryPool, execSQL, queryCtx)
 	if err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "query failed: "+err.Error())
 		return
 	}
 	durationMs := time.Since(start).Milliseconds()
 
-	// Apply masking rules (Fail Closed: 422 on error)
-	dbRules, err := h.maskingRules.ListForConnection(r.Context(), conn.ID)
+	sensitiveOverrideActive, err := h.masking.applyResult(r.Context(), conn, userID, result)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "load masking rules failed")
+		jsonErr(w, http.StatusUnprocessableEntity, "masking failed")
 		return
-	}
-	if len(dbRules) > 0 {
-		maskRules := make([]masking.Rule, 0, len(dbRules))
-		for _, mr := range dbRules {
-			// Check whitelist: if user is exempt for this column, skip masking
-			if h.whitelist != nil {
-				exempt, err := h.whitelist.IsExempt(r.Context(), userID, conn.ID, mr.TableName, mr.ColumnName)
-				if err == nil && exempt {
-					continue
-				}
-			}
-			maskRules = append(maskRules, masking.Rule{
-				Table:  mr.TableName,
-				Column: mr.ColumnName,
-				Mode:   masking.MaskMode(mr.MaskMode),
-			})
-		}
-		if len(maskRules) > 0 {
-			if err := h.engine.MaskResult(result, maskRules); err != nil {
-				jsonErr(w, http.StatusUnprocessableEntity, "masking failed")
-				return
-			}
-		}
 	}
 
 	h.audit.Log(r.Context(), repository.AuditEntry{
@@ -188,15 +181,48 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	})
 
 	jsonOK(w, map[string]any{
-		"columns":     result.Columns,
-		"rows":        result.Rows,
-		"row_count":   len(result.Rows),
-		"duration_ms": durationMs,
+		"columns":                   result.Columns,
+		"rows":                      result.Rows,
+		"row_count":                 len(result.Rows),
+		"duration_ms":               durationMs,
+		"sensitive_override_active": sensitiveOverrideActive,
 	})
 }
 
-func executeQuery(ctx context.Context, db *sql.DB, sqlStr string) (*masking.QueryResult, error) {
-	rows, err := db.QueryContext(ctx, sqlStr)
+func executeQueryForConnection(
+	ctx context.Context,
+	conn *model.DBConnection,
+	password string,
+	db *sql.DB,
+	sqlStr string,
+	queryCtx queryExecutionContext,
+) (*masking.QueryResult, error) {
+	if conn.DBType == "postgres" || conn.DBType == "postgresql" {
+		return executePostgresQuery(ctx, conn, password, db, sqlStr, queryCtx)
+	}
+	return executeSQLQuery(ctx, conn, db, sqlStr, queryCtx)
+}
+
+func executeSQLQuery(
+	ctx context.Context,
+	conn *model.DBConnection,
+	db *sql.DB,
+	sqlStr string,
+	queryCtx queryExecutionContext,
+) (*masking.QueryResult, error) {
+	pinnedConn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer pinnedConn.Close()
+
+	if queryCtx.DatabaseName != "" {
+		if _, err := pinnedConn.ExecContext(ctx, fmt.Sprintf("USE %s", quoteMySQLIdentifier(queryCtx.DatabaseName))); err != nil {
+			return nil, err
+		}
+	}
+
+	rows, err := pinnedConn.QueryContext(ctx, sqlStr)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +233,11 @@ func executeQuery(ctx context.Context, db *sql.DB, sqlStr string) (*masking.Quer
 		return nil, err
 	}
 
-	result := &masking.QueryResult{Columns: cols}
+	result := &masking.QueryResult{
+		Columns: cols,
+		Origins: inferColumnOriginsFromLabels(cols, effectiveQueryDatabaseName(conn, queryCtx)),
+		Rows:    make([][]any, 0),
+	}
 	for rows.Next() {
 		vals := make([]any, len(cols))
 		ptrs := make([]any, len(cols))
@@ -228,16 +258,199 @@ func executeQuery(ctx context.Context, db *sql.DB, sqlStr string) (*masking.Quer
 	return result, rows.Err()
 }
 
+func executePostgresQuery(
+	ctx context.Context,
+	connModel *model.DBConnection,
+	password string,
+	db *sql.DB,
+	sqlStr string,
+	queryCtx queryExecutionContext,
+) (*masking.QueryResult, error) {
+	if queryCtx.DatabaseName != "" && !strings.EqualFold(queryCtx.DatabaseName, connectionDatabaseName(connModel)) {
+		scopedDB, cleanup, err := openScopedQueryDB(connModel, password, queryCtx)
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+		db = scopedDB
+	}
+
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if queryCtx.SchemaName != "" {
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf(`SET search_path TO "%s"`, strings.ReplaceAll(queryCtx.SchemaName, `"`, `""`))); err != nil {
+			return nil, err
+		}
+	}
+
+	var result *masking.QueryResult
+	err = conn.Raw(func(driverConn any) error {
+		pgxConn := driverConn.(*stdlib.Conn).Conn()
+		rows, err := pgxConn.Query(ctx, sqlStr)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		fieldDescriptions := rows.FieldDescriptions()
+		columns := make([]string, len(fieldDescriptions))
+		for i, field := range fieldDescriptions {
+			columns[i] = field.Name
+		}
+
+		origins, err := resolvePostgresOrigins(ctx, pgxConn, fieldDescriptions)
+		if err != nil {
+			return err
+		}
+
+		queryResult := &masking.QueryResult{
+			Columns: columns,
+			Origins: origins,
+			Rows:    make([][]any, 0),
+		}
+		for rows.Next() {
+			values, err := rows.Values()
+			if err != nil {
+				return err
+			}
+			for i, value := range values {
+				if b, ok := value.([]byte); ok {
+					values[i] = string(b)
+				}
+			}
+			queryResult.Rows = append(queryResult.Rows, values)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		result = queryResult
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func resolvePostgresOrigins(ctx context.Context, conn *pgx.Conn, fields []pgconn.FieldDescription) ([]masking.ColumnOrigin, error) {
+	type originKey struct {
+		tableOID uint32
+		attrNum  uint16
+	}
+
+	keys := make([]originKey, 0, len(fields))
+	seen := make(map[originKey]struct{}, len(fields))
+	for _, field := range fields {
+		if field.TableOID == 0 || field.TableAttributeNumber == 0 {
+			continue
+		}
+		key := originKey{tableOID: field.TableOID, attrNum: field.TableAttributeNumber}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+
+	lookup := make(map[originKey]masking.ColumnOrigin, len(keys))
+	if len(keys) > 0 {
+		tableOIDs := make([]uint32, 0, len(keys))
+		tableSeen := make(map[uint32]struct{}, len(keys))
+		for _, key := range keys {
+			if _, ok := tableSeen[key.tableOID]; ok {
+				continue
+			}
+			tableSeen[key.tableOID] = struct{}{}
+			tableOIDs = append(tableOIDs, key.tableOID)
+		}
+
+		rows, err := conn.Query(ctx,
+			`SELECT a.attrelid, a.attnum, n.nspname, c.relname, a.attname
+			 FROM pg_catalog.pg_attribute a
+			 JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+			 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+			 WHERE a.attrelid = ANY($1)
+			   AND a.attnum > 0
+			   AND NOT a.attisdropped`,
+			tableOIDs,
+		)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		databaseName := conn.PgConn().ParameterStatus("database")
+		for rows.Next() {
+			var tableOID uint32
+			var attrNum uint16
+			var schemaName string
+			var tableName string
+			var columnName string
+			if err := rows.Scan(&tableOID, &attrNum, &schemaName, &tableName, &columnName); err != nil {
+				return nil, err
+			}
+			lookup[originKey{tableOID: tableOID, attrNum: attrNum}] = masking.ColumnOrigin{
+				Database: databaseName,
+				Schema:   schemaName,
+				Table:    tableName,
+				Column:   columnName,
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	origins := make([]masking.ColumnOrigin, len(fields))
+	for i, field := range fields {
+		key := originKey{tableOID: field.TableOID, attrNum: field.TableAttributeNumber}
+		if origin, ok := lookup[key]; ok {
+			origins[i] = origin
+			continue
+		}
+		origins[i] = masking.ColumnOrigin{Column: field.Name}
+	}
+	return origins, nil
+}
+
+func inferColumnOriginsFromLabels(columns []string, databaseName string) []masking.ColumnOrigin {
+	origins := make([]masking.ColumnOrigin, len(columns))
+	for i, column := range columns {
+		parts := strings.Split(column, ".")
+		switch len(parts) {
+		case 2:
+			origins[i] = masking.ColumnOrigin{
+				Database: databaseName,
+				Table:    parts[0],
+				Column:   parts[1],
+			}
+		default:
+			origins[i] = masking.ColumnOrigin{Column: column}
+		}
+	}
+	return origins
+}
+
 // injectLimit appends a LIMIT clause if the SQL is a SELECT and doesn't already have one.
-func injectLimit(sqlStr string, limit int) string {
-	upper := strings.ToUpper(strings.TrimSpace(sqlStr))
+func injectLimit(sqlStr string, limit int, dbType string) string {
+	if dbType == "redis" {
+		return sqlStr
+	}
+
+	trimmed := strings.TrimSpace(sqlStr)
+	withoutTrailingSemicolon := strings.TrimSpace(strings.TrimSuffix(trimmed, ";"))
+	upper := strings.ToUpper(withoutTrailingSemicolon)
 	if !strings.HasPrefix(upper, "SELECT") {
 		return sqlStr
 	}
 	if strings.Contains(upper, " LIMIT ") {
-		return sqlStr
+		return withoutTrailingSemicolon
 	}
-	return sqlStr + " LIMIT " + strconv.Itoa(limit)
+	return withoutTrailingSemicolon + " LIMIT " + strconv.Itoa(limit)
 }
 
 func truncate(s string, n int) string {
@@ -249,7 +462,7 @@ func truncate(s string, n int) string {
 
 // executeRedis handles POST /query for Redis connections.
 // Accepts a single read-only Redis command (e.g. "GET mykey", "HGETALL myhash").
-func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn *model.DBConnection, cmdLine string) {
+func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn *model.DBConnection, cmdLine string, queryCtx queryExecutionContext) {
 	if err := sqlreview.CheckRedisReadOnly(cmdLine); err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "only read-only Redis commands are allowed: "+err.Error())
 		return
@@ -261,9 +474,6 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 		return
 	}
 
-	addr := pool.BuildRedisAddr(conn.Host, conn.Port)
-	client := pool.RedisGlobal().GetOrCreate(conn.ID, addr, password, 0)
-
 	ctx, cancel := context.WithTimeout(r.Context(), defaultQueryTimeout)
 	defer cancel()
 
@@ -272,9 +482,21 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 	for i, a := range args {
 		ifaces[i] = a
 	}
+	dbIndex := 0
+	if queryCtx.RedisDBIndex != nil {
+		dbIndex = *queryCtx.RedisDBIndex
+	}
 
 	start := time.Now()
-	val, err := client.Do(ctx, append([]interface{}{cmd}, ifaces...)...).Result()
+	val, err := pool.RedisGlobal().DoInDB(ctx, pool.RedisConnOptions{
+		ConnID:   conn.ID,
+		Host:     conn.Host,
+		Port:     conn.Port,
+		Username: conn.Username,
+		Password: password,
+		DB:       dbIndex,
+		SSLMode:  conn.SSLMode,
+	}, append([]interface{}{cmd}, ifaces...)...)
 	durationMs := time.Since(start).Milliseconds()
 	if err != nil && err != redis.Nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "redis command failed: "+err.Error())
@@ -307,6 +529,43 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 	})
 }
 
+func openScopedQueryDB(
+	conn *model.DBConnection,
+	password string,
+	queryCtx queryExecutionContext,
+) (*sql.DB, func(), error) {
+	switch conn.DBType {
+	case "postgres", "postgresql":
+		targetDatabase := queryCtx.DatabaseName
+		if targetDatabase == "" {
+			targetDatabase = connectionDatabaseName(conn)
+		}
+		dsn := pool.BuildPostgresDSN(conn.Host, conn.Port, conn.Username, password, &targetDatabase, conn.SSLMode)
+		db, err := sql.Open("pgx", dsn)
+		if err != nil {
+			return nil, nil, err
+		}
+		db.SetMaxOpenConns(2)
+		db.SetMaxIdleConns(1)
+		db.SetConnMaxLifetime(2 * time.Minute)
+		db.SetConnMaxIdleTime(1 * time.Minute)
+		return db, func() { _ = db.Close() }, nil
+	default:
+		return nil, nil, fmt.Errorf("scoped mysql pool is not supported")
+	}
+}
+
+func effectiveQueryDatabaseName(conn *model.DBConnection, queryCtx queryExecutionContext) string {
+	if queryCtx.DatabaseName != "" {
+		return queryCtx.DatabaseName
+	}
+	return connectionDatabaseName(conn)
+}
+
+func quoteMySQLIdentifier(identifier string) string {
+	return "`" + strings.ReplaceAll(strings.TrimSpace(identifier), "`", "``") + "`"
+}
+
 // redisResultToQueryResult converts a Redis command result to a tabular QueryResult.
 // Scalar values produce one row; arrays/maps produce multiple rows.
 func redisResultToQueryResult(val interface{}) *masking.QueryResult {
@@ -318,19 +577,19 @@ func redisResultToQueryResult(val interface{}) *masking.QueryResult {
 	case int64:
 		return &masking.QueryResult{Columns: []string{"result"}, Rows: [][]any{{fmt.Sprintf("%d", v)}}}
 	case []interface{}:
-		result := &masking.QueryResult{Columns: []string{"value"}}
+		result := &masking.QueryResult{Columns: []string{"value"}, Rows: make([][]any, 0)}
 		for _, item := range v {
 			result.Rows = append(result.Rows, []any{fmt.Sprintf("%v", item)})
 		}
 		return result
 	case map[interface{}]interface{}:
-		result := &masking.QueryResult{Columns: []string{"field", "value"}}
+		result := &masking.QueryResult{Columns: []string{"field", "value"}, Rows: make([][]any, 0)}
 		for k, fv := range v {
 			result.Rows = append(result.Rows, []any{fmt.Sprintf("%v", k), fmt.Sprintf("%v", fv)})
 		}
 		return result
 	case map[string]interface{}:
-		result := &masking.QueryResult{Columns: []string{"field", "value"}}
+		result := &masking.QueryResult{Columns: []string{"field", "value"}, Rows: make([][]any, 0)}
 		for k, fv := range v {
 			result.Rows = append(result.Rows, []any{k, fmt.Sprintf("%v", fv)})
 		}

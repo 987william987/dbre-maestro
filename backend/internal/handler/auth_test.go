@@ -49,6 +49,10 @@ func TestAuthHandlerMe(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"permission_key"}).
 			AddRow("tickets.review").
 			AddRow("tickets.execute"))
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+			AddRow(userID, "alice", "alice@example.com", "hash", 0, 0, 1, now, now))
 	mock.ExpectQuery(`SELECT DISTINCT db_connection_id FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"db_connection_id"}).
@@ -161,6 +165,10 @@ func TestAuthHandlerMeReturnsEmptyArrayForNoGroups(t *testing.T) {
 	mock.ExpectQuery(`SELECT DISTINCT permission_key FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"permission_key"}))
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+			AddRow(userID, "bob", "bob@example.com", "hash", 0, 0, 1, now, now))
 	mock.ExpectQuery(`SELECT DISTINCT db_connection_id FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"db_connection_id"}))
@@ -182,6 +190,59 @@ func TestAuthHandlerMeReturnsEmptyArrayForNoGroups(t *testing.T) {
 		t.Fatalf("body = %s, want auth_groups/permissions/db_connection_ids to be [] instead of null", body)
 	}
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerMeProtectedUserGetsAllDBConnections(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	userRepo := repository.NewUserRepo(sqlxDB)
+	handler := NewAuthHandler(userRepo, nil, nil, nil)
+
+	userID := uint64(1)
+	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+			AddRow(userID, "admin", "admin@example.com", "hash", 1, 1, 1, now, now))
+	mock.ExpectQuery(`SELECT DISTINCT ag\.id, ag\.group_key, ag\.name, ag\.is_system, ag\.is_protected`).
+		WithArgs(userID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "group_key", "name", "is_system", "is_protected"}))
+	mock.ExpectQuery(`SELECT DISTINCT ag\.id, ag\.group_key, ag\.name, ag\.is_system, ag\.is_protected`).
+		WithArgs(userID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "group_key", "name", "is_system", "is_protected"}).
+			AddRow(4, "admin", "Admin", 1, 1))
+	mock.ExpectQuery(`SELECT DISTINCT permission_key FROM`).
+		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"permission_key"}).AddRow("sql_editor.query"))
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+			AddRow(userID, "admin", "admin@example.com", "hash", 1, 1, 1, now, now))
+	mock.ExpectQuery(`SELECT id\s+FROM db_connections`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7).AddRow(11))
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	ctx := context.WithValue(req.Context(), middleware.CtxUserID, userID)
+	ctx = context.WithValue(ctx, middleware.CtxUsername, "admin")
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	http.HandlerFunc(handler.Me).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), `"db_connection_ids":[7,11]`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
 	}
@@ -214,5 +275,28 @@ func TestAuthHandlerLoginDisabledUserReturnsForbidden(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerLogoutClearsRefreshCookieUnderAPINamespace(t *testing.T) {
+	handler := NewAuthHandler(nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	rec := httptest.NewRecorder()
+	handler.Logout(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cookies len = %d, want 1", len(cookies))
+	}
+	if cookies[0].Path != refreshCookiePath {
+		t.Fatalf("cookie path = %q, want %q", cookies[0].Path, refreshCookiePath)
+	}
+	if cookies[0].MaxAge != -1 {
+		t.Fatalf("cookie MaxAge = %d, want -1", cookies[0].MaxAge)
 	}
 }

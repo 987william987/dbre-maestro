@@ -1,37 +1,5 @@
-import { defineConfig, loadEnv, type ProxyOptions } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
-
-type ProxyRequest = {
-  method?: string
-  url?: string
-  headers: Record<string, string | string[] | undefined>
-}
-
-function shouldBypassToSpa(req: ProxyRequest) {
-  const accept = req.headers.accept ?? ''
-  const destination = req.headers['sec-fetch-dest']
-
-  return (
-    req.method === 'GET' &&
-    typeof accept === 'string' &&
-    accept.includes('text/html') &&
-    (destination === undefined || destination === 'document')
-  )
-}
-
-function createApiProxy(target: string): ProxyOptions {
-  return {
-    target,
-    changeOrigin: true,
-    bypass(req) {
-      if (shouldBypassToSpa(req)) {
-        return req.url
-      }
-
-      return undefined
-    },
-  }
-}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
@@ -50,18 +18,10 @@ export default defineConfig(({ mode }) => {
         usePolling,
       },
       proxy: {
-        '/setup': createApiProxy(proxyTarget),
-        '/auth': createApiProxy(proxyTarget),
-        '/tickets': createApiProxy(proxyTarget),
-        '/audit-logs': createApiProxy(proxyTarget),
-        '/db-connections': createApiProxy(proxyTarget),
-        '/auth-groups': createApiProxy(proxyTarget),
-        '/users': createApiProxy(proxyTarget),
-        '/masking-rules': createApiProxy(proxyTarget),
-        '/sql-review-rules': createApiProxy(proxyTarget),
-        '/query': createApiProxy(proxyTarget),
-        '/exports': createApiProxy(proxyTarget),
-        '/health': createApiProxy(proxyTarget),
+        '/api': {
+          target: proxyTarget,
+          changeOrigin: true,
+        },
       },
     },
   }

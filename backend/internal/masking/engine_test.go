@@ -22,6 +22,7 @@ func TestMaskFull(t *testing.T) {
 	e := newEngine(t)
 	result := &masking.QueryResult{
 		Columns: []string{"phone"},
+		Origins: []masking.ColumnOrigin{{Table: "users", Column: "phone"}},
 		Rows:    [][]any{{"13812345678"}},
 	}
 	rules := []masking.Rule{{Table: "users", Column: "phone", Mode: masking.MaskModeFull}}
@@ -37,6 +38,7 @@ func TestMaskPartial(t *testing.T) {
 	e := newEngine(t)
 	result := &masking.QueryResult{
 		Columns: []string{"phone"},
+		Origins: []masking.ColumnOrigin{{Table: "users", Column: "phone"}},
 		Rows:    [][]any{{"13812345678"}},
 	}
 	rules := []masking.Rule{{Table: "users", Column: "phone", Mode: masking.MaskModePartial}}
@@ -53,8 +55,8 @@ func TestMaskHashDeterministic(t *testing.T) {
 	e := newEngine(t)
 	rules := []masking.Rule{{Table: "users", Column: "email", Mode: masking.MaskModeHash}}
 
-	r1 := &masking.QueryResult{Columns: []string{"email"}, Rows: [][]any{{"alice@example.com"}}}
-	r2 := &masking.QueryResult{Columns: []string{"email"}, Rows: [][]any{{"alice@example.com"}}}
+	r1 := &masking.QueryResult{Columns: []string{"email"}, Origins: []masking.ColumnOrigin{{Table: "users", Column: "email"}}, Rows: [][]any{{"alice@example.com"}}}
+	r2 := &masking.QueryResult{Columns: []string{"email"}, Origins: []masking.ColumnOrigin{{Table: "users", Column: "email"}}, Rows: [][]any{{"alice@example.com"}}}
 	e.MaskResult(r1, rules)
 	e.MaskResult(r2, rules)
 	if r1.Rows[0][0] != r2.Rows[0][0] {
@@ -66,8 +68,8 @@ func TestMaskHashDifferentValues(t *testing.T) {
 	e := newEngine(t)
 	rules := []masking.Rule{{Table: "users", Column: "email", Mode: masking.MaskModeHash}}
 
-	r1 := &masking.QueryResult{Columns: []string{"email"}, Rows: [][]any{{"alice@example.com"}}}
-	r2 := &masking.QueryResult{Columns: []string{"email"}, Rows: [][]any{{"bob@example.com"}}}
+	r1 := &masking.QueryResult{Columns: []string{"email"}, Origins: []masking.ColumnOrigin{{Table: "users", Column: "email"}}, Rows: [][]any{{"alice@example.com"}}}
+	r2 := &masking.QueryResult{Columns: []string{"email"}, Origins: []masking.ColumnOrigin{{Table: "users", Column: "email"}}, Rows: [][]any{{"bob@example.com"}}}
 	e.MaskResult(r1, rules)
 	e.MaskResult(r2, rules)
 	if r1.Rows[0][0] == r2.Rows[0][0] {
@@ -85,8 +87,8 @@ func TestMaskHashWithPepperVsWithout(t *testing.T) {
 	e2, _ := masking.NewEngine(key2, masking.GlobalCache())
 	rules := []masking.Rule{{Table: "users", Column: "email", Mode: masking.MaskModeHash}}
 
-	r1 := &masking.QueryResult{Columns: []string{"email"}, Rows: [][]any{{"alice@example.com"}}}
-	r2 := &masking.QueryResult{Columns: []string{"email"}, Rows: [][]any{{"alice@example.com"}}}
+	r1 := &masking.QueryResult{Columns: []string{"email"}, Origins: []masking.ColumnOrigin{{Table: "users", Column: "email"}}, Rows: [][]any{{"alice@example.com"}}}
+	r2 := &masking.QueryResult{Columns: []string{"email"}, Origins: []masking.ColumnOrigin{{Table: "users", Column: "email"}}, Rows: [][]any{{"alice@example.com"}}}
 	e1.MaskResult(r1, rules)
 	e2.MaskResult(r2, rules)
 	if r1.Rows[0][0] == r2.Rows[0][0] {
@@ -98,6 +100,7 @@ func TestMaskNilValueSkipped(t *testing.T) {
 	e := newEngine(t)
 	result := &masking.QueryResult{
 		Columns: []string{"phone"},
+		Origins: []masking.ColumnOrigin{{Table: "users", Column: "phone"}},
 		Rows:    [][]any{{nil}},
 	}
 	rules := []masking.Rule{{Table: "users", Column: "phone", Mode: masking.MaskModeFull}}

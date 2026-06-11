@@ -58,7 +58,7 @@ const NAV_ITEMS: NavItem[] = [
     to: '/audit-logs',
     label: 'Audit Logs',
     icon: FileClock,
-    allowed: (permissions) => permissions.includes('audit_logs.read') || permissions.includes('audit_logs.write'),
+    allowed: (permissions) => permissions.includes('audit_logs.read'),
   },
 ]
 

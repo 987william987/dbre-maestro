@@ -31,12 +31,20 @@ export default function App() {
             <Route element={<RoleRoute allowedPermissions={['users.read', 'users.write']} />}>
               <Route path="/users" element={<UsersPage />} />
             </Route>
-            <Route element={<RoleRoute allowedPermissions={['sql_editor.query', 'db_connections.read', 'db_connections.write', 'masking_rules.read', 'masking_rules.write', 'sql_review.read', 'sql_review.write', 'audit_logs.read', 'audit_logs.write']} />}>
+            <Route element={<RoleRoute allowedPermissions={['sql_editor.query']} />}>
               <Route path="/sql-editor" element={<SQLEditorPage />} />
+            </Route>
+            <Route element={<RoleRoute allowedPermissions={['db_connections.read', 'db_connections.write']} />}>
               <Route path="/db-connections" element={<DBConnectionsPage />} />
-              <Route path="/audit-logs" element={<AuditLogsPage />} />
+            </Route>
+            <Route element={<RoleRoute allowedPermissions={['masking_rules.read', 'masking_rules.write']} />}>
               <Route path="/masking-rules" element={<MaskingRulesPage />} />
+            </Route>
+            <Route element={<RoleRoute allowedPermissions={['sql_review.read', 'sql_review.write']} />}>
               <Route path="/sql-review-rules" element={<SQLReviewRulesPage />} />
+            </Route>
+            <Route element={<RoleRoute allowedPermissions={['audit_logs.read']} />}>
+              <Route path="/audit-logs" element={<AuditLogsPage />} />
             </Route>
           </Route>
         </Route>

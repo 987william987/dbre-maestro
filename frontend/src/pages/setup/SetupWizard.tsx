@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, CheckCircle2, Circle, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { withApiPath } from '@/shared/api/client'
 import { getSetupStatus } from '@/shared/setup/api'
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -215,7 +216,7 @@ function AccountStep({
     setLoading(true)
     setApiError('')
     try {
-      const res = await fetch('/setup', {
+      const res = await fetch(withApiPath('/setup'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
