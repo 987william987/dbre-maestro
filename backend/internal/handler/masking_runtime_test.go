@@ -25,7 +25,7 @@ func TestMaskingRuntimeApplyResultMasksMySQLColumns(t *testing.T) {
 		t.Fatalf("masking.NewEngine: %v", err)
 	}
 
-	runtime := newMaskingRuntime(nil, repository.NewMaskingRuleRepo(sqlxDB), repository.NewMaskingWhitelistRepo(sqlxDB), engine)
+	runtime := newMaskingRuntime(nil, repository.NewMaskingRuleRepo(sqlxDB), repository.NewMaskingWhitelistRepo(sqlxDB), nil, engine)
 	conn := &model.DBConnection{ID: 7, DBType: "mysql"}
 	result := &masking.QueryResult{
 		Columns: []string{"email"},
@@ -40,12 +40,15 @@ func TestMaskingRuntimeApplyResultMasksMySQLColumns(t *testing.T) {
 		WithArgs(uint64(7), "analytics", "users", "email").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 
-	override, err := runtime.applyResult(context.Background(), conn, 0, result)
+	override, sensitiveIndexes, err := runtime.applyResult(context.Background(), conn, 0, result)
 	if err != nil {
 		t.Fatalf("applyResult() error = %v", err)
 	}
 	if override {
 		t.Fatalf("override = true, want false")
+	}
+	if len(sensitiveIndexes) != 1 || sensitiveIndexes[0] != 0 {
+		t.Fatalf("sensitiveIndexes = %v, want [0]", sensitiveIndexes)
 	}
 	if got := result.Rows[0][0]; got != "****" {
 		t.Fatalf("masked value = %v, want %q", got, "****")
@@ -68,7 +71,7 @@ func TestMaskingRuntimeApplyResultSkipsWhitelistMatch(t *testing.T) {
 		t.Fatalf("masking.NewEngine: %v", err)
 	}
 
-	runtime := newMaskingRuntime(nil, repository.NewMaskingRuleRepo(sqlxDB), repository.NewMaskingWhitelistRepo(sqlxDB), engine)
+	runtime := newMaskingRuntime(nil, repository.NewMaskingRuleRepo(sqlxDB), repository.NewMaskingWhitelistRepo(sqlxDB), nil, engine)
 	conn := &model.DBConnection{ID: 7, DBType: "mysql"}
 	result := &masking.QueryResult{
 		Columns: []string{"email"},
@@ -83,12 +86,15 @@ func TestMaskingRuntimeApplyResultSkipsWhitelistMatch(t *testing.T) {
 		WithArgs(uint64(7), "analytics", "users", "email").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 
-	override, err := runtime.applyResult(context.Background(), conn, 0, result)
+	override, sensitiveIndexes, err := runtime.applyResult(context.Background(), conn, 0, result)
 	if err != nil {
 		t.Fatalf("applyResult() error = %v", err)
 	}
 	if override {
 		t.Fatalf("override = true, want false")
+	}
+	if len(sensitiveIndexes) != 0 {
+		t.Fatalf("sensitiveIndexes = %v, want empty", sensitiveIndexes)
 	}
 	if got := result.Rows[0][0]; got != "alice@example.com" {
 		t.Fatalf("masked value = %v, want original value", got)

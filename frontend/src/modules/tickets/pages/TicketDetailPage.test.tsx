@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Ticket } from '@/shared/types/ticket'
+import type { Ticket, TicketDetail } from '@/shared/types/ticket'
 import { TicketDetailPage } from '@/modules/tickets/pages/TicketDetailPage'
 
 vi.mock('@/shared/auth/AuthContext', () => ({
@@ -49,6 +49,22 @@ const baseTicket: Ticket = {
   updated_at: '2026-06-09T10:00:00Z',
 }
 
+function buildDetail(ticket: Ticket, overrides?: Partial<TicketDetail>): TicketDetail {
+  return {
+    ticket,
+    executions: [],
+    scopes: [],
+    capabilities: {
+      can_review: false,
+      can_revoke: false,
+      can_request_execution: false,
+      can_execute: false,
+      can_download_export: false,
+    },
+    ...overrides,
+  }
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={['/tickets/12']}>
@@ -75,7 +91,15 @@ describe('TicketDetailPage role visibility', () => {
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
-    mockedGetTicket.mockResolvedValue({ ...baseTicket, status: 'pending_review' })
+    mockedGetTicket.mockResolvedValue(buildDetail({ ...baseTicket, status: 'pending_review' }, {
+      capabilities: {
+        can_review: true,
+        can_revoke: false,
+        can_request_execution: false,
+        can_execute: false,
+        can_download_export: false,
+      },
+    }))
 
     renderPage()
 
@@ -94,7 +118,15 @@ describe('TicketDetailPage role visibility', () => {
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
-    mockedGetTicket.mockResolvedValue({ ...baseTicket, status: 'approved' })
+    mockedGetTicket.mockResolvedValue(buildDetail({ ...baseTicket, status: 'approved' }, {
+      capabilities: {
+        can_review: false,
+        can_revoke: false,
+        can_request_execution: true,
+        can_execute: true,
+        can_download_export: false,
+      },
+    }))
 
     renderPage()
 
@@ -112,7 +144,7 @@ describe('TicketDetailPage role visibility', () => {
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
-    mockedGetTicket.mockResolvedValue({ ...baseTicket, status: 'pending_review' })
+    mockedGetTicket.mockResolvedValue(buildDetail({ ...baseTicket, status: 'pending_review' }))
 
     renderPage()
 

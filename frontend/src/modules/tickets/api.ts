@@ -1,6 +1,6 @@
 import { apiClient } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { Ticket, TicketStatus, TicketType } from '@/shared/types/ticket'
+import type { Ticket, TicketDetail, TicketStatus, TicketType } from '@/shared/types/ticket'
 
 type TicketsResponse = {
   tickets: Ticket[]
@@ -36,7 +36,11 @@ export async function listTickets(status?: TicketStatus) {
 }
 
 export async function getTicket(id: string) {
-  return apiClient.get<Ticket>(`/tickets/${id}`)
+  return apiClient.get<TicketDetail>(`/tickets/${id}`).then((response) => ({
+    ...response,
+    executions: Array.isArray(response.executions) ? response.executions : [],
+    scopes: Array.isArray(response.scopes) ? response.scopes : [],
+  }))
 }
 
 export async function createTicket(payload: CreateTicketPayload) {
@@ -61,6 +65,10 @@ export async function requestExecution(id: number) {
 
 export async function executeTicket(id: number) {
   return apiClient.post<Ticket>(`/tickets/${id}/execute`)
+}
+
+export async function revokeTicket(id: number) {
+  return apiClient.post<Ticket>(`/tickets/${id}/revoke`)
 }
 
 export async function listConnections() {

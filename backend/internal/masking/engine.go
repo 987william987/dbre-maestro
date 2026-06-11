@@ -23,9 +23,10 @@ func NewEngine(encryptionKey []byte, cache *RuleCache) (*Engine, error) {
 
 // QueryResult holds the columns and rows returned by a SQL Editor query.
 type QueryResult struct {
-	Columns []string
-	Origins []ColumnOrigin
-	Rows    [][]any
+	Columns    []string
+	RawColumns []string
+	Origins    []ColumnOrigin
+	Rows       [][]any
 }
 
 type ColumnOrigin struct {
@@ -43,8 +44,9 @@ func (e *Engine) MaskResult(result *QueryResult, rules []Rule) error {
 		return nil
 	}
 
+	columnLabels := result.columnLabelsForMatching()
 	for rowIdx, row := range result.Rows {
-		for colIdx, colName := range result.Columns {
+		for colIdx, colName := range columnLabels {
 			rule, ok := e.matchRule(result, colIdx, colName, rules)
 			if !ok {
 				continue
@@ -62,6 +64,13 @@ func (e *Engine) MaskResult(result *QueryResult, rules []Rule) error {
 		}
 	}
 	return nil
+}
+
+func (r *QueryResult) columnLabelsForMatching() []string {
+	if len(r.RawColumns) == len(r.Columns) {
+		return r.RawColumns
+	}
+	return r.Columns
 }
 
 func (e *Engine) matchRule(result *QueryResult, colIdx int, colName string, rules []Rule) (Rule, bool) {

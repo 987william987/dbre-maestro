@@ -1,9 +1,36 @@
 export type QueryResult = {
   columns: string[]
+  raw_columns?: string[]
+  sensitive_column_indexes?: number[]
   rows: Array<Array<string | number | boolean | null>>
   row_count: number
   duration_ms: number
   sensitive_override_active?: boolean
+}
+
+export type QueryHistoryEntry = {
+  id: number
+  db_connection_id: number
+  db_connection_name: string
+  database_name?: string | null
+  schema_name?: string | null
+  redis_db_index?: number | null
+  sql_content: string
+  duration_ms: number
+  created_at: string
+}
+
+export type SavedQuery = {
+  id: number
+  label: string
+  db_connection_id: number
+  db_connection_name: string
+  database_name?: string | null
+  schema_name?: string | null
+  redis_db_index?: number | null
+  sql_content: string
+  created_at: string
+  updated_at: string
 }
 
 export type MetadataLevel = 'database' | 'schema' | 'table' | 'redis_db'

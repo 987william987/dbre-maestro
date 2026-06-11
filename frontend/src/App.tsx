@@ -6,6 +6,7 @@ import { AuditLogsPage } from '@/modules/audit/pages/AuditLogsPage'
 import { LoginPage } from '@/modules/auth/pages/LoginPage'
 import { DBConnectionsPage } from '@/modules/db-connections/pages/DBConnectionsPage'
 import { MaskingRulesPage } from '@/modules/masking-rules/pages/MaskingRulesPage'
+import { SettingsPage } from '@/modules/settings/pages/SettingsPage'
 import { SQLEditorPage } from '@/modules/sql-editor/pages/SQLEditorPage'
 import { SQLReviewRulesPage } from '@/modules/sql-review-rules/pages/SQLReviewRulesPage'
 import { TicketDetailPage } from '@/modules/tickets/pages/TicketDetailPage'
@@ -45,6 +46,9 @@ export default function App() {
             </Route>
             <Route element={<RoleRoute allowedPermissions={['audit_logs.read']} />}>
               <Route path="/audit-logs" element={<AuditLogsPage />} />
+            </Route>
+            <Route element={<RoleRoute allowedPermissions={['settings.read', 'settings.write']} />}>
+              <Route path="/settings" element={<SettingsPage />} />
             </Route>
           </Route>
         </Route>

@@ -31,9 +31,9 @@ func (r *ExportRepo) Create(ctx context.Context, req *model.ExportRequest, statu
 	expiresAt := time.Now().Add(24 * time.Hour)
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO export_requests
-         (requester_id, download_token, sql_content, db_connection_id, status, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-		req.RequesterID, token, req.SQLContent, req.DBConnectionID, string(status), expiresAt,
+         (ticket_id, requester_id, download_token, sql_content, db_connection_id, status, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		req.TicketID, req.RequesterID, token, req.SQLContent, req.DBConnectionID, string(status), expiresAt,
 	)
 	if err != nil {
 		return 0, "", fmt.Errorf("create export_request: %w", err)
@@ -57,6 +57,15 @@ func (r *ExportRepo) GetByToken(ctx context.Context, token string) (*model.Expor
 func (r *ExportRepo) GetByID(ctx context.Context, id uint64) (*model.ExportRequest, error) {
 	var req model.ExportRequest
 	err := r.db.GetContext(ctx, &req, `SELECT * FROM export_requests WHERE id = ?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &req, err
+}
+
+func (r *ExportRepo) GetByTicketID(ctx context.Context, ticketID uint64) (*model.ExportRequest, error) {
+	var req model.ExportRequest
+	err := r.db.GetContext(ctx, &req, `SELECT * FROM export_requests WHERE ticket_id = ? ORDER BY id DESC LIMIT 1`, ticketID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

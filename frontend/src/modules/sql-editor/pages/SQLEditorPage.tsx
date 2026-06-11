@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { javascript } from '@codemirror/lang-javascript'
 import { sql } from '@codemirror/lang-sql'
@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Database,
   Download,
+  Filter,
   FileClock,
   Folder,
   FolderTree,
@@ -19,19 +20,30 @@ import {
   Star,
   StarOff,
   Table2,
+  Trash2,
   X,
   Workflow,
 } from 'lucide-react'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { MetadataColumn, MetadataItem, QueryResult } from '@/shared/types/sqlEditor'
+import type { MetadataColumn, MetadataItem, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { useToast } from '@/shared/ui/ToastContext'
+import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { listDBConnections } from '@/modules/db-connections/api'
 import { createExportRequest } from '@/modules/exports/api'
-import { executeQuery, listMetadata, listMetadataColumns } from '@/modules/sql-editor/api'
+import {
+  createSavedQuery,
+  createSensitiveAccessTicket,
+  deleteSavedQuery,
+  executeQuery,
+  listMetadata,
+  listMetadataColumns,
+  listQueryHistory,
+  listSavedQueries,
+} from '@/modules/sql-editor/api'
 
 type EditorTab = {
   id: string
@@ -43,25 +55,9 @@ type EditorTab = {
   lastRunAt: string | null
 }
 
-type QueryHistoryEntry = {
-  id: string
-  connectionId: number
-  sql: string
-  createdAt: string
-}
-
-type FavoriteQueryEntry = {
-  id: string
-  label: string
-  connectionId: number
-  sql: string
-}
-
 type PersistedState = {
   activeTabId: string
   tabs: EditorTab[]
-  history: QueryHistoryEntry[]
-  favorites: FavoriteQueryEntry[]
 }
 
 type AssetTreeNode = {
@@ -84,6 +80,69 @@ type AssetTreeNode = {
 const STORAGE_PREFIX = 'dbre_maestro.sql_editor'
 const DEFAULT_SQL = 'SELECT 1;'
 const HISTORY_LIMIT = 20
+const SAVED_QUERY_LIMIT = 10
+const EDITOR_BASE_VISIBLE_LINES = 12
+const EDITOR_MAX_HEIGHT = 840
+const EDITOR_LINE_HEIGHT = 24
+const EDITOR_VERTICAL_PADDING = 24
+const EDITOR_MIN_HEIGHT = EDITOR_VERTICAL_PADDING + EDITOR_BASE_VISIBLE_LINES * EDITOR_LINE_HEIGHT
+const RESULT_PAGE_SIZE = 50
+
+function parsePixelValue(value: string): number {
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function measureEditorHeight(container: HTMLDivElement | null, sqlText: string): number {
+  if (!container) {
+    return EDITOR_MIN_HEIGHT
+  }
+
+  const content = container.querySelector('.cm-content')
+  const line = container.querySelector('.cm-line')
+
+  if (!(content instanceof HTMLElement)) {
+    return EDITOR_MIN_HEIGHT
+  }
+
+  const contentStyles = window.getComputedStyle(content)
+  const lineStyles = window.getComputedStyle(line instanceof HTMLElement ? line : content)
+  const measuredLineHeight = parsePixelValue(lineStyles.lineHeight) || EDITOR_LINE_HEIGHT
+  const verticalPadding = parsePixelValue(contentStyles.paddingTop) + parsePixelValue(contentStyles.paddingBottom)
+  const minimumHeight = verticalPadding + measuredLineHeight * EDITOR_BASE_VISIBLE_LINES
+  const contentLineCount = Math.max(1, sqlText.split('\n').length)
+  const contentHeight = verticalPadding + measuredLineHeight * contentLineCount
+
+  return Math.min(EDITOR_MAX_HEIGHT, Math.max(minimumHeight, contentHeight))
+}
+
+function formatResultMetaLine(params: {
+  resultView: 'result' | 'vertical' | 'object-meta' | 'history' | 'saved'
+  result: QueryResult | null
+  selectedTable: MetadataItem | null
+  detailHint: string
+  historyCount: number
+  savedCount: number
+  currentPage: number
+  totalPages: number
+}): string {
+  const { resultView, result, selectedTable, detailHint, historyCount, savedCount, currentPage, totalPages } = params
+
+  if ((resultView === 'result' || resultView === 'vertical') && result) {
+    const parts = [`${result.row_count} rows`, `${result.duration_ms} ms`]
+    if (totalPages > 1) {
+      parts.push(`Page ${currentPage} / ${totalPages}`)
+    }
+    return parts.join(' / ')
+  }
+  if (resultView === 'object-meta') {
+    return selectedTable ? `${selectedTable.schema}.${selectedTable.name}` : detailHint || '選擇資料表後查看結構'
+  }
+  if (resultView === 'history') {
+    return `${historyCount} entries`
+  }
+  return `${savedCount} entries`
+}
 
 function createTab(seed = 1): EditorTab {
   return {
@@ -119,8 +178,6 @@ function safeParseState(raw: string | null): PersistedState | null {
         error: typeof tab.error === 'string' ? tab.error : '',
         lastRunAt: typeof tab.lastRunAt === 'string' ? tab.lastRunAt : null,
       })),
-      history: Array.isArray(parsed.history) ? parsed.history.slice(0, HISTORY_LIMIT) : [],
-      favorites: Array.isArray(parsed.favorites) ? parsed.favorites : [],
     }
   } catch {
     return null
@@ -184,19 +241,6 @@ function updateAssetTreeNode(
     }
     return { ...node, children: updateAssetTreeNode(node.children, nodeID, updater) }
   })
-}
-
-function findAssetTreeNode(nodes: AssetTreeNode[], nodeID: string): AssetTreeNode | null {
-  for (const node of nodes) {
-    if (node.id === nodeID) {
-      return node
-    }
-    const found = findAssetTreeNode(node.children, nodeID)
-    if (found) {
-      return found
-    }
-  }
-  return null
 }
 
 function filterAssetTree(nodes: AssetTreeNode[], searchTerm: string): AssetTreeNode[] {
@@ -302,9 +346,12 @@ function AssetTree({
 }
 
 export function SQLEditorPage() {
+  const editorContainerRef = useRef<HTMLDivElement | null>(null)
   const { user } = useAuth()
   const { pushToast } = useToast()
   const hasSensitiveOverride = Boolean(user?.permissions.includes('global.sensitive'))
+  const canApplySensitiveAccess = Boolean(user?.permissions.includes('sql_editor.sensitive_apply'))
+  const accessibleConnectionIDs = user?.dbConnectionIds ?? []
   const storageKey = user ? `${STORAGE_PREFIX}.${user.id}` : `${STORAGE_PREFIX}.anonymous`
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [connectionsLoading, setConnectionsLoading] = useState(true)
@@ -312,7 +359,7 @@ export function SQLEditorPage() {
   const [tabs, setTabs] = useState<EditorTab[]>([createTab()])
   const [activeTabId, setActiveTabId] = useState<string>(() => createTab().id)
   const [history, setHistory] = useState<QueryHistoryEntry[]>([])
-  const [favorites, setFavorites] = useState<FavoriteQueryEntry[]>([])
+  const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
   const [runningTabId, setRunningTabId] = useState<string | null>(null)
   const [exportingTabId, setExportingTabId] = useState<string | null>(null)
   const [explorerNodes, setExplorerNodes] = useState<AssetTreeNode[]>([])
@@ -322,11 +369,17 @@ export function SQLEditorPage() {
   const [columns, setColumns] = useState<MetadataColumn[]>([])
   const [columnsLoading, setColumnsLoading] = useState(false)
   const [metadataError, setMetadataError] = useState('')
-  const [editorError, setEditorError] = useState('')
   const [explorerSearch, setExplorerSearch] = useState('')
   const [assetPickerOpen, setAssetPickerOpen] = useState(false)
   const [assetPickerSearch, setAssetPickerSearch] = useState('')
-  const [resultView, setResultView] = useState<'result' | 'history'>('result')
+  const [resultView, setResultView] = useState<'result' | 'vertical' | 'object-meta' | 'history' | 'saved'>('result')
+  const [columnFilterOpen, setColumnFilterOpen] = useState(false)
+  const [visibleColumnIndexes, setVisibleColumnIndexes] = useState<number[] | null>(null)
+  const [savedQueryToDelete, setSavedQueryToDelete] = useState<SavedQuery | null>(null)
+  const [selectedSQL, setSelectedSQL] = useState('')
+  const [sensitiveAccessDuration, setSensitiveAccessDuration] = useState(10)
+  const [editorHeight, setEditorHeight] = useState(`${EDITOR_MIN_HEIGHT}px`)
+  const [resultPage, setResultPage] = useState(1)
 
   useEffect(() => {
     const restored = safeParseState(window.localStorage.getItem(storageKey))
@@ -334,15 +387,11 @@ export function SQLEditorPage() {
       const firstTab = createTab()
       setTabs([firstTab])
       setActiveTabId(firstTab.id)
-      setHistory([])
-      setFavorites([])
       return
     }
 
     setTabs(restored.tabs)
     setActiveTabId(restored.activeTabId)
-    setHistory(restored.history)
-    setFavorites(restored.favorites)
   }, [storageKey])
 
   useEffect(() => {
@@ -353,11 +402,9 @@ export function SQLEditorPage() {
     const state: PersistedState = {
       activeTabId,
       tabs,
-      history,
-      favorites,
     }
     window.localStorage.setItem(storageKey, JSON.stringify(state))
-  }, [activeTabId, favorites, history, storageKey, tabs])
+  }, [activeTabId, storageKey, tabs])
 
   useEffect(() => {
     let active = true
@@ -372,12 +419,6 @@ export function SQLEditorPage() {
         }
 
         setConnections(response.connections)
-        setTabs((currentTabs) => currentTabs.map((tab) => {
-          if (tab.connectionId !== null || response.connections.length === 0) {
-            return tab
-          }
-          return { ...tab, connectionId: response.connections[0].id }
-        }))
       } catch (error) {
         if (active) {
           setConnectionsError(error instanceof ApiError ? error.message : '讀取資料庫連線失敗。')
@@ -396,13 +437,58 @@ export function SQLEditorPage() {
     }
   }, [])
 
+  useEffect(() => {
+    let active = true
+
+    async function loadHistory() {
+      try {
+        const response = await listQueryHistory(HISTORY_LIMIT)
+        if (active) {
+          setHistory(response.history)
+        }
+      } catch (error) {
+        if (active) {
+          pushToast(error instanceof ApiError ? error.message : '讀取查詢歷史失敗。', 'error')
+        }
+      }
+    }
+
+    async function loadSavedQueries() {
+      try {
+        const response = await listSavedQueries()
+        if (active) {
+          setSavedQueries(response.saved_queries)
+        }
+      } catch (error) {
+        if (active) {
+          pushToast(error instanceof ApiError ? error.message : '讀取常用 SQL 失敗。', 'error')
+        }
+      }
+    }
+
+    void loadHistory()
+    void loadSavedQueries()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null,
     [activeTabId, tabs],
   )
+  const accessibleConnections = useMemo(() => {
+    if (!accessibleConnectionIDs.length) {
+      return [] as DBConnection[]
+    }
+
+    const accessibleIDSet = new Set(accessibleConnectionIDs)
+    return connections.filter((connection) => accessibleIDSet.has(connection.id))
+  }, [accessibleConnectionIDs, connections])
   const activeConnection = useMemo(
-    () => connections.find((connection) => connection.id === activeTab?.connectionId) ?? null,
-    [activeTab?.connectionId, connections],
+    () => accessibleConnections.find((connection) => connection.id === activeTab?.connectionId) ?? null,
+    [activeTab?.connectionId, accessibleConnections],
   )
   const activePathLabel = useMemo(() => {
     const parts = [activeConnection?.name].filter(Boolean) as string[]
@@ -424,18 +510,36 @@ export function SQLEditorPage() {
   const filteredConnections = useMemo(() => {
     const keyword = assetPickerSearch.trim().toLowerCase()
     if (!keyword) {
-      return connections
+      return accessibleConnections
     }
-    return connections.filter((connection) =>
+    return accessibleConnections.filter((connection) =>
       connection.name.toLowerCase().includes(keyword) ||
       connection.db_type.toLowerCase().includes(keyword) ||
       (connection.database_name ?? '').toLowerCase().includes(keyword),
     )
-  }, [assetPickerSearch, connections])
+  }, [accessibleConnections, assetPickerSearch])
+
+  useEffect(() => {
+    if (accessibleConnections.length === 0) {
+      setTabs((currentTabs) => currentTabs.map((tab) => (tab.connectionId === null ? tab : { ...tab, connectionId: null })))
+      return
+    }
+
+    const accessibleIDSet = new Set(accessibleConnections.map((connection) => connection.id))
+    setTabs((currentTabs) => currentTabs.map((tab) => (
+      tab.connectionId !== null && !accessibleIDSet.has(tab.connectionId)
+        ? { ...tab, connectionId: null }
+        : tab
+    )))
+  }, [accessibleConnections])
 
   useEffect(() => {
     if (!activeConnection) {
       setExplorerNodes([])
+      setSelectedDatabase('')
+      setSelectedSchema('')
+      setSelectedTable(null)
+      setColumns([])
       return
     }
 
@@ -453,60 +557,6 @@ export function SQLEditorPage() {
       syncAssetTreeActiveStates(current, activeTab?.connectionId ?? null, selectedDatabase, selectedSchema, selectedTable),
     )
   }, [activeTab?.connectionId, selectedDatabase, selectedSchema, selectedTable])
-
-  useEffect(() => {
-    if (!activeTab?.connectionId) {
-      return
-    }
-    const activeNode = findAssetTreeNode(explorerNodes, `connection-${activeTab.connectionId}`)
-    if (activeNode && activeNode.expanded && !activeNode.loaded && !activeNode.loading) {
-      void loadNodeChildren(activeNode)
-    }
-  }, [activeTab?.connectionId, explorerNodes])
-
-  useEffect(() => {
-    if (!activeTab?.connectionId) {
-      return
-    }
-
-    const connectionNodeID = `connection-${activeTab.connectionId}`
-    const connectionNode = findAssetTreeNode(explorerNodes, connectionNodeID)
-    if (!connectionNode || connectionNode.loading) {
-      return
-    }
-
-    if (!connectionNode.loaded) {
-      void loadNodeChildren(connectionNode)
-      return
-    }
-
-    if (!selectedDatabase) {
-      return
-    }
-
-    const databaseNodeID = `database-${activeTab.connectionId}-${selectedDatabase}`
-    const databaseNode = findAssetTreeNode(explorerNodes, databaseNodeID)
-    if (!databaseNode) {
-      return
-    }
-    if (!databaseNode.loaded && !databaseNode.loading && (selectedSchema || selectedTable || activeConnection?.db_type !== 'postgres')) {
-      void loadNodeChildren(databaseNode)
-      return
-    }
-
-    if (!selectedSchema || activeConnection?.db_type !== 'postgres') {
-      return
-    }
-
-    const schemaNodeID = `schema-${activeTab.connectionId}-${selectedDatabase}-${selectedSchema}`
-    const schemaNode = findAssetTreeNode(explorerNodes, schemaNodeID)
-    if (!schemaNode) {
-      return
-    }
-    if (!schemaNode.loaded && !schemaNode.loading && selectedTable) {
-      void loadNodeChildren(schemaNode)
-    }
-  }, [activeConnection?.db_type, activeTab?.connectionId, explorerNodes, selectedDatabase, selectedSchema, selectedTable])
 
   useEffect(() => {
     if (!activeTab?.connectionId || !selectedTable || activeConnection?.db_type === 'redis') {
@@ -691,9 +741,6 @@ export function SQLEditorPage() {
 
   function handleAddTab() {
     const nextTab = createTab(tabs.length + 1)
-    if (connections.length > 0) {
-      nextTab.connectionId = connections[0].id
-    }
     setTabs((current) => [...current, nextTab])
     setActiveTabId(nextTab.id)
   }
@@ -715,40 +762,31 @@ export function SQLEditorPage() {
   }
 
   async function handleRunQuery() {
-    if (!activeTab?.connectionId || !activeTab.sql.trim()) {
-      setEditorError('請先選擇資料庫連線並輸入查詢內容。')
+    const sqlToExecute = selectedSQL.trim() || activeTab?.sql.trim() || ''
+    if (!activeTab?.connectionId || !sqlToExecute) {
+      updateActiveTab({ error: '請先選擇資料庫連線並輸入查詢內容。' })
       return
     }
 
-    setEditorError('')
     setRunningTabId(activeTab.id)
     updateActiveTab({ error: '' })
 
     try {
       const result = await executeQuery({
         db_connection_id: activeTab.connectionId,
-        sql: activeTab.sql,
+        sql: sqlToExecute,
         database: selectedDatabase || undefined,
         schema: activeConnection?.db_type === 'postgres' ? selectedSchema || undefined : undefined,
         redis_db_index: activeConnection?.db_type === 'redis' && selectedDatabase ? Number(selectedDatabase) : undefined,
       })
 
-      const now = new Date().toISOString()
       updateActiveTab({
         result,
         error: '',
-        lastRunAt: now,
+        lastRunAt: new Date().toISOString(),
       })
-      setHistory((current) => {
-        const nextEntry: QueryHistoryEntry = {
-          id: `${Date.now()}`,
-          connectionId: activeTab.connectionId!,
-          sql: activeTab.sql,
-          createdAt: now,
-        }
-        const deduped = current.filter((entry) => !(entry.connectionId === nextEntry.connectionId && entry.sql === nextEntry.sql))
-        return [nextEntry, ...deduped].slice(0, HISTORY_LIMIT)
-      })
+      setResultView('result')
+      void listQueryHistory(HISTORY_LIMIT).then((response) => setHistory(response.history)).catch(() => undefined)
       pushToast('查詢已完成', 'success')
     } catch (error) {
       const message = error instanceof ApiError ? error.message : '查詢執行失敗。'
@@ -756,7 +794,6 @@ export function SQLEditorPage() {
         error: message,
         result: null,
       })
-      setEditorError(message)
     } finally {
       setRunningTabId(null)
     }
@@ -772,43 +809,80 @@ export function SQLEditorPage() {
       const response = await createExportRequest({
         db_connection_id: activeTab.connectionId,
         sql_content: activeTab.sql,
+        database_name: selectedDatabase || undefined,
+        schema_name: activeConnection?.db_type === 'postgres' ? selectedSchema || undefined : undefined,
       })
-      if (response.download_url) {
-        window.open(response.download_url, '_blank', 'noopener,noreferrer')
-        pushToast('已建立匯出請求', 'success')
-      } else {
-        pushToast(response.status === 'pending' ? '匯出申請已送出，待審批後才能下載。' : '匯出請求已建立。', 'success')
-      }
+      pushToast(`已建立匯出工單 ${response.ticket_no}`, 'success', { placement: 'center' })
     } catch (error) {
-      setEditorError(error instanceof ApiError ? error.message : '建立匯出請求失敗。')
+      pushToast(error instanceof ApiError ? error.message : '建立匯出請求失敗。', 'error')
     } finally {
       setExportingTabId(null)
     }
   }
 
-  function handleToggleFavorite() {
+  async function handleCreateSensitiveAccess() {
+    if (!activeTab?.connectionId || !activeTab.sql.trim()) {
+      return
+    }
+    if (activeConnection?.db_type !== 'mysql') {
+      pushToast('Sensitive Access 目前只支援 MySQL。', 'info', { placement: 'center' })
+      return
+    }
+
+    try {
+      const response = await createSensitiveAccessTicket({
+        db_connection_id: activeTab.connectionId,
+        sql_content: activeTab.sql,
+        database_name: selectedDatabase || undefined,
+        schema_name: selectedSchema || undefined,
+        approved_duration_minutes: sensitiveAccessDuration,
+      })
+      pushToast(`已建立 Sensitive Access 工單 ${response.ticket_no}`, 'success', { placement: 'center' })
+    } catch (error) {
+      pushToast(error instanceof ApiError ? error.message : '建立 Sensitive Access 工單失敗。', 'error')
+    }
+  }
+
+  async function handleSaveQuery() {
     if (!activeTab?.connectionId || !activeTab.sql.trim()) {
       return
     }
 
-    const existing = favorites.find((item) => item.connectionId === activeTab.connectionId && item.sql === activeTab.sql)
+    const existing = savedQueries.find((item) =>
+      item.db_connection_id === activeTab.connectionId &&
+      item.sql_content === activeTab.sql &&
+      (item.database_name ?? '') === selectedDatabase &&
+      (item.schema_name ?? '') === selectedSchema &&
+      (item.redis_db_index ?? null) === (activeConnection?.db_type === 'redis' && selectedDatabase ? Number(selectedDatabase) : null),
+    )
     if (existing) {
-      setFavorites((current) => current.filter((item) => item.id !== existing.id))
-      pushToast('已從收藏移除', 'info')
+      pushToast('這條 SQL 已經在常用清單中。', 'info')
       return
     }
 
-    const nextFavorite: FavoriteQueryEntry = {
-      id: `${Date.now()}`,
-      label: activeTab.title,
-      connectionId: activeTab.connectionId,
-      sql: activeTab.sql,
+    if (savedQueries.length >= SAVED_QUERY_LIMIT) {
+      pushToast('常用 SQL 最多只能儲存 10 組。', 'error')
+      return
     }
-    setFavorites((current) => [nextFavorite, ...current])
+
+    try {
+      const created = await createSavedQuery({
+        label: activeTab.title,
+        db_connection_id: activeTab.connectionId,
+        database: selectedDatabase || undefined,
+        schema: selectedSchema || undefined,
+        redis_db_index: activeConnection?.db_type === 'redis' && selectedDatabase ? Number(selectedDatabase) : undefined,
+        sql_content: activeTab.sql,
+      })
+      setSavedQueries((current) => [created, ...current].slice(0, SAVED_QUERY_LIMIT))
+    } catch (error) {
+      pushToast(error instanceof ApiError ? error.message : '儲存常用 SQL 失敗。', 'error')
+      return
+    }
     pushToast('已加入收藏', 'success')
   }
 
-  function applySavedQuery(entry: Pick<FavoriteQueryEntry, 'connectionId' | 'sql' | 'label'>) {
+  function applySavedQuery(entry: { connectionId: number; sql: string; label: string; database?: string | null; schema?: string | null; redisDbIndex?: number | null }) {
     if (!activeTab) {
       return
     }
@@ -821,14 +895,64 @@ export function SQLEditorPage() {
       result: null,
       error: '',
     })
+    setSelectedDatabase(entry.database ?? '')
+    setSelectedSchema(entry.schema ?? '')
+    setSelectedTable(null)
+    setColumns([])
+    if (entry.redisDbIndex !== undefined && entry.redisDbIndex !== null) {
+      setSelectedDatabase(String(entry.redisDbIndex))
+    }
     setResultView('result')
   }
 
-  const isFavorited = !!(activeTab && favorites.some((item) => item.connectionId === activeTab.connectionId && item.sql === activeTab.sql))
+  const isFavorited = !!(activeTab && savedQueries.some((item) =>
+    item.db_connection_id === activeTab.connectionId &&
+    item.sql_content === activeTab.sql &&
+    (item.database_name ?? '') === selectedDatabase &&
+    (item.schema_name ?? '') === selectedSchema &&
+    (item.redis_db_index ?? null) === (activeConnection?.db_type === 'redis' && selectedDatabase ? Number(selectedDatabase) : null),
+  ))
   const editorExtensions = useMemo(
-    () => [activeTab && connections.find((connection) => connection.id === activeTab.connectionId)?.db_type === 'redis' ? javascript() : sql()],
-    [activeTab, connections],
+    () => [activeTab && accessibleConnections.find((connection) => connection.id === activeTab.connectionId)?.db_type === 'redis' ? javascript() : sql()],
+    [activeTab, accessibleConnections],
   )
+  const visibleResultColumnIndexes = useMemo(() => {
+    if (!activeTab?.result) {
+      return []
+    }
+    if (!visibleColumnIndexes || visibleColumnIndexes.length === 0) {
+      return activeTab.result.columns.map((_, index) => index)
+    }
+    return visibleColumnIndexes.filter((index) => index >= 0 && index < activeTab.result!.columns.length)
+  }, [activeTab?.result, visibleColumnIndexes])
+  const sensitiveColumnIndexSet = useMemo(
+    () => new Set(activeTab?.result?.sensitive_column_indexes ?? []),
+    [activeTab?.result?.sensitive_column_indexes],
+  )
+  const totalResultPages = useMemo(() => {
+    if (!activeTab?.result) {
+      return 1
+    }
+    return Math.max(1, Math.ceil(activeTab.result.rows.length / RESULT_PAGE_SIZE))
+  }, [activeTab?.result])
+  const pagedResultRows = useMemo(() => {
+    if (!activeTab?.result) {
+      return []
+    }
+    const start = (resultPage - 1) * RESULT_PAGE_SIZE
+    return activeTab.result.rows.slice(start, start + RESULT_PAGE_SIZE)
+  }, [activeTab?.result, resultPage])
+  const detailHint = metadataHint(activeConnection?.db_type)
+  const resultMetaLine = useMemo(() => formatResultMetaLine({
+    resultView,
+    result: activeTab?.result ?? null,
+    selectedTable,
+    detailHint,
+    historyCount: history.length,
+    savedCount: savedQueries.length,
+    currentPage: resultPage,
+    totalPages: totalResultPages,
+  }), [activeTab?.result, detailHint, history.length, resultPage, resultView, savedQueries.length, selectedTable, totalResultPages])
 
   function handleSelectNode(node: AssetTreeNode) {
     if (node.kind === 'connection') {
@@ -862,6 +986,7 @@ export function SQLEditorPage() {
       setSelectedDatabase(node.database || selectedDatabase)
       setSelectedSchema(node.schema || '')
       setSelectedTable(node.item ?? null)
+      setResultView('object-meta')
       return
     }
 
@@ -913,8 +1038,61 @@ export function SQLEditorPage() {
     return ''
   }
 
-  const detailHint = metadataHint(activeConnection?.db_type)
-  const showExplorerDetailPane = activeConnection?.db_type === 'redis' || !!selectedTable || !!detailHint
+  useEffect(() => {
+    if (!activeTab?.result) {
+      setVisibleColumnIndexes(null)
+      return
+    }
+    setVisibleColumnIndexes(activeTab.result.columns.map((_, index) => index))
+  }, [activeTab?.id, activeTab?.result])
+
+  useEffect(() => {
+    setSelectedSQL('')
+  }, [activeTabId])
+
+  useEffect(() => {
+    if (resultView !== 'result' && resultView !== 'vertical') {
+      setResultPage(1)
+      return
+    }
+    setResultPage((current) => Math.min(current, totalResultPages))
+  }, [activeTab?.id, activeTab?.result, resultView, totalResultPages, visibleColumnIndexes])
+
+  useLayoutEffect(() => {
+    const updateHeight = () => {
+      const nextHeight = measureEditorHeight(editorContainerRef.current, activeTab?.sql ?? DEFAULT_SQL)
+      setEditorHeight(`${nextHeight}px`)
+    }
+
+    updateHeight()
+    const frameID = window.requestAnimationFrame(updateHeight)
+
+    return () => {
+      window.cancelAnimationFrame(frameID)
+    }
+  }, [activeTab?.id, activeTab?.sql])
+
+  async function handleDeleteSavedQuery(entry: SavedQuery) {
+    try {
+      await deleteSavedQuery(entry.id)
+      setSavedQueries((current) => current.filter((item) => item.id !== entry.id))
+      pushToast('已刪除常用 SQL', 'success')
+    } catch (error) {
+      pushToast(error instanceof ApiError ? error.message : '刪除常用 SQL 失敗。', 'error')
+    } finally {
+      setSavedQueryToDelete(null)
+    }
+  }
+
+  function toggleVisibleColumn(index: number) {
+    setVisibleColumnIndexes((current) => {
+      const base = current ?? activeTab?.result?.columns.map((_, columnIndex) => columnIndex) ?? []
+      if (base.includes(index)) {
+        return base.filter((item) => item !== index)
+      }
+      return [...base, index].sort((left, right) => left - right)
+    })
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-3 sm:p-4">
@@ -945,8 +1123,8 @@ export function SQLEditorPage() {
                 <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{history.length}</p>
               </div>
               <div className="rounded-[14px] border border-border bg-white px-3 py-2.5 shadow-soft">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Favorites</p>
-                <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{favorites.length}</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Saved Queries</p>
+                <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{savedQueries.length}</p>
               </div>
             </div>
           </div>
@@ -954,7 +1132,6 @@ export function SQLEditorPage() {
       </section>
 
       {connectionsError ? <InlineAlert>{connectionsError}</InlineAlert> : null}
-      {editorError ? <InlineAlert>{editorError}</InlineAlert> : null}
 
       <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
         <section className="flex min-h-0 flex-col rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
@@ -966,14 +1143,14 @@ export function SQLEditorPage() {
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
-            <div className="min-h-0 flex-1 rounded-[14px] border border-border bg-panel-soft px-3 py-3">
+            <div className="flex min-h-0 flex-1 flex-col rounded-[14px] border border-border bg-panel-soft px-3 py-3">
               <div className="flex items-center gap-2">
                 <Table2 className="h-4 w-4 text-muted" />
                 <p className="text-[12px] font-semibold text-ink">Workspace Explorer</p>
               </div>
               {metadataError ? <InlineAlert className="mt-2" tone="info">{metadataError}</InlineAlert> : null}
-              <div className={`mt-2 grid min-h-0 gap-3 ${showExplorerDetailPane ? 'lg:grid-cols-[1.15fr_0.85fr] xl:grid-cols-1' : ''}`}>
-                <div className="max-h-[360px] overflow-y-auto rounded-[12px] bg-white px-3 py-3">
+              <div className="mt-2 min-h-0 flex-1">
+                <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[12px] bg-white px-3 py-3">
                   <div className="px-1">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">Objects</p>
                     <label className="mt-2 flex h-9 items-center gap-2 rounded-[10px] border border-border bg-[#f8fafc] px-2.5">
@@ -987,56 +1164,22 @@ export function SQLEditorPage() {
                       />
                     </label>
                   </div>
-                  <div className="mt-3 border-t border-border/80 pt-3">
-                  {connectionsLoading ? (
-                    <p className="px-1 py-2 text-[12px] text-muted">載入連線中…</p>
-                  ) : !activeConnection || explorerNodes.length === 0 ? (
-                    <p className="px-1 py-2 text-[12px] text-muted">目前沒有可用的 DB connection。</p>
-                  ) : filteredExplorerNodes.length === 0 ? (
-                    <p className="px-1 py-2 text-[12px] text-muted">沒有符合搜尋條件的資產。</p>
-                  ) : (
-                    <AssetTree
-                      nodes={filteredExplorerNodes[0]?.children ?? []}
-                      onSelect={handleSelectNode}
-                      onToggle={(node) => void handleToggleNode(node)}
-                    />
-                  )}
-                  </div>
-                </div>
-
-                {showExplorerDetailPane ? (
-                  <div className="max-h-[360px] overflow-y-auto rounded-[12px] bg-white px-3 py-3">
-                    {activeConnection?.db_type === 'redis' ? (
-                      <div className="px-1 py-2 text-[12px] text-muted">
-                        {selectedDatabase ? `已選擇 Redis DB ${selectedDatabase}。key 瀏覽後續再補。` : '先選擇 Redis DB。'}
-                      </div>
-                    ) : selectedTable ? (
-                      <>
-                        <div className="border-b border-border/80 px-1 py-2">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">Columns</p>
-                          <p className="mt-1 text-[12px] font-semibold text-ink">
-                            {selectedDatabase ? `${selectedDatabase} / ` : ''}
-                            {selectedTable.schema}.{selectedTable.name}
-                          </p>
-                        </div>
-                        {columnsLoading ? (
-                          <p className="px-1 py-2 text-[12px] text-muted">載入 columns 中…</p>
-                        ) : columns.length === 0 ? (
-                          <p className="px-1 py-2 text-[12px] text-muted">尚無 columns。</p>
-                        ) : (
-                          columns.map((column) => (
-                            <div key={column.name} className="border-b border-border/60 px-1 py-2 text-[12px] text-ink last:border-b-0">
-                              <p className="font-semibold">{column.name}</p>
-                              <p className="mt-0.5 text-[11px] text-muted">{column.column_type}</p>
-                            </div>
-                          ))
-                        )}
-                      </>
+                  <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t border-border/80 pt-3">
+                    {connectionsLoading ? (
+                      <p className="px-1 py-2 text-[12px] text-muted">載入連線中…</p>
+                    ) : !activeConnection || explorerNodes.length === 0 ? (
+                      <p className="px-1 py-2 text-[12px] text-muted">目前沒有可用的 DB connection。</p>
+                    ) : filteredExplorerNodes.length === 0 ? (
+                      <p className="px-1 py-2 text-[12px] text-muted">沒有符合搜尋條件的資產。</p>
                     ) : (
-                      <p className="px-1 py-2 text-[12px] text-muted">{detailHint}</p>
+                      <AssetTree
+                        nodes={filteredExplorerNodes}
+                        onSelect={handleSelectNode}
+                        onToggle={(node) => void handleToggleNode(node)}
+                      />
                     )}
                   </div>
-                ) : null}
+                </div>
               </div>
             </div>
           </div>
@@ -1171,29 +1314,19 @@ export function SQLEditorPage() {
                   <Play className="h-4 w-4" />
                   {runningTabId === activeTab.id ? '執行中…' : 'Run Query'}
                 </button>
-                <button
-                  type="button"
-                  onClick={handleToggleFavorite}
-                  className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-page"
-                >
-                  {isFavorited ? <StarOff className="h-4 w-4" /> : <Star className="h-4 w-4" />}
-                  {isFavorited ? '取消收藏' : '加入收藏'}
-                </button>
                 <div className="inline-flex h-10 min-w-[220px] items-center rounded-[12px] border border-border bg-white px-3 text-[12px] font-semibold text-muted">
                   <span className="truncate">{activePathLabel.length > 0 ? activePathLabel.join(' / ') : '從左側 Explorer 選擇資料源'}</span>
                 </div>
-                {activeTab.lastRunAt ? (
-                  <p className="text-[12px] text-muted">Last run: {new Date(activeTab.lastRunAt).toLocaleString()}</p>
-                ) : null}
               </div>
 
-              <div className="min-h-0 flex-1 p-4">
-                <div className="overflow-hidden rounded-[18px] border border-[#d8e2ee] bg-[#eef4fb]">
+              <div className="shrink-0 p-4">
+                <div ref={editorContainerRef} className="overflow-hidden rounded-[18px] border border-[#d8e2ee] bg-[#eef4fb]">
                   <CodeMirror
                     value={activeTab.sql}
-                    height="320px"
+                    height={editorHeight}
                     extensions={editorExtensions}
                     onChange={(value) => updateActiveTab({ sql: value })}
+                    onStatistics={(stats) => setSelectedSQL(stats.selectedText ? stats.selectionCode : '')}
                     theme="light"
                     basicSetup={{
                       lineNumbers: true,
@@ -1204,15 +1337,15 @@ export function SQLEditorPage() {
                 </div>
               </div>
 
-              <div className="border-t border-border/80 px-4 py-3">
+              <div className="flex min-h-0 flex-1 flex-col border-t border-border/80 px-4 py-3">
                 {hasSensitiveOverride || activeTab.result?.sensitive_override_active ? (
                   <div className="mb-3 rounded-[14px] border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
                     <span className="font-semibold">Sensitive override active.</span> 此帳號的查詢與匯出結果會直接顯示未脫敏資料。
                   </div>
                 ) : null}
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-3 text-[12px] text-muted">
-                    <div className="inline-flex items-center rounded-[10px] border border-border bg-white p-1">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="inline-flex items-center rounded-[14px] border border-border bg-white p-1">
                       <button
                         type="button"
                         onClick={() => setResultView('result')}
@@ -1225,6 +1358,26 @@ export function SQLEditorPage() {
                       </button>
                       <button
                         type="button"
+                        onClick={() => setResultView('vertical')}
+                        className={`inline-flex items-center gap-2 rounded-[8px] px-3 py-1.5 ${
+                          resultView === 'vertical' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
+                        }`}
+                      >
+                        <Layers3 className="h-4 w-4" />
+                        Vertical
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setResultView('object-meta')}
+                        className={`inline-flex items-center gap-2 rounded-[8px] px-3 py-1.5 ${
+                          resultView === 'object-meta' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
+                        }`}
+                      >
+                        <Database className="h-4 w-4" />
+                        Object Meta
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setResultView('history')}
                         className={`inline-flex items-center gap-2 rounded-[8px] px-3 py-1.5 ${
                           resultView === 'history' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
@@ -1234,13 +1387,85 @@ export function SQLEditorPage() {
                         History
                       </button>
                     </div>
-                    {resultView === 'result' && activeTab.result ? (
-                      <span>{activeTab.result.row_count} rows / {activeTab.result.duration_ms} ms</span>
-                    ) : resultView === 'history' ? (
-                      <span>{history.length} entries</span>
-                    ) : null}
                   </div>
-                  {resultView === 'result' ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setResultView('saved')}
+                      className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Star className="h-4 w-4" />
+                      Saved
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveQuery()}
+                      disabled={!activeTab.connectionId || !activeTab.sql.trim() || isFavorited}
+                      className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isFavorited ? <StarOff className="h-4 w-4" /> : <Star className="h-4 w-4" />}
+                      {isFavorited ? 'Saved' : 'Save'}
+                    </button>
+                    <div className="inline-flex items-center overflow-hidden rounded-[10px] border border-border bg-white">
+                      <select
+                        value={sensitiveAccessDuration}
+                        onChange={(event) => setSensitiveAccessDuration(Number(event.target.value))}
+                        disabled={!canApplySensitiveAccess}
+                        className="h-9 border-r border-border bg-transparent px-2 text-[12px] font-semibold text-ink outline-none disabled:cursor-not-allowed"
+                      >
+                        <option value={10}>10m</option>
+                        <option value={30}>30m</option>
+                        <option value={60}>60m</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => void handleCreateSensitiveAccess()}
+                        disabled={!canApplySensitiveAccess || !activeTab.connectionId || !activeTab.sql.trim()}
+                        className="inline-flex h-9 items-center gap-2 px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Sensitive Access
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setColumnFilterOpen((current) => !current)}
+                        disabled={!activeTab.result}
+                        className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Filter className="h-4 w-4" />
+                        Filter Columns
+                      </button>
+                      {columnFilterOpen && activeTab.result ? (
+                        <div className="absolute right-0 top-[calc(100%+8px)] z-10 w-64 rounded-[14px] border border-border bg-white p-3 shadow-soft">
+                          <div className="mb-2 flex items-center justify-between">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">Visible Columns</p>
+                            <button
+                              type="button"
+                              onClick={() => setVisibleColumnIndexes(activeTab.result?.columns.map((_, index) => index) ?? [])}
+                              className="text-[11px] font-semibold text-accent"
+                            >
+                              Reset
+                            </button>
+                          </div>
+                          <div className="max-h-64 space-y-2 overflow-y-auto">
+                            {activeTab.result.columns.map((column, index) => {
+                              const checked = visibleResultColumnIndexes.includes(index)
+                              return (
+                                <label key={`${column}-${index}`} className={`flex items-center gap-2 text-[12px] ${sensitiveColumnIndexSet.has(index) ? 'text-[#b9381f]' : 'text-ink'}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleVisibleColumn(index)}
+                                  />
+                                  <span className="truncate">{column}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
                     <button
                       type="button"
                       onClick={() => void handleExport()}
@@ -1248,14 +1473,26 @@ export function SQLEditorPage() {
                       className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Download className="h-4 w-4" />
-                      {exportingTabId === activeTab.id ? '匯出中…' : 'Export Result'}
+                      {exportingTabId === activeTab.id ? '匯出中…' : 'EXPORT'}
                     </button>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted">
+                  {(resultView === 'result' || resultView === 'vertical') && activeTab.result ? (
+                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
+                      Executed in {(activeTab.result.duration_ms / 1000).toFixed(activeTab.result.duration_ms >= 1000 ? 2 : 3)}s
+                    </span>
                   ) : null}
+                  {activeTab.lastRunAt ? (
+                    <span>{new Date(activeTab.lastRunAt).toLocaleString()}</span>
+                  ) : null}
+                  <span>{resultMetaLine}</span>
                 </div>
 
                 {activeTab.error ? <InlineAlert className="mt-3">{activeTab.error}</InlineAlert> : null}
 
-                <div className="mt-3 max-h-[320px] overflow-auto rounded-[16px] border border-border bg-white">
+                <div className="mt-3 min-h-0 flex-1 overflow-auto rounded-[16px] border border-border bg-white">
                   {resultView === 'history' ? (
                     history.length === 0 ? (
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
@@ -1267,12 +1504,130 @@ export function SQLEditorPage() {
                           <button
                             key={entry.id}
                             type="button"
-                            onClick={() => applySavedQuery({ connectionId: entry.connectionId, sql: entry.sql, label: 'History Query' })}
+                            onClick={() => applySavedQuery({
+                              connectionId: entry.db_connection_id,
+                              sql: entry.sql_content,
+                              label: entry.db_connection_name,
+                              database: entry.database_name,
+                              schema: entry.schema_name,
+                              redisDbIndex: entry.redis_db_index,
+                            })}
                             className="block w-full px-4 py-3 text-left transition hover:bg-slate-50/70"
                           >
-                            <p className="truncate text-[12px] font-semibold text-ink">{entry.sql}</p>
-                            <p className="mt-1 text-[11px] text-muted">{new Date(entry.createdAt).toLocaleString()}</p>
+                            <p className="truncate text-[12px] font-semibold text-ink">{entry.sql_content}</p>
+                            <p className="mt-1 text-[11px] text-muted">
+                              {entry.db_connection_name} / {entry.duration_ms} ms / {new Date(entry.created_at).toLocaleString()}
+                            </p>
                           </button>
+                        ))}
+                      </div>
+                    )
+                  ) : resultView === 'saved' ? (
+                    savedQueries.length === 0 ? (
+                      <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
+                        尚無常用 SQL。
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-border">
+                        {savedQueries.map((entry) => (
+                          <div key={entry.id} className="flex items-start justify-between gap-3 px-4 py-3 transition hover:bg-slate-50/70">
+                            <button
+                              type="button"
+                              onClick={() => applySavedQuery({
+                                connectionId: entry.db_connection_id,
+                                sql: entry.sql_content,
+                                label: entry.label,
+                                database: entry.database_name,
+                                schema: entry.schema_name,
+                                redisDbIndex: entry.redis_db_index,
+                              })}
+                              className="min-w-0 flex-1 text-left"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="truncate text-[12px] font-semibold text-ink">{entry.label}</p>
+                                <span className="shrink-0 text-[10px] text-muted">{entry.db_connection_name}</span>
+                              </div>
+                              <p className="mt-1 truncate text-[11px] text-muted">{entry.sql_content}</p>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSavedQueryToDelete(entry)}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-border bg-white text-muted transition hover:bg-page hover:text-danger"
+                              aria-label={`Delete saved query ${entry.label}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  ) : resultView === 'object-meta' ? (
+                    !selectedTable ? (
+                      <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
+                        {detailHint || '從左側資產樹點擊資料表後查看表結構。'}
+                      </div>
+                    ) : columnsLoading ? (
+                      <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
+                        載入表結構中…
+                      </div>
+                    ) : columns.length === 0 ? (
+                      <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
+                        尚無表結構資料。
+                      </div>
+                    ) : (
+                      <table className="min-w-full border-collapse">
+                        <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+                          <tr>
+                            <th className="px-3 py-3">Column</th>
+                            <th className="px-3 py-3">Type</th>
+                            <th className="px-3 py-3">Nullable</th>
+                            <th className="px-3 py-3">Default</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {columns.map((column) => (
+                            <tr key={column.name} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
+                              <td className="px-3 py-2.5 font-semibold">{column.name}</td>
+                              <td className="px-3 py-2.5">{column.column_type}</td>
+                              <td className="px-3 py-2.5">{column.is_nullable}</td>
+                              <td className="px-3 py-2.5">{column.default || <span className="text-muted">(none)</span>}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )
+                  ) : resultView === 'vertical' ? (
+                    !activeTab.result ? (
+                      <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
+                        尚未執行查詢。
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-border">
+                        {pagedResultRows.map((row, rowOffset) => (
+                          <div key={`${activeTab.id}-vertical-${resultPage}-${rowOffset}`} className="px-4 py-2.5">
+                            <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-faint">
+                              Row {(resultPage - 1) * RESULT_PAGE_SIZE + rowOffset + 1}
+                            </p>
+                            <div className="overflow-hidden rounded-[12px] border border-border bg-panel-soft">
+                              {visibleResultColumnIndexes.map((columnIndex) => (
+                                <div
+                                  key={`${activeTab.id}-vertical-${rowOffset}-${columnIndex}`}
+                                  className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-t border-border px-3 py-2 first:border-t-0 sm:grid-cols-[160px_minmax(0,1fr)]"
+                                >
+                                  <p className={`text-[10px] font-bold uppercase tracking-[0.14em] ${sensitiveColumnIndexSet.has(columnIndex) ? 'text-[#b9381f]' : 'text-faint'}`}>
+                                    {activeTab.result?.columns[columnIndex]}
+                                  </p>
+                                  <p className="break-all text-[12px] text-ink">
+                                    {!Array.isArray(row)
+                                      ? <span className="text-muted">(empty)</span>
+                                      : row[columnIndex] === null
+                                        ? <span className="text-muted">(null)</span>
+                                        : String(row[columnIndex])}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         ))}
                       </div>
                     )
@@ -1280,17 +1635,26 @@ export function SQLEditorPage() {
                     <table className="min-w-full border-collapse">
                       <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
                         <tr>
-                          {activeTab.result.columns.map((column) => (
-                            <th key={column} className="px-3 py-3">{column}</th>
+                          {visibleResultColumnIndexes.map((columnIndex) => (
+                            <th
+                              key={`${activeTab.result?.columns[columnIndex]}-${columnIndex}`}
+                              className={`px-3 py-3 ${sensitiveColumnIndexSet.has(columnIndex) ? 'text-[#b9381f]' : ''}`}
+                            >
+                              {activeTab.result?.columns[columnIndex]}
+                            </th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {activeTab.result.rows.map((row, rowIndex) => (
-                          <tr key={`${activeTab.id}-row-${rowIndex}`} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
-                            {(Array.isArray(row) ? row : []).map((cell, cellIndex) => (
-                              <td key={`${activeTab.id}-cell-${rowIndex}-${cellIndex}`} className="px-3 py-2.5 align-top">
-                                {cell === null ? <span className="text-muted">(null)</span> : String(cell)}
+                        {pagedResultRows.map((row, rowOffset) => (
+                          <tr key={`${activeTab.id}-row-${resultPage}-${rowOffset}`} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
+                            {visibleResultColumnIndexes.map((columnIndex) => (
+                              <td key={`${activeTab.id}-cell-${rowOffset}-${columnIndex}`} className="px-3 py-2.5 align-top">
+                                {!Array.isArray(row)
+                                  ? <span className="text-muted">(empty)</span>
+                                  : row[columnIndex] === null
+                                    ? <span className="text-muted">(null)</span>
+                                    : String(row[columnIndex])}
                               </td>
                             ))}
                           </tr>
@@ -1303,11 +1667,46 @@ export function SQLEditorPage() {
                     </div>
                   )}
                 </div>
+                {(resultView === 'result' || resultView === 'vertical') && activeTab.result && totalResultPages > 1 ? (
+                  <div className="mt-3 flex items-center justify-end gap-2 text-[12px] text-muted">
+                    <button
+                      type="button"
+                      onClick={() => setResultPage((current) => Math.max(1, current - 1))}
+                      disabled={resultPage <= 1}
+                      className="inline-flex h-8 items-center rounded-[10px] border border-border bg-white px-3 font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      上一頁
+                    </button>
+                    <span>{resultPage} / {totalResultPages}</span>
+                    <button
+                      type="button"
+                      onClick={() => setResultPage((current) => Math.min(totalResultPages, current + 1))}
+                      disabled={resultPage >= totalResultPages}
+                      className="inline-flex h-8 items-center rounded-[10px] border border-border bg-white px-3 font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      下一頁
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
           )}
         </section>
       </div>
+      <ConfirmDialog
+        open={savedQueryToDelete !== null}
+        title="刪除常用 SQL"
+        description={savedQueryToDelete ? `確認刪除「${savedQueryToDelete.label}」？刪除後若已達 10 筆上限，才可再新增其他常用 SQL。` : ''}
+        confirmLabel="刪除"
+        cancelLabel="取消"
+        tone="danger"
+        onCancel={() => setSavedQueryToDelete(null)}
+        onConfirm={() => {
+          if (savedQueryToDelete) {
+            void handleDeleteSavedQuery(savedQueryToDelete)
+          }
+        }}
+      />
     </div>
   )
 }

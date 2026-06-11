@@ -19,8 +19,10 @@ const (
 type TicketType string
 
 const (
-	TicketTypeDDL TicketType = "ddl"
-	TicketTypeDML TicketType = "dml"
+	TicketTypeDDL                  TicketType = "ddl"
+	TicketTypeDML                  TicketType = "dml"
+	TicketTypeSQLExport            TicketType = "sql_export"
+	TicketTypeSensitiveQueryAccess TicketType = "sensitive_query_access"
 )
 
 type Ticket struct {
@@ -40,8 +42,25 @@ type Ticket struct {
 	ScheduledAt    *time.Time   `db:"scheduled_at"     json:"scheduled_at,omitempty"`
 	StartedAt      *time.Time   `db:"started_at"       json:"started_at,omitempty"`
 	CompletedAt    *time.Time   `db:"completed_at"     json:"completed_at,omitempty"`
+	ApprovedDurationMinutes *int `db:"approved_duration_minutes" json:"approved_duration_minutes,omitempty"`
+	ApprovedUntil *time.Time `db:"approved_until"     json:"approved_until,omitempty"`
+	RevokedAt     *time.Time `db:"revoked_at"         json:"revoked_at,omitempty"`
+	RevokedBy     *uint64    `db:"revoked_by"         json:"revoked_by,omitempty"`
 	CreatedAt      time.Time    `db:"created_at"       json:"created_at"`
 	UpdatedAt      time.Time    `db:"updated_at"       json:"updated_at"`
+}
+
+type TicketScope struct {
+	ID           uint64    `db:"id"            json:"id"`
+	TicketID     uint64    `db:"ticket_id"     json:"ticket_id"`
+	ConnectionID uint64    `db:"connection_id" json:"connection_id"`
+	DatabaseName *string   `db:"database_name" json:"database_name,omitempty"`
+	SchemaName   *string   `db:"schema_name"   json:"schema_name,omitempty"`
+	TableName    *string   `db:"table_name"    json:"table_name,omitempty"`
+	ColumnName   string    `db:"column_name"   json:"column_name"`
+	IsSensitive  bool      `db:"is_sensitive"  json:"is_sensitive"`
+	SourceKind   string    `db:"source_kind"   json:"source_kind"`
+	CreatedAt    time.Time `db:"created_at"    json:"created_at"`
 }
 
 type TicketExecution struct {

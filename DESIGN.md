@@ -1,148 +1,100 @@
-# DESIGN.md
+# DESIGN.md — Admin Dashboard 設計規範
 
-DBRE Maestro 目前已批准的設計方向，來源於 `sql-editor` finalized 稿。
-這份文件是後續 `/design-shotgun`、`/design-html` 與實作頁面的共同基準。
+> 參考來源：[Shadcnblocks Admin Kit](https://www.shadcnblocks.com/admin-dashboard)（[Live Demo](https://shadcnblocks-admin.vercel.app/)）
+> 技術基礎：Next.js (App Router) + shadcn/ui + Tailwind CSS + TypeScript + Recharts
 
-## 設計定位
+---
 
-- 產品類型：內部 DBA / 工程團隊使用的資料庫治理工作台
-- 視覺語氣：乾淨、冷靜、偏專業工具，不走行銷感或展示感
-- 互動原則：主操作前景化，治理資訊近身但不搶焦點
-- 版面原則：優先保障主工作區面積，避免為提示或摘要切碎畫面
+## 1. 整體風格
 
-## 色彩 Tokens
+- **極簡單色（Monochrome）**：以黑、白、灰為主色調，圖表也以深淺灰階呈現，僅在語意處使用彩色。
+- **卡片式版面**：淺灰頁面背景（`bg-muted/40`）+ 白色卡片，圓角 `rounded-xl`，細邊框 `border`，無陰影或極淡陰影。
+- **大量留白**：卡片內 padding 充足（`p-6`），區塊間距 `gap-4`～`gap-6`。
+- **語意色僅兩種**：綠色 = 正向趨勢（+27.9%），紅色 = 負向趨勢（-13.7%）與通知 badge。
+- **支援明暗模式與主題色切換**：CSS variables 驅動（shadcn theming），頂部欄提供 light/dark toggle 與 theme preset 選擇器。
 
-```css
-:root {
-  --page: #f6f7fb;
-  --panel: #ffffff;
-  --panel-muted: #fbfcfe;
-  --panel-soft: #f7f9fc;
-  --sidebar: #ffffff;
-  --editor: #f9fbfd;
-  --editor-border: #dbe3ec;
-  --editor-toolbar: #f3f6fa;
-  --editor-code-bg: #eef3f8;
-  --editor-code-text: #1f2937;
-  --text: #101828;
-  --text-secondary: #667085;
-  --text-muted: #98a2b3;
-  --brand: #111827;
-  --accent: #2563eb;
-  --accent-soft: #eff6ff;
-  --success: #12b76a;
-  --warning: #f79009;
-  --danger: #f04438;
-  --border: #e7ebf0;
-  --border-strong: #d0d5dd;
-}
+## 2. 版面結構（App Shell）
+
+```
+┌──────────┬──────────────────────────────────────────────┐
+│          │ Topbar：☰ | App 名稱      🔍⌘K 🔔 ☀️ 主題選擇 │
+│ Sidebar  ├──────────────────────────────────────────────┤
+│ (256px,  │ Breadcrumb：Kit / Products / Product List    │
+│ 可收合)  ├──────────────────────────────────────────────┤
+│          │ 主內容區（獨立捲動容器、max-width 置中）       │
+│ 群組導覽 │   PageHeader + 卡片網格 / 表格 / 表單          │
+│ 底部用戶 │                                              │
+└──────────┴──────────────────────────────────────────────┘
 ```
 
-## 字體系統
+### 2.1 Sidebar（左側欄）
+- 寬約 256px，可收合為 icon-only 模式（shadcn `Sidebar` 元件，`collapsible="icon"`）。
+- **頂部**：workspace/team switcher（logo + 名稱 + 副標 + 上下箭頭）。
+- **中段**：依領域分群（如 `Ecommerce`、`Project Management`、`Manage`），群組標籤為小型 muted 文字。
+- 導覽項目：icon + 文字 + 右側 chevron（可展開子選單）；子選單以左側豎線縮排呈現；當前頁高亮（淺灰底）。
+- **底部**：使用者卡片（avatar + 名稱 + email + 選單）。
 
-- UI Sans：`Manrope`, `Noto Sans TC`, `sans-serif`
-- Display / Page Title：`Sora`, `Manrope`, `sans-serif`
-- Mono / SQL / IDs：`JetBrains Mono`, `monospace`
+### 2.2 Topbar（頂部欄）
+- 左：sidebar 收合鈕 + 目前 App 名稱。
+- 右：全域搜尋（觸發 `⌘K` Command Palette）、通知鈴鐺（紅色數字 badge）、明暗切換、主題色選擇器（色點 + 名稱下拉）。
 
-## 字重與層級
+### 2.3 第二層工具列
+- Breadcrumb（目前路徑）+ 頁面內搜尋框（"Search pages or run commands"）。
 
-- Page title：`Sora 800`, 28px, 緊字距
-- Section title：`Sora/Manrope 700-800`, 18px
-- Navigation / primary button：`Manrope 700`
-- Body：`Manrope 400`, 13px / 1.5
-- Meta / secondary copy：11-12px，使用 `--text-secondary` 或 `--text-muted`
+## 3. 頁面模式（Page Patterns）
 
-## 間距與尺寸
+### 3.1 Dashboard（總覽頁）
+1. **KPI Stat Row**：4 格等寬統計卡（以分隔線相隔、共用一張卡片）。每格：icon + 指標名稱（muted）→ 前期數值（小字 muted）→ **大號粗體數值**（text-3xl/4xl font-bold）→ 趨勢箭頭 + 百分比（綠/紅）+ "vs last month"。
+2. **主圖表列**：2 欄（約 5:4）。卡片標頭 = 方形 icon 容器 + 標題 + 右側 legend；折線/面積圖（本年 vs 去年，黑線 + 灰面積）、水平堆疊長條圖（各通路營收，灰階區分）。
+3. **次要卡片列**：3 欄等寬。迷你長條圖、雙線比較圖、donut 圖（中心顯示最大占比 + 右側 legend 列表附百分比）。
+4. 圖表使用 Recharts（shadcn `Chart` 包裝），一律灰階配色、淺色格線、無多餘裝飾。
 
-- 外層 page gutter：`18px`
-- Sidebar width：`252px`
-- Card padding：`18px`
-- 小型 control 高度：`36px`
-- Search / input 高度：`40px`
-- Card radius：`18px`
-- Control radius：`12px`
-- Pill radius：`999px`
+### 3.2 列表頁（Data Table）
+- **PageHeader**：大標題（text-3xl/4xl font-bold）+ 一行 muted 描述；右側主要 CTA 為**黑底白字按鈕**（icon + 文字，如 "+ Add Products"）。
+- **Tabs**：底線式 tab（如 "All products"）。
+- **篩選列**：左側搜尋框 + 多個下拉篩選（Category / Supplier / Stock level）；右側 "Manage Table"（欄位顯示設定）。
+- **表格**：
+  - 表頭淺灰底、欄位可排序（名稱 + 排序箭頭）。
+  - 儲存格模式：縮圖 + 名稱（粗體）、等寬碼（SKU）、灰底 `Badge`（分類）、複合資訊（庫存數 + High/Low 標籤 + 綠色進度條）、金額靠右。
+  - 每列尾端 `⋯` DropdownMenu（row actions）。
+- 表格下方：分頁器 + 筆數資訊。
 
-## 陰影與邊框
+### 3.3 表單頁（Create / Edit）
+- **PageHeader**：標題 + 描述；右側動作列：`Reset`（ghost）、`Save draft`（outline）、`Save Product`（黑色 primary）。
+- **兩欄布局**（約 2:1）：
+  - 主欄：表單卡片分區（如 "Product Info"），每區有標題 + muted 說明。
+  - 側欄：次要設定卡片（如 "Pricing"），sticky 跟隨捲動。
+- 欄位規範：label 在上方、placeholder 給範例值（"Shirt, t-shirts, etc."）、欄位下方輔助說明用 muted 小字；相關欄位並排（SKU / Barcode）；金額欄位前綴幣別。
+- 圖片上傳：虛線框預覽區 + "Upload image" / "Remove" 文字按鈕 + 規格說明。
 
-```css
---shadow: 0 18px 38px rgba(16, 24, 40, 0.06);
---shadow-soft: 0 4px 14px rgba(16, 24, 40, 0.05);
-```
+## 4. 設計 Tokens
 
-- 預設邊框色：`--border`
-- 強調邊框：`--border-strong`
-- 不使用厚重投影或高飽和外光暈
+| Token | 值（建議） |
+|---|---|
+| 字體 | Geist / Inter（sans-serif），等寬碼用 mono |
+| 頁面背景 | `--background`（近白）/ 內容區 `bg-muted/40` |
+| 卡片 | `bg-card` 白、`border`、`rounded-xl` |
+| 主要按鈕 | 黑底白字（`bg-primary text-primary-foreground`） |
+| 文字層級 | 標題 `font-bold`；說明/標籤 `text-muted-foreground text-sm` |
+| 正向/負向 | green-600 / red-600（僅用於趨勢與警示） |
+| 圓角 | 卡片 `xl`、按鈕/輸入框 `md`、badge `full` |
+| 間距 | 卡片內 `p-6`，網格 `gap-4`～`gap-6` |
 
-## 版面模式
+## 5. 元件對照（shadcn/ui）
 
-- 頁面基底：左側固定 sidebar + 右側主工作區
-- 主工作區：先是 page heading，再是工作模組
-- 內容頁優先使用「一大主區 + 次工具列」結構
-- 對 SQL Editor 類頁面：
-  - 第一屏優先保留 tab、editor、主要操作
-  - result table 應盡量跨滿可用寬度
-  - 治理規則應使用收合、pill、popover 或近身提示，不應形成大塊獨立模組
+| 用途 | 元件 |
+|---|---|
+| App Shell | `Sidebar`（collapsible icon）、`Breadcrumb` |
+| 全域搜尋 | `Command`（⌘K palette） |
+| 統計/圖表 | `Card` + `Chart`（Recharts：Area/Bar/Line/Pie） |
+| 列表 | `Table`、`Tabs`、`Badge`、`Progress`、`DropdownMenu`、`Pagination`、`Select`、`Input` |
+| 表單 | `Form`（react-hook-form + zod）、`Input`、`Select`、`Textarea`、`Button` |
+| 其他 | `Avatar`、`Tooltip`、`Sheet`（行動版 sidebar）、`Sonner`（toast） |
 
-## 元件語氣
+## 6. 互動與響應式
 
-### Sidebar
-- 白底、輕微玻璃感
-- active item 用淡灰底，不用高彩色塊
-- nav label 用 11px 大寫輔助分組
-
-### Tabs
-- 預設白底描邊
-- active tab 深色底、白字
-- 不做誇張陰影或漸層
-
-### Buttons
-- Primary：深色實底 `#111827 -> #1f2937`
-- Secondary / ghost：白底、細邊框
-- 高頻次要操作可放 toolbar，但要靠排序而不是色彩搶焦點
-
-### Chips / Pills
-- 用於 limit、status、guardrails 這類輕量上下文
-- 預設白底邊框
-- 成功 / 警告 / 錯誤狀態才用有色底
-
-### Cards
-- 白底、細邊框、輕陰影
-- 不使用厚重彩色背景卡作為預設
-
-### Table
-- 表頭使用淡灰背景
-- 敏感欄位表頭可用 danger 色提示
-- 表格優先資訊密度，不做花俏 row decoration
-
-## 互動準則
-
-- 使用者最常做的事必須永遠在第一視野
-- 額外治理資訊預設收合或弱化，但必須可快速展開
-- Search 不是每頁必備；若沒有明確查找需求，可以省略
-- Follow-up actions 盡量併回 result toolbar 或主工作區，不另外拆一張 summary card
-- 空間是稀缺資源，不要為了「看起來完整」塞入大面積提示模組
-
-## 響應式準則
-
-- Desktop：維持 sidebar + content 雙欄
-- Tablet：主內容可降成單欄，但保留原本資訊群組順序
-- Mobile：優先保住標題、主要操作、資料結果；次要提示改收合
-
-## 不該出現的風格
-
-- 預設紫藍漸層 hero
-- 行銷頁式大標語 + 大插畫
-- 過度圓潤的 SaaS landing page 卡片感
-- 為了提示而新增大面積獨立模組
-- 顏色過多的 status 系統
-- 把內部工具做成像品牌官網
-
-## 後續頁面對齊要求
-
-後續若做 `SQL Requests`、`Dashboard`、`Permission Requests`、`Audit Log`：
-
-- 延續同一套字體、色票、radius、shadow、border
-- 延續「高密度但不髒亂」的版面節奏
-- 治理資訊一律當作近身輔助，不可喧賓奪主
-- 若新頁面需要例外風格，必須明確說明為什麼這頁要偏離
+- `⌘K` 開啟 Command Palette（頁面導覽 + 指令）。
+- Sidebar 可收合；行動版改用 `Sheet` 抽屜。
+- 主內容區為獨立捲動容器（topbar / sidebar 固定）。
+- 表格在窄螢幕允許橫向捲動或隱藏次要欄位（搭配 Manage Table）。
+- 響應式斷點：KPI 4 欄 → 2 欄 → 1 欄；圖表列 2 欄 → 1 欄；表單兩欄 → 單欄。

@@ -1,13 +1,18 @@
 import { apiClient } from '@/shared/api/client'
 
 export type CreateExportResponse = {
-  id: number
-  status: 'ready' | 'pending' | 'rejected' | 'approved' | 'expired'
-  sensitive: boolean
-  download_url?: string
-  expires_at?: string
+  ticket_id: number
+  ticket_no: string
+  status: 'pending_review' | 'approved' | 'rejected' | 'ready' | 'pending' | 'expired'
+  contains_sensitive: boolean
+  scope_count: number
 }
 
-export function createExportRequest(payload: { sql_content: string; db_connection_id: number }) {
+export function createExportRequest(payload: {
+  sql_content: string
+  db_connection_id: number
+  database_name?: string
+  schema_name?: string
+}) {
   return apiClient.post<CreateExportResponse>('/exports', payload)
 }

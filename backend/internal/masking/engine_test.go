@@ -125,3 +125,19 @@ func TestNoRulesNoChange(t *testing.T) {
 		t.Error("no rules should leave data unchanged")
 	}
 }
+
+func TestMaskingUsesRawColumnsForLabelMatchingFallback(t *testing.T) {
+	e := newEngine(t)
+	result := &masking.QueryResult{
+		Columns:    []string{"user_id"},
+		RawColumns: []string{"t_deposit.user_id"},
+		Rows:       [][]any{{"12345"}},
+	}
+	rules := []masking.Rule{{Table: "t_deposit", Column: "user_id", Mode: masking.MaskModeFull}}
+	if err := e.MaskResult(result, rules); err != nil {
+		t.Fatal(err)
+	}
+	if result.Rows[0][0] != "****" {
+		t.Errorf("got %q, want ****", result.Rows[0][0])
+	}
+}

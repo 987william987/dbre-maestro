@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Database, FileClock, FilePlus2, LogOut, ShieldAlert, ShieldCheck, SquareTerminal, Ticket, Users } from 'lucide-react'
+import { ChevronDown, Database, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/shared/auth/AuthContext'
@@ -60,6 +60,12 @@ const NAV_ITEMS: NavItem[] = [
     icon: FileClock,
     allowed: (permissions) => permissions.includes('audit_logs.read'),
   },
+  {
+    to: '/settings',
+    label: 'Settings',
+    icon: Settings2,
+    allowed: (permissions) => permissions.includes('settings.read') || permissions.includes('settings.write'),
+  },
 ]
 
 const NAV_GROUPS = [
@@ -69,7 +75,7 @@ const NAV_GROUPS = [
   },
   {
     title: 'Governance',
-    items: ['/users', '/db-connections', '/masking-rules', '/sql-review-rules', '/audit-logs'],
+    items: ['/users', '/db-connections', '/masking-rules', '/sql-review-rules', '/audit-logs', '/settings'],
   },
 ]
 

@@ -20,6 +20,7 @@ import (
 
 type ExportHandler struct {
 	exports   *repository.ExportRepo
+	tickets   *repository.TicketRepo
 	dbConns   *repository.DBConnectionRepo
 	users     *repository.UserRepo
 	audit     *repository.AuditRepo
@@ -30,6 +31,7 @@ type ExportHandler struct {
 
 func NewExportHandler(
 	exports *repository.ExportRepo,
+	tickets *repository.TicketRepo,
 	dbConns *repository.DBConnectionRepo,
 	users *repository.UserRepo,
 	audit *repository.AuditRepo,
@@ -41,10 +43,11 @@ func NewExportHandler(
 ) *ExportHandler {
 	return &ExportHandler{
 		exports:   exports,
+		tickets:   tickets,
 		dbConns:   dbConns,
 		users:     users,
 		audit:     audit,
-		masking:   newMaskingRuntime(users, maskingRules, whitelist, engine),
+		masking:   newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo: notifRepo,
 		lark:      lark,
 	}
@@ -71,14 +74,15 @@ func (h *ExportHandler) sendInApp(ctx context.Context, userID uint64, notifType,
 }
 
 // POST /exports
-// Non-sensitive (no masking rules on the connection): immediate token, status=ready.
-// Sensitive (has masking rules): status=pending, requires DBA/reviewer approval.
+// Creates a sql_export ticket from SQL Editor context.
 func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
 
 	var req struct {
 		SQLContent     string `json:"sql_content"`
 		DBConnectionID uint64 `json:"db_connection_id"`
+		DatabaseName   string `json:"database_name"`
+		SchemaName     string `json:"schema_name"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -99,66 +103,55 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessibleIDs, err := h.users.GetEffectiveDBConnectionIDs(r.Context(), userID)
+	hasAccess, err := userCanAccessConnection(r.Context(), h.users, userID, req.DBConnectionID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "db scope check failed")
 		return
-	}
-	hasAccess := false
-	for _, accessibleID := range accessibleIDs {
-		if accessibleID == req.DBConnectionID {
-			hasAccess = true
-			break
-		}
 	}
 	if !hasAccess {
 		jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
 		return
 	}
 
-	sensitive, err := h.masking.isSensitiveConnection(r.Context(), conn)
+	analysis, err := analyzeSQLScopes(r.Context(), h.dbConns, h.masking, conn, req.SQLContent, buildQueryExecutionContext(req.DatabaseName, req.SchemaName))
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "check masking rules failed")
+		jsonErr(w, http.StatusUnprocessableEntity, "analyze export query failed: "+err.Error())
 		return
 	}
-
-	status := model.ExportStatusReady
-	if sensitive {
-		status = model.ExportStatusPending
-	}
-
-	exportReq := &model.ExportRequest{
-		RequesterID:    userID,
+	title := fmt.Sprintf("SQL Export / %s", conn.Name)
+	description := fmt.Sprintf("由 SQL Editor 建立的導出申請。Sensitive=%t", analysis.ContainsSensitive)
+	ticket, err := h.tickets.CreateWithScopes(r.Context(), &model.Ticket{
+		Title:          title,
+		Description:    &description,
 		SQLContent:     req.SQLContent,
-		DBConnectionID: req.DBConnectionID,
-	}
-
-	id, token, err := h.exports.Create(r.Context(), exportReq, status)
+		TicketType:     model.TicketTypeSQLExport,
+		DBConnectionID: &req.DBConnectionID,
+		SubmitterID:    userID,
+	}, analysis.Scopes)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "create export failed")
+		jsonErr(w, http.StatusInternalServerError, "create export ticket failed")
 		return
 	}
 
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
-		ActionType:   "export_create",
-		ResourceType: "export",
-		ResourceID:   &id,
-		Details:      map[string]string{"sensitive": fmt.Sprintf("%v", sensitive)},
+		ActionType:   "ticket_submit",
+		ResourceType: "ticket",
+		ResourceID:   &ticket.ID,
+		Details:      map[string]any{"ticket_type": ticket.TicketType, "contains_sensitive": analysis.ContainsSensitive},
 		IPAddress:    clientIP(r),
 	})
+	body := fmt.Sprintf("工單 %s 已提交，等待匯出審核", ticket.TicketNo)
+	h.sendInApp(r.Context(), userID, "ticket_submitted", "匯出工單已建立", body, "ticket", ticket.ID)
 
-	resp := map[string]any{
-		"id":        id,
-		"status":    string(status),
-		"sensitive": sensitive,
-	}
-	if !sensitive {
-		resp["download_url"] = fmt.Sprintf("/api/exports/download/%s", token)
-		resp["expires_at"] = time.Now().Add(24 * time.Hour)
-	}
-	jsonCreated(w, resp)
+	jsonCreated(w, map[string]any{
+		"ticket_id":           ticket.ID,
+		"ticket_no":           ticket.TicketNo,
+		"status":              string(ticket.Status),
+		"contains_sensitive":  analysis.ContainsSensitive,
+		"scope_count":         len(analysis.Scopes),
+	})
 }
 
 // GET /exports
@@ -167,7 +160,7 @@ func (h *ExportHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
 
 	var requesterID *uint64
-	if !middleware.HasPermission(r.Context(), "sql_editor.sensitive_review") {
+	if !middleware.HasPermission(r.Context(), "settings.write") {
 		requesterID = &userID
 	}
 
@@ -315,9 +308,23 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return
 	}
-	if _, err := h.masking.applyResult(r.Context(), conn, req.RequesterID, result); err != nil {
-		http.Error(w, "masking failed", http.StatusUnprocessableEntity)
-		return
+
+	shouldApplyMasking := true
+	if req.TicketID != nil && h.tickets != nil {
+		ticket, err := h.tickets.GetByID(r.Context(), *req.TicketID)
+		if err != nil {
+			http.Error(w, "ticket lookup failed", http.StatusInternalServerError)
+			return
+		}
+		if ticket != nil && ticket.TicketType == model.TicketTypeSQLExport && ticket.Status == model.TicketStatusApproved {
+			shouldApplyMasking = false
+		}
+	}
+	if shouldApplyMasking {
+		if _, _, err := h.masking.applyResult(r.Context(), conn, req.RequesterID, result); err != nil {
+			http.Error(w, "masking failed", http.StatusUnprocessableEntity)
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")

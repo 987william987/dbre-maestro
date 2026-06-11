@@ -27,6 +27,8 @@ const PERMISSION_METADATA: PermissionOption[] = [
   { key: 'users.write', module: 'Users', action: 'Write', label: 'Users Write', description: '管理 user 與 auth group。' },
   { key: 'audit_logs.read', module: 'Audit Logs', action: 'Read', label: 'Audit Logs Read', description: '查看稽核記錄頁面。' },
   { key: 'audit_logs.write', module: 'Audit Logs', action: 'Write', label: 'Audit Logs Write', description: '匯出 audit logs 報表。' },
+  { key: 'settings.read', module: 'Settings', action: 'Read', label: 'Settings Read', description: '查看平台設定頁面。' },
+  { key: 'settings.write', module: 'Settings', action: 'Write', label: 'Settings Write', description: '修改平台設定。' },
   { key: 'db_connections.read', module: 'DB Connections', action: 'Read', label: 'DB Connections Read', description: '查看資料庫連線清單。' },
   { key: 'db_connections.write', module: 'DB Connections', action: 'Write', label: 'DB Connections Write', description: '新增、修改、刪除資料庫連線。' },
   { key: 'masking_rules.read', module: 'Masking Rules', action: 'Read', label: 'Masking Rules Read', description: '查看遮罩規則與 whitelist。' },
