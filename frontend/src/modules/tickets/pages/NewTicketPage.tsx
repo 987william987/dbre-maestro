@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, FileText, Loader2, PanelTopOpen, ScrollText } from 'lucide-react'
+import { ArrowLeft, FileText, Loader2, ScrollText } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ApiError } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
@@ -93,8 +93,8 @@ export function NewTicketPage() {
         <section className="rounded-xl border border-border bg-panel shadow-soft">
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center gap-2">
-              <FileText className="h-4 w-4 text-accent" />
-              <p className="text-[13px] font-semibold text-ink">Request Brief</p>
+              <FileText className="h-4 w-4 text-muted" />
+              <p className="text-[13px] font-semibold text-ink">工單資訊</p>
             </div>
           </div>
 
@@ -160,15 +160,15 @@ export function NewTicketPage() {
         <section className="rounded-xl border border-border bg-panel shadow-soft">
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center gap-2">
-              <ScrollText className="h-4 w-4 text-accent" />
-              <p className="text-[13px] font-semibold text-ink">SQL Draft</p>
+              <ScrollText className="h-4 w-4 text-muted" />
+              <p className="text-[13px] font-semibold text-ink">
+                SQL 內容 <span className="text-danger">*</span>
+              </p>
             </div>
           </div>
 
           <label className="flex h-full flex-col gap-1.5 px-4 py-4">
-            <span className="text-[12px] font-semibold text-ink">
-              SQL 內容 <span className="text-danger">*</span>
-            </span>
+            <span className="sr-only">SQL 內容</span>
             <textarea
               value={sqlContent}
               onChange={(event) => setSqlContent(event.target.value)}
