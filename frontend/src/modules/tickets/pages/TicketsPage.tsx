@@ -8,8 +8,11 @@ import { formatDateTime } from '@/shared/lib/format'
 import type { Ticket, TicketStatus } from '@/shared/types/ticket'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
+import { Pagination } from '@/shared/ui/Pagination'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { listTickets } from '@/modules/tickets/api'
+
+const PAGE_SIZE = 20
 
 const STATUS_OPTIONS: Array<{ value: '' | TicketStatus; label: string }> = [
   { value: '', label: '全部狀態' },
@@ -28,15 +31,16 @@ export function TicketsPage() {
   const { user } = useAuth()
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [status, setStatus] = useState<'' | TicketStatus>('')
+  const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  async function loadTickets(nextStatus: '' | TicketStatus) {
+  async function loadTickets(nextStatus: '' | TicketStatus, nextOffset: number) {
     setLoading(true)
     setError('')
 
     try {
-      const response = await listTickets(nextStatus || undefined)
+      const response = await listTickets(nextStatus || undefined, PAGE_SIZE, nextOffset)
       setTickets(Array.isArray(response.tickets) ? response.tickets : [])
     } catch (loadError) {
       setError(loadError instanceof ApiError ? loadError.message : '讀取工單列表失敗，請稍後重試。')
@@ -46,8 +50,8 @@ export function TicketsPage() {
   }
 
   useEffect(() => {
-    void loadTickets(status)
-  }, [status])
+    void loadTickets(status, offset)
+  }, [status, offset])
 
   const canCreateTicket = user?.permissions.includes('tickets.apply') ?? false
 
@@ -80,7 +84,10 @@ export function TicketsPage() {
             <span className="font-semibold text-ink">狀態</span>
             <select
               value={status}
-              onChange={(event) => setStatus(event.target.value as '' | TicketStatus)}
+              onChange={(event) => {
+                setStatus(event.target.value as '' | TicketStatus)
+                setOffset(0)
+              }}
               className="h-10 min-w-[160px] rounded-lg border border-border bg-white px-3 text-[13px] font-medium text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             >
               {STATUS_OPTIONS.map((option) => (
@@ -153,6 +160,8 @@ export function TicketsPage() {
           </div>
         )}
       </div>
+
+      <Pagination offset={offset} pageSize={PAGE_SIZE} count={tickets.length} onChange={setOffset} />
     </div>
   )
 }

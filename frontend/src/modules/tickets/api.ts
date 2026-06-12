@@ -20,10 +20,16 @@ type CreateTicketPayload = {
   db_connection_id?: number | null
 }
 
-export async function listTickets(status?: TicketStatus) {
+export async function listTickets(status?: TicketStatus, limit?: number, offset?: number) {
   const query = new URLSearchParams()
   if (status) {
     query.set('status', status)
+  }
+  if (limit != null) {
+    query.set('limit', String(limit))
+  }
+  if (offset != null) {
+    query.set('offset', String(offset))
   }
 
   const path = query.size > 0 ? `/tickets?${query.toString()}` : '/tickets'

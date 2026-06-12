@@ -48,11 +48,11 @@ describe('TicketsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(mockedListTickets).toHaveBeenCalledWith(undefined))
+    await waitFor(() => expect(mockedListTickets).toHaveBeenCalledWith(undefined, 20, 0))
 
     fireEvent.change(screen.getByDisplayValue('全部狀態'), { target: { value: 'pending_review' } })
 
-    await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith('pending_review'))
+    await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith('pending_review', 20, 0))
   })
 
   it('後端回傳 null tickets 時會退化成空狀態，而不是直接白屏', async () => {
