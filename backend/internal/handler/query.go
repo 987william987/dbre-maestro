@@ -152,13 +152,13 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	password, err := h.dbConns.DecryptPassword(conn)
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	driver, dsn := pool.BuildDSN(conn, password)
+	driver, dsn := pool.BuildDSN(resolvedConn, password)
 	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
 	if err != nil {
 		jsonErr(w, http.StatusServiceUnavailable, "cannot connect to database: "+err.Error())
@@ -176,14 +176,14 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	result, err := executeQueryForConnection(ctx, conn, password, pools.QueryPool, execSQL, queryCtx)
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx)
 	if err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "query failed: "+err.Error())
 		return
 	}
 	durationMs := time.Since(start).Milliseconds()
 
-	sensitiveOverrideActive, sensitiveColumnIndexes, err := h.masking.applyResult(r.Context(), conn, userID, result)
+	sensitiveOverrideActive, sensitiveColumnIndexes, err := h.masking.applyResult(r.Context(), resolvedConn, userID, result)
 	if err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "masking failed")
 		return
@@ -1043,7 +1043,7 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 		return
 	}
 
-	password, err := h.dbConns.DecryptPassword(conn)
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal error")
 		return
@@ -1064,13 +1064,13 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 
 	start := time.Now()
 	val, err := pool.RedisGlobal().DoInDB(ctx, pool.RedisConnOptions{
-		ConnID:   conn.ID,
-		Host:     conn.Host,
-		Port:     conn.Port,
-		Username: conn.Username,
+		ConnID:   resolvedConn.ID,
+		Host:     resolvedConn.Host,
+		Port:     resolvedConn.Port,
+		Username: resolvedConn.Username,
 		Password: password,
 		DB:       dbIndex,
-		SSLMode:  conn.SSLMode,
+		SSLMode:  resolvedConn.SSLMode,
 	}, append([]interface{}{cmd}, ifaces...)...)
 	durationMs := time.Since(start).Milliseconds()
 	if err != nil && err != redis.Nil {

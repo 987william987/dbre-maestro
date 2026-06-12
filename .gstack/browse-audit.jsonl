@@ -100,3 +100,15 @@
 {"ts":"2026-06-12T02:40:58.433Z","cmd":"goto","args":"http://localhost:5173/settings","origin":"http://localhost:5173/settings","durationMs":33,"status":"ok","hasCookies":false,"mode":"launched"}
 {"ts":"2026-06-12T02:40:59.042Z","cmd":"wait","args":"--networkidle","origin":"http://localhost:5173/settings","durationMs":563,"status":"ok","hasCookies":false,"mode":"launched"}
 {"ts":"2026-06-12T02:40:59.744Z","cmd":"screenshot","args":"--viewport /tmp/dr-settings.png","origin":"http://localhost:5173/settings","durationMs":31,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-12T06:46:26.949Z","cmd":"goto","args":"http://localhost:5173/audit-logs","origin":"http://localhost:5173/audit-logs","durationMs":541,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-12T06:46:27.950Z","cmd":"wait","args":"--networkidle","origin":"http://localhost:5173/login","durationMs":946,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-12T06:46:28.848Z","cmd":"screenshot","args":"--viewport /tmp/dr-audit-after.png","origin":"http://localhost:5173/login","durationMs":40,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-12T06:46:28.892Z","cmd":"console","args":"--errors","origin":"http://localhost:5173/login","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-12T06:55:27.203Z","cmd":"goto","args":"http://localhost:5173/login","origin":"http://localhost:5173/login","durationMs":44,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-12T06:55:27.805Z","cmd":"screenshot","args":"--viewport /tmp/dr-login-after.png","origin":"http://localhost:5173/login","durationMs":20,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-12T06:55:27.880Z","cmd":"fill","args":"input[placeholder='e.g. admin'] admin","origin":"http://localhost:5173/login","durationMs":30,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-12T06:55:27.931Z","cmd":"fill","args":"input[type='password'] Admin1234","origin":"http://localhost:5173/login","durationMs":7,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-12T06:55:28.005Z","cmd":"click","args":"button[type='submit']","origin":"http://localhost:5173/login","durationMs":31,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-12T06:55:29.595Z","cmd":"goto","args":"http://localhost:5173/audit-logs","origin":"http://localhost:5173/audit-logs","durationMs":34,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-12T06:55:30.129Z","cmd":"wait","args":"--networkidle","origin":"http://localhost:5173/audit-logs","durationMs":485,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-12T06:55:31.038Z","cmd":"screenshot","args":"--viewport /tmp/dr-audit-after2.png","origin":"http://localhost:5173/audit-logs","durationMs":30,"status":"ok","hasCookies":false,"mode":"launched"}

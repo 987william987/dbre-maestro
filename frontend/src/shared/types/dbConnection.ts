@@ -1,3 +1,14 @@
+export type DBConnectionCredential = {
+  id: number
+  db_connection_id: number
+  credential_role: 'readonly' | 'readwrite' | string
+  username: string
+  encryption_key_version: number
+  created_at: string
+  updated_at: string
+  has_password: boolean
+}
+
 export type DBConnection = {
   id: number
   name: string
@@ -12,4 +23,5 @@ export type DBConnection = {
   created_by: number
   created_at: string
   updated_at: string
+  credentials?: DBConnectionCredential[]
 }

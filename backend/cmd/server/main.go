@@ -15,6 +15,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/config"
 	"github.com/dbre-maestro/maestro/internal/db"
 	"github.com/dbre-maestro/maestro/internal/handler"
+	"github.com/dbre-maestro/maestro/internal/job"
 	"github.com/dbre-maestro/maestro/internal/masking"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/notification"
@@ -84,6 +85,7 @@ func main() {
 	whitelistRepo := repository.NewMaskingWhitelistRepo(metaDB)
 	authGroupRepo := repository.NewAuthGroupRepo(metaDB)
 	settingsRepo := repository.NewSettingsRepo(metaDB)
+	dbMetadataRepo := repository.NewDBMetadataRepo(metaDB)
 
 	var larkClient *notification.Client
 	if cfg.LarkWebhookURL != "" {
@@ -117,10 +119,13 @@ func main() {
 	authGroupH := handler.NewAuthGroupHandler(authGroupRepo, userRepo, auditRepo)
 	notifH := handler.NewNotificationHandler(notifRepo)
 	whitelistH := handler.NewMaskingWhitelistHandler(dbConnRepo, whitelistRepo, auditRepo)
-	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, auditRepo)
+	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, dbConnRepo, auditRepo)
+	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo)
+	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
 
 	// Background scheduler: poll every 30s for due scheduled tickets
 	go runScheduler(ticketRepo, dbConnRepo, ticketH)
+	go inventoryJob.Start(context.Background())
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -200,7 +205,16 @@ func main() {
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSettingsRead).Get("/", settingsH.Get)
+			r.With(requireSettingsRead).Get("/db-connections", settingsH.ListDBConnections)
 			r.With(requireSettingsWrite).Patch("/", settingsH.Patch)
+		})
+
+		r.Route("/db-metadata", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireDBMetadataRead).Get("/inventory", dbMetadataH.ListInventory)
+			r.With(requireDBMetadataRead).Get("/objects", dbMetadataH.ListObjects)
 		})
 
 		r.Route("/auth-groups", func(r chi.Router) {
@@ -408,4 +422,7 @@ func requireSettingsRead(next http.Handler) http.Handler {
 }
 func requireSettingsWrite(next http.Handler) http.Handler {
 	return middleware.RequirePermission("settings.write")(next)
+}
+func requireDBMetadataRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission("db_metadata.read")(next)
 }

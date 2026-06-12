@@ -601,13 +601,13 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "db connection not found")
 		return
 	}
-	password, err := h.dbConns.DecryptPassword(conn)
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadwrite)
 	if err != nil {
 		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "decrypt password failed")
 		return
 	}
 
-	driver, dsn := pool.BuildDSN(conn, password)
+	driver, dsn := pool.BuildDSN(resolvedConn, password)
 	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
 	if err != nil {
 		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "cannot connect: "+err.Error())
@@ -881,11 +881,11 @@ func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64,
 	if err != nil || conn == nil {
 		return allIssues // fail open: can't connect, let static issues through
 	}
-	password, err := h.dbConns.DecryptPassword(conn)
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadwrite)
 	if err != nil {
 		return allIssues
 	}
-	driver, dsn := pool.BuildDSN(conn, password)
+	driver, dsn := pool.BuildDSN(resolvedConn, password)
 	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
 	if err != nil {
 		return allIssues // fail open

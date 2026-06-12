@@ -68,8 +68,8 @@ describe('DBConnectionsPage', () => {
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'analytics' } })
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'db.internal' } })
     fireEvent.change(screen.getByLabelText('Port'), { target: { value: '3306' } })
-    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'readonly' } })
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret' } })
+    fireEvent.change(screen.getByLabelText('Readonly Username'), { target: { value: 'readonly' } })
+    fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
     fireEvent.click(screen.getByRole('button', { name: '建立連線' }))
 
     await waitFor(() => expect(mockedCreateDBConnection).toHaveBeenCalledWith({
@@ -81,6 +81,7 @@ describe('DBConnectionsPage', () => {
       username: 'readonly',
       password: 'secret',
       ssl_mode: 'prefer',
+      credentials: [{ credential_role: 'readonly', username: 'readonly', password: 'secret' }],
     }))
     await waitFor(() => expect(mockedListDBConnections).toHaveBeenCalledTimes(2))
   })
@@ -95,8 +96,8 @@ describe('DBConnectionsPage', () => {
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'warehouse' } })
     fireEvent.change(screen.getByLabelText('DB Type'), { target: { value: 'postgres' } })
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'pg.internal' } })
-    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'postgres' } })
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret' } })
+    fireEvent.change(screen.getByLabelText('Readonly Username'), { target: { value: 'postgres' } })
+    fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '建立連線' }))
 
@@ -109,6 +110,7 @@ describe('DBConnectionsPage', () => {
       username: 'postgres',
       password: 'secret',
       ssl_mode: 'prefer',
+      credentials: [{ credential_role: 'readonly', username: 'postgres', password: 'secret' }],
     }))
   })
 
@@ -137,7 +139,7 @@ describe('DBConnectionsPage', () => {
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'cache-redis' } })
     fireEvent.change(screen.getByLabelText('DB Type'), { target: { value: 'redis' } })
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'redis.internal' } })
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret' } })
+    fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
     fireEvent.click(screen.getByRole('button', { name: '建立連線' }))
 
     await waitFor(() => expect(mockedCreateDBConnection).toHaveBeenCalledWith({
@@ -149,6 +151,7 @@ describe('DBConnectionsPage', () => {
       username: '',
       password: 'secret',
       ssl_mode: 'prefer',
+      credentials: [{ credential_role: 'readonly', username: '', password: 'secret' }],
     }))
   })
 
@@ -209,6 +212,7 @@ describe('DBConnectionsPage', () => {
       username: 'readonly',
       password: '',
       ssl_mode: 'require',
+      credentials: [{ credential_role: 'readonly', username: 'readonly', password: '' }],
     }))
   })
 
@@ -223,8 +227,8 @@ describe('DBConnectionsPage', () => {
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'mysql-conn' } })
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'db.internal' } })
     fireEvent.change(screen.getByLabelText('Port'), { target: { value: '3306' } })
-    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'root' } })
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret' } })
+    fireEvent.change(screen.getByLabelText('Readonly Username'), { target: { value: 'root' } })
+    fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
     fireEvent.click(screen.getByRole('button', { name: '建立連線' }))
 
     await waitFor(() => expect(mockedCreateDBConnection).toHaveBeenCalledWith({
@@ -236,6 +240,7 @@ describe('DBConnectionsPage', () => {
       username: 'root',
       password: 'secret',
       ssl_mode: 'prefer',
+      credentials: [{ credential_role: 'readonly', username: 'root', password: 'secret' }],
     }))
   })
 

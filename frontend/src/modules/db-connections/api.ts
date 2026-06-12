@@ -19,6 +19,11 @@ type CreateConnectionPayload = {
   username: string
   password: string
   ssl_mode?: string
+  credentials?: Array<{
+    credential_role: 'readonly' | 'readwrite' | string
+    username: string
+    password: string
+  }>
 }
 
 type PatchConnectionPayload = Partial<CreateConnectionPayload>
@@ -34,8 +39,9 @@ export function createDBConnection(payload: CreateConnectionPayload) {
   return apiClient.post<DBConnection>('/db-connections', payload)
 }
 
-export function testDBConnection(id: number) {
-  return apiClient.post<ConnectionTestResponse>(`/db-connections/${id}/test`)
+export function testDBConnection(id: number, credentialRole?: 'readonly' | 'readwrite' | string) {
+  const suffix = credentialRole ? `?credential_role=${encodeURIComponent(credentialRole)}` : ''
+  return apiClient.post<ConnectionTestResponse>(`/db-connections/${id}/test${suffix}`)
 }
 
 export function deleteDBConnection(id: number) {

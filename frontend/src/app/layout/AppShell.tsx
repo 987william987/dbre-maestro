@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bell, ChevronDown, Database, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, SquareTerminal, Ticket, Users } from 'lucide-react'
+import { Bell, ChevronDown, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -47,6 +47,12 @@ const NAV_ITEMS: NavItem[] = [
     allowed: (permissions) => permissions.includes('db_connections.read') || permissions.includes('db_connections.write'),
   },
   {
+    to: '/db-metadata/inventory',
+    label: 'DB Metadata',
+    icon: DatabaseZap,
+    allowed: (permissions) => permissions.includes('db_metadata.read'),
+  },
+  {
     to: '/masking-rules',
     label: 'Masking Rules',
     icon: ShieldAlert,
@@ -79,7 +85,7 @@ const NAV_GROUPS = [
   },
   {
     title: 'Governance',
-    items: ['/users', '/db-connections', '/masking-rules', '/sql-review-rules', '/audit-logs', '/settings'],
+    items: ['/users', '/db-connections', '/db-metadata/inventory', '/db-metadata/objects', '/masking-rules', '/sql-review-rules', '/audit-logs', '/settings'],
   },
 ]
 

@@ -95,7 +95,7 @@ func (h *MetadataHandler) Tables(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	password, err := h.dbConns.DecryptPassword(conn)
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal error")
 		return
@@ -107,7 +107,7 @@ func (h *MetadataHandler) Tables(w http.ResponseWriter, r *http.Request) {
 	selectedDatabase := strings.TrimSpace(r.URL.Query().Get("database"))
 	selectedSchema := strings.TrimSpace(r.URL.Query().Get("schema"))
 
-	response, err := h.loadMetadata(ctx, conn, password, selectedDatabase, selectedSchema)
+	response, err := h.loadMetadata(ctx, resolvedConn, password, selectedDatabase, selectedSchema)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "query metadata failed: "+err.Error())
 		return
@@ -147,7 +147,7 @@ func (h *MetadataHandler) Columns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	password, err := h.dbConns.DecryptPassword(conn)
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal error")
 		return
@@ -158,7 +158,7 @@ func (h *MetadataHandler) Columns(w http.ResponseWriter, r *http.Request) {
 
 	selectedDatabase := strings.TrimSpace(r.URL.Query().Get("database"))
 
-	columns, resolvedDatabase, err := h.loadColumns(ctx, conn, password, selectedDatabase, schema, table)
+	columns, resolvedDatabase, err := h.loadColumns(ctx, resolvedConn, password, selectedDatabase, schema, table)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "query columns failed: "+err.Error())
 		return

@@ -32,8 +32,12 @@ services:
       DBRE_ENCRYPTION_KEY: ${DBRE_ENCRYPTION_KEY:-}
       JWT_SECRET: ${JWT_SECRET:-}
       PORT: "8080"
+      AWS_PROFILE: ${AWS_PROFILE:-default}
+      AWS_SDK_LOAD_CONFIG: "1"
     ports:
       - "8080:8080"
+    volumes:
+      - ${HOME}/.aws:/root/.aws:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/health"]
       interval: 15s

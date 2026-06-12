@@ -5,6 +5,8 @@ import { RoleRoute } from '@/app/router/RoleRoute'
 import { AuditLogsPage } from '@/modules/audit/pages/AuditLogsPage'
 import { LoginPage } from '@/modules/auth/pages/LoginPage'
 import { DBConnectionsPage } from '@/modules/db-connections/pages/DBConnectionsPage'
+import { DBMetadataInventoryPage } from '@/modules/db-metadata/pages/DBMetadataInventoryPage'
+import { DBMetadataObjectsPage } from '@/modules/db-metadata/pages/DBMetadataObjectsPage'
 import { MaskingRulesPage } from '@/modules/masking-rules/pages/MaskingRulesPage'
 import { SettingsPage } from '@/modules/settings/pages/SettingsPage'
 import { SQLEditorPage } from '@/modules/sql-editor/pages/SQLEditorPage'
@@ -37,6 +39,10 @@ export default function App() {
             </Route>
             <Route element={<RoleRoute allowedPermissions={['db_connections.read', 'db_connections.write']} />}>
               <Route path="/db-connections" element={<DBConnectionsPage />} />
+            </Route>
+            <Route element={<RoleRoute allowedPermissions={['db_metadata.read']} />}>
+              <Route path="/db-metadata/inventory" element={<DBMetadataInventoryPage />} />
+              <Route path="/db-metadata/objects" element={<DBMetadataObjectsPage />} />
             </Route>
             <Route element={<RoleRoute allowedPermissions={['masking_rules.read', 'masking_rules.write']} />}>
               <Route path="/masking-rules" element={<MaskingRulesPage />} />

@@ -31,6 +31,7 @@ const PERMISSION_METADATA: PermissionOption[] = [
   { key: 'settings.write', module: 'Settings', action: 'Write', label: 'Settings Write', description: '修改平台設定。' },
   { key: 'db_connections.read', module: 'DB Connections', action: 'Read', label: 'DB Connections Read', description: '查看資料庫連線清單。' },
   { key: 'db_connections.write', module: 'DB Connections', action: 'Write', label: 'DB Connections Write', description: '新增、修改、刪除資料庫連線。' },
+  { key: 'db_metadata.read', module: 'DB Metadata', action: 'Read', label: 'DB Metadata Read', description: '查看雲端實例總覽與資料庫物件快照。' },
   { key: 'masking_rules.read', module: 'Masking Rules', action: 'Read', label: 'Masking Rules Read', description: '查看遮罩規則與 whitelist。' },
   { key: 'masking_rules.write', module: 'Masking Rules', action: 'Write', label: 'Masking Rules Write', description: '管理遮罩規則與 whitelist。' },
   { key: 'sql_review.read', module: 'SQL Review', action: 'Read', label: 'SQL Review Read', description: '查看 SQL Review 規則。' },

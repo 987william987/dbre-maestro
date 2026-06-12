@@ -53,6 +53,9 @@ func TestDBConnectionHandlerPatchAllowsClearingDatabaseName(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM db_connections WHERE id = \?`).
 		WithArgs(uint64(5)).
 		WillReturnRows(dbConnectionRows("analytics"))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
 	mock.ExpectExec(`UPDATE db_connections`).
 		WithArgs("analytics", "mysql", "db.internal", uint16(3306), nil, "readonly", "prefer", uint64(5)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -61,6 +64,9 @@ func TestDBConnectionHandlerPatchAllowsClearingDatabaseName(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM db_connections WHERE id = \?`).
 		WithArgs(uint64(5)).
 		WillReturnRows(dbConnectionRows(nil))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
 
 	req := withURLParam(httptest.NewRequest(http.MethodPatch, "/db-connections/5", strings.NewReader(`{"database_name":null}`)), "id", "5")
 	ctx := context.WithValue(req.Context(), middleware.CtxUserID, uint64(99))
@@ -98,9 +104,17 @@ func TestDBConnectionHandlerCreateRedisAllowsEmptyUsername(t *testing.T) {
 		repository.NewAuditRepo(sqlxDB),
 	)
 
+	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO db_connections`).
 		WithArgs("cache-redis", "redis", "redis.internal", uint16(6379), nil, "", sqlmock.AnyArg(), "prefer", uint64(99)).
 		WillReturnResult(sqlmock.NewResult(7, 1))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
+	mock.ExpectExec(`DELETE FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
 	mock.ExpectQuery(`SELECT \* FROM db_connections WHERE id = \?`).
 		WithArgs(uint64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -119,6 +133,9 @@ func TestDBConnectionHandlerCreateRedisAllowsEmptyUsername(t *testing.T) {
 			"created_at",
 			"updated_at",
 		}).AddRow(7, "cache-redis", "redis", "redis.internal", 6379, nil, "", []byte("cipher"), 1, "prefer", nil, 99, time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
 	mock.ExpectExec(`INSERT INTO audit_logs`).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -159,9 +176,17 @@ func TestDBConnectionHandlerCreatePostgresDefaultsDatabaseNameToPostgres(t *test
 		repository.NewAuditRepo(sqlxDB),
 	)
 
+	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO db_connections`).
 		WithArgs("analytics-pg", "postgres", "pg.internal", uint16(5432), "postgres", "postgres", sqlmock.AnyArg(), "prefer", uint64(99)).
 		WillReturnResult(sqlmock.NewResult(8, 1))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(8)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
+	mock.ExpectExec(`DELETE FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(8)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
 	mock.ExpectQuery(`SELECT \* FROM db_connections WHERE id = \?`).
 		WithArgs(uint64(8)).
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -180,6 +205,9 @@ func TestDBConnectionHandlerCreatePostgresDefaultsDatabaseNameToPostgres(t *test
 			"created_at",
 			"updated_at",
 		}).AddRow(8, "analytics-pg", "postgres", "pg.internal", 5432, "postgres", "postgres", []byte("cipher"), 1, "prefer", nil, 99, time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(8)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
 	mock.ExpectExec(`INSERT INTO audit_logs`).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 

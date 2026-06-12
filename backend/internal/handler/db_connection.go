@@ -21,6 +21,12 @@ type DBConnectionHandler struct {
 	audit *repository.AuditRepo
 }
 
+type connectionCredentialPayload struct {
+	CredentialRole string `json:"credential_role"`
+	Username       string `json:"username"`
+	Password       string `json:"password"`
+}
+
 func NewDBConnectionHandler(repo *repository.DBConnectionRepo, users *repository.UserRepo, audit *repository.AuditRepo) *DBConnectionHandler {
 	return &DBConnectionHandler{repo: repo, users: users, audit: audit}
 }
@@ -66,14 +72,15 @@ func (h *DBConnectionHandler) List(w http.ResponseWriter, r *http.Request) {
 // POST /db-connections
 func (h *DBConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name         string  `json:"name"`
-		DBType       string  `json:"db_type"`
-		Host         string  `json:"host"`
-		Port         uint16  `json:"port"`
-		DatabaseName *string `json:"database_name"`
-		Username     string  `json:"username"`
-		Password     string  `json:"password"`
-		SSLMode      string  `json:"ssl_mode"`
+		Name         string                        `json:"name"`
+		DBType       string                        `json:"db_type"`
+		Host         string                        `json:"host"`
+		Port         uint16                        `json:"port"`
+		DatabaseName *string                       `json:"database_name"`
+		Username     string                        `json:"username"`
+		Password     string                        `json:"password"`
+		SSLMode      string                        `json:"ssl_mode"`
+		Credentials  []connectionCredentialPayload `json:"credentials"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -82,12 +89,17 @@ func (h *DBConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.DBType == "" {
 		req.DBType = "mysql"
 	}
-	if req.Name == "" || req.Host == "" || req.Password == "" || req.Port == 0 {
+	if req.Name == "" || req.Host == "" || req.Port == 0 {
+		jsonErr(w, http.StatusUnprocessableEntity, "name, host, and port are required")
+		return
+	}
+	if req.Password == "" && len(req.Credentials) == 0 {
 		jsonErr(w, http.StatusUnprocessableEntity, "name, host, port, password are required")
 		return
 	}
-	if req.DBType != "redis" && req.Username == "" {
-		jsonErr(w, http.StatusUnprocessableEntity, "username is required for mysql/postgres connections")
+	credentials := normalizeCredentialPayloads(req.Credentials)
+	if req.DBType != "redis" && req.Username == "" && !hasCredentialRole(credentials, model.DBCredentialRoleReadonly) {
+		jsonErr(w, http.StatusUnprocessableEntity, "readonly username is required for mysql/postgres connections")
 		return
 	}
 	if req.SSLMode == "" {
@@ -106,7 +118,7 @@ func (h *DBConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:    userID,
 	}
 
-	created, err := h.repo.Create(r.Context(), c, req.Password)
+	created, err := h.repo.Create(r.Context(), c, req.Password, credentials)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "create failed")
 		return
@@ -118,7 +130,11 @@ func (h *DBConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "setting_change",
 		ResourceType: "db_connection",
 		ResourceID:   &created.ID,
-		Details:      map[string]string{"action": "create", "name": created.Name},
+		Details: map[string]any{
+			"action":           "create",
+			"name":             created.Name,
+			"credential_roles": extractCredentialRoles(credentials),
+		},
 	})
 
 	jsonCreated(w, created)
@@ -138,22 +154,32 @@ func (h *DBConnectionHandler) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if conn.DBType == "redis" {
-		redisPassword, err := h.repo.DecryptPassword(conn)
-		if err != nil {
-			jsonOK(w, map[string]any{"ok": false, "error": "decrypt error"})
-			return
+	role := strings.TrimSpace(r.URL.Query().Get("credential_role"))
+	if role == "" {
+		if conn.DBType == "redis" {
+			role = model.DBCredentialRoleReadonly
+		} else {
+			role = model.DBCredentialRoleReadonly
 		}
+	}
+
+	resolvedConn, password, err := h.repo.ResolveCredential(conn, role)
+	if err != nil {
+		jsonOK(w, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+
+	if conn.DBType == "redis" {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 		if err := pool.RedisGlobal().Ping(ctx, pool.RedisConnOptions{
-			ConnID:   conn.ID,
-			Host:     conn.Host,
-			Port:     conn.Port,
-			Username: conn.Username,
-			Password: redisPassword,
+			ConnID:   resolvedConn.ID,
+			Host:     resolvedConn.Host,
+			Port:     resolvedConn.Port,
+			Username: resolvedConn.Username,
+			Password: password,
 			DB:       0,
-			SSLMode:  conn.SSLMode,
+			SSLMode:  resolvedConn.SSLMode,
 		}); err != nil {
 			jsonOK(w, map[string]any{"ok": false, "error": err.Error()})
 			return
@@ -162,13 +188,7 @@ func (h *DBConnectionHandler) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	password, err := h.repo.DecryptPassword(conn)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "decrypt error")
-		return
-	}
-
-	driver, dsn := pool.BuildDSN(conn, password)
+	driver, dsn := pool.BuildDSN(resolvedConn, password)
 	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
 	if err != nil {
 		jsonOK(w, map[string]any{"ok": false, "error": err.Error()})
@@ -202,14 +222,15 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name         *string         `json:"name"`
-		DBType       *string         `json:"db_type"`
-		Host         *string         `json:"host"`
-		Port         *uint16         `json:"port"`
-		DatabaseName json.RawMessage `json:"database_name"`
-		Username     *string         `json:"username"`
-		Password     *string         `json:"password"`
-		SSLMode      *string         `json:"ssl_mode"`
+		Name         *string                        `json:"name"`
+		DBType       *string                        `json:"db_type"`
+		Host         *string                        `json:"host"`
+		Port         *uint16                        `json:"port"`
+		DatabaseName json.RawMessage                `json:"database_name"`
+		Username     *string                        `json:"username"`
+		Password     *string                        `json:"password"`
+		SSLMode      *string                        `json:"ssl_mode"`
+		Credentials  *[]connectionCredentialPayload `json:"credentials"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -265,6 +286,13 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	credentials := normalizeCredentialPayloads(existingCredentials(existing, req.Credentials))
+	if req.Credentials != nil {
+		if err := h.repo.ReplaceCredentials(r.Context(), id, credentials); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "update credentials failed")
+			return
+		}
+	}
 
 	pool.Global().Invalidate(id)
 	pool.RedisGlobal().Invalidate(id)
@@ -276,7 +304,11 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "setting_change",
 		ResourceType: "db_connection",
 		ResourceID:   &id,
-		Details:      map[string]string{"action": "update", "name": name},
+		Details: map[string]any{
+			"action":           "update",
+			"name":             name,
+			"credential_roles": extractCredentialRoles(credentials),
+		},
 	})
 
 	updated, _ := h.repo.GetByID(r.Context(), id)
@@ -293,6 +325,57 @@ func normalizeDatabaseName(dbType string, databaseName *string) *string {
 	}
 	trimmed := strings.TrimSpace(*databaseName)
 	return &trimmed
+}
+
+func normalizeCredentialPayloads(payloads []connectionCredentialPayload) []model.DBConnectionCredentialInput {
+	items := make([]model.DBConnectionCredentialInput, 0, len(payloads))
+	for _, payload := range payloads {
+		role := strings.TrimSpace(payload.CredentialRole)
+		username := strings.TrimSpace(payload.Username)
+		if role == "" {
+			continue
+		}
+		items = append(items, model.DBConnectionCredentialInput{
+			CredentialRole: role,
+			Username:       username,
+			Password:       payload.Password,
+		})
+	}
+	return items
+}
+
+func hasCredentialRole(credentials []model.DBConnectionCredentialInput, role string) bool {
+	for _, credential := range credentials {
+		if credential.CredentialRole == role && credential.Username != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func extractCredentialRoles(credentials []model.DBConnectionCredentialInput) []string {
+	roles := make([]string, 0, len(credentials))
+	for _, credential := range credentials {
+		if credential.CredentialRole == "" {
+			continue
+		}
+		roles = append(roles, credential.CredentialRole)
+	}
+	return roles
+}
+
+func existingCredentials(existing *model.DBConnection, patch *[]connectionCredentialPayload) []connectionCredentialPayload {
+	if patch != nil {
+		return *patch
+	}
+	items := make([]connectionCredentialPayload, 0, len(existing.Credentials))
+	for _, credential := range existing.Credentials {
+		items = append(items, connectionCredentialPayload{
+			CredentialRole: credential.CredentialRole,
+			Username:       credential.Username,
+		})
+	}
+	return items
 }
 
 // DELETE /db-connections/{id}

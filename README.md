@@ -76,3 +76,26 @@ make gen-key
 - `JWT_SECRET`
 
 後端啟動時若缺少 `DBRE_ENCRYPTION_KEY` 或 `JWT_SECRET`，服務不會成功啟動。
+
+### AWS Profile
+
+若要在本機用 `docker compose` 驗證 `DB Metadata inventory` 掃描，可直接沿用你本機已設定好的 AWS profile。
+
+`docker-compose.yml` 已預設：
+
+- 將 `${HOME}/.aws` 掛進 `app` container 的 `/root/.aws`
+- 傳入 `AWS_PROFILE`
+- 啟用 `AWS_SDK_LOAD_CONFIG=1`
+
+使用方式：
+
+```bash
+export AWS_PROFILE=your-profile
+docker compose up --build
+```
+
+若未指定，預設會使用：
+
+```bash
+AWS_PROFILE=default
+```

@@ -12,7 +12,7 @@ import (
 )
 
 type sqlScopeAnalysis struct {
-	Scopes          []model.TicketScope
+	Scopes            []model.TicketScope
 	ContainsSensitive bool
 }
 
@@ -24,24 +24,24 @@ func analyzeSQLScopes(
 	sqlContent string,
 	queryCtx queryExecutionContext,
 ) (*sqlScopeAnalysis, error) {
-	password, err := dbConns.DecryptPassword(conn)
+	resolvedConn, password, err := dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt password: %w", err)
 	}
 
-	driver, dsn := pool.BuildDSN(conn, password)
+	driver, dsn := pool.BuildDSN(resolvedConn, password)
 	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("get query pool: %w", err)
 	}
 
 	execSQL := injectLimit(sqlContent, 200, conn.DBType)
-	result, err := executeQueryForConnection(ctx, conn, password, pools.QueryPool, execSQL, queryCtx)
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx)
 	if err != nil {
 		return nil, err
 	}
 
-	_, sensitiveIndexes, err := maskingRuntime.applyResult(ctx, conn, 0, result)
+	_, sensitiveIndexes, err := maskingRuntime.applyResult(ctx, resolvedConn, 0, result)
 	if err != nil {
 		return nil, err
 	}

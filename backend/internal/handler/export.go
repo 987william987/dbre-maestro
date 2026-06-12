@@ -301,13 +301,13 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	password, err := h.dbConns.DecryptPassword(conn)
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	driver, dsn := pool.BuildDSN(conn, password)
+	driver, dsn := pool.BuildDSN(resolvedConn, password)
 	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
 	if err != nil {
 		http.Error(w, "pool error", http.StatusInternalServerError)
@@ -317,7 +317,7 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	result, err := executeQueryForConnection(ctx, conn, password, pools.QueryPool, req.SQLContent, queryExecutionContext{})
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, req.SQLContent, queryExecutionContext{})
 	if err != nil {
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return
@@ -335,7 +335,7 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldApplyMasking {
-		if _, _, err := h.masking.applyResult(r.Context(), conn, req.RequesterID, result); err != nil {
+		if _, _, err := h.masking.applyResult(r.Context(), resolvedConn, req.RequesterID, result); err != nil {
 			http.Error(w, "masking failed", http.StatusUnprocessableEntity)
 			return
 		}

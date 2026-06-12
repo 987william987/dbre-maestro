@@ -24,6 +24,7 @@
 | `settings.write` | settings | 修改 Settings API |
 | `db_connections.read` | db_connections | 查看資料庫連線 |
 | `db_connections.write` | db_connections | 新增/修改/刪除/測試資料庫連線 |
+| `db_metadata.read` | db_metadata | 查看雲端實例總覽與資料庫物件快照 |
 | `masking_rules.read` | masking_rules | 查看 masking rules 與 whitelist |
 | `masking_rules.write` | masking_rules | 管理 masking rules 與 whitelist |
 | `sql_review.read` | sql_review | 查看 SQL review rules |
@@ -49,10 +50,12 @@
 | SQL Editor | `/sql-editor` | `sql_editor.query` | 查詢、收藏 SQL；若另有對應權限可建立 export / sensitive access 工單 |
 | Users | `/users` | `users.read` 或 `users.write` | 查看 RBAC；若有 `users.write` 可修改 |
 | DB Connections | `/db-connections` | `db_connections.read` 或 `db_connections.write` | 查看；若有 `db_connections.write` 可新增/修改/刪除/測試 |
+| DB Metadata Inventory | `/db-metadata/inventory` | `db_metadata.read` | 查看雲端實例總覽與 mapping |
+| DB Metadata Objects | `/db-metadata/objects` | `db_metadata.read` | 查看資料庫物件平面快照表 |
 | Masking Rules | `/masking-rules` | `masking_rules.read` 或 `masking_rules.write` | 查看；若有 `masking_rules.write` 可管理規則 |
 | SQL Review | `/sql-review-rules` | `sql_review.read` 或 `sql_review.write` | 查看；若有 `sql_review.write` 可修改規則 |
 | Audit Logs | `/audit-logs` | `audit_logs.read` 或 `audit_logs.write` | 查看；若有 `audit_logs.write` 可匯出 |
-| Settings | `/settings` | `settings.read` 或 `settings.write` | 目前主要作為平台設定入口說明；PATCH API 保留給後端 |
+| Settings | `/settings` | `settings.read` 或 `settings.write` | 管理 DB Metadata 掃描設定 |
 
 ## API 對照
 
@@ -103,6 +106,8 @@
 |---|---|
 | `GET /api/db-connections/{id}/metadata` | `sql_editor.query` |
 | `GET /api/db-connections/{id}/metadata/{schema}/{table}/columns` | `sql_editor.query` |
+| `GET /api/db-metadata/inventory` | `db_metadata.read` |
+| `GET /api/db-metadata/objects` | `db_metadata.read` |
 
 ### Notifications
 

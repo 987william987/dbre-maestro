@@ -26,8 +26,10 @@ type ConnectionForm = {
   dbType: 'mysql' | 'postgres' | 'redis'
   host: string
   port: string
-  username: string
-  password: string
+  readonlyUsername: string
+  readonlyPassword: string
+  readwriteUsername: string
+  readwritePassword: string
   sslMode: 'prefer' | 'disable' | 'require'
 }
 
@@ -42,8 +44,10 @@ const EMPTY_FORM: ConnectionForm = {
   dbType: 'mysql',
   host: '',
   port: '3306',
-  username: '',
-  password: '',
+  readonlyUsername: '',
+  readonlyPassword: '',
+  readwriteUsername: '',
+  readwritePassword: '',
   sslMode: 'prefer',
 }
 
@@ -111,8 +115,10 @@ export function DBConnectionsPage() {
       dbType: normalizeDBType(connection.db_type),
       host: connection.host,
       port: String(connection.port),
-      username: connection.username,
-      password: '',
+      readonlyUsername: findCredentialUsername(connection, 'readonly') ?? connection.username ?? '',
+      readonlyPassword: '',
+      readwriteUsername: findCredentialUsername(connection, 'readwrite') ?? '',
+      readwritePassword: '',
       sslMode: normalizeSSLMode(connection.ssl_mode),
     })
   }
@@ -433,25 +439,55 @@ export function DBConnectionsPage() {
 
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="grid gap-1.5 text-[12px] font-medium text-muted">
-                          Username
+                          Readonly Username
                           <input
-                            value={form.username}
-                            onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
+                            value={form.readonlyUsername}
+                            onChange={(event) => setForm((current) => ({ ...current, readonlyUsername: event.target.value }))}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           />
                         </label>
                         <label className="grid gap-1.5 text-[12px] font-medium text-muted">
-                          Password
+                          Readonly Password
                           <input
-                            value={form.password}
+                            value={form.readonlyPassword}
                             type="password"
-                            onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                            onChange={(event) => setForm((current) => ({ ...current, readonlyPassword: event.target.value }))}
                             placeholder={drawerState.mode === 'edit' ? '留空代表不更新密碼' : ''}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           />
                         </label>
+                      </div>
+
+                      {form.dbType !== 'redis' ? (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                            Readwrite Username
+                            <input
+                              value={form.readwriteUsername}
+                              onChange={(event) => setForm((current) => ({ ...current, readwriteUsername: event.target.value }))}
+                              className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                              disabled={submitting}
+                            />
+                          </label>
+                          <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                            Readwrite Password
+                            <input
+                              value={form.readwritePassword}
+                              type="password"
+                              onChange={(event) => setForm((current) => ({ ...current, readwritePassword: event.target.value }))}
+                              placeholder={drawerState.mode === 'edit' ? '留空代表不更新密碼' : ''}
+                              className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                              disabled={submitting}
+                            />
+                          </label>
+                        </div>
+                      ) : null}
+
+                      <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
+                        <p className="font-semibold text-ink">Credential 策略</p>
+                        <p className="mt-1">SQL Editor / DB Metadata 走 `readonly`；DDL / DML execute 走 `readwrite`。編輯時若密碼留空，表示保留既有密碼。</p>
                       </div>
 
                       <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
@@ -504,9 +540,13 @@ function toPayload(form: ConnectionForm) {
     host: form.host.trim(),
     port: Number(form.port),
     database_name: databaseName,
-    username: form.username.trim(),
-    password: form.password,
+    username: form.readonlyUsername.trim(),
+    password: form.readonlyPassword,
     ssl_mode: form.sslMode,
+    credentials: [
+      { credential_role: 'readonly', username: form.readonlyUsername.trim(), password: form.readonlyPassword },
+      { credential_role: 'readwrite', username: form.readwriteUsername.trim(), password: form.readwritePassword },
+    ].filter((item) => item.username || item.password),
   }
 }
 
@@ -528,10 +568,10 @@ function isFormSubmittable(form: ConnectionForm, isEdit = false) {
   if (!form.name.trim() || !form.host.trim() || !form.port.trim()) {
     return false
   }
-  if (form.dbType !== 'redis' && !form.username.trim()) {
+  if (!form.readonlyUsername.trim() && form.dbType !== 'redis') {
     return false
   }
-  if (!isEdit && !form.password) {
+  if (!isEdit && !form.readonlyPassword) {
     return false
   }
   return Number(form.port) > 0
@@ -545,6 +585,10 @@ function formatDBType(dbType: string) {
     return 'Redis'
   }
   return 'MySQL'
+}
+
+function findCredentialUsername(connection: DBConnection, role: 'readonly' | 'readwrite') {
+  return connection.credentials?.find((item) => item.credential_role === role)?.username
 }
 
 
