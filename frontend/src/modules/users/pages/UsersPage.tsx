@@ -466,7 +466,7 @@ export function UsersPage() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-[22px] border border-white/85 bg-[rgba(248,250,252,0.82)] shadow-soft">
+      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
@@ -500,7 +500,7 @@ export function UsersPage() {
               <button
                 type="button"
                 onClick={openCreateUserDrawer}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-[12px] bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
               >
                 <UserPlus className="h-4 w-4" />
                 建立 User
@@ -508,7 +508,7 @@ export function UsersPage() {
               <button
                 type="button"
                 onClick={openCreateAuthGroupDrawer}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-[12px] border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
               >
                 <Shield className="h-4 w-4" />
                 建立 Auth Group
@@ -519,9 +519,9 @@ export function UsersPage() {
 
         <div className="px-4 py-3 sm:px-5">
           {loading ? (
-            <LoadingBlock message="載入 RBAC 資料中…" className="min-h-[320px] rounded-[18px] border-white/80 bg-white/86" />
+            <LoadingBlock message="載入 RBAC 資料中…" className="min-h-[320px] rounded-xl border-border bg-panel" />
           ) : viewMode === 'users' ? (
-            <section className="rounded-[18px] border border-white/85 bg-white/92 shadow-soft">
+            <section className="rounded-xl border border-border bg-panel shadow-soft">
               <div className="border-b border-border/80 px-4 py-3">
                 <div className="flex items-center gap-2">
                   <UsersIcon className="h-4 w-4 text-accent" />
@@ -580,7 +580,7 @@ export function UsersPage() {
                           <button
                             type="button"
                             onClick={() => void openEditUserDrawer(user.id)}
-                            className="inline-flex h-8 items-center justify-center rounded-[10px] border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
+                            className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
                           >
                             管理
                           </button>
@@ -592,7 +592,7 @@ export function UsersPage() {
               </div>
             </section>
           ) : (
-            <section className="rounded-[18px] border border-white/85 bg-white/92 shadow-soft">
+            <section className="rounded-xl border border-border bg-panel shadow-soft">
               <div className="border-b border-border/80 px-4 py-3">
                 <div className="flex items-center gap-2">
                   <Shield className="h-4 w-4 text-accent" />
@@ -630,7 +630,7 @@ export function UsersPage() {
                           <button
                             type="button"
                             onClick={() => void openEditAuthGroupDrawer(group.name as AuthGroup)}
-                            className="inline-flex h-8 items-center justify-center rounded-[10px] border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
+                            className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
                           >
                             管理
                           </button>
@@ -653,7 +653,7 @@ export function UsersPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="users-drawer-title"
-            className="flex h-full w-full max-w-[720px] flex-col overflow-hidden rounded-[24px] border border-white/80 bg-[rgba(255,255,255,0.96)] shadow-[0_22px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl"
+            className="flex h-full w-full max-w-[720px] flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-[0_22px_60px_rgba(15,23,42,0.18)]"
           >
             <div className="flex items-start justify-between border-b border-border/80 px-5 py-4">
               <div>
@@ -665,7 +665,7 @@ export function UsersPage() {
               <button
                 type="button"
                 onClick={closeDrawer}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-[12px] border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
                 aria-label="關閉"
               >
                 <X className="h-4 w-4" />
@@ -674,7 +674,7 @@ export function UsersPage() {
 
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               {drawerLoading ? (
-                <LoadingBlock message="載入明細中…" className="min-h-[240px] rounded-[18px] border-white/80 bg-white/86" />
+                <LoadingBlock message="載入明細中…" className="min-h-[240px] rounded-xl border-border bg-panel" />
               ) : drawerState.mode === 'create-user' || (drawerState.mode === 'edit-user' && selectedUser) ? (
                 <div className="grid gap-4">
                   <CardSection title="User Profile" icon={<UsersIcon className="h-4 w-4 text-accent" />}>
@@ -686,7 +686,7 @@ export function UsersPage() {
                           value={userDraft.username}
                           onChange={(event) => setUserDraft((current) => ({ ...current, username: event.target.value }))}
                           disabled={saving || selectedUserIsProtected}
-                          className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
+                          className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
                       <label className="grid gap-1.5 text-[12px] font-medium text-muted">
@@ -696,7 +696,7 @@ export function UsersPage() {
                           value={userDraft.email}
                           onChange={(event) => setUserDraft((current) => ({ ...current, email: event.target.value }))}
                           disabled={saving || selectedUserIsProtected}
-                          className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
+                          className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
                       <label className="grid gap-1.5 text-[12px] font-medium text-muted">
@@ -707,7 +707,7 @@ export function UsersPage() {
                           value={userDraft.password}
                           onChange={(event) => setUserDraft((current) => ({ ...current, password: event.target.value }))}
                           disabled={saving}
-                          className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                          className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                         />
                       </label>
 
@@ -719,7 +719,7 @@ export function UsersPage() {
                       ) : null}
 
                       {selectedUserIsProtected ? (
-                        <div className="rounded-[14px] border border-danger/20 bg-red-50 px-3 py-3 text-[12px] text-danger">
+                        <div className="rounded-lg border border-danger/20 bg-red-50 px-3 py-3 text-[12px] text-danger">
                           初始 admin 只允許在此頁修改密碼，其餘欄位不可調整，也不可停用或刪除。
                         </div>
                       ) : null}
@@ -732,7 +732,7 @@ export function UsersPage() {
                           !userDraft.email.trim() ||
                           (drawerState.mode === 'create-user' && !userDraft.password.trim())
                         }
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
                       >
                         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                         {drawerState.mode === 'create-user' ? '建立使用者' : userDraft.pendingDelete ? '確認刪除此 User' : '儲存變更'}
@@ -742,7 +742,7 @@ export function UsersPage() {
 
                   {drawerState.mode === 'edit-user' && selectedUser ? (
                     <CardSection title="Account Status" icon={<Shield className="h-4 w-4 text-accent" />}>
-                      <div className="flex items-center justify-between gap-3 rounded-[14px] border border-border bg-panel-soft px-3 py-3">
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-panel-soft px-3 py-3">
                         <div>
                           <p className="text-[12px] font-semibold text-ink">登入狀態</p>
                           <p className="mt-1 text-[11px] text-muted">停用只會先留在草稿裡，按下最上方儲存後才會真正生效。</p>
@@ -751,7 +751,7 @@ export function UsersPage() {
                           type="button"
                           onClick={() => setUserDraft((current) => ({ ...current, isActive: !current.isActive, pendingDelete: false }))}
                           disabled={saving || selectedUserIsProtected}
-                          className={`inline-flex h-10 items-center justify-center rounded-[12px] px-4 text-[13px] font-semibold transition disabled:opacity-50 ${
+                          className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-[13px] font-semibold transition disabled:opacity-50 ${
                             userDraft.isActive
                               ? 'border border-danger/20 bg-red-50 text-danger hover:bg-red-100'
                               : 'border border-border bg-white text-ink hover:bg-page'
@@ -788,7 +788,7 @@ export function UsersPage() {
                           value={pendingUserAuthGroup}
                           onChange={(event) => setPendingUserAuthGroup(event.target.value)}
                           disabled={saving || selectedUserIsProtected}
-                          className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
+                          className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         >
                           <option value="">選擇 auth group</option>
                           {authGroupOptions
@@ -813,7 +813,7 @@ export function UsersPage() {
                             setPendingUserAuthGroup('')
                           }}
                           disabled={saving || selectedUserIsProtected || !pendingUserAuthGroup}
-                          className="inline-flex h-10 items-center justify-center rounded-[12px] border border-border bg-panel-soft px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
+                          className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-panel-soft px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                         >
                           加入群組
                         </button>
@@ -903,7 +903,7 @@ export function UsersPage() {
 
                   {drawerState.mode === 'edit-user' && !selectedUserIsProtected ? (
                     <CardSection title="Danger Zone" icon={<Trash2 className="h-4 w-4 text-danger" />}>
-                      <div className="flex items-center justify-between gap-3 rounded-[14px] border border-danger/20 bg-red-50 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/20 bg-red-50 px-3 py-3">
                         <div>
                           <p className="text-[12px] font-semibold text-danger">刪除這個 User</p>
                           <p className="mt-1 text-[11px] text-danger/80">只會先標記為待刪除，真正刪除要在最上方按「儲存變更」後才會執行。</p>
@@ -912,7 +912,7 @@ export function UsersPage() {
                           type="button"
                           onClick={() => setUserDraft((current) => ({ ...current, pendingDelete: !current.pendingDelete }))}
                           disabled={saving}
-                          className={`inline-flex h-10 items-center justify-center rounded-[12px] px-4 text-[13px] font-semibold transition ${
+                          className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-[13px] font-semibold transition ${
                             userDraft.pendingDelete
                               ? 'border border-border bg-white text-ink hover:bg-page'
                               : 'border border-danger/20 bg-red-100 text-danger hover:bg-red-200'
@@ -937,7 +937,7 @@ export function UsersPage() {
                           value={authGroupDraft.name}
                           onChange={(event) => setAuthGroupDraft((current) => ({ ...current, name: event.target.value }))}
                           disabled={saving || selectedAuthGroupIsProtected}
-                          className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
+                          className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
                       <label className="grid gap-1.5 text-[12px] font-medium text-muted">
@@ -947,7 +947,7 @@ export function UsersPage() {
                           value={authGroupDraft.description}
                           onChange={(event) => setAuthGroupDraft((current) => ({ ...current, description: event.target.value }))}
                           disabled={saving || selectedAuthGroupIsProtected}
-                          className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
+                          className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
                       {selectedAuthGroup ? (
@@ -959,7 +959,7 @@ export function UsersPage() {
                       <button
                         type="submit"
                         disabled={saving || !authGroupDraft.name.trim()}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
                       >
                         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                         {drawerState.mode === 'create-auth-group' ? '建立 Auth Group' : authGroupDraft.pendingDelete ? '確認刪除此 Auth Group' : '儲存 Auth Group'}
@@ -994,7 +994,7 @@ export function UsersPage() {
                         value={pendingAuthGroupUserID}
                         onChange={(event) => setPendingAuthGroupUserID(event.target.value)}
                         disabled={saving || selectedAuthGroupIsProtected}
-                        className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
+                        className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                       >
                         <option value="">選擇 user</option>
                         {users
@@ -1020,7 +1020,7 @@ export function UsersPage() {
                           setPendingAuthGroupUserID('')
                         }}
                         disabled={saving || selectedAuthGroupIsProtected || !pendingAuthGroupUserID}
-                        className="inline-flex h-10 items-center justify-center rounded-[12px] border border-border bg-panel-soft px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
+                        className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-panel-soft px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                       >
                         加入使用者
                       </button>
@@ -1090,7 +1090,7 @@ export function UsersPage() {
 
                   {drawerState.mode === 'edit-auth-group' && !selectedAuthGroupIsProtected ? (
                     <CardSection title="Danger Zone" icon={<Trash2 className="h-4 w-4 text-danger" />}>
-                      <div className="flex items-center justify-between gap-3 rounded-[14px] border border-danger/20 bg-red-50 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/20 bg-red-50 px-3 py-3">
                         <div>
                           <p className="text-[12px] font-semibold text-danger">刪除這個 Auth Group</p>
                           <p className="mt-1 text-[11px] text-danger/80">只會先標記為待刪除，真正刪除要在最上方儲存後才會執行。</p>
@@ -1099,7 +1099,7 @@ export function UsersPage() {
                           type="button"
                           onClick={() => setAuthGroupDraft((current) => ({ ...current, pendingDelete: !current.pendingDelete }))}
                           disabled={saving}
-                          className={`inline-flex h-10 items-center justify-center rounded-[12px] px-4 text-[13px] font-semibold transition ${
+                          className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-[13px] font-semibold transition ${
                             authGroupDraft.pendingDelete
                               ? 'border border-border bg-white text-ink hover:bg-page'
                               : 'border border-danger/20 bg-red-100 text-danger hover:bg-red-200'
@@ -1281,7 +1281,7 @@ function filterConnections(connections: DBConnection[], search: string, excluded
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[14px] border border-border bg-white px-3 py-2.5 shadow-soft">
+    <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
       <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">{label}</p>
       <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{value}</p>
     </div>
@@ -1293,7 +1293,7 @@ function ViewButton({ active, label, onClick }: { active: boolean; label: string
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex h-9 items-center justify-center rounded-[12px] border px-3 text-[12px] font-semibold transition ${
+      className={`inline-flex h-9 items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition ${
         active ? 'border-brand bg-brand text-white' : 'border-border bg-white text-ink hover:bg-panel-soft'
       }`}
     >
@@ -1304,7 +1304,7 @@ function ViewButton({ active, label, onClick }: { active: boolean; label: string
 
 function CardSection({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
   return (
-    <section className="rounded-[18px] border border-white/85 bg-white/92 shadow-soft">
+    <section className="rounded-xl border border-border bg-panel shadow-soft">
       <div className="border-b border-border/80 px-4 py-3">
         <div className="flex items-center gap-2">
           {icon}
@@ -1318,7 +1318,7 @@ function CardSection({ title, icon, children }: { title: string; icon: ReactNode
 
 function InfoBox({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[14px] border border-border bg-panel-soft px-3 py-3">
+    <div className="rounded-lg border border-border bg-panel-soft px-3 py-3">
       <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">{label}</p>
       <p className="mt-1 text-[13px] text-ink">{value || '—'}</p>
     </div>
@@ -1327,7 +1327,7 @@ function InfoBox({ label, value }: { label: string; value: string }) {
 
 function InfoList({ title, items, emptyMessage }: { title: string; items: string[]; emptyMessage: string }) {
   return (
-    <div className="grid gap-2 rounded-[14px] border border-border bg-panel-soft px-3 py-3">
+    <div className="grid gap-2 rounded-lg border border-border bg-panel-soft px-3 py-3">
       <p className="text-[12px] font-semibold text-ink">{title}</p>
       <div className="flex flex-wrap gap-2">
         {items.length > 0 ? items.map((item) => <Tag key={item} label={item} />) : <span className="text-[12px] text-muted">{emptyMessage}</span>}
@@ -1364,7 +1364,7 @@ function ActionTag({
   onRemove: () => void
 }) {
   return (
-    <div className="inline-flex items-center gap-2 rounded-[12px] border border-border bg-white px-3 py-2">
+    <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2">
       <div>
         <p className="text-[12px] font-semibold text-ink">{label}</p>
         {meta ? <p className="text-[10px] text-muted">{meta}</p> : null}
@@ -1373,7 +1373,7 @@ function ActionTag({
         type="button"
         onClick={onRemove}
         disabled={disabled}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-[8px] border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink disabled:opacity-40"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink disabled:opacity-40"
         aria-label={`移除 ${label}`}
       >
         <X className="h-3.5 w-3.5" />
@@ -1400,14 +1400,14 @@ function PermissionGroupBoard({
   onRemove?: (permissionKey: string) => void
 }) {
   return (
-    <div className="grid gap-3 rounded-[16px] border border-border bg-panel-soft/80 px-3 py-3">
+    <div className="grid gap-3 rounded-xl border border-border bg-panel-soft/80 px-3 py-3">
       <div>
         <p className="text-[12px] font-semibold text-ink">{title}</p>
         <p className="mt-1 text-[11px] text-muted">{description}</p>
       </div>
       {groupedPermissions.length > 0 ? (
         groupedPermissions.map((group) => (
-          <div key={group.module} className="grid gap-2 rounded-[14px] border border-border/80 bg-white px-3 py-3">
+          <div key={group.module} className="grid gap-2 rounded-lg border border-border/80 bg-white px-3 py-3">
             <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-faint">{group.module}</p>
             <div className="flex flex-wrap gap-2">
               {group.permissions.map((permission) => (
@@ -1458,7 +1458,7 @@ function PermissionSearchPanel({
   }, {})
 
   return (
-    <div className="grid gap-3 rounded-[16px] border border-border bg-panel-soft/80 px-3 py-3">
+    <div className="grid gap-3 rounded-xl border border-border bg-panel-soft/80 px-3 py-3">
       <div>
         <p className="text-[12px] font-semibold text-ink">{title}</p>
         <p className="mt-1 text-[11px] text-muted">{description}</p>
@@ -1467,16 +1467,16 @@ function PermissionSearchPanel({
         value={search}
         onChange={(event) => onSearchChange(event.target.value)}
         placeholder="搜尋 module、action、permission key"
-        className="h-10 rounded-[12px] border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+        className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
         disabled={disabled}
       />
       <div className="grid gap-3">
         {Object.entries(grouped).length > 0 ? (
           Object.entries(grouped).map(([module, modulePermissions]) => (
-            <div key={module} className="grid gap-2 rounded-[14px] border border-border/80 bg-white px-3 py-3">
+            <div key={module} className="grid gap-2 rounded-lg border border-border/80 bg-white px-3 py-3">
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-faint">{module}</p>
               {modulePermissions.map((permission) => (
-                <div key={permission.key} className="flex items-start justify-between gap-3 rounded-[12px] border border-border bg-panel-soft px-3 py-2.5">
+                <div key={permission.key} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-panel-soft px-3 py-2.5">
                   <div>
                     <p className="text-[12px] font-semibold text-ink">{permission.label}</p>
                     <p className="mt-1 text-[11px] text-muted">{permission.description}</p>
@@ -1486,7 +1486,7 @@ function PermissionSearchPanel({
                     type="button"
                     onClick={() => onAdd(permission.key)}
                     disabled={disabled}
-                    className="inline-flex h-8 items-center justify-center rounded-[10px] border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
+                    className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                   >
                     加入
                   </button>
@@ -1522,7 +1522,7 @@ function DBScopeBoard({
   onRemove?: (connectionId: number) => void
 }) {
   return (
-    <div className="grid gap-3 rounded-[16px] border border-border bg-panel-soft/80 px-3 py-3">
+    <div className="grid gap-3 rounded-xl border border-border bg-panel-soft/80 px-3 py-3">
       <div>
         <p className="text-[12px] font-semibold text-ink">{title}</p>
         <p className="mt-1 text-[11px] text-muted">{description}</p>
@@ -1563,7 +1563,7 @@ function DBScopePanel({
   onAdd: (connectionId: number) => void
 }) {
   return (
-    <div className="grid gap-3 rounded-[16px] border border-border bg-panel-soft/80 px-3 py-3">
+    <div className="grid gap-3 rounded-xl border border-border bg-panel-soft/80 px-3 py-3">
       <div>
         <p className="text-[12px] font-semibold text-ink">{title}</p>
         <p className="mt-1 text-[11px] text-muted">{description}</p>
@@ -1572,12 +1572,12 @@ function DBScopePanel({
         value={search}
         onChange={(event) => onSearchChange(event.target.value)}
         placeholder="搜尋 connection name、host、database"
-        className="h-10 rounded-[12px] border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+        className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
         disabled={disabled}
       />
       <div className="grid gap-2">
         {connections.length > 0 ? connections.map((connection) => (
-          <div key={connection.id} className="flex items-start justify-between gap-3 rounded-[12px] border border-border bg-white px-3 py-2.5">
+          <div key={connection.id} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-white px-3 py-2.5">
             <div>
               <p className="text-[12px] font-semibold text-ink">{connection.name}</p>
               <p className="mt-1 text-[11px] text-muted">{connection.db_type} / {connection.host}</p>
@@ -1586,7 +1586,7 @@ function DBScopePanel({
               type="button"
               onClick={() => onAdd(connection.id)}
               disabled={disabled}
-              className="inline-flex h-8 items-center justify-center rounded-[10px] border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
+              className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
             >
               加入
             </button>

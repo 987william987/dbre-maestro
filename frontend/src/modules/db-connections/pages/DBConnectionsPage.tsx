@@ -213,7 +213,7 @@ export function DBConnectionsPage() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-[22px] border border-white/85 bg-[rgba(248,250,252,0.82)] shadow-soft">
+      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
@@ -237,7 +237,7 @@ export function DBConnectionsPage() {
         </div>
 
         <div className="px-4 py-3 sm:px-5">
-          <section className="rounded-[18px] border border-white/85 bg-white/92 shadow-soft">
+          <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border/80 px-4 py-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
@@ -247,7 +247,7 @@ export function DBConnectionsPage() {
                 <button
                   type="button"
                   onClick={openCreateDrawer}
-                  className="inline-flex h-9 items-center justify-center gap-2 rounded-[12px] bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
                 >
                   <Plus className="h-4 w-4" />
                   新增連線
@@ -259,7 +259,7 @@ export function DBConnectionsPage() {
             {loading ? (
               <LoadingBlock message="載入連線中…" className="h-48 rounded-none border-0 bg-transparent" />
             ) : sortedConnections.length === 0 ? (
-              <div className="m-4 flex h-48 items-center justify-center rounded-[18px] border border-dashed border-border bg-panel-soft text-sm text-muted">
+              <div className="m-4 flex h-48 items-center justify-center rounded-xl border border-dashed border-border bg-panel-soft text-sm text-muted">
                 尚未建立任何資料庫連線。
               </div>
             ) : (
@@ -273,7 +273,7 @@ export function DBConnectionsPage() {
                       <th className="px-3 py-3">
                         <div className="group relative inline-flex">
                           <span>SSL</span>
-                          <div className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-10 hidden w-52 rounded-[10px] border border-border bg-white px-3 py-2 text-[11px] font-medium normal-case tracking-normal text-muted shadow-soft group-hover:block">
+                          <div className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-10 hidden w-52 rounded-md border border-border bg-white px-3 py-2 text-[11px] font-medium normal-case tracking-normal text-muted shadow-soft group-hover:block">
                             支援就走 SSL，不支援可退回非加密。
                           </div>
                         </div>
@@ -314,7 +314,7 @@ export function DBConnectionsPage() {
                                 type="button"
                                 onClick={() => void handleTest(connection.id)}
                                 disabled={testingId === connection.id}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-[10px] border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
+                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                               >
                                 {testingId === connection.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                                 Test
@@ -322,7 +322,7 @@ export function DBConnectionsPage() {
                               <button
                                 type="button"
                                 onClick={() => openEditDrawer(connection)}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-[10px] border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page"
+                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
                                 Edit
@@ -331,7 +331,7 @@ export function DBConnectionsPage() {
                                 type="button"
                                 onClick={() => setPendingDeleteId(connection.id)}
                                 disabled={deletingId === connection.id}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-[10px] border border-danger/20 bg-red-50 px-2.5 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
+                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2.5 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
                               >
                                 {deletingId === connection.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                                 Delete
@@ -357,7 +357,7 @@ export function DBConnectionsPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="db-connections-drawer-title"
-            className="flex h-full w-full max-w-[680px] flex-col overflow-hidden rounded-[24px] border border-white/80 bg-[rgba(255,255,255,0.96)] shadow-[0_22px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl"
+            className="flex h-full w-full max-w-[680px] flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-[0_22px_60px_rgba(15,23,42,0.18)]"
           >
             <div className="flex items-start justify-between border-b border-border/80 px-5 py-4">
               <div>
@@ -369,7 +369,7 @@ export function DBConnectionsPage() {
               <button
                 type="button"
                 onClick={closeDrawer}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-[12px] border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
                 aria-label="關閉"
               >
                 <X className="h-4 w-4" />
@@ -378,7 +378,7 @@ export function DBConnectionsPage() {
 
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               {drawerLoading ? (
-                <LoadingBlock message="載入明細中…" className="min-h-[240px] rounded-[18px] border-white/80 bg-white/86" />
+                <LoadingBlock message="載入明細中…" className="min-h-[240px] rounded-xl border-border bg-panel" />
               ) : (
                 <div className="grid gap-4">
                   <CardSection title="Connection Profile" icon={<ServerCog className="h-4 w-4 text-accent" />}>
@@ -388,7 +388,7 @@ export function DBConnectionsPage() {
                         <input
                           value={form.name}
                           onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                          className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                          className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                           disabled={submitting}
                         />
                       </label>
@@ -406,7 +406,7 @@ export function DBConnectionsPage() {
                                 port: current.port === DEFAULT_PORT_BY_DB_TYPE[current.dbType] || current.port === '' ? DEFAULT_PORT_BY_DB_TYPE[nextType] : current.port,
                               }))
                             }}
-                            className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           >
                             {DB_TYPE_OPTIONS.map((option) => (
@@ -421,7 +421,7 @@ export function DBConnectionsPage() {
                           <select
                             value={form.sslMode}
                             onChange={(event) => setForm((current) => ({ ...current, sslMode: normalizeSSLMode(event.target.value) }))}
-                            className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           >
                             {SSL_MODE_OPTIONS.map((option) => (
@@ -439,7 +439,7 @@ export function DBConnectionsPage() {
                           <input
                             value={form.host}
                             onChange={(event) => setForm((current) => ({ ...current, host: event.target.value }))}
-                            className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           />
                         </label>
@@ -448,7 +448,7 @@ export function DBConnectionsPage() {
                           <input
                             value={form.port}
                             onChange={(event) => setForm((current) => ({ ...current, port: event.target.value }))}
-                            className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           />
                         </label>
@@ -460,7 +460,7 @@ export function DBConnectionsPage() {
                           <input
                             value={form.username}
                             onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
-                            className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           />
                         </label>
@@ -471,13 +471,13 @@ export function DBConnectionsPage() {
                             type="password"
                             onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
                             placeholder={drawerState.mode === 'edit' ? '留空代表不更新密碼' : ''}
-                            className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           />
                         </label>
                       </div>
 
-                      <div className="rounded-[14px] border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
+                      <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
                         <p className="font-semibold text-ink">SSL Mode 說明</p>
                         <p className="mt-1">{activeSSLMode?.description}</p>
                       </div>
@@ -485,7 +485,7 @@ export function DBConnectionsPage() {
                       <button
                         type="submit"
                         disabled={submitting || !isFormSubmittable(form, drawerState.mode === 'edit')}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : drawerState.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
                         {drawerState.mode === 'create' ? '建立連線' : '儲存變更'}
@@ -572,7 +572,7 @@ function formatDBType(dbType: string) {
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[14px] border border-border bg-white px-3 py-2.5 shadow-soft">
+    <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
       <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">{label}</p>
       <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{value}</p>
     </div>
@@ -581,7 +581,7 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 
 function CardSection({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
   return (
-    <section className="rounded-[18px] border border-white/85 bg-white/92 shadow-soft">
+    <section className="rounded-xl border border-border bg-panel shadow-soft">
       <div className="border-b border-border/80 px-4 py-3">
         <div className="flex items-center gap-2">
           {icon}

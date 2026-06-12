@@ -304,8 +304,8 @@ function AssetTree({
     return (
       <div key={node.id}>
         <div
-          className={`group flex items-center rounded-[9px] border border-transparent pr-2 text-[12px] ${
-            node.active ? 'bg-[#eef2ff] text-ink' : 'text-muted hover:border-border/70 hover:bg-[#f8fafc]'
+          className={`group flex items-center rounded-md border border-transparent pr-2 text-[12px] ${
+            node.active ? 'bg-panel-soft text-ink' : 'text-muted hover:border-border/70 hover:bg-panel-soft'
           }`}
           style={{ paddingLeft }}
         >
@@ -326,11 +326,11 @@ function AssetTree({
             onClick={() => onSelect(node)}
             className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
           >
-            <span className="flex h-4 w-4 items-center justify-center text-[#64748b]">{iconForNode(node)}</span>
+            <span className="flex h-4 w-4 items-center justify-center text-muted">{iconForNode(node)}</span>
             <span className="truncate font-medium">{node.label}</span>
             {node.loading ? <span className="text-[10px] font-semibold text-faint">Loading…</span> : null}
             {node.kind === 'connection' && node.active ? (
-              <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#475569]">
+              <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
                 Selected
               </span>
             ) : null}
@@ -1096,7 +1096,7 @@ export function SQLEditorPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-[22px] border border-white/85 bg-[rgba(248,250,252,0.82)] shadow-soft">
+      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
@@ -1114,15 +1114,15 @@ export function SQLEditorPage() {
             </div>
 
             <div className="grid min-w-[250px] gap-2 text-[12px] text-muted sm:grid-cols-3 lg:min-w-[360px]">
-              <div className="rounded-[14px] border border-border bg-white px-3 py-2.5 shadow-soft">
+              <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Tabs</p>
                 <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{tabs.length}</p>
               </div>
-              <div className="rounded-[14px] border border-border bg-white px-3 py-2.5 shadow-soft">
+              <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">History</p>
                 <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{history.length}</p>
               </div>
-              <div className="rounded-[14px] border border-border bg-white px-3 py-2.5 shadow-soft">
+              <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Saved Queries</p>
                 <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{savedQueries.length}</p>
               </div>
@@ -1134,7 +1134,7 @@ export function SQLEditorPage() {
       {connectionsError ? <InlineAlert>{connectionsError}</InlineAlert> : null}
 
       <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <section className="flex min-h-0 flex-col rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
+        <section className="flex min-h-0 flex-col rounded-xl border border-border bg-panel shadow-soft">
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center gap-2">
               <FolderTree className="h-4 w-4 text-accent" />
@@ -1143,17 +1143,17 @@ export function SQLEditorPage() {
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
-            <div className="flex min-h-0 flex-1 flex-col rounded-[14px] border border-border bg-panel-soft px-3 py-3">
+            <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-panel-soft px-3 py-3">
               <div className="flex items-center gap-2">
                 <Table2 className="h-4 w-4 text-muted" />
                 <p className="text-[12px] font-semibold text-ink">Workspace Explorer</p>
               </div>
               {metadataError ? <InlineAlert className="mt-2" tone="info">{metadataError}</InlineAlert> : null}
               <div className="mt-2 min-h-0 flex-1">
-                <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[12px] bg-white px-3 py-3">
+                <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-white px-3 py-3">
                   <div className="px-1">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">Objects</p>
-                    <label className="mt-2 flex h-9 items-center gap-2 rounded-[10px] border border-border bg-[#f8fafc] px-2.5">
+                    <label className="mt-2 flex h-9 items-center gap-2 rounded-md border border-border bg-panel-soft px-2.5">
                       <Search className="h-3.5 w-3.5 text-faint" />
                       <input
                         aria-label="Explorer Search"
@@ -1185,7 +1185,7 @@ export function SQLEditorPage() {
           </div>
         </section>
 
-        <section className="flex min-h-0 flex-col rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
+        <section className="flex min-h-0 flex-col rounded-xl border border-border bg-panel shadow-soft">
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
               {tabs.map((tab) => (
@@ -1193,7 +1193,7 @@ export function SQLEditorPage() {
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTabId(tab.id)}
-                  className={`inline-flex items-center gap-2 rounded-[12px] border px-3 py-2 text-[12px] font-semibold transition ${
+                  className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[12px] font-semibold transition ${
                     tab.id === activeTabId
                       ? 'border-border bg-panel-soft text-ink'
                       : 'border-transparent bg-white text-muted hover:border-border hover:bg-page hover:text-ink'
@@ -1216,7 +1216,7 @@ export function SQLEditorPage() {
               <button
                 type="button"
                 onClick={handleAddTab}
-                className="inline-flex items-center gap-2 rounded-[12px] border border-border bg-white px-3 py-2 text-[12px] font-semibold text-ink transition hover:bg-page"
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-[12px] font-semibold text-ink transition hover:bg-page"
               >
                 <Plus className="h-4 w-4" />
                 New Tab
@@ -1225,7 +1225,7 @@ export function SQLEditorPage() {
           </div>
 
           {!activeTab ? (
-            <LoadingBlock message="載入 editor 中…" className="m-4 min-h-[320px] rounded-[18px] border-white/80 bg-white/86" />
+            <LoadingBlock message="載入 editor 中…" className="m-4 min-h-[320px] rounded-xl border-border bg-panel" />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-4 py-3">
@@ -1233,7 +1233,7 @@ export function SQLEditorPage() {
                   <button
                     type="button"
                     onClick={() => setAssetPickerOpen((current) => !current)}
-                    className="flex min-h-[52px] w-full items-center gap-2 rounded-[12px] border border-border bg-white px-3 py-2 text-left text-[12px] text-ink"
+                    className="flex min-h-[52px] w-full items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-left text-[12px] text-ink"
                   >
                     <Workflow className="h-4 w-4 shrink-0 text-faint" />
                     <div className="min-w-0 flex-1">
@@ -1253,8 +1253,8 @@ export function SQLEditorPage() {
                     <ChevronDown className="h-4 w-4 shrink-0 text-faint" />
                   </button>
                   {assetPickerOpen ? (
-                    <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-10 rounded-[12px] border border-border bg-white p-2 shadow-soft">
-                      <label className="flex h-9 items-center gap-2 rounded-[10px] border border-border bg-[#f8fafc] px-2.5">
+                    <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-10 rounded-lg border border-border bg-white p-2 shadow-soft">
+                      <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-panel-soft px-2.5">
                         <Search className="h-3.5 w-3.5 text-faint" />
                         <input
                           aria-label="Asset Picker Search"
@@ -1273,15 +1273,15 @@ export function SQLEditorPage() {
                               key={connection.id}
                               type="button"
                               onClick={() => handleSelectConnection(connection)}
-                              className={`flex w-full items-center gap-2 rounded-[9px] px-2 py-2 text-left text-[12px] ${
+                              className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[12px] ${
                                 activeConnection?.id === connection.id
-                                  ? 'bg-[#eef2ff] text-ink ring-1 ring-[#c7d7fe]'
-                                  : 'text-muted hover:bg-[#f8fafc] hover:text-ink'
+                                  ? 'bg-panel-soft text-ink ring-1 ring-border-strong'
+                                  : 'text-muted hover:bg-panel-soft hover:text-ink'
                               }`}
                             >
-                              <span className="flex h-4 w-4 items-center justify-center text-[#64748b]">
+                              <span className="flex h-4 w-4 items-center justify-center text-muted">
                                 {activeConnection?.id === connection.id ? (
-                                  <Check className="h-3.5 w-3.5 text-[#315fcb]" />
+                                  <Check className="h-3.5 w-3.5 text-ink" />
                                 ) : (
                                   <Workflow className="h-3.5 w-3.5" />
                                 )}
@@ -1294,7 +1294,7 @@ export function SQLEditorPage() {
                                 </p>
                               </div>
                               {activeConnection?.id === connection.id ? (
-                                <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#315fcb]">
+                                <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink">
                                   Selected
                                 </span>
                               ) : null}
@@ -1309,18 +1309,18 @@ export function SQLEditorPage() {
                   type="button"
                   onClick={handleRunQuery}
                   disabled={runningTabId === activeTab.id || !activeTab.connectionId}
-                  className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Play className="h-4 w-4" />
                   {runningTabId === activeTab.id ? '執行中…' : 'Run Query'}
                 </button>
-                <div className="inline-flex h-10 min-w-[220px] items-center rounded-[12px] border border-border bg-white px-3 text-[12px] font-semibold text-muted">
+                <div className="inline-flex h-10 min-w-[220px] items-center rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-muted">
                   <span className="truncate">{activePathLabel.length > 0 ? activePathLabel.join(' / ') : '從左側 Explorer 選擇資料源'}</span>
                 </div>
               </div>
 
               <div className="shrink-0 p-4">
-                <div ref={editorContainerRef} className="overflow-hidden rounded-[18px] border border-[#d8e2ee] bg-[#eef4fb]">
+                <div ref={editorContainerRef} className="overflow-hidden rounded-xl border border-border bg-panel-soft">
                   <CodeMirror
                     value={activeTab.sql}
                     height={editorHeight}
@@ -1339,17 +1339,17 @@ export function SQLEditorPage() {
 
               <div className="flex min-h-0 flex-1 flex-col border-t border-border/80 px-4 py-3">
                 {hasSensitiveOverride || activeTab.result?.sensitive_override_active ? (
-                  <div className="mb-3 rounded-[14px] border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
                     <span className="font-semibold">Sensitive override active.</span> 此帳號的查詢與匯出結果會直接顯示未脫敏資料。
                   </div>
                 ) : null}
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-3">
-                    <div className="inline-flex items-center rounded-[14px] border border-border bg-white p-1">
+                    <div className="inline-flex items-center rounded-lg border border-border bg-white p-1">
                       <button
                         type="button"
                         onClick={() => setResultView('result')}
-                        className={`inline-flex items-center gap-2 rounded-[8px] px-3 py-1.5 ${
+                        className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 ${
                           resultView === 'result' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
                         }`}
                       >
@@ -1359,7 +1359,7 @@ export function SQLEditorPage() {
                       <button
                         type="button"
                         onClick={() => setResultView('vertical')}
-                        className={`inline-flex items-center gap-2 rounded-[8px] px-3 py-1.5 ${
+                        className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 ${
                           resultView === 'vertical' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
                         }`}
                       >
@@ -1369,7 +1369,7 @@ export function SQLEditorPage() {
                       <button
                         type="button"
                         onClick={() => setResultView('object-meta')}
-                        className={`inline-flex items-center gap-2 rounded-[8px] px-3 py-1.5 ${
+                        className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 ${
                           resultView === 'object-meta' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
                         }`}
                       >
@@ -1379,7 +1379,7 @@ export function SQLEditorPage() {
                       <button
                         type="button"
                         onClick={() => setResultView('history')}
-                        className={`inline-flex items-center gap-2 rounded-[8px] px-3 py-1.5 ${
+                        className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 ${
                           resultView === 'history' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
                         }`}
                       >
@@ -1392,7 +1392,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={() => setResultView('saved')}
-                      className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Star className="h-4 w-4" />
                       Saved
@@ -1401,12 +1401,12 @@ export function SQLEditorPage() {
                       type="button"
                       onClick={() => void handleSaveQuery()}
                       disabled={!activeTab.connectionId || !activeTab.sql.trim() || isFavorited}
-                      className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isFavorited ? <StarOff className="h-4 w-4" /> : <Star className="h-4 w-4" />}
                       {isFavorited ? 'Saved' : 'Save'}
                     </button>
-                    <div className="inline-flex items-center overflow-hidden rounded-[10px] border border-border bg-white">
+                    <div className="inline-flex items-center overflow-hidden rounded-md border border-border bg-white">
                       <select
                         value={sensitiveAccessDuration}
                         onChange={(event) => setSensitiveAccessDuration(Number(event.target.value))}
@@ -1431,13 +1431,13 @@ export function SQLEditorPage() {
                         type="button"
                         onClick={() => setColumnFilterOpen((current) => !current)}
                         disabled={!activeTab.result}
-                        className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <Filter className="h-4 w-4" />
                         Filter Columns
                       </button>
                       {columnFilterOpen && activeTab.result ? (
-                        <div className="absolute right-0 top-[calc(100%+8px)] z-10 w-64 rounded-[14px] border border-border bg-white p-3 shadow-soft">
+                        <div className="absolute right-0 top-[calc(100%+8px)] z-10 w-64 rounded-lg border border-border bg-white p-3 shadow-soft">
                           <div className="mb-2 flex items-center justify-between">
                             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">Visible Columns</p>
                             <button
@@ -1470,7 +1470,7 @@ export function SQLEditorPage() {
                       type="button"
                       onClick={() => void handleExport()}
                       disabled={exportingTabId === activeTab.id || !activeTab.connectionId || !activeTab.sql.trim()}
-                      className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Download className="h-4 w-4" />
                       {exportingTabId === activeTab.id ? '匯出中…' : 'EXPORT'}
@@ -1492,7 +1492,7 @@ export function SQLEditorPage() {
 
                 {activeTab.error ? <InlineAlert className="mt-3">{activeTab.error}</InlineAlert> : null}
 
-                <div className="mt-3 min-h-0 flex-1 overflow-auto rounded-[16px] border border-border bg-white">
+                <div className="mt-3 min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-white">
                   {resultView === 'history' ? (
                     history.length === 0 ? (
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
@@ -1552,7 +1552,7 @@ export function SQLEditorPage() {
                             <button
                               type="button"
                               onClick={() => setSavedQueryToDelete(entry)}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-border bg-white text-muted transition hover:bg-page hover:text-danger"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-white text-muted transition hover:bg-page hover:text-danger"
                               aria-label={`Delete saved query ${entry.label}`}
                             >
                               <Trash2 className="h-4 w-4" />
@@ -1608,7 +1608,7 @@ export function SQLEditorPage() {
                             <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-faint">
                               Row {(resultPage - 1) * RESULT_PAGE_SIZE + rowOffset + 1}
                             </p>
-                            <div className="overflow-hidden rounded-[12px] border border-border bg-panel-soft">
+                            <div className="overflow-hidden rounded-lg border border-border bg-panel-soft">
                               {visibleResultColumnIndexes.map((columnIndex) => (
                                 <div
                                   key={`${activeTab.id}-vertical-${rowOffset}-${columnIndex}`}
@@ -1673,7 +1673,7 @@ export function SQLEditorPage() {
                       type="button"
                       onClick={() => setResultPage((current) => Math.max(1, current - 1))}
                       disabled={resultPage <= 1}
-                      className="inline-flex h-8 items-center rounded-[10px] border border-border bg-white px-3 font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-8 items-center rounded-md border border-border bg-white px-3 font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       上一頁
                     </button>
@@ -1682,7 +1682,7 @@ export function SQLEditorPage() {
                       type="button"
                       onClick={() => setResultPage((current) => Math.min(totalResultPages, current + 1))}
                       disabled={resultPage >= totalResultPages}
-                      className="inline-flex h-8 items-center rounded-[10px] border border-border bg-white px-3 font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-8 items-center rounded-md border border-border bg-white px-3 font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       下一頁
                     </button>

@@ -4,3 +4,4 @@ bin/
 *.swp
 .DS_Store
 backend/vendor/
+.gstack/

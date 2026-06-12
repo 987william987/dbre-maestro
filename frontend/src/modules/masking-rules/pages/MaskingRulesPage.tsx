@@ -329,7 +329,7 @@ export function MaskingRulesPage() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-[22px] border border-white/85 bg-[rgba(248,250,252,0.82)] shadow-soft">
+      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
@@ -346,7 +346,7 @@ export function MaskingRulesPage() {
               </p>
             </div>
             {!canWrite ? (
-              <div className="rounded-[14px] border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
+              <div className="rounded-lg border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
                 目前帳號只有 `masking_rules.read`，可查看但不可調整規則。
               </div>
             ) : null}
@@ -370,7 +370,7 @@ export function MaskingRulesPage() {
             }
           >
             {loading ? (
-              <LoadingBlock message="載入 global masking rules 中…" className="m-4 min-h-[180px] rounded-[18px] border-white/80 bg-white/86" />
+              <LoadingBlock message="載入 global masking rules 中…" className="m-4 min-h-[180px] rounded-xl border-border bg-panel" />
             ) : sortedRules.length === 0 ? (
               <EmptyState message="尚未建立任何 global masking rule。" />
             ) : (
@@ -409,7 +409,7 @@ export function MaskingRulesPage() {
             }
           >
             {loading ? (
-              <LoadingBlock message="載入 whitelist 中…" className="m-4 min-h-[180px] rounded-[18px] border-white/80 bg-white/86" />
+              <LoadingBlock message="載入 whitelist 中…" className="m-4 min-h-[180px] rounded-xl border-border bg-panel" />
             ) : sortedWhitelist.length === 0 ? (
               <EmptyState message="尚未建立任何 whitelist。" />
             ) : (
@@ -447,7 +447,7 @@ export function MaskingRulesPage() {
               <input
                 value={ruleForm.columnName}
                 onChange={(event) => setRuleForm((current) => ({ ...current, columnName: event.target.value }))}
-                className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 disabled={ruleSubmitting}
               />
             </Field>
@@ -455,7 +455,7 @@ export function MaskingRulesPage() {
               <select
                 value={ruleForm.maskMode}
                 onChange={(event) => setRuleForm((current) => ({ ...current, maskMode: normalizeMaskMode(event.target.value) }))}
-                className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 disabled={ruleSubmitting}
               >
                 {MASK_MODE_OPTIONS.map((option) => (
@@ -469,7 +469,7 @@ export function MaskingRulesPage() {
             <button
               type="submit"
               disabled={ruleSubmitting || !ruleForm.columnName.trim()}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {ruleSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : ruleDrawer.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
               {ruleDrawer.mode === 'create' ? '建立規則' : '儲存變更'}
@@ -501,7 +501,7 @@ export function MaskingRulesPage() {
                     columnName: '',
                   })
                 }
-                className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 disabled={whitelistSubmitting}
               >
                 <option value="">選擇 MySQL connection</option>
@@ -514,7 +514,7 @@ export function MaskingRulesPage() {
             </Field>
 
             {whitelistForm.dbConnectionId ? (
-              <div className="grid gap-3 rounded-[16px] border border-border bg-panel-soft/60 px-3 py-3">
+              <div className="grid gap-3 rounded-xl border border-border bg-panel-soft/60 px-3 py-3">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-[12px] font-semibold text-ink">Metadata 選取</p>
                   {targetLoading ? <Loader2 className="h-4 w-4 animate-spin text-muted" /> : null}
@@ -531,7 +531,7 @@ export function MaskingRulesPage() {
                         columnName: '',
                       }))
                     }
-                    className="h-10 rounded-[12px] border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                    className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                     disabled={whitelistSubmitting}
                   >
                     <option value="">選擇 database</option>
@@ -554,7 +554,7 @@ export function MaskingRulesPage() {
                           columnName: '',
                         }))
                       }
-                      className="h-10 rounded-[12px] border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                      className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                       disabled={whitelistSubmitting}
                     >
                       <option value="">選擇 table</option>
@@ -572,7 +572,7 @@ export function MaskingRulesPage() {
                     <select
                       value={whitelistForm.columnName}
                       onChange={(event) => setWhitelistForm((current) => ({ ...current, columnName: event.target.value }))}
-                      className="h-10 rounded-[12px] border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                      className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                       disabled={whitelistSubmitting}
                     >
                       <option value="">選擇 column</option>
@@ -591,7 +591,7 @@ export function MaskingRulesPage() {
               <input
                 value={whitelistForm.databaseName}
                 onChange={(event) => setWhitelistForm((current) => ({ ...current, databaseName: event.target.value }))}
-                className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 disabled={whitelistSubmitting}
               />
             </Field>
@@ -599,7 +599,7 @@ export function MaskingRulesPage() {
               <input
                 value={whitelistForm.tableName}
                 onChange={(event) => setWhitelistForm((current) => ({ ...current, tableName: event.target.value }))}
-                className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 disabled={whitelistSubmitting}
               />
             </Field>
@@ -607,7 +607,7 @@ export function MaskingRulesPage() {
               <input
                 value={whitelistForm.columnName}
                 onChange={(event) => setWhitelistForm((current) => ({ ...current, columnName: event.target.value }))}
-                className="h-10 rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 disabled={whitelistSubmitting}
               />
             </Field>
@@ -615,7 +615,7 @@ export function MaskingRulesPage() {
             <button
               type="submit"
               disabled={whitelistSubmitting || !isWhitelistFormSubmittable(whitelistForm)}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {whitelistSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : whitelistDrawer.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
               {whitelistDrawer.mode === 'create' ? '建立白名單' : '儲存變更'}
@@ -668,7 +668,7 @@ function SectionCard({
   children: ReactNode
 }) {
   return (
-    <section className="rounded-[18px] border border-white/85 bg-white/92 shadow-soft">
+    <section className="rounded-xl border border-border bg-panel shadow-soft">
       <div className="border-b border-border/80 px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -691,7 +691,7 @@ function ActionButton({ onClick, children }: { onClick: () => void; children: Re
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-9 items-center justify-center gap-2 rounded-[12px] bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
+      className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
     >
       {children}
     </button>
@@ -748,7 +748,7 @@ function ActionCell({
       <button
         type="button"
         onClick={onEdit}
-        className="inline-flex h-8 items-center justify-center gap-1 rounded-[10px] border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page"
+        className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page"
       >
         <Pencil className="h-3.5 w-3.5" />
         Edit
@@ -757,7 +757,7 @@ function ActionCell({
         type="button"
         onClick={onDelete}
         disabled={deleting}
-        className="inline-flex h-8 items-center justify-center gap-1 rounded-[10px] border border-danger/20 bg-red-50 px-2.5 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
+        className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2.5 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
       >
         {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
         Delete
@@ -782,7 +782,7 @@ function DrawerLayout({
       <div
         role="dialog"
         aria-modal="true"
-        className="flex h-full w-full max-w-[620px] flex-col overflow-hidden rounded-[24px] border border-white/80 bg-[rgba(255,255,255,0.96)] shadow-[0_22px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl"
+        className="flex h-full w-full max-w-[620px] flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-[0_22px_60px_rgba(15,23,42,0.18)]"
       >
         <div className="flex items-start justify-between border-b border-border/80 px-5 py-4">
           <div>
@@ -792,7 +792,7 @@ function DrawerLayout({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-[12px] border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
             aria-label="關閉"
           >
             <X className="h-4 w-4" />

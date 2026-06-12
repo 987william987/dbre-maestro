@@ -1,7 +1,8 @@
 # DESIGN.md — Admin Dashboard 設計規範
 
 > 參考來源：[Shadcnblocks Admin Kit](https://www.shadcnblocks.com/admin-dashboard)（[Live Demo](https://shadcnblocks-admin.vercel.app/)）
-> 技術基礎：Next.js (App Router) + shadcn/ui + Tailwind CSS + TypeScript + Recharts
+> 本專案技術基礎：React 18 + Vite + Tailwind CSS 3 + TypeScript + react-router-dom
+> （參考範例原為 Next.js + Tailwind 4；本文件已對應本專案 stack。shadcn/ui 以 Vite 方式引入，目前 lucide-react / clsx / tailwind-merge 已具備，Radix 元件與 Recharts 視需要再加）
 
 ---
 
@@ -30,7 +31,7 @@
 ### 2.1 Sidebar（左側欄）
 - 寬約 256px，可收合為 icon-only 模式（shadcn `Sidebar` 元件，`collapsible="icon"`）。
 - **頂部**：workspace/team switcher（logo + 名稱 + 副標 + 上下箭頭）。
-- **中段**：依領域分群（如 `Ecommerce`、`Project Management`、`Manage`），群組標籤為小型 muted 文字。
+- **中段**：依領域分群（範例為 `Ecommerce`、`Project Management`；本專案可對應資料庫治理的功能群組），群組標籤為小型 muted 文字。
 - 導覽項目：icon + 文字 + 右側 chevron（可展開子選單）；子選單以左側豎線縮排呈現；當前頁高亮（淺灰底）。
 - **底部**：使用者卡片（avatar + 名稱 + email + 選單）。
 
@@ -47,7 +48,7 @@
 1. **KPI Stat Row**：4 格等寬統計卡（以分隔線相隔、共用一張卡片）。每格：icon + 指標名稱（muted）→ 前期數值（小字 muted）→ **大號粗體數值**（text-3xl/4xl font-bold）→ 趨勢箭頭 + 百分比（綠/紅）+ "vs last month"。
 2. **主圖表列**：2 欄（約 5:4）。卡片標頭 = 方形 icon 容器 + 標題 + 右側 legend；折線/面積圖（本年 vs 去年，黑線 + 灰面積）、水平堆疊長條圖（各通路營收，灰階區分）。
 3. **次要卡片列**：3 欄等寬。迷你長條圖、雙線比較圖、donut 圖（中心顯示最大占比 + 右側 legend 列表附百分比）。
-4. 圖表使用 Recharts（shadcn `Chart` 包裝），一律灰階配色、淺色格線、無多餘裝飾。
+4. 圖表使用 Recharts（shadcn `Chart` 包裝，需新增依賴），一律灰階配色、淺色格線、無多餘裝飾。
 
 ### 3.2 列表頁（Data Table）
 - **PageHeader**：大標題（text-3xl/4xl font-bold）+ 一行 muted 描述；右側主要 CTA 為**黑底白字按鈕**（icon + 文字，如 "+ Add Products"）。
@@ -90,6 +91,7 @@
 | 列表 | `Table`、`Tabs`、`Badge`、`Progress`、`DropdownMenu`、`Pagination`、`Select`、`Input` |
 | 表單 | `Form`（react-hook-form + zod）、`Input`、`Select`、`Textarea`、`Button` |
 | 其他 | `Avatar`、`Tooltip`、`Sheet`（行動版 sidebar）、`Sonner`（toast） |
+| SQL / 程式碼編輯 | `@uiw/react-codemirror`（已安裝；嵌入 `Card` 內，邊框與圓角沿用卡片規範，dark mode 搭配 one-dark theme） |
 
 ## 6. 互動與響應式
 

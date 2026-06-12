@@ -53,7 +53,7 @@ export function TicketsPage() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-[22px] border border-white/85 bg-[rgba(248,250,252,0.82)] shadow-soft">
+      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
@@ -74,7 +74,7 @@ export function TicketsPage() {
               <button
                 type="button"
                 onClick={() => void loadTickets(status)}
-                className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-border bg-white px-3.5 text-[13px] font-semibold text-ink transition-colors hover:bg-panel-soft"
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-3.5 text-[13px] font-semibold text-ink transition-colors hover:bg-panel-soft"
               >
                 <RefreshCcw className="h-4 w-4" />
                 重新整理
@@ -82,7 +82,7 @@ export function TicketsPage() {
               {canCreateTicket ? (
                 <Link
                   to="/tickets/new"
-                  className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition-colors hover:bg-slate-800"
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition-colors hover:bg-slate-800"
                 >
                   建立新工單
                   <ArrowRight className="h-4 w-4" />
@@ -102,12 +102,12 @@ export function TicketsPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            <label className="flex items-center gap-2 rounded-[12px] border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
+            <label className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
               <span className="font-semibold text-ink">狀態</span>
               <select
                 value={status}
                 onChange={(event) => setStatus(event.target.value as '' | TicketStatus)}
-                className="h-8 min-w-[128px] rounded-[10px] border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-8 min-w-[128px] rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
               >
                 {STATUS_OPTIONS.map((option) => (
                   <option key={option.value || 'all'} value={option.value}>
@@ -122,7 +122,7 @@ export function TicketsPage() {
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
-      <div className="overflow-hidden rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
+      <div className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
         {loading ? (
           <LoadingBlock message="載入工單列表中…" className="h-[320px] rounded-none border-0 bg-transparent" />
         ) : tickets.length === 0 ? (
@@ -151,7 +151,7 @@ export function TicketsPage() {
                     <td className="px-4 py-3.5 align-top">
                       <Link
                         to={`/tickets/${ticket.id}`}
-                        className="inline-flex rounded-[8px] border border-transparent px-1.5 py-1 font-mono text-[12px] font-semibold text-accent transition hover:border-accent/15 hover:bg-accent-soft hover:text-blue-700"
+                        className="inline-flex rounded-md border border-transparent px-1.5 py-1 font-mono text-[12px] font-semibold text-accent transition hover:border-accent/15 hover:bg-accent-soft hover:text-blue-700"
                       >
                         {ticket.ticket_no}
                       </Link>

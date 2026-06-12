@@ -102,7 +102,7 @@ function Button({ variant = 'primary', className, children, ...props }: {
       className={cn(
         'inline-flex h-9 items-center justify-center gap-2 rounded-control px-4 text-sm font-bold',
         'transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
-        variant === 'primary'   && 'bg-brand text-white hover:bg-[#1f2937]',
+        variant === 'primary'   && 'bg-brand text-white hover:bg-zinc-800',
         variant === 'secondary' && 'border border-border bg-panel text-ink hover:bg-page',
         variant === 'ghost'     && 'text-muted hover:bg-page',
         className,
@@ -354,7 +354,7 @@ function NotificationsStep({
 
       <div className="rounded-card border border-border bg-panel-soft p-4 flex flex-col gap-3">
         <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-control bg-[#06aff2] flex items-center justify-center shrink-0 mt-0.5">
+          <div className="w-8 h-8 rounded-control bg-brand flex items-center justify-center shrink-0 mt-0.5">
             <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white" xmlns="http://www.w3.org/2000/svg">
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
             </svg>
@@ -367,7 +367,7 @@ function NotificationsStep({
           </div>
         </div>
 
-        <div className="rounded-control bg-[#eef3f8] px-3 py-2 font-mono text-xs text-ink">
+        <div className="rounded-control bg-panel-soft px-3 py-2 font-mono text-xs text-ink">
           LARK_WEBHOOK_URL=https://open.larksuite.com/open-apis/bot/v2/hook/...
         </div>
 

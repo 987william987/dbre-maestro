@@ -105,7 +105,7 @@ export function SettingsPage() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-[22px] border border-white/85 bg-[rgba(248,250,252,0.82)] shadow-soft">
+      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
@@ -126,7 +126,7 @@ export function SettingsPage() {
               <button
                 type="button"
                 onClick={() => void handleRefresh()}
-                className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-border bg-white px-3.5 text-[13px] font-semibold text-ink transition-colors hover:bg-panel-soft"
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-3.5 text-[13px] font-semibold text-ink transition-colors hover:bg-panel-soft"
               >
                 <RefreshCcw className="h-4 w-4" />
                 重新整理
@@ -135,7 +135,7 @@ export function SettingsPage() {
                 type="button"
                 onClick={() => void handleSave()}
                 disabled={!canWrite || saving}
-                className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings2 className="h-4 w-4" />}
                 儲存設定
@@ -148,7 +148,7 @@ export function SettingsPage() {
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
       {loading ? (
-        <LoadingBlock message="載入平台設定中…" className="min-h-[320px] rounded-[22px] border-white/80 bg-white/86" />
+        <LoadingBlock message="載入平台設定中…" className="min-h-[320px] rounded-xl border-border bg-panel" />
       ) : (
         <div className="grid gap-3 xl:grid-cols-2">
           <SettingsCard
@@ -189,7 +189,7 @@ function SettingsCard({
   onToggle: (userID: number) => void
 }) {
   return (
-    <section className="rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
+    <section className="rounded-xl border border-border bg-panel shadow-soft">
       <div className="border-b border-border/80 px-4 py-3">
         <p className="text-[14px] font-semibold text-ink">{title}</p>
         <p className="mt-1 text-[12px] leading-5 text-muted">{description}</p>
@@ -204,8 +204,8 @@ function SettingsCard({
               return (
                 <label
                   key={option.id}
-                  className={`flex items-start gap-3 rounded-[14px] border px-3 py-2.5 ${
-                    checked ? 'border-[#c7d7fe] bg-[#eef2ff]' : 'border-border bg-white'
+                  className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 ${
+                    checked ? 'border-border-strong bg-panel-soft' : 'border-border bg-white'
                   } ${disabled ? 'cursor-default' : 'cursor-pointer'}`}
                 >
                   <input

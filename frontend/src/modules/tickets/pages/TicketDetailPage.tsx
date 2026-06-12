@@ -109,7 +109,7 @@ export function TicketDetailPage() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-[22px] border border-white/85 bg-[rgba(248,250,252,0.82)] shadow-soft">
+      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
@@ -129,13 +129,13 @@ export function TicketDetailPage() {
               <button
                 type="button"
                 onClick={() => navigate(0)}
-                className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
               >
                 重新整理
               </button>
               <Link
                 to="/tickets"
-                className="inline-flex h-10 items-center gap-2 rounded-[12px] border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
               >
                 <ArrowLeft className="h-4 w-4" />
                 返回列表
@@ -145,19 +145,19 @@ export function TicketDetailPage() {
 
           {ticket ? (
             <div className="mt-4 grid gap-2 md:grid-cols-3">
-              <div className="rounded-[14px] border border-border bg-white px-3 py-2.5 shadow-soft">
+              <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Ticket No</p>
                 <p className="mt-1 font-mono text-[18px] font-bold text-accent">{ticket.ticket_no}</p>
                 <p className="mt-0.5 text-[12px] text-muted">工單識別碼與追蹤入口</p>
               </div>
-              <div className="rounded-[14px] border border-border bg-white px-3 py-2.5 shadow-soft">
+              <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Status</p>
                 <div className="mt-1">
                   <StatusBadge status={ticket.status} />
                 </div>
                 <p className="mt-1.5 text-[12px] text-muted">目前流程節點</p>
               </div>
-              <div className="rounded-[14px] border border-border bg-white px-3 py-2.5 shadow-soft">
+              <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
                 <div className="flex items-center gap-2 text-faint">
                   <Clock3 className="h-3.5 w-3.5" />
                   <p className="text-[10px] font-bold uppercase tracking-[0.16em]">Created</p>
@@ -173,12 +173,12 @@ export function TicketDetailPage() {
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
       {loading ? (
-        <LoadingBlock message="載入工單詳情中…" className="min-h-[420px] rounded-[22px] border-white/80 bg-white/86" />
+        <LoadingBlock message="載入工單詳情中…" className="min-h-[420px] rounded-xl border-border bg-panel" />
       ) : !ticket || !detail ? (
-        <div className="rounded-[22px] border border-white/80 bg-white/86 p-6 text-sm text-muted shadow-soft">找不到這筆工單。</div>
+        <div className="rounded-xl border border-border bg-panel p-6 text-sm text-muted shadow-soft">找不到這筆工單。</div>
       ) : (
         <div className="grid gap-3 xl:grid-cols-[1.15fr_0.85fr]">
-          <section className="rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
+          <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
               <span className="font-mono text-sm font-semibold text-accent">{ticket.ticket_no}</span>
               <StatusBadge status={ticket.status} />
@@ -218,7 +218,7 @@ export function TicketDetailPage() {
 
             <div className="border-t border-border px-4 py-4">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">SQL Content</p>
-              <pre className="mt-2 overflow-x-auto rounded-[16px] border border-[#d8e2ee] bg-[#eef4fb] p-4 font-mono text-[13px] leading-7 text-[#334155]">
+              <pre className="mt-2 overflow-x-auto rounded-xl border border-border bg-panel-soft p-4 font-mono text-[13px] leading-7 text-ink">
                 <code>{ticket.sql_content}</code>
               </pre>
             </div>
@@ -226,7 +226,7 @@ export function TicketDetailPage() {
 
           <section className="flex flex-col gap-3">
             {canReview ? (
-              <div className="rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
+              <div className="rounded-xl border border-border bg-panel shadow-soft">
                 <div className="border-b border-border/80 px-4 py-3">
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="h-4 w-4 text-accent" />
@@ -241,7 +241,7 @@ export function TicketDetailPage() {
                     <textarea
                       value={comment}
                       onChange={(event) => setComment(event.target.value)}
-                      className="min-h-24 rounded-[14px] border border-border bg-panel-soft px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                      className="min-h-24 rounded-lg border border-border bg-panel-soft px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                       disabled={acting !== null}
                     />
                   </label>
@@ -251,13 +251,13 @@ export function TicketDetailPage() {
                       type="button"
                       disabled={acting !== null}
                       onClick={() => void runAction('approve', () => approveTicket(ticket.id, comment))}
-                      className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {acting === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                       審核通過
                     </button>
                   ) : (
-                    <p className="mt-3 rounded-[12px] border border-border bg-panel-soft px-3 py-2 text-[12px] text-muted">
+                    <p className="mt-3 rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px] text-muted">
                       目前狀態不是 `pending_review`，因此不能再做 approve / reject。
                     </p>
                   )}
@@ -267,7 +267,7 @@ export function TicketDetailPage() {
                     <textarea
                       value={reason}
                       onChange={(event) => setReason(event.target.value)}
-                      className="min-h-24 rounded-[14px] border border-border bg-panel-soft px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                      className="min-h-24 rounded-lg border border-border bg-panel-soft px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                       disabled={acting !== null}
                     />
                   </label>
@@ -277,7 +277,7 @@ export function TicketDetailPage() {
                       type="button"
                       disabled={acting !== null || reason.trim() === ''}
                       onClick={() => void runAction('reject', () => rejectTicket(ticket.id, reason.trim()))}
-                      className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-[12px] border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
                       拒絕工單
@@ -288,7 +288,7 @@ export function TicketDetailPage() {
             ) : null}
 
             {canOperateDBA || canExecute || canRevoke ? (
-              <div className="rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
+              <div className="rounded-xl border border-border bg-panel shadow-soft">
                 <div className="border-b border-border/80 px-4 py-3">
                   <div className="flex items-center gap-2">
                     <Play className="h-4 w-4 text-accent" />
@@ -302,7 +302,7 @@ export function TicketDetailPage() {
                     type="button"
                     disabled={acting !== null || !canOperateDBA || ticket.status !== 'approved'}
                     onClick={() => setConfirmAction('request-execution')}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[12px] border border-border bg-panel-soft px-4 text-[13px] font-bold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-panel-soft px-4 text-[13px] font-bold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {acting === 'request-execution' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     Request Execution
@@ -311,7 +311,7 @@ export function TicketDetailPage() {
                     type="button"
                     disabled={acting !== null || !canExecute || ticket.status !== 'pending_execution'}
                     onClick={() => setConfirmAction('execute')}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {acting === 'execute' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                     Execute
@@ -321,7 +321,7 @@ export function TicketDetailPage() {
                       type="button"
                       disabled={acting !== null || ticket.status !== 'approved' || ticket.ticket_type !== 'sensitive_query_access'}
                       onClick={() => setConfirmAction('revoke')}
-                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[12px] border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {acting === 'revoke' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
                       提前撤銷
@@ -329,7 +329,7 @@ export function TicketDetailPage() {
                   ) : null}
                 </div>
 
-                <p className="mx-4 mb-4 rounded-[12px] border border-border bg-panel-soft px-3 py-2 text-[12px] text-muted">
+                <p className="mx-4 mb-4 rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px] text-muted">
                   目前狀態：`{ticket.status}`。
                   {ticket.ticket_type === 'sensitive_query_access' && canRevoke
                     ? ' 已核准的臨時敏感查詢可在此提前撤銷。'
@@ -389,7 +389,7 @@ function ScopeRow({ scope }: { scope: TicketScope }) {
   parts.push(scope.column_name)
 
   return (
-    <div className="rounded-[12px] border border-border bg-panel-soft px-3 py-2 text-[12px] text-ink">
+    <div className="rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px] text-ink">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono">{parts.join(' / ')}</span>
         {scope.is_sensitive ? (

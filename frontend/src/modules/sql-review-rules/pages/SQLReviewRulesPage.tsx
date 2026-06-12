@@ -87,7 +87,7 @@ export function SQLReviewRulesPage() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-[22px] border border-white/85 bg-[rgba(248,250,252,0.82)] shadow-soft">
+      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
@@ -104,16 +104,16 @@ export function SQLReviewRulesPage() {
               </p>
             </div>
 
-            <div className="rounded-[14px] border border-border bg-white px-3 py-2.5 text-[12px] text-muted shadow-soft">
+            <div className="rounded-lg border border-border bg-white px-3 py-2.5 text-[12px] text-muted shadow-soft">
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Rules</p>
               <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{rules.length}</p>
             </div>
           </div>
         </div>
 
-        <div className="overflow-x-auto rounded-[18px] border border-white/85 bg-white/92 shadow-soft sm:m-4">
+        <div className="overflow-x-auto rounded-xl border border-border bg-panel shadow-soft sm:m-4">
           {loading ? (
-            <LoadingBlock message="載入 SQL review rules 中…" className="m-4 min-h-[220px] rounded-[18px] border-white/80 bg-white/86" />
+            <LoadingBlock message="載入 SQL review rules 中…" className="m-4 min-h-[220px] rounded-xl border-border bg-panel" />
           ) : rules.length === 0 ? (
             <div className="flex h-[220px] items-center justify-center text-[12px] text-muted">目前沒有 SQL review rules。</div>
           ) : (
@@ -164,7 +164,7 @@ export function SQLReviewRulesPage() {
                               },
                             }))
                           }
-                          className="h-9 w-[120px] rounded-[10px] border border-border bg-white px-3 text-[12px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                          className="h-9 w-[120px] rounded-md border border-border bg-white px-3 text-[12px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                           placeholder="threshold"
                         />
                       </td>
@@ -173,7 +173,7 @@ export function SQLReviewRulesPage() {
                           type="button"
                           onClick={() => void handleSave(rule)}
                           disabled={savingRuleName === rule.rule_name}
-                          className="inline-flex h-8 items-center justify-center gap-1 rounded-[10px] border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
+                          className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                         >
                           {savingRuleName === rule.rule_name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
                           Save

@@ -139,7 +139,7 @@ export function AuditLogsPage() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-[22px] border border-white/85 bg-[rgba(248,250,252,0.82)] shadow-soft">
+      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
@@ -156,7 +156,7 @@ export function AuditLogsPage() {
               </p>
             </div>
 
-            <div className="rounded-[14px] border border-border bg-white px-3 py-2.5 text-[12px] text-muted shadow-soft">
+            <div className="rounded-lg border border-border bg-white px-3 py-2.5 text-[12px] text-muted shadow-soft">
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Total Events</p>
               <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{total}</p>
             </div>
@@ -192,7 +192,7 @@ export function AuditLogsPage() {
               <input
                 value={filters.actorKeyword}
                 onChange={(event) => setFilters((current) => ({ ...current, actorKeyword: event.target.value }))}
-                className="h-10 w-full rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-10 w-full rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 placeholder="操作人名稱"
               />
             </FilterHint>
@@ -203,7 +203,7 @@ export function AuditLogsPage() {
               <input
                 value={filters.resourceKeyword}
                 onChange={(event) => setFilters((current) => ({ ...current, resourceKeyword: event.target.value }))}
-                className="h-10 w-full rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-10 w-full rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 placeholder="資源名稱"
               />
             </FilterHint>
@@ -215,7 +215,7 @@ export function AuditLogsPage() {
                 value={filters.from}
                 onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))}
                 type="datetime-local"
-                className="h-10 w-full rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-10 w-full rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
               />
             </FilterHint>
             <FilterHint
@@ -226,12 +226,12 @@ export function AuditLogsPage() {
                 value={filters.to}
                 onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))}
                 type="datetime-local"
-                className="h-10 w-full rounded-[12px] border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-10 w-full rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
               />
             </FilterHint>
             <button
               type="submit"
-              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800"
             >
               <Search className="h-4 w-4" />
               套用
@@ -240,7 +240,7 @@ export function AuditLogsPage() {
               <button
                 type="button"
                 onClick={handleExport}
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-[12px] border border-border bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-page"
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-page"
               >
                 <Download className="h-4 w-4" />
                 匯出
@@ -256,7 +256,7 @@ export function AuditLogsPage() {
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
-      <section className="overflow-hidden rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
+      <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
         {loading ? (
           <LoadingBlock message="載入稽核日誌中…" className="h-60 rounded-none border-0" />
         ) : logs.length === 0 ? (
@@ -290,7 +290,7 @@ export function AuditLogsPage() {
                       <button
                         type="button"
                         onClick={() => setSelectedLog(log)}
-                        className="inline-flex h-8 items-center justify-center rounded-[10px] border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
+                        className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
                       >
                         查看
                       </button>
@@ -312,7 +312,7 @@ export function AuditLogsPage() {
             type="button"
             disabled={offset === 0}
             onClick={() => setOffset((current) => Math.max(0, current - PAGE_SIZE))}
-            className="inline-flex h-9 items-center justify-center rounded-[10px] border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
+            className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
           >
             上一頁
           </button>
@@ -320,7 +320,7 @@ export function AuditLogsPage() {
             type="button"
             disabled={offset + PAGE_SIZE >= total}
             onClick={() => setOffset((current) => current + PAGE_SIZE)}
-            className="inline-flex h-9 items-center justify-center rounded-[10px] border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
+            className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
           >
             下一頁
           </button>
@@ -333,7 +333,7 @@ export function AuditLogsPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="audit-log-detail-title"
-            className="flex max-h-[min(720px,calc(100vh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-[24px] border border-white/80 bg-[rgba(255,255,255,0.96)] shadow-[0_22px_60px_rgba(15,23,42,0.18)] backdrop-blur-xl"
+            className="flex max-h-[min(720px,calc(100vh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-[0_22px_60px_rgba(15,23,42,0.18)]"
           >
             <div className="flex items-start justify-between border-b border-border/80 px-5 py-4">
               <div>
@@ -345,7 +345,7 @@ export function AuditLogsPage() {
               <button
                 type="button"
                 onClick={() => setSelectedLog(null)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-[12px] border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
                 aria-label="關閉"
               >
                 <X className="h-4 w-4" />
@@ -360,12 +360,12 @@ export function AuditLogsPage() {
                 <InfoBox label="來源 IP" value={formatIPAddress(selectedLog.ip_address)} />
               </section>
 
-              <section className="rounded-[18px] border border-white/85 bg-white/92 shadow-soft">
+              <section className="rounded-xl border border-border bg-panel shadow-soft">
                 <div className="border-b border-border/80 px-4 py-3">
                   <p className="text-[13px] font-semibold text-ink">完整明細</p>
                 </div>
                 <div className="px-4 py-4">
-                  <pre className="overflow-x-auto rounded-[12px] bg-panel-soft px-3 py-3 text-[12px] text-muted">
+                  <pre className="overflow-x-auto rounded-lg bg-panel-soft px-3 py-3 text-[12px] text-muted">
                     {selectedLog.details ? JSON.stringify(selectedLog.details, null, 2) : '—'}
                   </pre>
                 </div>
@@ -393,7 +393,7 @@ function SelectField({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-10 w-full appearance-none rounded-[12px] border border-border bg-panel-soft px-3 pr-9 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+        className="h-10 w-full appearance-none rounded-lg border border-border bg-panel-soft px-3 pr-9 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -418,7 +418,7 @@ function FilterHint({
   return (
     <div className={`group relative ${className ?? ''}`}>
       {children}
-      <div className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-20 hidden w-64 rounded-[10px] border border-border bg-white px-3 py-2 text-[11px] font-medium text-muted shadow-soft group-hover:block">
+      <div className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-20 hidden w-64 rounded-md border border-border bg-white px-3 py-2 text-[11px] font-medium text-muted shadow-soft group-hover:block">
         {hint}
       </div>
     </div>
@@ -427,7 +427,7 @@ function FilterHint({
 
 function InfoBox({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[14px] border border-border bg-panel-soft px-3 py-3">
+    <div className="rounded-lg border border-border bg-panel-soft px-3 py-3">
       <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">{label}</p>
       <p className="mt-1 text-[13px] text-ink">{value || '—'}</p>
     </div>
