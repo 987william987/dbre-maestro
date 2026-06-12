@@ -62,11 +62,11 @@ export function LoginPage() {
     <div className="min-h-screen bg-page px-4 py-8 sm:px-6">
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl items-center justify-center">
         <div className="grid w-full max-w-5xl overflow-hidden rounded-card border border-border bg-panel shadow-card lg:grid-cols-[1.1fr_0.9fr]">
-          <section className="hidden border-r border-border bg-[linear-gradient(180deg,#fbfcfe_0%,#f4f7fb_100%)] p-10 lg:flex lg:flex-col lg:justify-between">
+          <section className="hidden border-r border-border bg-panel-soft p-10 lg:flex lg:flex-col lg:justify-between">
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-faint">DBRE Maestro</p>
+              <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-faint">Database Governance</p>
               <h1 className="mt-4 max-w-md font-display text-[34px] font-black leading-tight tracking-tight text-ink">
-                Edgex DevSecOps
+                DBRE Maestro
               </h1>
               <p className="mt-4 max-w-md text-sm text-muted">
                 資料庫治理流程，從登入後的第一個操作開始一致化。

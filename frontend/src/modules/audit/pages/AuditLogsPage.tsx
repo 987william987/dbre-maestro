@@ -141,33 +141,19 @@ export function AuditLogsPage() {
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
       <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-muted">
-                <span className="rounded-full border border-border bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                  Audit
-                </span>
-                <span>/</span>
-                <span>Event Timeline</span>
-              </div>
-              <h2 className="mt-3 text-[24px] font-bold tracking-[-0.03em] text-ink">稽核日誌</h2>
-              <p className="mt-2 text-[13px] leading-6 text-muted">
-                查看登入、工單、匯出與設定變更等操作紀錄。常用條件已整理成可選項，複雜明細改由詳情視窗查看。
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-border bg-white px-3 py-2.5 text-[12px] text-muted shadow-soft">
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Total Events</p>
-              <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{total}</p>
-            </div>
+          <div className="max-w-3xl">
+            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">稽核日誌</h2>
+            <p className="mt-2 text-[13px] leading-6 text-muted">
+              查看登入、工單、匯出與設定變更等操作紀錄。常用條件已整理成可選項，複雜明細改由詳情視窗查看。
+            </p>
           </div>
         </div>
 
         <form className="px-4 py-3 sm:px-5" onSubmit={handleSubmit}>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             <FilterHint
               hint="從清單挑選常見操作事件，例如登入、登出、設定變更。"
-              className="min-w-[160px] max-w-[220px] flex-1"
+              className="w-full"
             >
               <SelectField
                 value={filters.actionType}
@@ -177,7 +163,7 @@ export function AuditLogsPage() {
             </FilterHint>
             <FilterHint
               hint="先用資源類型收斂，例如資料庫連線、工單或使用者。"
-              className="min-w-[160px] max-w-[220px] flex-1"
+              className="w-full"
             >
               <SelectField
                 value={filters.resourceType}
@@ -187,7 +173,7 @@ export function AuditLogsPage() {
             </FilterHint>
             <FilterHint
               hint="可輸入操作人名稱關鍵字，例如 admin 或 william。"
-              className="min-w-[160px] flex-1"
+              className="w-full"
             >
               <input
                 value={filters.actorKeyword}
@@ -198,7 +184,7 @@ export function AuditLogsPage() {
             </FilterHint>
             <FilterHint
               hint="可輸入資源名稱關鍵字，例如某個連線名稱或工單標題。"
-              className="min-w-[180px] flex-1"
+              className="w-full"
             >
               <input
                 value={filters.resourceKeyword}
@@ -209,7 +195,7 @@ export function AuditLogsPage() {
             </FilterHint>
             <FilterHint
               hint="設定開始時間，僅顯示此時間之後的事件。"
-              className="min-w-[220px] flex-1"
+              className="w-full"
             >
               <input
                 value={filters.from}
@@ -220,7 +206,7 @@ export function AuditLogsPage() {
             </FilterHint>
             <FilterHint
               hint="設定結束時間，僅顯示此時間之前的事件。"
-              className="min-w-[220px] flex-1"
+              className="w-full"
             >
               <input
                 value={filters.to}
@@ -229,13 +215,9 @@ export function AuditLogsPage() {
                 className="h-10 w-full rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
               />
             </FilterHint>
-            <button
-              type="submit"
-              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800"
-            >
-              <Search className="h-4 w-4" />
-              套用
-            </button>
+          </div>
+
+          <div className="mt-3 flex flex-wrap justify-end gap-2">
             {canExport ? (
               <button
                 type="button"
@@ -246,6 +228,13 @@ export function AuditLogsPage() {
                 匯出
               </button>
             ) : null}
+            <button
+              type="submit"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800"
+            >
+              <Search className="h-4 w-4" />
+              套用
+            </button>
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-muted">
