@@ -504,28 +504,23 @@ export function UsersPage() {
           </div>
         </div>
 
-        <div className="px-4 py-3 sm:px-5">
-          {loading ? (
-            <LoadingBlock message="載入 RBAC 資料中…" className="min-h-[320px] rounded-xl border-border bg-panel" />
-          ) : viewMode === 'users' ? (
-            <section className="rounded-xl border border-border bg-panel shadow-soft">
-              <div className="border-b border-border/80 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <UsersIcon className="h-4 w-4 text-accent" />
-                  <p className="text-[13px] font-semibold text-ink">Users</p>
-                </div>
-              </div>
+      </section>
+
+      {loading ? (
+        <LoadingBlock message="載入 RBAC 資料中…" className="min-h-[320px] rounded-xl border-border bg-panel" />
+      ) : viewMode === 'users' ? (
+            <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
               <div className="overflow-x-auto">
                 <table className="min-w-full border-collapse">
                   <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
                     <tr>
-                      <th className="px-3 py-3">Username</th>
-                      <th className="px-3 py-3">Auth Groups</th>
-                      <th className="px-3 py-3">DB Scope</th>
-                      <th className="px-3 py-3">Status</th>
-                      <th className="px-3 py-3">Created</th>
-                      <th className="px-3 py-3">Updated</th>
-                      <th className="px-3 py-3">Action</th>
+                      <th className="whitespace-nowrap px-3 py-3">Username</th>
+                      <th className="whitespace-nowrap px-3 py-3">Auth Groups</th>
+                      <th className="whitespace-nowrap px-3 py-3">DB Scope</th>
+                      <th className="whitespace-nowrap px-3 py-3">Status</th>
+                      <th className="whitespace-nowrap px-3 py-3">Created</th>
+                      <th className="whitespace-nowrap px-3 py-3">Updated</th>
+                      <th className="whitespace-nowrap px-3 py-3">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -567,7 +562,7 @@ export function UsersPage() {
                           <button
                             type="button"
                             onClick={() => void openEditUserDrawer(user.id)}
-                            className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
+                            className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
                           >
                             管理
                           </button>
@@ -579,24 +574,18 @@ export function UsersPage() {
               </div>
             </section>
           ) : (
-            <section className="rounded-xl border border-border bg-panel shadow-soft">
-              <div className="border-b border-border/80 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <Shield className="h-4 w-4 text-accent" />
-                  <p className="text-[13px] font-semibold text-ink">Auth Groups</p>
-                </div>
-              </div>
+            <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
               <div className="overflow-x-auto">
                 <table className="min-w-full border-collapse">
                   <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
                     <tr>
-                      <th className="px-3 py-3">Auth Group</th>
-                      <th className="px-3 py-3">Users</th>
-                      <th className="px-3 py-3">Permissions</th>
-                      <th className="px-3 py-3">DB Scope</th>
-                      <th className="px-3 py-3">Created</th>
-                      <th className="px-3 py-3">Updated</th>
-                      <th className="px-3 py-3">Action</th>
+                      <th className="whitespace-nowrap px-3 py-3">Auth Group</th>
+                      <th className="whitespace-nowrap px-3 py-3">Users</th>
+                      <th className="whitespace-nowrap px-3 py-3">Permissions</th>
+                      <th className="whitespace-nowrap px-3 py-3">DB Scope</th>
+                      <th className="whitespace-nowrap px-3 py-3">Created</th>
+                      <th className="whitespace-nowrap px-3 py-3">Updated</th>
+                      <th className="whitespace-nowrap px-3 py-3">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -617,7 +606,7 @@ export function UsersPage() {
                           <button
                             type="button"
                             onClick={() => void openEditAuthGroupDrawer(group.name as AuthGroup)}
-                            className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
+                            className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
                           >
                             管理
                           </button>
@@ -629,8 +618,6 @@ export function UsersPage() {
               </div>
             </section>
           )}
-        </div>
-      </section>
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
