@@ -545,12 +545,24 @@ export function UsersPage() {
                           </div>
                         </td>
                         <td className="px-3 py-3">
-                          <div className="flex flex-wrap gap-1.5">
-                            {(user.db_connection_ids ?? []).length > 0
-                              ? (user.db_connection_ids ?? []).map((connectionId) => (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {(user.db_connection_ids ?? []).length > 0 ? (
+                              <>
+                                {(user.db_connection_ids ?? []).slice(0, 2).map((connectionId) => (
                                   <Tag key={connectionId} label={getConnectionLabel(connectionId, connections)} />
-                                ))
-                              : <span className="text-[12px] text-muted">—</span>}
+                                ))}
+                                {(user.db_connection_ids ?? []).length > 2 ? (
+                                  <span
+                                    className="whitespace-nowrap text-[11px] font-semibold text-muted"
+                                    title={(user.db_connection_ids ?? []).slice(2).map((id) => getConnectionLabel(id, connections)).join('、')}
+                                  >
+                                    +{(user.db_connection_ids ?? []).length - 2}
+                                  </span>
+                                ) : null}
+                              </>
+                            ) : (
+                              <span className="text-[12px] text-muted">—</span>
+                            )}
                           </div>
                         </td>
                         <td className="px-3 py-3">
