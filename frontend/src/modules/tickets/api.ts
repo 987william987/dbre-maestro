@@ -40,6 +40,7 @@ export async function getTicket(id: string) {
     ...response,
     executions: Array.isArray(response.executions) ? response.executions : [],
     scopes: Array.isArray(response.scopes) ? response.scopes : [],
+    export_request: response.export_request ?? null,
   }))
 }
 

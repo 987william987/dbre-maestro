@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Database, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { hasAnyPermission, TICKET_WORKSPACE_PERMISSIONS } from '@/shared/auth/permissions'
 import { useAuth } from '@/shared/auth/AuthContext'
 
 type NavItem = {
@@ -16,7 +17,7 @@ const NAV_ITEMS: NavItem[] = [
     to: '/tickets',
     label: 'Tickets',
     icon: Ticket,
-    allowed: () => true,
+    allowed: (permissions) => hasAnyPermission(permissions, TICKET_WORKSPACE_PERMISSIONS),
   },
   {
     to: '/tickets/new',
@@ -58,7 +59,7 @@ const NAV_ITEMS: NavItem[] = [
     to: '/audit-logs',
     label: 'Audit Logs',
     icon: FileClock,
-    allowed: (permissions) => permissions.includes('audit_logs.read'),
+    allowed: (permissions) => permissions.includes('audit_logs.read') || permissions.includes('audit_logs.write'),
   },
   {
     to: '/settings',

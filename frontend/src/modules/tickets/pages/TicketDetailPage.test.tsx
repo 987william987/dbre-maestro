@@ -152,4 +152,40 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.queryByText('審核操作')).not.toBeInTheDocument()
     expect(screen.queryByText('執行流程')).not.toBeInTheDocument()
   })
+
+  it('sql export submitter 在 ready export 存在時可看到下載入口', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['sql_editor.export'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      ticket_type: 'sql_export',
+      status: 'approved',
+      sql_content: 'SELECT * FROM users;',
+    }, {
+      export_request: {
+        status: 'ready',
+        expires_at: '2026-06-12T01:00:00Z',
+        download_url: '/api/exports/download/token-123',
+      },
+      capabilities: {
+        can_review: false,
+        can_revoke: false,
+        can_request_execution: false,
+        can_execute: false,
+        can_download_export: true,
+      },
+    }))
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('匯出下載')).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: '下載匯出檔' })).toHaveAttribute('href', '/api/exports/download/token-123')
+  })
 })

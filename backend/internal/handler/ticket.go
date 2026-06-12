@@ -21,7 +21,6 @@ import (
 
 type TicketHandler struct {
 	tickets        *repository.TicketRepo
-	settings       *repository.SettingsRepo
 	exports        *repository.ExportRepo
 	audit          *repository.AuditRepo
 	dbConns        *repository.DBConnectionRepo
@@ -34,7 +33,6 @@ type TicketHandler struct {
 
 func NewTicketHandler(
 	tickets *repository.TicketRepo,
-	settings *repository.SettingsRepo,
 	exports *repository.ExportRepo,
 	audit *repository.AuditRepo,
 	dbConns *repository.DBConnectionRepo,
@@ -48,7 +46,6 @@ func NewTicketHandler(
 ) *TicketHandler {
 	return &TicketHandler{
 		tickets:        tickets,
-		settings:       settings,
 		exports:        exports,
 		audit:          audit,
 		dbConns:        dbConns,
@@ -256,10 +253,29 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var exportDetail map[string]any
+	if ticket.TicketType == model.TicketTypeSQLExport && h.exports != nil {
+		exportReq, err := h.exports.GetByTicketID(r.Context(), id)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "get export failed")
+			return
+		}
+		if exportReq != nil {
+			exportDetail = map[string]any{
+				"status":     exportReq.Status,
+				"expires_at": exportReq.ExpiresAt,
+			}
+			if ticket.SubmitterID == userID && exportReq.Status == model.ExportStatusReady {
+				exportDetail["download_url"] = fmt.Sprintf("/api/exports/download/%s", exportReq.DownloadToken)
+			}
+		}
+	}
+
 	jsonOK(w, map[string]any{
-		"ticket":     ticket,
-		"executions": executions,
-		"scopes":     scopes,
+		"ticket":         ticket,
+		"executions":     executions,
+		"scopes":         scopes,
+		"export_request": exportDetail,
 		"capabilities": map[string]any{
 			"can_review":            canReview,
 			"can_revoke":            canRevoke,
@@ -457,6 +473,7 @@ func (h *TicketHandler) RequestExecution(w http.ResponseWriter, r *http.Request)
 	}
 
 	_ = userID
+	h.notifyExecutors(r.Context(), ticket, "工單待執行", fmt.Sprintf("工單 %s 已進入待執行佇列", ticket.TicketNo))
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
 }
@@ -727,59 +744,28 @@ func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TicketHandler) canViewAllTickets(ctx context.Context, userID uint64) (bool, error) {
-	if middleware.HasPermission(ctx, "tickets.review", "tickets.execute") {
-		return true, nil
-	}
-	if h.settings == nil {
-		return false, nil
-	}
-	if ok, err := h.settings.IsSensitiveExportReviewer(ctx, userID); err != nil {
-		return false, err
-	} else if ok {
-		return true, nil
-	}
-	if ok, err := h.settings.IsSensitiveQueryAccessReviewer(ctx, userID); err != nil {
-		return false, err
-	} else if ok {
+	if middleware.HasPermission(ctx, permissionTicketReview, permissionTicketExecute, permissionSQLEditorExportReview, permissionSQLEditorSensitiveRev) {
 		return true, nil
 	}
 	return false, nil
 }
 
 func (h *TicketHandler) canReviewTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
-	switch ticket.TicketType {
-	case model.TicketTypeSQLExport:
-		if middleware.HasPermission(ctx, "settings.write") {
+	_ = userID
+	for _, permissionKey := range reviewPermissionsForTicket(ticket.TicketType) {
+		if middleware.HasPermission(ctx, permissionKey) {
 			return true, nil
 		}
-		if h.settings == nil {
-			return false, nil
-		}
-		return h.settings.IsSensitiveExportReviewer(ctx, userID)
-	case model.TicketTypeSensitiveQueryAccess:
-		if middleware.HasPermission(ctx, "settings.write") {
-			return true, nil
-		}
-		if h.settings == nil {
-			return false, nil
-		}
-		return h.settings.IsSensitiveQueryAccessReviewer(ctx, userID)
-	default:
-		return middleware.HasPermission(ctx, "tickets.review"), nil
 	}
+	return false, nil
 }
 
 func (h *TicketHandler) canRevokeSensitiveTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
 	if ticket.TicketType != model.TicketTypeSensitiveQueryAccess {
 		return false, nil
 	}
-	if middleware.HasPermission(ctx, "settings.write") {
-		return true, nil
-	}
-	if h.settings == nil {
-		return false, nil
-	}
-	return h.settings.IsSensitiveQueryAccessReviewer(ctx, userID)
+	_ = userID
+	return middleware.HasPermission(ctx, permissionSQLEditorSensitiveRev), nil
 }
 
 func (h *TicketHandler) ensureReadyExportRequest(ctx context.Context, ticket *model.Ticket) (*model.ExportRequest, error) {
@@ -815,28 +801,34 @@ func (h *TicketHandler) ensureReadyExportRequest(ctx context.Context, ticket *mo
 }
 
 func (h *TicketHandler) notifyTicketReviewers(ctx context.Context, ticket *model.Ticket, title, body string) {
-	if h.settings == nil || h.notifRepo == nil {
+	if h.notifRepo == nil {
 		return
 	}
-	var reviewerIDs []uint64
-	switch ticket.TicketType {
-	case model.TicketTypeSQLExport:
-		settings, err := h.settings.Get(ctx)
-		if err != nil {
-			return
-		}
-		reviewerIDs = settings.SensitiveExportReviewerUserIDs
-	case model.TicketTypeSensitiveQueryAccess:
-		settings, err := h.settings.Get(ctx)
-		if err != nil {
-			return
-		}
-		reviewerIDs = settings.SensitiveQueryAccessReviewerUserIDs
-	default:
+	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, reviewPermissionsForTicket(ticket.TicketType))
+	if err != nil {
 		return
 	}
 	for _, reviewerID := range reviewerIDs {
+		if reviewerID == ticket.SubmitterID {
+			continue
+		}
 		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticket.ID)
+	}
+}
+
+func (h *TicketHandler) notifyExecutors(ctx context.Context, ticket *model.Ticket, title, body string) {
+	if h.notifRepo == nil {
+		return
+	}
+	executorIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionTicketExecute})
+	if err != nil {
+		return
+	}
+	for _, executorID := range executorIDs {
+		if executorID == ticket.SubmitterID {
+			continue
+		}
+		h.sendInApp(ctx, executorID, "ticket_pending_execution", title, body, "ticket", ticket.ID)
 	}
 }
 

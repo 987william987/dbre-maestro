@@ -40,8 +40,9 @@ const PERMISSION_METADATA: PermissionOption[] = [
   { key: 'tickets.execute', module: 'Tickets', action: 'Execute', label: 'Tickets Execute', description: '執行 DDL / DML 工單。' },
   { key: 'sql_editor.query', module: 'SQL Editor', action: 'Query', label: 'SQL Editor Query', description: '使用 SQL Editor 查詢資料。' },
   { key: 'sql_editor.export', module: 'SQL Editor', action: 'Export', label: 'SQL Editor Export', description: '匯出當前查詢結果。' },
+  { key: 'sql_editor.export_review', module: 'SQL Editor', action: 'Export Review', label: 'Export Review', description: '審批 SQL 匯出工單。' },
   { key: 'sql_editor.sensitive_apply', module: 'SQL Editor', action: 'Sensitive Apply', label: 'Sensitive Apply', description: '申請臨時敏感資料查看。' },
-  { key: 'sql_editor.sensitive_review', module: 'SQL Editor', action: 'Sensitive Review', label: 'Sensitive Review', description: '審批敏感資料查看工單。' },
+  { key: 'sql_editor.sensitive_review', module: 'SQL Editor', action: 'Sensitive Review', label: 'Sensitive Review', description: '審批與撤銷敏感資料查看工單。' },
   { key: 'sql_editor.sensitive_execute', module: 'SQL Editor', action: 'Sensitive Execute', label: 'Sensitive Execute', description: '執行敏感資料查看工單。' },
   { key: 'global.sensitive', module: 'Global', action: 'Sensitive', label: 'Global Sensitive', description: '永久繞過遮罩規則查看敏感資料。' },
 ]

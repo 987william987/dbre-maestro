@@ -1,30 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Loader2, RefreshCcw, Settings2 } from 'lucide-react'
-import { getSettings, patchSettings } from '@/modules/settings/api'
-import { listUsers } from '@/modules/users/api'
+import { useEffect, useState } from 'react'
+import { RefreshCcw, Settings2 } from 'lucide-react'
+import { getSettings } from '@/modules/settings/api'
 import { ApiError } from '@/shared/api/client'
-import { useAuth } from '@/shared/auth/AuthContext'
 import type { PlatformSettings } from '@/shared/types/settings'
-import type { UserSummary } from '@/shared/types/user'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
-import { useToast } from '@/shared/ui/ToastContext'
-
-const EMPTY_SETTINGS: PlatformSettings = {
-  sensitive_export_reviewer_user_ids: [],
-  sensitive_query_access_reviewer_user_ids: [],
-}
 
 export function SettingsPage() {
-  const { user } = useAuth()
-  const { pushToast } = useToast()
-  const [users, setUsers] = useState<UserSummary[]>([])
-  const [settings, setSettings] = useState<PlatformSettings>(EMPTY_SETTINGS)
+  const [settings, setSettings] = useState<PlatformSettings | null>(null)
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-
-  const canWrite = user?.permissions.includes('settings.write') ?? false
 
   useEffect(() => {
     let active = true
@@ -33,12 +18,10 @@ export function SettingsPage() {
       setLoading(true)
       setError('')
       try {
-        const [settingsResponse, usersResponse] = await Promise.all([getSettings(), listUsers()])
-        if (!active) {
-          return
+        const settingsResponse = await getSettings()
+        if (active) {
+          setSettings(settingsResponse)
         }
-        setSettings(settingsResponse)
-        setUsers(usersResponse.users)
       } catch (loadError) {
         if (active) {
           setError(loadError instanceof ApiError ? loadError.message : '讀取平台設定失敗。')
@@ -56,39 +39,6 @@ export function SettingsPage() {
       active = false
     }
   }, [])
-
-  const userOptions = useMemo(
-    () => users.map((item) => ({ id: item.id, label: `${item.username} (#${item.id})`, helper: item.email })),
-    [users],
-  )
-
-  function toggleUser(targetKey: keyof PlatformSettings, userID: number) {
-    if (!canWrite) {
-      return
-    }
-    setSettings((current) => {
-      const base = current[targetKey]
-      const next = base.includes(userID) ? base.filter((item) => item !== userID) : [...base, userID].sort((left, right) => left - right)
-      return {
-        ...current,
-        [targetKey]: next,
-      }
-    })
-  }
-
-  async function handleSave() {
-    setSaving(true)
-    setError('')
-    try {
-      const saved = await patchSettings(settings)
-      setSettings(saved)
-      pushToast('設定已更新', 'success')
-    } catch (saveError) {
-      setError(saveError instanceof ApiError ? saveError.message : '更新設定失敗。')
-    } finally {
-      setSaving(false)
-    }
-  }
 
   async function handleRefresh() {
     setLoading(true)
@@ -118,7 +68,7 @@ export function SettingsPage() {
               </div>
               <h2 className="mt-3 text-[24px] font-bold tracking-[-0.03em] text-ink">平台設定</h2>
               <p className="mt-2 text-[13px] leading-6 text-muted">
-                本期先管理 SQL 匯出審批人與臨時敏感查詢審批人名單。只有 `settings.write` 可修改，`settings.read` 僅可查看。
+                特殊審批人已改回 Users / RBAC 的 permission 模組管理。這一頁保留作為平台層設定入口，不再維護 reviewer 名單。
               </p>
             </div>
 
@@ -131,15 +81,10 @@ export function SettingsPage() {
                 <RefreshCcw className="h-4 w-4" />
                 重新整理
               </button>
-              <button
-                type="button"
-                onClick={() => void handleSave()}
-                disabled={!canWrite || saving}
-                className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings2 className="h-4 w-4" />}
-                儲存設定
-              </button>
+              <div className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-muted">
+                <Settings2 className="h-4 w-4" />
+                Reviewer 改由 RBAC 管理
+              </div>
             </div>
           </div>
         </div>
@@ -150,81 +95,24 @@ export function SettingsPage() {
       {loading ? (
         <LoadingBlock message="載入平台設定中…" className="min-h-[320px] rounded-xl border-border bg-panel" />
       ) : (
-        <div className="grid gap-3 xl:grid-cols-2">
-          <SettingsCard
-            title="敏感導出審批人"
-            description="命中敏感欄位的 SQL EXPORT 工單，由這份名單中的任一人審批。"
-            options={userOptions}
-            selected={settings.sensitive_export_reviewer_user_ids}
-            disabled={!canWrite}
-            onToggle={(userID) => toggleUser('sensitive_export_reviewer_user_ids', userID)}
-          />
-          <SettingsCard
-            title="敏感查詢審批人"
-            description="Sensitive Access 工單由這份名單中的任一人審批，也可提前撤銷。"
-            options={userOptions}
-            selected={settings.sensitive_query_access_reviewer_user_ids}
-            disabled={!canWrite}
-            onToggle={(userID) => toggleUser('sensitive_query_access_reviewer_user_ids', userID)}
-          />
-        </div>
+        <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <div className="border-b border-border/80 px-4 py-3">
+            <p className="text-[14px] font-semibold text-ink">目前策略</p>
+            <p className="mt-1 text-[12px] leading-5 text-muted">
+              `sql_export` reviewer 使用 `sql_editor.export_review`；`sensitive_query_access` reviewer 使用 `sql_editor.sensitive_review`。
+            </p>
+          </div>
+          <div className="space-y-3 px-4 py-4 text-[13px] text-muted">
+            <p>若要調整審批人，請到 Users / RBAC 工作台修改 user 或 auth group 的 permission。</p>
+            <p>目前這頁不需要 `users.read` 或 `users.write` 即可載入，避免跨模組耦合。</p>
+            {settings ? (
+              <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-ink">
+                已讀取平台設定物件，共 {Object.keys(settings).length} 個欄位。
+              </div>
+            ) : null}
+          </div>
+        </section>
       )}
     </div>
-  )
-}
-
-function SettingsCard({
-  title,
-  description,
-  options,
-  selected,
-  disabled,
-  onToggle,
-}: {
-  title: string
-  description: string
-  options: Array<{ id: number; label: string; helper: string }>
-  selected: number[]
-  disabled: boolean
-  onToggle: (userID: number) => void
-}) {
-  return (
-    <section className="rounded-xl border border-border bg-panel shadow-soft">
-      <div className="border-b border-border/80 px-4 py-3">
-        <p className="text-[14px] font-semibold text-ink">{title}</p>
-        <p className="mt-1 text-[12px] leading-5 text-muted">{description}</p>
-      </div>
-      <div className="max-h-[520px] overflow-y-auto px-4 py-3">
-        {options.length === 0 ? (
-          <p className="text-[12px] text-muted">目前沒有可配置的使用者。</p>
-        ) : (
-          <div className="space-y-2">
-            {options.map((option) => {
-              const checked = selected.includes(option.id)
-              return (
-                <label
-                  key={option.id}
-                  className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 ${
-                    checked ? 'border-border-strong bg-panel-soft' : 'border-border bg-white'
-                  } ${disabled ? 'cursor-default' : 'cursor-pointer'}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={disabled}
-                    onChange={() => onToggle(option.id)}
-                    className="mt-0.5"
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-[13px] font-semibold text-ink">{option.label}</span>
-                    <span className="block text-[12px] text-muted">{option.helper}</span>
-                  </span>
-                </label>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    </section>
   )
 }

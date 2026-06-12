@@ -44,7 +44,7 @@ export default function App() {
             <Route element={<RoleRoute allowedPermissions={['sql_review.read', 'sql_review.write']} />}>
               <Route path="/sql-review-rules" element={<SQLReviewRulesPage />} />
             </Route>
-            <Route element={<RoleRoute allowedPermissions={['audit_logs.read']} />}>
+            <Route element={<RoleRoute allowedPermissions={['audit_logs.read', 'audit_logs.write']} />}>
               <Route path="/audit-logs" element={<AuditLogsPage />} />
             </Route>
             <Route element={<RoleRoute allowedPermissions={['settings.read', 'settings.write']} />}>

@@ -36,6 +36,7 @@ type QueryHandler struct {
 	artifacts    *repository.QueryArtifactRepo
 	tickets      *repository.TicketRepo
 	masking      *maskingRuntime
+	notifRepo    *repository.NotificationRepo
 }
 
 type queryExecutionContext struct {
@@ -53,6 +54,7 @@ func NewQueryHandler(
 	tickets *repository.TicketRepo,
 	engine *masking.Engine,
 	whitelist *repository.MaskingWhitelistRepo,
+	notifRepo *repository.NotificationRepo,
 ) *QueryHandler {
 	return &QueryHandler{
 		dbConns:      dbConns,
@@ -62,6 +64,27 @@ func NewQueryHandler(
 		artifacts:    artifacts,
 		tickets:      tickets,
 		masking:      newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
+		notifRepo:    notifRepo,
+	}
+}
+
+func (h *QueryHandler) sendInApp(ctx context.Context, userID uint64, notifType, title, body, resType string, resID uint64) {
+	if h.notifRepo == nil {
+		return
+	}
+	_ = h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
+}
+
+func (h *QueryHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body string) {
+	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorSensitiveRev})
+	if err != nil {
+		return
+	}
+	for _, reviewerID := range reviewerIDs {
+		if reviewerID == submitterID {
+			continue
+		}
+		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticketID)
 	}
 }
 
@@ -284,13 +307,16 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		ResourceType: "ticket",
 		ResourceID:   &ticket.ID,
 		Details: map[string]any{
-			"ticket_type":                 ticket.TicketType,
-			"approved_duration_minutes":   req.ApprovedDurationMinutes,
-			"contains_sensitive_columns":  true,
-			"scope_count":                 len(analysis.Scopes),
+			"ticket_type":                ticket.TicketType,
+			"approved_duration_minutes":  req.ApprovedDurationMinutes,
+			"contains_sensitive_columns": true,
+			"scope_count":                len(analysis.Scopes),
 		},
 		IPAddress: clientIP(r),
 	})
+	body := fmt.Sprintf("工單 %s 已提交，等待敏感查詢審核", ticket.TicketNo)
+	h.sendInApp(r.Context(), userID, "ticket_submitted", "Sensitive Access 工單已建立", body, "ticket", ticket.ID)
+	h.notifyReviewers(r.Context(), ticket.ID, userID, "新的 Sensitive Access 工單待審核", body)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":   ticket.ID,

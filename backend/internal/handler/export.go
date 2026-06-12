@@ -73,6 +73,19 @@ func (h *ExportHandler) sendInApp(ctx context.Context, userID uint64, notifType,
 	_ = h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
 }
 
+func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body string) {
+	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorExportReview})
+	if err != nil {
+		return
+	}
+	for _, reviewerID := range reviewerIDs {
+		if reviewerID == submitterID {
+			continue
+		}
+		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticketID)
+	}
+}
+
 // POST /exports
 // Creates a sql_export ticket from SQL Editor context.
 func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -144,13 +157,14 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 	body := fmt.Sprintf("工單 %s 已提交，等待匯出審核", ticket.TicketNo)
 	h.sendInApp(r.Context(), userID, "ticket_submitted", "匯出工單已建立", body, "ticket", ticket.ID)
+	h.notifyReviewers(r.Context(), ticket.ID, userID, "新的匯出工單待審核", body)
 
 	jsonCreated(w, map[string]any{
-		"ticket_id":           ticket.ID,
-		"ticket_no":           ticket.TicketNo,
-		"status":              string(ticket.Status),
-		"contains_sensitive":  analysis.ContainsSensitive,
-		"scope_count":         len(analysis.Scopes),
+		"ticket_id":          ticket.ID,
+		"ticket_no":          ticket.TicketNo,
+		"status":             string(ticket.Status),
+		"contains_sensitive": analysis.ContainsSensitive,
+		"scope_count":        len(analysis.Scopes),
 	})
 }
 
@@ -160,7 +174,7 @@ func (h *ExportHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
 
 	var requesterID *uint64
-	if !middleware.HasPermission(r.Context(), "settings.write") {
+	if !middleware.HasPermission(r.Context(), permissionSQLEditorExportReview) {
 		requesterID = &userID
 	}
 

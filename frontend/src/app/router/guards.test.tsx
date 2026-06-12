@@ -71,4 +71,38 @@ describe('route guards', () => {
 
     expect(screen.getByText('tickets page')).toBeInTheDocument()
   })
+
+  it('audit_logs.write 也可以通過 Audit Logs 頁面守衛', () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 2,
+        username: 'auditor',
+        authGroups: ['admin'],
+        authGroupDetails: [],
+        permissions: ['audit_logs.write'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/audit-logs']}>
+        <Routes>
+          <Route path="/tickets" element={<div>tickets page</div>} />
+          <Route element={<RoleRoute allowedPermissions={['audit_logs.read', 'audit_logs.write']} />}>
+            <Route path="/audit-logs" element={<div>audit logs</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('audit logs')).toBeInTheDocument()
+  })
 })

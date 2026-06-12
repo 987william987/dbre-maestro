@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, Clock3, Loader2, Play, Send, ShieldCheck, ShieldX } from 'lucide-react'
+import { ArrowLeft, Clock3, Download, Loader2, Play, Send, ShieldCheck, ShieldX } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
@@ -79,6 +79,7 @@ export function TicketDetailPage() {
   const canOperateDBA = detail?.capabilities?.can_request_execution ?? false
   const canExecute = detail?.capabilities?.can_execute ?? false
   const canRevoke = detail?.capabilities?.can_revoke ?? false
+  const exportDownloadURL = detail?.export_request?.download_url ?? null
 
   async function reloadTicket() {
     if (!id) {
@@ -339,6 +340,30 @@ export function TicketDetailPage() {
                       ? ' 可觸發執行。'
                       : ' 此狀態下沒有 DBA 流程操作可執行。'}
                 </p>
+              </div>
+            ) : null}
+
+            {ticket.ticket_type === 'sql_export' && detail.capabilities.can_download_export && exportDownloadURL ? (
+              <div className="rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
+                <div className="border-b border-border/80 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Download className="h-4 w-4 text-accent" />
+                    <p className="text-[13px] font-semibold text-ink">匯出下載</p>
+                  </div>
+                  <p className="mt-1 text-[12px] text-muted">工單審核通過後，從這裡下載 ready export。</p>
+                </div>
+                <div className="px-4 py-4">
+                  <a
+                    href={exportDownloadURL}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800"
+                  >
+                    <Download className="h-4 w-4" />
+                    下載匯出檔
+                  </a>
+                  <p className="mt-3 text-[12px] text-muted">
+                    有效期限：{detail.export_request?.expires_at ? formatDateTime(detail.export_request.expires_at, true) : '—'}
+                  </p>
+                </div>
               </div>
             ) : null}
           </section>

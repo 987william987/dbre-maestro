@@ -75,5 +75,10 @@ export type TicketDetail = {
   ticket: Ticket
   executions: TicketExecution[]
   scopes: TicketScope[]
+  export_request?: {
+    status: string
+    expires_at: string
+    download_url?: string | null
+  } | null
   capabilities: TicketCapabilities
 }

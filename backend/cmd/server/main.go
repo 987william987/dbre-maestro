@@ -105,13 +105,13 @@ func main() {
 
 	healthH := handler.NewHealthHandler(metaDB)
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret)
-	ticketH := handler.NewTicketHandler(ticketRepo, settingsRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, larkClient, notifRepo)
+	ticketH := handler.NewTicketHandler(ticketRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, larkClient, notifRepo)
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, auditRepo)
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, larkClient)
 	auditH := handler.NewAuditHandler(auditRepo)
 	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
 	sqlReviewRuleH := handler.NewSQLReviewRuleHandler(sqlReviewRuleRepo, auditRepo)
-	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, maskingEngine, whitelistRepo)
+	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, maskingEngine, whitelistRepo, notifRepo)
 	userH := handler.NewUserHandler(userRepo, authGroupRepo, sessionRepo, auditRepo)
 	metadataH := handler.NewMetadataHandler(dbConnRepo, userRepo)
 	authGroupH := handler.NewAuthGroupHandler(authGroupRepo, userRepo, auditRepo)
@@ -155,20 +155,7 @@ func main() {
 				middleware.InjectPermissions(userRepo),
 				middleware.RequirePermission("sql_editor.export"),
 			).Post("/", exportH.Create)
-			r.With(
-				middleware.RequireAuth(cfg.JWTSecret),
-				middleware.RequireActiveUser(userRepo),
-				middleware.InjectPermissions(userRepo),
-				middleware.RequirePermission("sql_editor.export"),
-			).Get("/", exportH.List)
 			r.Get("/download/{token}", exportH.Download)
-			r.Route("/{id}", func(r chi.Router) {
-				r.Use(middleware.RequireAuth(cfg.JWTSecret))
-				r.Use(middleware.RequireActiveUser(userRepo))
-				r.Use(middleware.InjectPermissions(userRepo))
-				r.With(requireSensitiveReview).Post("/approve", exportH.Approve)
-				r.With(requireSensitiveReview).Post("/reject", exportH.Reject)
-			})
 		})
 
 		r.Route("/db-connections", func(r chi.Router) {
@@ -289,9 +276,9 @@ func main() {
 
 			r.Route("/{id}", func(r chi.Router) {
 				r.Get("/", ticketH.Get)
-				r.Post("/approve", ticketH.Approve)
-				r.Post("/reject", ticketH.Reject)
-				r.Post("/revoke", ticketH.Revoke)
+				r.With(requireTicketWorkflowReview).Post("/approve", ticketH.Approve)
+				r.With(requireTicketWorkflowReview).Post("/reject", ticketH.Reject)
+				r.With(requireSensitiveReview).Post("/revoke", ticketH.Revoke)
 				r.With(requireTicketsExecute).Post("/request-execution", ticketH.RequestExecution)
 				r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)
 				r.With(requireTicketsExecute).Post("/stop", ticketH.Stop)
@@ -401,6 +388,9 @@ func requireSQLEditorSensitiveApply(next http.Handler) http.Handler {
 func requireSensitiveReview(next http.Handler) http.Handler {
 	return middleware.RequirePermission("sql_editor.sensitive_review")(next)
 }
+func requireSQLEditorExportReview(next http.Handler) http.Handler {
+	return middleware.RequirePermission("sql_editor.export_review")(next)
+}
 func requireTicketsApply(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.apply")(next)
 }
@@ -409,6 +399,9 @@ func requireTicketsReview(next http.Handler) http.Handler {
 }
 func requireTicketsExecute(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.execute")(next)
+}
+func requireTicketWorkflowReview(next http.Handler) http.Handler {
+	return middleware.RequirePermission("tickets.review", "sql_editor.export_review", "sql_editor.sensitive_review")(next)
 }
 func requireSettingsRead(next http.Handler) http.Handler {
 	return middleware.RequirePermission("settings.read", "settings.write")(next)

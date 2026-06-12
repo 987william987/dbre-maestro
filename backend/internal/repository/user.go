@@ -141,6 +141,51 @@ func (r *UserRepo) GetEffectivePermissionKeys(ctx context.Context, userID uint64
 	return permissionKeys, err
 }
 
+func (r *UserRepo) ListActiveUserIDsByPermissionKeys(ctx context.Context, permissionKeys []string) ([]uint64, error) {
+	if len(permissionKeys) == 0 {
+		return []uint64{}, nil
+	}
+
+	now := time.Now()
+	query, args, err := sqlx.In(`
+		SELECT DISTINCT u.id
+		FROM users u
+		WHERE u.is_active = 1
+		  AND u.id IN (
+			SELECT up.user_id
+			FROM user_permissions up
+			INNER JOIN permissions p ON p.id = up.permission_id
+			WHERE p.permission_key IN (?)
+			UNION
+			SELECT uag.user_id
+			FROM user_auth_groups uag
+			INNER JOIN auth_group_permissions agp ON agp.auth_group_id = uag.auth_group_id
+			INNER JOIN permissions p ON p.id = agp.permission_id
+			WHERE p.permission_key IN (?)
+			  AND (uag.expires_at IS NULL OR uag.expires_at > ?)
+			UNION
+			SELECT agm.user_id
+			FROM auth_group_memberships agm
+			INNER JOIN auth_groups ag ON ag.group_key = agm.auth_group
+			INNER JOIN auth_group_permissions agp ON agp.auth_group_id = ag.id
+			INNER JOIN permissions p ON p.id = agp.permission_id
+			WHERE p.permission_key IN (?)
+			  AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+		  )
+		ORDER BY u.id
+	`, permissionKeys, permissionKeys, now, permissionKeys, now)
+	if err != nil {
+		return nil, err
+	}
+
+	query = r.db.Rebind(query)
+	var userIDs []uint64
+	if err := r.db.SelectContext(ctx, &userIDs, query, args...); err != nil {
+		return nil, err
+	}
+	return userIDs, nil
+}
+
 func (r *UserRepo) GetEffectiveDBConnectionIDs(ctx context.Context, userID uint64) ([]uint64, error) {
 	user, err := r.GetByID(ctx, userID)
 	if err != nil {
