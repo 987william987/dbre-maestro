@@ -75,31 +75,22 @@ export function TicketsPage() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 px-4 py-3 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted">
-            <span className="font-semibold text-ink">Current view</span>
-            <span className="rounded-full border border-border bg-white px-2.5 py-1 font-semibold text-ink">
-              {status ? STATUS_OPTIONS.find((option) => option.value === status)?.label : '全部工單'}
-            </span>
-            <span>{tickets.length} 筆</span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            <label className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
-              <span className="font-semibold text-ink">狀態</span>
-              <select
-                value={status}
-                onChange={(event) => setStatus(event.target.value as '' | TicketStatus)}
-                className="h-8 min-w-[128px] rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-              >
-                {STATUS_OPTIONS.map((option) => (
-                  <option key={option.value || 'all'} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
+          <label className="flex items-center gap-2 text-[12px] text-muted">
+            <span className="font-semibold text-ink">狀態</span>
+            <select
+              value={status}
+              onChange={(event) => setStatus(event.target.value as '' | TicketStatus)}
+              className="h-10 min-w-[160px] rounded-lg border border-border bg-white px-3 text-[13px] font-medium text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+            >
+              {STATUS_OPTIONS.map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="text-[12px] text-muted">{tickets.length} 筆</p>
         </div>
       </section>
 
