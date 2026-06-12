@@ -22,14 +22,17 @@ const mockedListNotifications = vi.mocked(listNotifications)
 const mockedMarkNotificationRead = vi.mocked(markNotificationRead)
 const mockedMarkAllNotificationsRead = vi.mocked(markAllNotificationsRead)
 
-function renderShell() {
+function renderShell(initialEntry = '/tickets') {
   return render(
-    <MemoryRouter initialEntries={['/tickets']}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <ToastProvider>
         <Routes>
           <Route element={<AppShell />}>
             <Route path="/tickets" element={<div>tickets page</div>} />
+            <Route path="/tickets/new" element={<div>new ticket page</div>} />
             <Route path="/tickets/:id" element={<div>ticket detail page</div>} />
+            <Route path="/db-metadata/inventory" element={<div>inventory page</div>} />
+            <Route path="/db-metadata/objects" element={<div>objects page</div>} />
           </Route>
         </Routes>
       </ToastProvider>
@@ -102,5 +105,69 @@ describe('AppShell notifications', () => {
     fireEvent.click(screen.getByText('全部標示已讀'))
 
     await waitFor(() => expect(mockedMarkAllNotificationsRead).toHaveBeenCalled())
+  })
+
+  it('有子項目的主導航會自動展開目前所在頁面', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'dba',
+        authGroups: ['dba'],
+        authGroupDetails: [],
+        permissions: ['tickets.apply', 'db_metadata.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/db-metadata/objects')
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: /DB Metadata/i })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('實例總覽')).toBeInTheDocument()
+    expect(screen.getByText('資料庫物件')).toBeInTheDocument()
+  })
+
+  it('可手動展開與收合子導航', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'operator',
+        authGroups: ['operator'],
+        authGroupDetails: [],
+        permissions: ['tickets.apply'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/tickets')
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    const ticketsToggle = screen.getByRole('button', { name: /Tickets/i })
+    expect(ticketsToggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('建立工單')).toBeInTheDocument()
+
+    fireEvent.click(ticketsToggle)
+    expect(ticketsToggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('建立工單')).not.toBeInTheDocument()
+
+    fireEvent.click(ticketsToggle)
+    expect(ticketsToggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('建立工單')).toBeInTheDocument()
   })
 })

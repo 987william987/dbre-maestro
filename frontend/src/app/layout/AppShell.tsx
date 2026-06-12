@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, ChevronDown, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, SquareTerminal, Ticket, Users } from 'lucide-react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
 import { hasAnyPermission, TICKET_WORKSPACE_PERMISSIONS } from '@/shared/auth/permissions'
@@ -8,73 +8,92 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import type { NotificationItem } from '@/shared/types/notification'
 import { useToast } from '@/shared/ui/ToastContext'
 
-type NavItem = {
+type NavLeafItem = {
   to: string
   label: string
   icon: typeof Ticket
+}
+
+type NavItem = {
+  key: string
+  label: string
+  icon: typeof Ticket
   allowed: (permissions: string[]) => boolean
+  to?: string
+  children?: NavLeafItem[]
 }
 
 const NAV_ITEMS: NavItem[] = [
   {
-    to: '/tickets',
+    key: 'tickets',
     label: 'Tickets',
     icon: Ticket,
     allowed: (permissions) => hasAnyPermission(permissions, TICKET_WORKSPACE_PERMISSIONS),
+    to: '/tickets',
+    children: [
+      { to: '/tickets', label: '工單列表', icon: Ticket },
+      { to: '/tickets/new', label: '建立工單', icon: FilePlus2 },
+    ],
   },
   {
-    to: '/tickets/new',
-    label: 'New Ticket',
-    icon: FilePlus2,
-    allowed: (permissions) => permissions.includes('tickets.apply'),
-  },
-  {
-    to: '/sql-editor',
+    key: 'sql-editor',
     label: 'SQL Editor',
     icon: SquareTerminal,
     allowed: (permissions) => permissions.includes('sql_editor.query'),
+    to: '/sql-editor',
   },
   {
-    to: '/users',
+    key: 'users',
     label: 'Users',
     icon: Users,
     allowed: (permissions) => permissions.includes('users.read') || permissions.includes('users.write'),
+    to: '/users',
   },
   {
-    to: '/db-connections',
+    key: 'db-connections',
     label: 'DB Connections',
     icon: Database,
     allowed: (permissions) => permissions.includes('db_connections.read') || permissions.includes('db_connections.write'),
+    to: '/db-connections',
   },
   {
-    to: '/db-metadata/inventory',
+    key: 'db-metadata',
     label: 'DB Metadata',
     icon: DatabaseZap,
     allowed: (permissions) => permissions.includes('db_metadata.read'),
+    to: '/db-metadata/inventory',
+    children: [
+      { to: '/db-metadata/inventory', label: '實例總覽', icon: DatabaseZap },
+      { to: '/db-metadata/objects', label: '資料庫物件', icon: DatabaseZap },
+    ],
   },
   {
-    to: '/masking-rules',
+    key: 'masking-rules',
     label: 'Masking Rules',
     icon: ShieldAlert,
     allowed: (permissions) => permissions.includes('masking_rules.read') || permissions.includes('masking_rules.write'),
+    to: '/masking-rules',
   },
   {
-    to: '/sql-review-rules',
+    key: 'sql-review-rules',
     label: 'SQL Review',
     icon: ShieldCheck,
     allowed: (permissions) => permissions.includes('sql_review.read') || permissions.includes('sql_review.write'),
+    to: '/sql-review-rules',
   },
   {
-    to: '/audit-logs',
+    key: 'audit-logs',
     label: 'Audit Logs',
     icon: FileClock,
     allowed: (permissions) => permissions.includes('audit_logs.read') || permissions.includes('audit_logs.write'),
+    to: '/audit-logs',
   },
   {
-    to: '/settings',
+    key: 'settings',
     label: 'Settings',
     icon: Settings2,
     allowed: (permissions) => permissions.includes('settings.read') || permissions.includes('settings.write'),
+    to: '/settings',
   },
 ]
 
@@ -91,10 +110,12 @@ const NAV_GROUPS = [
 
 export function AppShell() {
   const { user, logout } = useAuth()
+  const location = useLocation()
   const navigate = useNavigate()
   const { pushToast } = useToast()
   const [menuOpen, setMenuOpen] = useState(false)
   const [notificationOpen, setNotificationOpen] = useState(false)
+  const [expandedNavKeys, setExpandedNavKeys] = useState<string[]>([])
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -222,7 +243,28 @@ export function AppShell() {
     }
   }
 
-  const navItems = NAV_ITEMS.filter((item) => item.allowed(user.permissions))
+  const navItems = useMemo(
+    () => NAV_ITEMS.filter((item) => item.allowed(user.permissions)),
+    [user.permissions],
+  )
+
+  useEffect(() => {
+    setExpandedNavKeys((current) => {
+      const required = navItems
+        .filter((item) => item.children?.some((child) => isPathActive(location.pathname, child.to)))
+        .map((item) => item.key)
+      const next = new Set([...current, ...required])
+      return Array.from(next)
+    })
+  }, [location.pathname, navItems])
+
+  useEffect(() => {
+    setExpandedNavKeys((current) => current.filter((key) => navItems.some((item) => item.key === key)))
+  }, [navItems])
+
+  function toggleNavGroup(key: string) {
+    setExpandedNavKeys((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]))
+  }
 
   return (
     <div className="flex h-screen text-ink">
@@ -239,7 +281,7 @@ export function AppShell() {
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
           {NAV_GROUPS.map((group) => {
-            const items = navItems.filter((item) => group.items.includes(item.to))
+            const items = navItems.filter((item) => (item.to ? group.items.includes(item.to) : false))
             if (items.length === 0) {
               return null
             }
@@ -247,25 +289,81 @@ export function AppShell() {
             return (
               <div key={group.title} className="mb-6">
                 <p className="px-2 text-[11px] font-medium text-muted">{group.title}</p>
-                <nav className="mt-1.5 flex flex-col gap-0.5">
+                <nav className="mt-2 flex flex-col gap-1">
                   {items.map((item) => {
                     const Icon = item.icon
+                    const hasChildren = (item.children?.length ?? 0) > 0
+                    const isExpanded = expandedNavKeys.includes(item.key)
+                    const isActive = hasChildren
+                      ? item.children?.some((child) => isPathActive(location.pathname, child.to)) ?? false
+                      : item.to != null && isPathActive(location.pathname, item.to)
+
+                    if (!hasChildren && item.to) {
+                      return (
+                        <NavLink key={item.key} to={item.to} className="block">
+                          {({ isActive: linkActive }) => (
+                            <div
+                              className={cn(
+                                'flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors',
+                                linkActive
+                                  ? 'bg-panel-soft text-ink'
+                                  : 'text-muted hover:bg-panel-soft/60 hover:text-ink',
+                              )}
+                            >
+                              <Icon className="h-4 w-4 shrink-0" />
+                              <span>{item.label}</span>
+                            </div>
+                          )}
+                        </NavLink>
+                      )
+                    }
+
                     return (
-                      <NavLink key={item.to} to={item.to} className="block">
-                        {({ isActive }) => (
-                          <div
+                      <div key={item.key} className="rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => toggleNavGroup(item.key)}
+                          className={cn(
+                            'flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-[13px] font-medium transition-colors',
+                            isActive
+                              ? 'bg-panel-soft text-ink'
+                              : 'text-muted hover:bg-panel-soft/60 hover:text-ink',
+                          )}
+                          aria-expanded={isExpanded}
+                        >
+                          <Icon className="h-4 w-4 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                          <ChevronDown
                             className={cn(
-                              'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors',
-                              isActive
-                                ? 'bg-panel-soft text-ink'
-                                : 'text-muted hover:bg-panel-soft/60 hover:text-ink',
+                              'h-4 w-4 shrink-0 text-faint transition-transform',
+                              isExpanded ? 'rotate-180' : 'rotate-0',
                             )}
-                          >
-                            <Icon className="h-4 w-4 shrink-0" />
-                            <span>{item.label}</span>
+                          />
+                        </button>
+                        {isExpanded ? (
+                          <div className="ml-5 mt-1 border-l border-border pl-3">
+                            <div className="flex flex-col gap-1">
+                              {item.children?.map((child) => (
+                                <NavLink key={child.to} to={child.to} className="block">
+                                  {({ isActive: childActive }) => (
+                                    <div
+                                      className={cn(
+                                        'flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium transition-colors',
+                                        childActive
+                                          ? 'bg-panel-soft text-ink'
+                                          : 'text-muted hover:bg-panel-soft/60 hover:text-ink',
+                                      )}
+                                    >
+                                      <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', childActive ? 'bg-ink' : 'bg-faint')} />
+                                      {child.label}
+                                    </div>
+                                  )}
+                                </NavLink>
+                              ))}
+                            </div>
                           </div>
-                        )}
-                      </NavLink>
+                        ) : null}
+                      </div>
                     )
                   })}
                 </nav>
@@ -460,6 +558,13 @@ export function AppShell() {
       </div>
     </div>
   )
+}
+
+function isPathActive(pathname: string, target: string) {
+  if (target === '/tickets') {
+    return pathname === '/tickets' || pathname.startsWith('/tickets/')
+  }
+  return pathname === target || pathname.startsWith(`${target}/`)
 }
 
 function formatRelativeTime(value: string) {
