@@ -122,10 +122,12 @@ func main() {
 	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, dbConnRepo, auditRepo)
 	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo)
 	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
+	objectJob := job.NewDBMetadataObjectJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
 
 	// Background scheduler: poll every 30s for due scheduled tickets
 	go runScheduler(ticketRepo, dbConnRepo, ticketH)
 	go inventoryJob.Start(context.Background())
+	go objectJob.Start(context.Background())
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)

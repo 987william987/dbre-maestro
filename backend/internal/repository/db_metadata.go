@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -139,4 +141,88 @@ func (r *DBMetadataRepo) ReplaceInventorySnapshots(ctx context.Context, snapshot
 	}
 	tx = nil
 	return nil
+}
+
+func (r *DBMetadataRepo) ReplaceObjectSnapshotsForConnection(ctx context.Context, snapshotAt time.Time, dbConnectionID uint64, items []model.DBObjectSnapshot) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin replace object snapshots tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM db_object_snapshots WHERE db_connection_id = ?`, dbConnectionID); err != nil {
+		return fmt.Errorf("clear db_object_snapshots for connection %d: %w", dbConnectionID, err)
+	}
+
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO db_object_snapshots
+			 (snapshot_at, db_connection_id, connection_name_snapshot, engine, cluster_name, node_name, database_name, schema_name, table_name, data_size_bytes, index_size_bytes)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			snapshotAt,
+			dbConnectionID,
+			item.ConnectionName,
+			item.Engine,
+			item.ClusterName,
+			item.NodeName,
+			item.DatabaseName,
+			item.SchemaName,
+			item.TableName,
+			item.DataSizeBytes,
+			item.IndexSizeBytes,
+		); err != nil {
+			return fmt.Errorf("insert object snapshot %s.%s.%s: %w", item.DatabaseName, item.SchemaName, item.TableName, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit replace object snapshots tx: %w", err)
+	}
+	tx = nil
+	return nil
+}
+
+func (r *DBMetadataRepo) FindLatestInventoryByEndpoint(ctx context.Context, endpoint string) (*model.CloudDBInventorySnapshot, error) {
+	trimmedEndpoint := strings.TrimSpace(endpoint)
+	if trimmedEndpoint == "" {
+		return nil, nil
+	}
+
+	var item model.CloudDBInventorySnapshot
+	err := r.db.GetContext(ctx, &item, `SELECT
+		id,
+		snapshot_at,
+		provider,
+		engine,
+		region,
+		az,
+		account_id,
+		db_identifier,
+		cluster_identifier,
+		instance_identifier,
+		role,
+		engine_version,
+		instance_class,
+		storage_type,
+		cluster_endpoint,
+		cluster_reader_endpoint,
+		instance_endpoint,
+		raw_payload_json
+	FROM cloud_db_inventory_snapshots
+	WHERE cluster_endpoint = ?
+	   OR cluster_reader_endpoint = ?
+	   OR instance_endpoint = ?
+	ORDER BY snapshot_at DESC, id DESC
+	LIMIT 1`, trimmedEndpoint, trimmedEndpoint, trimmedEndpoint)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find inventory by endpoint %s: %w", trimmedEndpoint, err)
+	}
+	return &item, nil
 }
