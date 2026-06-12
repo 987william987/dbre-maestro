@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Loader2, Pencil, PlugZap, Plus, ServerCog, Trash2, X } from 'lucide-react'
+import { Loader2, Pencil, Plus, ServerCog, Trash2, X } from 'lucide-react'
 import { createDBConnection, deleteDBConnection, listDBConnections, patchDBConnection, testDBConnection } from '@/modules/db-connections/api'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
@@ -214,48 +214,27 @@ export function DBConnectionsPage() {
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
       <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
-        <div className="border-b border-border/80 px-4 py-3 sm:px-5">
+        <div className="px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-muted">
-                <span className="rounded-full border border-border bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                  Connections
-                </span>
-                <span>/</span>
-                <span>Infrastructure Registry</span>
-              </div>
-              <h2 className="mt-3 text-[24px] font-bold tracking-[-0.03em] text-ink">資料庫連線管理</h2>
+              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">資料庫連線管理</h2>
               <p className="mt-2 max-w-[860px] text-[13px] leading-6 text-muted">
-                用資產列表集中盤點現有連線，新增與變更一律走獨立視窗操作。支援 MySQL、PostgreSQL 與 Redis，`database` 可留空，讓 SQL Editor 之後自行瀏覽可用資料庫。
+                支援 MySQL、PostgreSQL 與 Redis；`database` 可留空，讓 SQL 編輯器自行瀏覽可用資料庫。
               </p>
             </div>
-
-            <div className="grid min-w-[160px] gap-2 text-[12px] text-muted sm:grid-cols-1 lg:min-w-[160px]">
-              <MetricCard label="Registered" value={String(connections.length)} />
-            </div>
+            <button
+              type="button"
+              onClick={openCreateDrawer}
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800"
+            >
+              <Plus className="h-4 w-4" />
+              新增連線
+            </button>
           </div>
         </div>
+      </section>
 
-        <div className="px-4 py-3 sm:px-5">
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
-            <div className="border-b border-border/80 px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <PlugZap className="h-4 w-4 text-accent" />
-                  <p className="text-[13px] font-semibold text-ink">已註冊連線</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={openCreateDrawer}
-                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
-                >
-                  <Plus className="h-4 w-4" />
-                  新增連線
-                </button>
-              </div>
-              <p className="mt-1 text-[12px] text-muted">用清晰列表查看當前資產，從單列動作進入測試、編輯或刪除。</p>
-            </div>
-
+      <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
             {loading ? (
               <LoadingBlock message="載入連線中…" className="h-48 rounded-none border-0 bg-transparent" />
             ) : sortedConnections.length === 0 ? (
@@ -297,11 +276,11 @@ export function DBConnectionsPage() {
                           }`}
                         >
                           <td className="px-3 py-2.5 align-top">
-                            <p className="text-[13px] font-semibold">{connection.name}</p>
+                            <p className="whitespace-nowrap text-[13px] font-semibold">{connection.name}</p>
                           </td>
                           <td className={`px-3 py-2.5 align-top text-[12px] font-medium whitespace-nowrap ${isFailed ? 'text-danger' : 'text-ink'}`}>{formatDBType(connection.db_type)}</td>
                           <td className="px-3 py-2.5 align-top">
-                            <p className="font-mono text-[12px]">{connection.host}:{connection.port}</p>
+                            <p className="break-all font-mono text-[12px]">{connection.host}:{connection.port}</p>
                           </td>
                           <td className="px-3 py-2.5 align-top whitespace-nowrap">
                             <p className={`text-[12px] ${isFailed ? 'text-danger' : 'text-ink'}`}>{connection.ssl_mode}</p>
@@ -317,7 +296,7 @@ export function DBConnectionsPage() {
                                 className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                               >
                                 {testingId === connection.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                                Test
+                                測試
                               </button>
                               <button
                                 type="button"
@@ -325,7 +304,7 @@ export function DBConnectionsPage() {
                                 className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
-                                Edit
+                                編輯
                               </button>
                               <button
                                 type="button"
@@ -334,7 +313,7 @@ export function DBConnectionsPage() {
                                 className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2.5 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
                               >
                                 {deletingId === connection.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                                Delete
+                                刪除
                               </button>
                             </div>
                           </td>
@@ -345,8 +324,6 @@ export function DBConnectionsPage() {
                 </table>
               </div>
             )}
-          </section>
-        </div>
       </section>
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
@@ -570,14 +547,6 @@ function formatDBType(dbType: string) {
   return 'MySQL'
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
-      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">{label}</p>
-      <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{value}</p>
-    </div>
-  )
-}
 
 function CardSection({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
   return (

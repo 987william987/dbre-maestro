@@ -158,7 +158,7 @@ describe('DBConnectionsPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText('analytics').length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    fireEvent.click(screen.getByRole('button', { name: '測試' }))
 
     await waitFor(() => expect(mockedTestDBConnection).toHaveBeenCalledWith(5))
     await waitFor(() => expect(screen.getByText('analytics 連線測試成功')).toBeInTheDocument())
@@ -179,7 +179,7 @@ describe('DBConnectionsPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText(/analytics|warehouse/).length).toBeGreaterThan(1))
-    fireEvent.click(screen.getAllByRole('button', { name: 'Test' })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: '測試' })[0])
 
     await waitFor(() => expect(screen.getByText('warehouse 連線測試失敗：連線測試失敗')).toBeInTheDocument())
 
@@ -194,7 +194,7 @@ describe('DBConnectionsPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText('analytics').length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    fireEvent.click(screen.getByRole('button', { name: '編輯' }))
     fireEvent.change(screen.getByLabelText('DB Type'), { target: { value: 'postgres' } })
     fireEvent.change(screen.getByLabelText('SSL Mode'), { target: { value: 'require' } })
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
@@ -248,7 +248,7 @@ describe('DBConnectionsPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText('analytics').length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    fireEvent.click(screen.getByRole('button', { name: '刪除' }))
     fireEvent.click(screen.getByRole('button', { name: '確認刪除' }))
 
     await waitFor(() => expect(mockedDeleteDBConnection).toHaveBeenCalledWith(5))
