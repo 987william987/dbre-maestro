@@ -195,7 +195,7 @@ export function TicketDetailPage() {
           </section>
 
           <section className="flex flex-col gap-3">
-            {canReview ? (
+            {canReview && ticket.status === 'pending_review' ? (
               <div className="rounded-xl border border-border bg-panel shadow-soft">
                 <div className="border-b border-border/80 px-4 py-3">
                   <div className="flex items-center gap-2">
@@ -216,21 +216,15 @@ export function TicketDetailPage() {
                     />
                   </label>
 
-                  {ticket.status === 'pending_review' ? (
-                    <button
-                      type="button"
-                      disabled={acting !== null}
-                      onClick={() => void runAction('approve', () => approveTicket(ticket.id, comment))}
-                      className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {acting === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                      審核通過
-                    </button>
-                  ) : (
-                    <p className="mt-3 rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px] text-muted">
-                      目前狀態不是 `pending_review`，因此不能再做 approve / reject。
-                    </p>
-                  )}
+                  <button
+                    type="button"
+                    disabled={acting !== null}
+                    onClick={() => void runAction('approve', () => approveTicket(ticket.id, comment))}
+                    className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {acting === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                    審核通過
+                  </button>
 
                   <label className="mt-4 flex flex-col gap-1.5">
                     <span className="text-[12px] font-semibold text-ink">拒絕原因（必填）</span>
@@ -242,17 +236,15 @@ export function TicketDetailPage() {
                     />
                   </label>
 
-                  {ticket.status === 'pending_review' ? (
-                    <button
-                      type="button"
-                      disabled={acting !== null || reason.trim() === ''}
-                      onClick={() => void runAction('reject', () => rejectTicket(ticket.id, reason.trim()))}
-                      className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
-                      拒絕工單
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    disabled={acting !== null || reason.trim() === ''}
+                    onClick={() => void runAction('reject', () => rejectTicket(ticket.id, reason.trim()))}
+                    className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
+                    拒絕工單
+                  </button>
                 </div>
               </div>
             ) : null}
@@ -299,16 +291,6 @@ export function TicketDetailPage() {
                   ) : null}
                 </div>
 
-                <p className="mx-4 mb-4 rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px] text-muted">
-                  目前狀態：`{ticket.status}`。
-                  {ticket.ticket_type === 'sensitive_query_access' && canRevoke
-                    ? ' 已核准的臨時敏感查詢可在此提前撤銷。'
-                    : ticket.status === 'approved'
-                    ? ' 可送入待執行佇列。'
-                    : ticket.status === 'pending_execution'
-                      ? ' 可觸發執行。'
-                      : ' 此狀態下沒有 DBA 流程操作可執行。'}
-                </p>
               </div>
             ) : null}
 
