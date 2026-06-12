@@ -30,6 +30,7 @@ import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataColumn, MetadataItem, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
+import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { listDBConnections } from '@/modules/db-connections/api'
@@ -1098,35 +1099,11 @@ export function SQLEditorPage() {
     <div className="flex h-full min-h-0 flex-col gap-3 p-3 sm:p-4">
       <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-            <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-muted">
-                <span className="rounded-full border border-border bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                  SQL Editor
-                </span>
-                <span>/</span>
-                <span>Query Console</span>
-              </div>
-              <h2 className="mt-3 text-[24px] font-bold tracking-[-0.03em] text-ink">SQL / Redis 工作台</h2>
-              <p className="mt-2 text-[13px] leading-6 text-muted">
-                在同一個工作區執行 read-only 查詢、瀏覽 metadata、保留歷史與收藏，並從結果區直接建立匯出請求。
-              </p>
-            </div>
-
-            <div className="grid min-w-[250px] gap-2 text-[12px] text-muted sm:grid-cols-3 lg:min-w-[360px]">
-              <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Tabs</p>
-                <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{tabs.length}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">History</p>
-                <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{history.length}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Saved Queries</p>
-                <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{savedQueries.length}</p>
-              </div>
-            </div>
+          <div className="max-w-3xl">
+            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">SQL 編輯器</h2>
+            <p className="mt-2 text-[13px] leading-6 text-muted">
+              在同一個工作區執行 read-only 查詢、瀏覽 metadata、保留歷史與收藏，並從結果區直接建立匯出請求。
+            </p>
           </div>
         </div>
       </section>
@@ -1137,50 +1114,37 @@ export function SQLEditorPage() {
         <section className="flex min-h-0 flex-col rounded-xl border border-border bg-panel shadow-soft">
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center gap-2">
-              <FolderTree className="h-4 w-4 text-accent" />
-              <p className="text-[13px] font-semibold text-ink">Workspace Assets</p>
+              <FolderTree className="h-4 w-4 text-muted" />
+              <p className="text-[13px] font-semibold text-ink">資料來源</p>
             </div>
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
-            <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-panel-soft px-3 py-3">
-              <div className="flex items-center gap-2">
-                <Table2 className="h-4 w-4 text-muted" />
-                <p className="text-[12px] font-semibold text-ink">Workspace Explorer</p>
-              </div>
-              {metadataError ? <InlineAlert className="mt-2" tone="info">{metadataError}</InlineAlert> : null}
-              <div className="mt-2 min-h-0 flex-1">
-                <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg bg-white px-3 py-3">
-                  <div className="px-1">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">Objects</p>
-                    <label className="mt-2 flex h-9 items-center gap-2 rounded-md border border-border bg-panel-soft px-2.5">
-                      <Search className="h-3.5 w-3.5 text-faint" />
-                      <input
-                        aria-label="Explorer Search"
-                        value={explorerSearch}
-                        onChange={(event) => setExplorerSearch(event.target.value)}
-                        placeholder="Search assets"
-                        className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
-                      />
-                    </label>
-                  </div>
-                  <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t border-border/80 pt-3">
-                    {connectionsLoading ? (
-                      <p className="px-1 py-2 text-[12px] text-muted">載入連線中…</p>
-                    ) : !activeConnection || explorerNodes.length === 0 ? (
-                      <p className="px-1 py-2 text-[12px] text-muted">目前沒有可用的 DB connection。</p>
-                    ) : filteredExplorerNodes.length === 0 ? (
-                      <p className="px-1 py-2 text-[12px] text-muted">沒有符合搜尋條件的資產。</p>
-                    ) : (
-                      <AssetTree
-                        nodes={filteredExplorerNodes}
-                        onSelect={handleSelectNode}
-                        onToggle={(node) => void handleToggleNode(node)}
-                      />
-                    )}
-                  </div>
-                </div>
-              </div>
+          <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
+            {metadataError ? <InlineAlert className="mb-2" tone="info">{metadataError}</InlineAlert> : null}
+            <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-panel-soft px-2.5">
+              <Search className="h-3.5 w-3.5 text-faint" />
+              <input
+                aria-label="Explorer Search"
+                value={explorerSearch}
+                onChange={(event) => setExplorerSearch(event.target.value)}
+                placeholder="搜尋資產"
+                className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
+              />
+            </label>
+            <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t border-border/80 pt-3">
+              {connectionsLoading ? (
+                <p className="px-1 py-2 text-[12px] text-muted">載入連線中…</p>
+              ) : !activeConnection || explorerNodes.length === 0 ? (
+                <p className="px-1 py-2 text-[12px] text-muted">目前沒有可用的 DB connection。</p>
+              ) : filteredExplorerNodes.length === 0 ? (
+                <p className="px-1 py-2 text-[12px] text-muted">沒有符合搜尋條件的資產。</p>
+              ) : (
+                <AssetTree
+                  nodes={filteredExplorerNodes}
+                  onSelect={handleSelectNode}
+                  onToggle={(node) => void handleToggleNode(node)}
+                />
+              )}
             </div>
           </div>
         </section>
@@ -1668,24 +1632,14 @@ export function SQLEditorPage() {
                   )}
                 </div>
                 {(resultView === 'result' || resultView === 'vertical') && activeTab.result && totalResultPages > 1 ? (
-                  <div className="mt-3 flex items-center justify-end gap-2 text-[12px] text-muted">
-                    <button
-                      type="button"
-                      onClick={() => setResultPage((current) => Math.max(1, current - 1))}
-                      disabled={resultPage <= 1}
-                      className="inline-flex h-8 items-center rounded-md border border-border bg-white px-3 font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      上一頁
-                    </button>
-                    <span>{resultPage} / {totalResultPages}</span>
-                    <button
-                      type="button"
-                      onClick={() => setResultPage((current) => Math.min(totalResultPages, current + 1))}
-                      disabled={resultPage >= totalResultPages}
-                      className="inline-flex h-8 items-center rounded-md border border-border bg-white px-3 font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      下一頁
-                    </button>
+                  <div className="mt-3">
+                    <Pagination
+                      offset={(resultPage - 1) * RESULT_PAGE_SIZE}
+                      pageSize={RESULT_PAGE_SIZE}
+                      count={Math.min(activeTab.result.rows.length - (resultPage - 1) * RESULT_PAGE_SIZE, RESULT_PAGE_SIZE)}
+                      total={activeTab.result.rows.length}
+                      onChange={(nextOffset) => setResultPage(Math.floor(nextOffset / RESULT_PAGE_SIZE) + 1)}
+                    />
                   </div>
                 ) : null}
               </div>

@@ -201,7 +201,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('CodeMirror'), {
       target: { value: 'SELECT * FROM tickets;' },
@@ -239,7 +239,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Primary MySQL'))
 
@@ -284,7 +284,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Primary MySQL'))
 
@@ -326,7 +326,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByRole('button', { name: 'History' }))
@@ -344,7 +344,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     expect(screen.getByText('Select asset')).toBeInTheDocument()
     expect(mockedListMetadata).not.toHaveBeenCalled()
   })
@@ -411,7 +411,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     expect(screen.getByText('Primary MySQL')).toBeInTheDocument()
     expect(screen.queryByText('Hidden Redis')).not.toBeInTheDocument()
@@ -445,7 +445,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     expect(screen.getByText('沒有符合的 asset。')).toBeInTheDocument()
   })
@@ -459,7 +459,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Primary MySQL'))
 
@@ -510,7 +510,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
@@ -536,7 +536,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
@@ -555,7 +555,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
@@ -602,7 +602,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
@@ -626,7 +626,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Save'))
@@ -675,7 +675,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
@@ -703,14 +703,14 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
 
     expect(await screen.findByText('Executed in 1.28s')).toBeInTheDocument()
     expect(screen.getByText('51 rows / 1280 ms / Page 1 / 2')).toBeInTheDocument()
-    expect(screen.getByText('1 / 2')).toBeInTheDocument()
+    expect(screen.getByText('共 51 筆，目前顯示 1 - 50')).toBeInTheDocument()
     expect(screen.getByText('user-1@example.com')).toBeInTheDocument()
     expect(screen.queryByText('user-51@example.com')).not.toBeInTheDocument()
 
@@ -719,7 +719,7 @@ describe('SQLEditorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '下一頁' }))
 
-    expect(await screen.findByText('2 / 2')).toBeInTheDocument()
+    expect(await screen.findByText('共 51 筆，目前顯示 51 - 51')).toBeInTheDocument()
     expect(screen.getByText('user-51@example.com')).toBeInTheDocument()
     expect(screen.queryByText('user-1@example.com')).not.toBeInTheDocument()
   })
@@ -780,7 +780,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Shared MySQL'))
     fireEvent.click(screen.getByLabelText('Toggle Shared MySQL'))
@@ -848,7 +848,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Configured MySQL'))
     fireEvent.click(screen.getByLabelText('Toggle Configured MySQL'))
@@ -917,7 +917,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Shared Postgres'))
     fireEvent.click(screen.getByLabelText('Toggle Shared Postgres'))
@@ -986,7 +986,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL / Redis 工作台')).toBeInTheDocument()
+    expect(await screen.findByText('SQL 編輯器')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Select asset'))
     fireEvent.click(screen.getByText('Search MySQL'))
     fireEvent.click(screen.getByLabelText('Toggle Search MySQL'))
