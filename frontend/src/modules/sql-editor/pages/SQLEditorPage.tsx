@@ -1100,9 +1100,9 @@ export function SQLEditorPage() {
       <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="max-w-3xl">
-            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">SQL 編輯器</h2>
+            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">SQL Editor</h2>
             <p className="mt-2 text-[13px] leading-6 text-muted">
-              在同一個工作區執行 read-only 查詢、瀏覽 metadata、保留歷史與收藏，並從結果區直接建立匯出請求。
+              Run read-only queries, browse metadata, and keep query history and saved queries — all in one workspace. Create export requests directly from the result panel.
             </p>
           </div>
         </div>
@@ -1115,7 +1115,7 @@ export function SQLEditorPage() {
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center gap-2">
               <FolderTree className="h-4 w-4 text-muted" />
-              <p className="text-[13px] font-semibold text-ink">資料來源</p>
+              <p className="text-[13px] font-semibold text-ink">Data Sources</p>
             </div>
           </div>
 
@@ -1127,17 +1127,17 @@ export function SQLEditorPage() {
                 aria-label="Explorer Search"
                 value={explorerSearch}
                 onChange={(event) => setExplorerSearch(event.target.value)}
-                placeholder="搜尋資產"
+                placeholder="Search assets"
                 className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
               />
             </label>
             <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t border-border/80 pt-3">
               {connectionsLoading ? (
-                <p className="px-1 py-2 text-[12px] text-muted">載入連線中…</p>
+                <p className="px-1 py-2 text-[12px] text-muted">Loading connections...</p>
               ) : !activeConnection || explorerNodes.length === 0 ? (
-                <p className="px-1 py-2 text-[12px] text-muted">目前沒有可用的 DB connection。</p>
+                <p className="px-1 py-2 text-[12px] text-muted">No DB connections available.</p>
               ) : filteredExplorerNodes.length === 0 ? (
-                <p className="px-1 py-2 text-[12px] text-muted">沒有符合搜尋條件的資產。</p>
+                <p className="px-1 py-2 text-[12px] text-muted">No matching assets.</p>
               ) : (
                 <AssetTree
                   nodes={filteredExplorerNodes}

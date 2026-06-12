@@ -90,9 +90,9 @@ export function SQLReviewRulesPage() {
       <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="px-4 py-3 sm:px-5">
           <div className="max-w-3xl">
-            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">SQL 審核規則</h2>
+            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">SQL Review Rules</h2>
             <p className="mt-2 text-[13px] leading-6 text-muted">
-              管理工單 SQL 在送審時自動檢查的規則：啟用狀態與門檻值，修改後逐列儲存即生效。
+              Manage rules that auto-check ticket SQL during review: enable/disable and configure thresholds. Changes take effect per row on save.
             </p>
           </div>
         </div>
@@ -100,9 +100,9 @@ export function SQLReviewRulesPage() {
 
       <div className="overflow-hidden overflow-x-auto rounded-xl border border-border bg-panel shadow-soft">
           {loading ? (
-            <LoadingBlock message="載入 SQL review rules 中…" className="m-4 min-h-[220px] rounded-xl border-border bg-panel" />
+            <LoadingBlock message="Loading SQL review rules..." className="m-4 min-h-[220px] rounded-xl border-border bg-panel" />
           ) : rules.length === 0 ? (
-            <div className="flex h-[220px] items-center justify-center text-[12px] text-muted">目前沒有 SQL review rules。</div>
+            <div className="flex h-[220px] items-center justify-center text-[12px] text-muted">No SQL review rules found.</div>
           ) : (
             <table className="min-w-full border-collapse">
               <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
@@ -137,7 +137,7 @@ export function SQLReviewRulesPage() {
                               }))
                             }
                           />
-                          <span>{draft?.enabled ? '啟用' : '停用'}</span>
+                          <span>{draft?.enabled ? 'Enabled' : 'Disabled'}</span>
                         </label>
                       </td>
                       <td className="px-3 py-3">
@@ -164,7 +164,7 @@ export function SQLReviewRulesPage() {
                           className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                         >
                           {savingRuleName === rule.rule_name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
-                          儲存
+                          Save
                         </button>
                       </td>
                     </tr>

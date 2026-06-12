@@ -132,13 +132,13 @@ describe('UsersPage', () => {
 
     renderPage()
 
-    fireEvent.click(await screen.findByRole('button', { name: '建立使用者' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Create User' }))
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'alice' } })
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'alice@example.com' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Secret123!' } })
     fireEvent.change(screen.getByLabelText('User auth group membership selection'), { target: { value: 'developer' } })
-    fireEvent.click(screen.getByRole('button', { name: '加入群組' }))
-    fireEvent.click(screen.getByRole('button', { name: '確認建立' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Group' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Create' }))
 
     await waitFor(() => {
       expect(mockedCreateUser).toHaveBeenCalledWith({
@@ -190,13 +190,13 @@ describe('UsersPage', () => {
 
     renderPage()
 
-    fireEvent.click(await screen.findByRole('button', { name: '管理' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage' }))
     fireEvent.change(await screen.findByLabelText('Username'), { target: { value: 'bobby' } })
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'bobby@example.com' } })
 
     expect(mockedPatchUser).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: '儲存變更' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
 
     await waitFor(() => {
       expect(mockedPatchUser).toHaveBeenCalledWith(3, {
@@ -243,17 +243,17 @@ describe('UsersPage', () => {
 
     renderPage()
 
-    fireEvent.click(await screen.findByRole('button', { name: '管理' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage' }))
     const username = await screen.findByLabelText('Username')
     const email = screen.getByLabelText('Email')
     const password = screen.getByLabelText('Password')
 
     expect(username).toBeDisabled()
     expect(email).toBeDisabled()
-    expect(screen.queryByRole('button', { name: '標記刪除' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Mark Delete' })).not.toBeInTheDocument()
 
     fireEvent.change(password, { target: { value: 'NewSecret123!' } })
-    fireEvent.click(screen.getByRole('button', { name: '儲存變更' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
 
     await waitFor(() => {
       expect(mockedPatchUser).toHaveBeenCalledWith(1, { password: 'NewSecret123!' })
@@ -310,16 +310,16 @@ describe('UsersPage', () => {
 
     renderPage()
 
-    fireEvent.click(await screen.findByRole('button', { name: '建立 Auth Group' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Auth Group' }))
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ops' } })
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'operations' } })
     fireEvent.change(screen.getByLabelText('Auth Group user selection'), { target: { value: '7' } })
-    fireEvent.click(screen.getByRole('button', { name: '加入使用者' }))
-    fireEvent.click(screen.getAllByRole('button', { name: '加入' })[0])
-    fireEvent.change(screen.getByPlaceholderText('搜尋 connection name、host、database'), { target: { value: 'analytics' } })
-    const addButtons = screen.getAllByRole('button', { name: '加入' })
+    fireEvent.click(screen.getByRole('button', { name: 'Add User' }))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add' })[0])
+    fireEvent.change(screen.getByPlaceholderText('Search connection name, host, database'), { target: { value: 'analytics' } })
+    const addButtons = screen.getAllByRole('button', { name: 'Add' })
     fireEvent.click(addButtons[addButtons.length - 1])
-    fireEvent.click(screen.getAllByRole('button', { name: '建立 Auth Group' })[1])
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create Auth Group' })[1])
 
     await waitFor(() => {
       expect(mockedCreateAuthGroup).toHaveBeenCalledWith({
@@ -349,13 +349,13 @@ describe('UsersPage', () => {
 
     renderPage()
 
-    fireEvent.click(await screen.findByRole('button', { name: '依授權群組' }))
-    fireEvent.click((await screen.findAllByRole('button', { name: '管理' }))[0])
+    fireEvent.click(await screen.findByRole('button', { name: 'Auth Groups' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Manage' }))[0])
     expect((await screen.findAllByText('Created')).length).toBeGreaterThan(0)
     expect(screen.getAllByText('Updated').length).toBeGreaterThan(0)
 
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'db admin team' } })
-    fireEvent.click(screen.getByRole('button', { name: '儲存 Auth Group' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Auth Group' }))
 
     await waitFor(() => {
       expect(mockedPatchAuthGroup).toHaveBeenCalledWith('developer', {
@@ -401,12 +401,12 @@ describe('UsersPage', () => {
 
     renderPage()
 
-    fireEvent.click(await screen.findByRole('button', { name: '管理' }))
-    fireEvent.click(await screen.findByRole('button', { name: '標記刪除' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark Delete' }))
 
     expect(mockedDeleteUser).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: '確認刪除此 User' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Delete' }))
 
     await waitFor(() => {
       expect(mockedDeleteUser).toHaveBeenCalledWith(6)

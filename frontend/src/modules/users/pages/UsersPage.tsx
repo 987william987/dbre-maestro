@@ -99,9 +99,9 @@ const EMPTY_AUTH_GROUP_DRAFT: AuthGroupDraft = {
   pendingDelete: false,
 }
 
-export function UsersPage() {
+export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode }) {
   const { pushToast } = useToast()
-  const [viewMode, setViewMode] = useState<ViewMode>('users')
+  const [viewMode, setViewMode] = useState<ViewMode>(initialView)
   const [users, setUsers] = useState<UserSummary[]>([])
   const [authGroups, setAuthGroups] = useState<AuthGroupDetail[]>([])
   const [connections, setConnections] = useState<DBConnection[]>([])
@@ -459,11 +459,11 @@ export function UsersPage() {
 
   const drawerTitle =
     drawerState?.mode === 'create-user'
-      ? '建立 User'
+      ? 'Create User'
       : drawerState?.mode === 'edit-user'
         ? selectedUser?.username ?? 'User'
         : drawerState?.mode === 'create-auth-group'
-          ? '建立 Auth Group'
+          ? 'Create Auth Group'
           : selectedAuthGroup?.label ?? 'Auth Group'
 
   return (
@@ -471,9 +471,9 @@ export function UsersPage() {
       <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="max-w-3xl">
-            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">使用者管理</h2>
+            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">User Management</h2>
             <p className="mt-2 text-[13px] leading-6 text-muted">
-              以 User 與 Auth Group 兩個視角維護權限、直接能力與 DB Scope。所有修改只在最後儲存時生效，並先顯示確認摘要。
+              Manage users and auth groups with their permissions, direct capabilities, and DB scope. All changes take effect only after saving, with a confirmation summary shown first.
             </p>
           </div>
         </div>
@@ -481,8 +481,8 @@ export function UsersPage() {
         <div className="border-b border-border/80 px-4 sm:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex gap-1">
-              <ViewButton active={viewMode === 'users'} label="依使用者" onClick={() => setViewMode('users')} />
-              <ViewButton active={viewMode === 'auth-groups'} label="依授權群組" onClick={() => setViewMode('auth-groups')} />
+              <ViewButton active={viewMode === 'users'} label="Users" onClick={() => setViewMode('users')} />
+              <ViewButton active={viewMode === 'auth-groups'} label="Auth Groups" onClick={() => setViewMode('auth-groups')} />
             </div>
             <div className="flex flex-wrap gap-2 py-2">
               <button
@@ -491,7 +491,7 @@ export function UsersPage() {
                 className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
               >
                 <UserPlus className="h-4 w-4" />
-                建立使用者
+                Create User
               </button>
               <button
                 type="button"
@@ -499,7 +499,7 @@ export function UsersPage() {
                 className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
               >
                 <Shield className="h-4 w-4" />
-                建立 Auth Group
+                Create Auth Group
               </button>
             </div>
           </div>
@@ -577,7 +577,7 @@ export function UsersPage() {
                             onClick={() => void openEditUserDrawer(user.id)}
                             className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
                           >
-                            管理
+                            Manage
                           </button>
                         </td>
                       </tr>
@@ -621,7 +621,7 @@ export function UsersPage() {
                             onClick={() => void openEditAuthGroupDrawer(group.name as AuthGroup)}
                             className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
                           >
-                            管理
+                            Manage
                           </button>
                         </td>
                       </tr>
@@ -722,7 +722,7 @@ export function UsersPage() {
                         className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
                       >
                         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        {drawerState.mode === 'create-user' ? '確認建立' : userDraft.pendingDelete ? '確認刪除此 User' : '儲存變更'}
+                        {drawerState.mode === 'create-user' ? 'Confirm Create' : userDraft.pendingDelete ? 'Confirm Delete' : 'Save Changes'}
                       </button>
                     </form>
                   </CardSection>
@@ -802,7 +802,7 @@ export function UsersPage() {
                           disabled={saving || selectedUserIsProtected || !pendingUserAuthGroup}
                           className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-panel-soft px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                         >
-                          加入群組
+                          Add to Group
                         </button>
                       </div>
                     </div>
@@ -905,7 +905,7 @@ export function UsersPage() {
                               : 'border border-danger/20 bg-red-100 text-danger hover:bg-red-200'
                           }`}
                         >
-                          {userDraft.pendingDelete ? '取消刪除標記' : '標記刪除'}
+                          {userDraft.pendingDelete ? 'Cancel Delete' : 'Mark Delete'}
                         </button>
                       </div>
                     </CardSection>
@@ -949,7 +949,7 @@ export function UsersPage() {
                         className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
                       >
                         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        {drawerState.mode === 'create-auth-group' ? '建立 Auth Group' : authGroupDraft.pendingDelete ? '確認刪除此 Auth Group' : '儲存 Auth Group'}
+                        {drawerState.mode === 'create-auth-group' ? 'Create Auth Group' : authGroupDraft.pendingDelete ? 'Confirm Delete' : 'Save Auth Group'}
                       </button>
                     </form>
                   </CardSection>
@@ -1009,7 +1009,7 @@ export function UsersPage() {
                         disabled={saving || selectedAuthGroupIsProtected || !pendingAuthGroupUserID}
                         className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-panel-soft px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                       >
-                        加入使用者
+                        Add User
                       </button>
                     </div>
                   </CardSection>
@@ -1092,7 +1092,7 @@ export function UsersPage() {
                               : 'border border-danger/20 bg-red-100 text-danger hover:bg-red-200'
                           }`}
                         >
-                          {authGroupDraft.pendingDelete ? '取消刪除標記' : '標記刪除'}
+                          {authGroupDraft.pendingDelete ? 'Cancel Delete' : 'Mark Delete'}
                         </button>
                       </div>
                     </CardSection>
@@ -1466,7 +1466,7 @@ function PermissionSearchPanel({
                     disabled={disabled}
                     className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                   >
-                    加入
+                    Add
                   </button>
                 </div>
               ))}
@@ -1549,7 +1549,7 @@ function DBScopePanel({
       <input
         value={search}
         onChange={(event) => onSearchChange(event.target.value)}
-        placeholder="搜尋 connection name、host、database"
+        placeholder="Search connection name, host, database"
         className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
         disabled={disabled}
       />
@@ -1566,7 +1566,7 @@ function DBScopePanel({
               disabled={disabled}
               className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
             >
-              加入
+              Add
             </button>
           </div>
         )) : <span className="text-[12px] text-muted">{emptyMessage}</span>}

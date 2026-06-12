@@ -333,7 +333,7 @@ export function MaskingRulesPage() {
         <div className="px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
-              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">資料遮罩規則</h2>
+              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">Masking Rules</h2>
               <p className="mt-2 text-[13px] leading-6 text-muted">
                 目前只支援 MySQL。Global rule 只管理欄位名稱與遮罩模式；Whitelist 則用於精準解除特定實例 / database / table / column 的誤殺。
               </p>

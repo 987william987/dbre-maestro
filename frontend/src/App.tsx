@@ -33,6 +33,7 @@ export default function App() {
             <Route path="/tickets/:id" element={<TicketDetailPage />} />
             <Route element={<RoleRoute allowedPermissions={['users.read', 'users.write']} />}>
               <Route path="/users" element={<UsersPage />} />
+              <Route path="/users/groups" element={<UsersPage initialView="auth-groups" />} />
             </Route>
             <Route element={<RoleRoute allowedPermissions={['sql_editor.query']} />}>
               <Route path="/sql-editor" element={<SQLEditorPage />} />

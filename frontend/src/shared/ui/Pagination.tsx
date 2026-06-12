@@ -19,7 +19,7 @@ export function Pagination({ offset, pageSize, count, total, onChange }: Paginat
   return (
     <div className="flex items-center justify-between px-1">
       <p className="text-[12px] text-muted">
-        {total != null ? `共 ${total} 筆，目前顯示 ${from} - ${Math.min(to, total)}` : `目前顯示 ${from} - ${to}`}
+        {total != null ? `Showing ${from}–${Math.min(to, total)} of ${total}` : `Showing ${from}–${to}`}
       </p>
       <div className="flex gap-2">
         <button
@@ -28,7 +28,7 @@ export function Pagination({ offset, pageSize, count, total, onChange }: Paginat
           onClick={() => onChange(Math.max(0, offset - pageSize))}
           className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
         >
-          上一頁
+          Previous
         </button>
         <button
           type="button"
@@ -36,7 +36,7 @@ export function Pagination({ offset, pageSize, count, total, onChange }: Paginat
           onClick={() => onChange(offset + pageSize)}
           className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
         >
-          下一頁
+          Next
         </button>
       </div>
     </div>

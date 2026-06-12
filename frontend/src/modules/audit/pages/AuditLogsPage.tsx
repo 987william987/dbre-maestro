@@ -13,41 +13,41 @@ import { useToast } from '@/shared/ui/ToastContext'
 const PAGE_SIZE = 20
 
 const ACTION_OPTIONS = [
-  { value: '', label: '全部動作' },
-  { value: 'login', label: '登入' },
-  { value: 'logout', label: '登出' },
-  { value: 'setting_change', label: '設定變更' },
-  { value: 'user_create', label: '建立使用者' },
-  { value: 'user_update', label: '更新使用者' },
-  { value: 'user_delete', label: '刪除使用者' },
-  { value: 'user_membership_add', label: '加入使用者群組' },
-  { value: 'user_membership_remove', label: '移除使用者群組' },
-  { value: 'user_permission_add', label: '新增使用者權限' },
-  { value: 'ticket_submit', label: '建立工單' },
-  { value: 'ticket_approve', label: '核准工單' },
-  { value: 'ticket_reject', label: '駁回工單' },
-  { value: 'ticket_request_execution', label: '申請執行工單' },
-  { value: 'ticket_execute_start', label: '開始執行工單' },
-  { value: 'ticket_execute_complete', label: '工單執行完成' },
-  { value: 'ticket_execute_failed', label: '工單執行失敗' },
-  { value: 'ticket_schedule', label: '排程執行工單' },
-  { value: 'ticket_stop', label: '停止工單' },
-  { value: 'query_execute', label: '執行查詢' },
-  { value: 'export_create', label: '建立匯出申請' },
-  { value: 'export_approve', label: '核准匯出申請' },
-  { value: 'export_reject', label: '駁回匯出申請' },
-  { value: 'export_download', label: '下載匯出檔案' },
-  { value: 'audit_export', label: '匯出稽核日誌' },
-  { value: 'notification_failure', label: '通知發送失敗' },
+  { value: '', label: 'All Actions' },
+  { value: 'login', label: 'Login' },
+  { value: 'logout', label: 'Logout' },
+  { value: 'setting_change', label: 'Setting Change' },
+  { value: 'user_create', label: 'Create User' },
+  { value: 'user_update', label: 'Update User' },
+  { value: 'user_delete', label: 'Delete User' },
+  { value: 'user_membership_add', label: 'Add Group Membership' },
+  { value: 'user_membership_remove', label: 'Remove Group Membership' },
+  { value: 'user_permission_add', label: 'Add User Permission' },
+  { value: 'ticket_submit', label: 'Submit Ticket' },
+  { value: 'ticket_approve', label: 'Approve Ticket' },
+  { value: 'ticket_reject', label: 'Reject Ticket' },
+  { value: 'ticket_request_execution', label: 'Request Execution' },
+  { value: 'ticket_execute_start', label: 'Start Execution' },
+  { value: 'ticket_execute_complete', label: 'Execution Complete' },
+  { value: 'ticket_execute_failed', label: 'Execution Failed' },
+  { value: 'ticket_schedule', label: 'Schedule Execution' },
+  { value: 'ticket_stop', label: 'Stop Ticket' },
+  { value: 'query_execute', label: 'Execute Query' },
+  { value: 'export_create', label: 'Create Export' },
+  { value: 'export_approve', label: 'Approve Export' },
+  { value: 'export_reject', label: 'Reject Export' },
+  { value: 'export_download', label: 'Download Export' },
+  { value: 'audit_export', label: 'Export Audit Log' },
+  { value: 'notification_failure', label: 'Notification Failure' },
 ] as const
 
 const RESOURCE_OPTIONS = [
-  { value: '', label: '全部資源' },
-  { value: 'db_connection', label: '資料庫連線' },
-  { value: 'ticket', label: '工單' },
-  { value: 'user', label: '使用者' },
-  { value: 'export', label: '匯出申請' },
-  { value: 'audit_log', label: '稽核日誌' },
+  { value: '', label: 'All Resources' },
+  { value: 'db_connection', label: 'DB Connection' },
+  { value: 'ticket', label: 'Ticket' },
+  { value: 'user', label: 'User' },
+  { value: 'export', label: 'Export' },
+  { value: 'audit_log', label: 'Audit Log' },
 ] as const
 
 export function AuditLogsPage() {
@@ -142,9 +142,9 @@ export function AuditLogsPage() {
       <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="max-w-3xl">
-            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">稽核日誌</h2>
+            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">Audit Logs</h2>
             <p className="mt-2 text-[13px] leading-6 text-muted">
-              查看登入、工單、匯出與設定變更等操作紀錄。常用條件已整理成可選項，複雜明細改由詳情視窗查看。
+              View operation records for logins, tickets, exports, and configuration changes. Common filters are provided as selects; complex details are shown in the detail panel.
             </p>
           </div>
         </div>
@@ -152,7 +152,7 @@ export function AuditLogsPage() {
         <form className="px-4 py-3 sm:px-5" onSubmit={handleSubmit}>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             <FilterHint
-              hint="從清單挑選常見操作事件，例如登入、登出、設定變更。"
+              hint="Select a common action event, e.g. login, logout, setting change."
               className="w-full"
             >
               <SelectField
@@ -162,7 +162,7 @@ export function AuditLogsPage() {
               />
             </FilterHint>
             <FilterHint
-              hint="先用資源類型收斂，例如資料庫連線、工單或使用者。"
+              hint="Narrow by resource type, e.g. DB connection, ticket, or user."
               className="w-full"
             >
               <SelectField
@@ -172,29 +172,29 @@ export function AuditLogsPage() {
               />
             </FilterHint>
             <FilterHint
-              hint="可輸入操作人名稱關鍵字，例如 admin 或 william。"
+              hint="Filter by actor name keyword, e.g. admin or william."
               className="w-full"
             >
               <input
                 value={filters.actorKeyword}
                 onChange={(event) => setFilters((current) => ({ ...current, actorKeyword: event.target.value }))}
                 className="h-10 w-full rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                placeholder="操作人名稱"
+                placeholder="Actor"
               />
             </FilterHint>
             <FilterHint
-              hint="可輸入資源名稱關鍵字，例如某個連線名稱或工單標題。"
+              hint="Filter by resource name keyword, e.g. a connection name or ticket title."
               className="w-full"
             >
               <input
                 value={filters.resourceKeyword}
                 onChange={(event) => setFilters((current) => ({ ...current, resourceKeyword: event.target.value }))}
                 className="h-10 w-full rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                placeholder="資源名稱"
+                placeholder="Resource"
               />
             </FilterHint>
             <FilterHint
-              hint="設定開始時間，僅顯示此時間之後的事件。"
+              hint="Set start time — only events after this time will be shown."
               className="w-full"
             >
               <input
@@ -205,7 +205,7 @@ export function AuditLogsPage() {
               />
             </FilterHint>
             <FilterHint
-              hint="設定結束時間，僅顯示此時間之前的事件。"
+              hint="Set end time — only events before this time will be shown."
               className="w-full"
             >
               <input
@@ -225,7 +225,7 @@ export function AuditLogsPage() {
                 className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-page"
               >
                 <Download className="h-4 w-4" />
-                匯出
+                Export
               </button>
             ) : null}
             <button
@@ -233,12 +233,12 @@ export function AuditLogsPage() {
               className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800"
             >
               <Search className="h-4 w-4" />
-              套用
+              Apply
             </button>
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-muted">
-            {filterHint.length > 0 ? <span>目前篩選：{filterHint.join('、')}</span> : null}
+            {filterHint.length > 0 ? <span>Active filters: {filterHint.join(', ')}</span> : null}
           </div>
         </form>
       </section>
@@ -247,9 +247,9 @@ export function AuditLogsPage() {
 
       <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
         {loading ? (
-          <LoadingBlock message="載入稽核日誌中…" className="h-60 rounded-none border-0" />
+          <LoadingBlock message="Loading audit logs..." className="h-60 rounded-none border-0" />
         ) : logs.length === 0 ? (
-          <div className="flex h-60 items-center justify-center text-sm text-muted">目前沒有符合條件的稽核紀錄。</div>
+          <div className="flex h-60 items-center justify-center text-sm text-muted">No matching audit logs.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse">

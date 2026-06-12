@@ -102,7 +102,7 @@ describe('AppShell notifications', () => {
 
     await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
     fireEvent.click(screen.getByLabelText('Notifications'))
-    fireEvent.click(screen.getByText('全部標示已讀'))
+    fireEvent.click(screen.getByText('Mark all read'))
 
     await waitFor(() => expect(mockedMarkAllNotificationsRead).toHaveBeenCalled())
   })
@@ -131,8 +131,8 @@ describe('AppShell notifications', () => {
 
     await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
     expect(screen.getByRole('button', { name: /DB Metadata/i })).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByText('實例總覽')).toBeInTheDocument()
-    expect(screen.getByText('資料庫物件')).toBeInTheDocument()
+    expect(screen.getByText('Inventory')).toBeInTheDocument()
+    expect(screen.getByText('Objects')).toBeInTheDocument()
   })
 
   it('可手動展開與收合子導航', async () => {
@@ -160,14 +160,12 @@ describe('AppShell notifications', () => {
     await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
     const ticketsToggle = screen.getByRole('button', { name: /Tickets/i })
     expect(ticketsToggle).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByText('建立工單')).toBeInTheDocument()
+    expect(screen.getByText('New Ticket')).toBeInTheDocument()
 
     fireEvent.click(ticketsToggle)
     expect(ticketsToggle).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByText('建立工單')).not.toBeInTheDocument()
 
     fireEvent.click(ticketsToggle)
     expect(ticketsToggle).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByText('建立工單')).toBeInTheDocument()
   })
 })

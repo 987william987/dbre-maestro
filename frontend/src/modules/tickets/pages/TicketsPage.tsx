@@ -15,16 +15,16 @@ import { listTickets } from '@/modules/tickets/api'
 const PAGE_SIZE = 20
 
 const STATUS_OPTIONS: Array<{ value: '' | TicketStatus; label: string }> = [
-  { value: '', label: '全部狀態' },
-  { value: 'pending_review', label: '待審核' },
-  { value: 'approved', label: '已通過' },
-  { value: 'rejected', label: '已拒絕' },
-  { value: 'pending_execution', label: '待執行' },
-  { value: 'executing', label: '執行中' },
-  { value: 'completed', label: '已完成' },
-  { value: 'failed', label: '失敗' },
-  { value: 'stopped', label: '已停止' },
-  { value: 'interrupted', label: '已中斷' },
+  { value: '', label: 'All' },
+  { value: 'pending_review', label: 'Pending Review' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'rejected', label: 'Rejected' },
+  { value: 'pending_execution', label: 'Pending Execution' },
+  { value: 'executing', label: 'Executing' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'stopped', label: 'Stopped' },
+  { value: 'interrupted', label: 'Interrupted' },
 ]
 
 export function TicketsPage() {
@@ -61,9 +61,9 @@ export function TicketsPage() {
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
-              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">工單工作台</h2>
+              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">Ticket Workspace</h2>
               <p className="mt-2 max-w-[860px] text-[13px] leading-6 text-muted">
-                以單一佇列檢視提交、審核、待執行與歷史紀錄。顯示範圍由目前角色與後端授權決定。
+                View submitted, pending review, pending execution, and historical tickets in a single queue. Visible scope is determined by your current role and backend permissions.
               </p>
             </div>
 
@@ -73,7 +73,7 @@ export function TicketsPage() {
                 className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition-colors hover:bg-slate-800"
               >
                 <Plus className="h-4 w-4" />
-                建立新工單
+                New Ticket
               </Link>
             ) : null}
           </div>
@@ -81,14 +81,14 @@ export function TicketsPage() {
 
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
           <label className="flex items-center gap-2 text-[12px] text-muted">
-            <span className="font-semibold text-ink">狀態</span>
+            <span className="font-semibold text-ink">Status</span>
             <select
               value={status}
               onChange={(event) => {
                 setStatus(event.target.value as '' | TicketStatus)
                 setOffset(0)
               }}
-              className="h-10 min-w-[160px] rounded-lg border border-border bg-white px-3 text-[13px] font-medium text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className="h-9 min-w-[160px] rounded-md border border-border bg-white px-3 text-[13px] font-medium text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             >
               {STATUS_OPTIONS.map((option) => (
                 <option key={option.value || 'all'} value={option.value}>
@@ -97,7 +97,7 @@ export function TicketsPage() {
               ))}
             </select>
           </label>
-          <p className="text-[12px] text-muted">{tickets.length} 筆</p>
+          <p className="text-[12px] text-muted">{tickets.length} items</p>
         </div>
       </section>
 
@@ -105,7 +105,7 @@ export function TicketsPage() {
 
       <div className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
         {loading ? (
-          <LoadingBlock message="載入工單列表中…" className="h-[320px] rounded-none border-0 bg-transparent" />
+          <LoadingBlock message="Loading tickets..." className="h-[320px] rounded-none border-0 bg-transparent" />
         ) : tickets.length === 0 ? (
           <div className="bg-panel">
             <EmptyState variant={status ? 'search' : 'history'} />
@@ -115,12 +115,12 @@ export function TicketsPage() {
             <table className="min-w-full border-collapse">
               <thead className="bg-editor-toolbar">
                 <tr className="text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                  <th className="px-4 py-3">工單編號</th>
-                  <th className="px-4 py-3">標題</th>
-                  <th className="px-4 py-3">類型</th>
-                  <th className="px-4 py-3">狀態</th>
-                  <th className="px-4 py-3">提交者</th>
-                  <th className="px-4 py-3">建立時間</th>
+                  <th className="px-4 py-3">Ticket No.</th>
+                  <th className="px-4 py-3">Title</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Submitter</th>
+                  <th className="px-4 py-3">Created</th>
                 </tr>
               </thead>
               <tbody>

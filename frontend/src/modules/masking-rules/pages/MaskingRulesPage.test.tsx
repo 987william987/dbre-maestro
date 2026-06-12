@@ -131,7 +131,7 @@ describe('MaskingRulesPage', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '資料遮罩規則' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Masking Rules' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '新增規則' }))
     fireEvent.change(screen.getByLabelText('Column Name'), { target: { value: 'email' } })
     fireEvent.click(screen.getByRole('button', { name: '建立規則' }))

@@ -31,8 +31,8 @@ const NAV_ITEMS: NavItem[] = [
     allowed: (permissions) => hasAnyPermission(permissions, TICKET_WORKSPACE_PERMISSIONS),
     to: '/tickets',
     children: [
-      { to: '/tickets', label: '工單列表', icon: Ticket },
-      { to: '/tickets/new', label: '建立工單', icon: FilePlus2 },
+      { to: '/tickets', label: 'All Tickets', icon: Ticket },
+      { to: '/tickets/new', label: 'New Ticket', icon: FilePlus2 },
     ],
   },
   {
@@ -48,6 +48,10 @@ const NAV_ITEMS: NavItem[] = [
     icon: Users,
     allowed: (permissions) => permissions.includes('users.read') || permissions.includes('users.write'),
     to: '/users',
+    children: [
+      { to: '/users', label: 'Users', icon: Users },
+      { to: '/users/groups', label: 'Auth Groups', icon: Users },
+    ],
   },
   {
     key: 'db-connections',
@@ -63,8 +67,8 @@ const NAV_ITEMS: NavItem[] = [
     allowed: (permissions) => permissions.includes('db_metadata.read'),
     to: '/db-metadata/inventory',
     children: [
-      { to: '/db-metadata/inventory', label: '實例總覽', icon: DatabaseZap },
-      { to: '/db-metadata/objects', label: '資料庫物件', icon: DatabaseZap },
+      { to: '/db-metadata/inventory', label: 'Inventory', icon: DatabaseZap },
+      { to: '/db-metadata/objects', label: 'Objects', icon: DatabaseZap },
     ],
   },
   {
@@ -269,7 +273,7 @@ export function AppShell() {
   return (
     <div className="flex h-screen text-ink">
       <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-panel lg:flex">
-        <div className="flex items-center gap-2.5 border-b border-border px-4 py-3.5">
+        <div className="flex h-14 items-center gap-2.5 border-b border-border px-4">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-white">
             <span className="text-sm font-bold">M</span>
           </div>
@@ -340,21 +344,20 @@ export function AppShell() {
                             )}
                           />
                         </button>
-                        {isExpanded ? (
-                          <div className="ml-5 mt-1 border-l border-border pl-3">
-                            <div className="flex flex-col gap-1">
+                        <div className={cn('overflow-hidden transition-all duration-200 ease-in-out', isExpanded ? 'max-h-40' : 'max-h-0')}>
+                          <div className="ml-5 mt-1 border-l border-border pb-1 pl-3">
+                            <div className="flex flex-col gap-0.5">
                               {item.children?.map((child) => (
-                                <NavLink key={child.to} to={child.to} className="block">
+                                <NavLink key={child.to} to={child.to} className="block" end>
                                   {({ isActive: childActive }) => (
                                     <div
                                       className={cn(
-                                        'flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium transition-colors',
+                                        'flex items-center rounded-lg px-3 py-1.5 text-[12px] font-medium transition-colors',
                                         childActive
                                           ? 'bg-panel-soft text-ink'
                                           : 'text-muted hover:bg-panel-soft/60 hover:text-ink',
                                       )}
                                     >
-                                      <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', childActive ? 'bg-ink' : 'bg-faint')} />
                                       {child.label}
                                     </div>
                                   )}
@@ -362,7 +365,7 @@ export function AppShell() {
                               ))}
                             </div>
                           </div>
-                        ) : null}
+                        </div>
                       </div>
                     )
                   })}
@@ -431,12 +434,12 @@ export function AppShell() {
                       disabled={unreadCount === 0}
                       className="text-[12px] font-medium text-muted transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      全部標示已讀
+                      Mark all read
                     </button>
                   </div>
 
                   {notifications.length === 0 ? (
-                    <div className="px-4 py-5 text-[13px] text-muted">目前沒有站內信通知。</div>
+                    <div className="px-4 py-5 text-[13px] text-muted">No notifications.</div>
                   ) : (
                     <div className="max-h-[420px] overflow-y-auto">
                       {notifications.map((notification) => (
@@ -547,7 +550,7 @@ export function AppShell() {
               className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 py-1.5 text-[12px] font-medium text-muted transition-colors hover:bg-panel-soft hover:text-ink"
             >
               <LogOut className="h-3.5 w-3.5" />
-              登出
+              Sign out
             </button>
           </nav>
         </header>
@@ -563,6 +566,9 @@ export function AppShell() {
 function isPathActive(pathname: string, target: string) {
   if (target === '/tickets') {
     return pathname === '/tickets' || pathname.startsWith('/tickets/')
+  }
+  if (target === '/users') {
+    return pathname === '/users'
   }
   return pathname === target || pathname.startsWith(`${target}/`)
 }

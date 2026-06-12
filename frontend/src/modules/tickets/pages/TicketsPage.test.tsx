@@ -50,7 +50,7 @@ describe('TicketsPage', () => {
 
     await waitFor(() => expect(mockedListTickets).toHaveBeenCalledWith(undefined, 20, 0))
 
-    fireEvent.change(screen.getByDisplayValue('全部狀態'), { target: { value: 'pending_review' } })
+    fireEvent.change(screen.getByDisplayValue('All'), { target: { value: 'pending_review' } })
 
     await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith('pending_review', 20, 0))
   })

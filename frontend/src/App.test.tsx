@@ -90,7 +90,7 @@ describe('App routing', () => {
       </AppProviders>,
     )
 
-    expect(await screen.findByText('工單工作台')).toBeInTheDocument()
+    expect(await screen.findByText('Ticket Workspace')).toBeInTheDocument()
     expect(await screen.findByText('尚無歷史工單')).toBeInTheDocument()
 
     await waitFor(() => {

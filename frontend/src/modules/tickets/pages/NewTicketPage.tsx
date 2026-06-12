@@ -73,9 +73,9 @@ export function NewTicketPage() {
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
-              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">建立工單</h2>
+              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">New Ticket</h2>
               <p className="mt-2 text-[13px] leading-6 text-muted">
-                填寫變更內容與目標資料庫，送出後由 Reviewer / DBA 接手審核與執行。
+                Fill in the change details and target database. After submission, a Reviewer / DBA will handle the review and execution.
               </p>
             </div>
             <Link
@@ -83,7 +83,7 @@ export function NewTicketPage() {
               className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
             >
               <ArrowLeft className="h-4 w-4" />
-              返回列表
+              Back to List
             </Link>
           </div>
         </div>
@@ -94,14 +94,14 @@ export function NewTicketPage() {
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center gap-2">
               <FileText className="h-4 w-4 text-muted" />
-              <p className="text-[13px] font-semibold text-ink">工單資訊</p>
+              <p className="text-[13px] font-semibold text-ink">Ticket Info</p>
             </div>
           </div>
 
           <div className="grid gap-4 px-4 py-4">
             <label className="flex flex-col gap-1.5">
               <span className="text-[12px] font-semibold text-ink">
-                標題 <span className="text-danger">*</span>
+                Title <span className="text-danger">*</span>
               </span>
               <input
                 value={title}
@@ -113,7 +113,7 @@ export function NewTicketPage() {
             </label>
 
             <label className="flex flex-col gap-1.5">
-              <span className="text-[12px] font-semibold text-ink">描述</span>
+              <span className="text-[12px] font-semibold text-ink">Description</span>
               <textarea
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
@@ -125,7 +125,7 @@ export function NewTicketPage() {
 
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-semibold text-ink">工單類型</span>
+                <span className="text-[12px] font-semibold text-ink">Ticket Type</span>
                 <select
                   value={ticketType}
                   onChange={(event) => setTicketType(event.target.value as TicketType)}
@@ -138,7 +138,7 @@ export function NewTicketPage() {
               </label>
 
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-semibold text-ink">目標資料庫</span>
+                <span className="text-[12px] font-semibold text-ink">Target DB</span>
                 <select
                   value={dbConnectionId}
                   onChange={(event) => setDbConnectionId(event.target.value)}
@@ -162,7 +162,7 @@ export function NewTicketPage() {
             <div className="flex items-center gap-2">
               <ScrollText className="h-4 w-4 text-muted" />
               <p className="text-[13px] font-semibold text-ink">
-                SQL 內容 <span className="text-danger">*</span>
+                SQL Content <span className="text-danger">*</span>
               </p>
             </div>
           </div>
@@ -192,7 +192,7 @@ export function NewTicketPage() {
               to="/tickets"
               className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
             >
-              取消
+              Cancel
             </Link>
             <button
               type="submit"
@@ -200,7 +200,7 @@ export function NewTicketPage() {
               className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-5 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {submitting ? '建立中…' : '建立工單'}
+              {submitting ? 'Submitting...' : 'Submit Ticket'}
             </button>
           </div>
         </div>

@@ -223,9 +223,9 @@ export function DBConnectionsPage() {
         <div className="px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
-              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">資料庫連線管理</h2>
+              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">DB Connections</h2>
               <p className="mt-2 max-w-[860px] text-[13px] leading-6 text-muted">
-                支援 MySQL、PostgreSQL 與 Redis；`database` 可留空，讓 SQL 編輯器自行瀏覽可用資料庫。
+                Supports MySQL, PostgreSQL, and Redis. Leave `database` empty to let the SQL Editor browse available databases automatically.
               </p>
             </div>
             <button
