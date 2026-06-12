@@ -32,7 +32,10 @@ describe('DBMetadata pages', () => {
     await waitFor(() => expect(screen.getByText('DB Metadata / 實例總覽')).toBeInTheDocument())
     expect(screen.getByRole('link', { name: '實例總覽' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '資料庫物件' })).toBeInTheDocument()
-    expect(screen.getByText('尚未有任何 inventory snapshot。')).toBeInTheDocument()
+    expect(screen.getByLabelText('Engine')).toBeInTheDocument()
+    expect(screen.getByLabelText('Identifier 搜尋')).toBeInTheDocument()
+    expect(screen.getByLabelText('Role')).toBeInTheDocument()
+    expect(screen.getByText('查無符合條件的 inventory snapshot。')).toBeInTheDocument()
   })
 
   it('objects page 可顯示空狀態', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { DatabaseZap } from 'lucide-react'
 import { DBMetadataSectionTabs } from '@/modules/db-metadata/components/DBMetadataSectionTabs'
 import { listInventorySnapshots } from '@/modules/db-metadata/api'
@@ -16,6 +16,9 @@ export function DBMetadataInventoryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [offset, setOffset] = useState(0)
+  const [engineFilter, setEngineFilter] = useState('all')
+  const [roleFilter, setRoleFilter] = useState('all')
+  const [identifierKeyword, setIdentifierKeyword] = useState('')
 
   useEffect(() => {
     let active = true
@@ -45,7 +48,31 @@ export function DBMetadataInventoryPage() {
     }
   }, [])
 
-  const pagedItems = items.slice(offset, offset + PAGE_SIZE)
+  const engineOptions = useMemo(() => {
+    return ['all', ...new Set(items.map((item) => item.engine).filter(Boolean))] as string[]
+  }, [items])
+
+  const roleOptions = useMemo(() => {
+    return ['all', ...new Set(items.map((item) => item.role ?? '').filter(Boolean))] as string[]
+  }, [items])
+
+  const filteredItems = useMemo(() => {
+    const keyword = identifierKeyword.trim().toLowerCase()
+    return items.filter((item) => {
+      if (engineFilter !== 'all' && item.engine !== engineFilter) {
+        return false
+      }
+      if (roleFilter !== 'all' && (item.role ?? '') !== roleFilter) {
+        return false
+      }
+      if (keyword !== '' && !item.db_identifier.toLowerCase().includes(keyword)) {
+        return false
+      }
+      return true
+    })
+  }, [engineFilter, identifierKeyword, items, roleFilter])
+
+  const pagedItems = filteredItems.slice(offset, offset + PAGE_SIZE)
 
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
@@ -67,14 +94,67 @@ export function DBMetadataInventoryPage() {
 
       <DBMetadataSectionTabs />
 
+      <section className="rounded-xl border border-border bg-panel shadow-soft">
+        <div className="grid gap-3 px-4 py-4 md:grid-cols-3">
+          <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+            Engine
+            <select
+              value={engineFilter}
+              onChange={(event) => {
+                setEngineFilter(event.target.value)
+                setOffset(0)
+              }}
+              className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
+            >
+              {engineOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option === 'all' ? '全部 engines' : option}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+            Identifier 搜尋
+            <input
+              value={identifierKeyword}
+              onChange={(event) => {
+                setIdentifierKeyword(event.target.value)
+                setOffset(0)
+              }}
+              placeholder="模糊搜尋 DB identifier"
+              className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
+            />
+          </label>
+
+          <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+            Role
+            <select
+              value={roleFilter}
+              onChange={(event) => {
+                setRoleFilter(event.target.value)
+                setOffset(0)
+              }}
+              className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
+            >
+              {roleOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option === 'all' ? '全部 roles' : option}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </section>
+
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
       <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
         {loading ? (
           <LoadingBlock message="載入實例總覽中…" className="min-h-[320px] rounded-none border-0 bg-transparent" />
-        ) : items.length === 0 ? (
+        ) : filteredItems.length === 0 ? (
           <div className="m-4 flex min-h-[240px] items-center justify-center rounded-xl border border-dashed border-border bg-panel-soft text-sm text-muted">
-            尚未有任何 inventory snapshot。
+            查無符合條件的 inventory snapshot。
           </div>
         ) : (
           <div className="grid gap-3 p-3">
@@ -121,7 +201,7 @@ export function DBMetadataInventoryPage() {
               offset={offset}
               pageSize={PAGE_SIZE}
               count={pagedItems.length}
-              total={items.length}
+              total={filteredItems.length}
               onChange={setOffset}
             />
           </div>
