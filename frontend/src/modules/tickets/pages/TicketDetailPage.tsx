@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, Clock3, Download, Loader2, Play, Send, ShieldCheck, ShieldX } from 'lucide-react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { ArrowLeft, Download, Loader2, Play, Send, ShieldCheck, ShieldX } from 'lucide-react'
+import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
@@ -23,7 +23,6 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 
 export function TicketDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
   const { user } = useAuth()
   const { pushToast } = useToast()
   const [detail, setDetail] = useState<TicketDetail | null>(null)
@@ -114,60 +113,30 @@ export function TicketDetailPage() {
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-muted">
-                <span className="rounded-full border border-border bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                  Tickets
-                </span>
-                <span>/</span>
-                <span>Detail Workspace</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">{ticket ? ticket.title : '工單詳情'}</h2>
+                {ticket ? <StatusBadge status={ticket.status} /> : null}
               </div>
-              <h2 className="mt-3 text-[24px] font-bold tracking-[-0.03em] text-ink">{ticket ? ticket.title : '工單詳情'}</h2>
               <p className="mt-2 text-[13px] leading-6 text-muted">
-                檢視工單內容、狀態節點與依角色可執行的後續操作。這一頁應該像控制台細節頁，而不是單純資料卡片。
+                {ticket ? (
+                  <>
+                    <span className="font-mono font-semibold text-ink">{ticket.ticket_no}</span>
+                    <span className="mx-2 text-faint">·</span>
+                    建立於 {formatDateTime(ticket.created_at, true)}
+                  </>
+                ) : (
+                  '檢視工單內容、狀態與依角色可執行的後續操作。'
+                )}
               </p>
             </div>
-            <div className="flex gap-2.5">
-              <button
-                type="button"
-                onClick={() => navigate(0)}
-                className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
-              >
-                重新整理
-              </button>
-              <Link
-                to="/tickets"
-                className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                返回列表
-              </Link>
-            </div>
+            <Link
+              to="/tickets"
+              className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              返回列表
+            </Link>
           </div>
-
-          {ticket ? (
-            <div className="mt-4 grid gap-2 md:grid-cols-3">
-              <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Ticket No</p>
-                <p className="mt-1 font-mono text-[18px] font-bold text-accent">{ticket.ticket_no}</p>
-                <p className="mt-0.5 text-[12px] text-muted">工單識別碼與追蹤入口</p>
-              </div>
-              <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Status</p>
-                <div className="mt-1">
-                  <StatusBadge status={ticket.status} />
-                </div>
-                <p className="mt-1.5 text-[12px] text-muted">目前流程節點</p>
-              </div>
-              <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
-                <div className="flex items-center gap-2 text-faint">
-                  <Clock3 className="h-3.5 w-3.5" />
-                  <p className="text-[10px] font-bold uppercase tracking-[0.16em]">Created</p>
-                </div>
-                <p className="mt-1 text-[16px] font-bold tracking-tight text-ink">{formatDateTime(ticket.created_at, true)}</p>
-                <p className="mt-0.5 text-[12px] text-muted">建立時間與後續稽核時間軸參考</p>
-              </div>
-            </div>
-          ) : null}
         </div>
       </section>
 
@@ -344,7 +313,7 @@ export function TicketDetailPage() {
             ) : null}
 
             {ticket.ticket_type === 'sql_export' && detail.capabilities.can_download_export && exportDownloadURL ? (
-              <div className="rounded-[22px] border border-white/85 bg-white/92 shadow-soft">
+              <div className="rounded-xl border border-border bg-panel shadow-soft">
                 <div className="border-b border-border/80 px-4 py-3">
                   <div className="flex items-center gap-2">
                     <Download className="h-4 w-4 text-accent" />
@@ -355,7 +324,7 @@ export function TicketDetailPage() {
                 <div className="px-4 py-4">
                   <a
                     href={exportDownloadURL}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[12px] bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800"
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800"
                   >
                     <Download className="h-4 w-4" />
                     下載匯出檔

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, RefreshCcw } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { EmptyState } from '@/components/tickets/EmptyState'
 import { ApiError } from '@/shared/api/client'
@@ -57,38 +57,21 @@ export function TicketsPage() {
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-muted">
-                <span className="rounded-full border border-border bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                  Tickets
-                </span>
-                <span>/</span>
-                <span>Operations Queue</span>
-              </div>
-              <h2 className="mt-3 text-[24px] font-bold tracking-[-0.03em] text-ink">工單工作台</h2>
+              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">工單工作台</h2>
               <p className="mt-2 max-w-[860px] text-[13px] leading-6 text-muted">
                 以單一佇列檢視提交、審核、待執行與歷史紀錄。顯示範圍由目前角色與後端授權決定。
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void loadTickets(status)}
-                className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-3.5 text-[13px] font-semibold text-ink transition-colors hover:bg-panel-soft"
+            {canCreateTicket ? (
+              <Link
+                to="/tickets/new"
+                className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition-colors hover:bg-slate-800"
               >
-                <RefreshCcw className="h-4 w-4" />
-                重新整理
-              </button>
-              {canCreateTicket ? (
-                <Link
-                  to="/tickets/new"
-                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition-colors hover:bg-slate-800"
-                >
-                  建立新工單
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              ) : null}
-            </div>
+                <Plus className="h-4 w-4" />
+                建立新工單
+              </Link>
+            ) : null}
           </div>
         </div>
 
