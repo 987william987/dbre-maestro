@@ -51,11 +51,11 @@ describe('SQLReviewRulesPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByRole('heading', { name: 'SQL Review Rules' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'SQL 審核規則' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('checkbox'))
     fireEvent.change(screen.getByPlaceholderText('threshold'), { target: { value: '5000' } })
-    fireEvent.click(screen.getByText('Save'))
+    fireEvent.click(screen.getByText('儲存'))
 
     await waitFor(() => {
       expect(mockedPatchSQLReviewRule).toHaveBeenCalledWith('high_row_count', {

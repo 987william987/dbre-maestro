@@ -88,30 +88,17 @@ export function SQLReviewRulesPage() {
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
       <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
-        <div className="border-b border-border/80 px-4 py-3 sm:px-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-muted">
-                <span className="rounded-full border border-border bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                  Governance
-                </span>
-                <span>/</span>
-                <span>SQL Review Rules</span>
-              </div>
-              <h2 className="mt-3 text-[24px] font-bold tracking-[-0.03em] text-ink">SQL Review Rules</h2>
-              <p className="mt-2 text-[13px] leading-6 text-muted">
-                管理 SQL review 規則的啟用狀態與 threshold。這一頁以設定清單 + inline patch 為主，不拆 detail 頁。
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-border bg-white px-3 py-2.5 text-[12px] text-muted shadow-soft">
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Rules</p>
-              <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{rules.length}</p>
-            </div>
+        <div className="px-4 py-3 sm:px-5">
+          <div className="max-w-3xl">
+            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">SQL 審核規則</h2>
+            <p className="mt-2 text-[13px] leading-6 text-muted">
+              管理工單 SQL 在送審時自動檢查的規則：啟用狀態與門檻值，修改後逐列儲存即生效。
+            </p>
           </div>
         </div>
+      </section>
 
-        <div className="overflow-x-auto rounded-xl border border-border bg-panel shadow-soft sm:m-4">
+      <div className="overflow-hidden overflow-x-auto rounded-xl border border-border bg-panel shadow-soft">
           {loading ? (
             <LoadingBlock message="載入 SQL review rules 中…" className="m-4 min-h-[220px] rounded-xl border-border bg-panel" />
           ) : rules.length === 0 ? (
@@ -138,6 +125,7 @@ export function SQLReviewRulesPage() {
                         <label className="inline-flex items-center gap-2">
                           <input
                             type="checkbox"
+                            className="h-4 w-4 accent-ink"
                             checked={draft?.enabled ?? false}
                             onChange={(event) =>
                               setDrafts((current) => ({
@@ -149,7 +137,7 @@ export function SQLReviewRulesPage() {
                               }))
                             }
                           />
-                          <span>{draft?.enabled ? 'Enabled' : 'Disabled'}</span>
+                          <span>{draft?.enabled ? '啟用' : '停用'}</span>
                         </label>
                       </td>
                       <td className="px-3 py-3">
@@ -176,7 +164,7 @@ export function SQLReviewRulesPage() {
                           className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                         >
                           {savingRuleName === rule.rule_name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
-                          Save
+                          儲存
                         </button>
                       </td>
                     </tr>
@@ -185,8 +173,7 @@ export function SQLReviewRulesPage() {
               </tbody>
             </table>
           )}
-        </div>
-      </section>
+      </div>
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
     </div>
