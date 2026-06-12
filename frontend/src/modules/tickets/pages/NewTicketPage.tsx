@@ -73,58 +73,18 @@ export function NewTicketPage() {
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-muted">
-                <span className="rounded-full border border-border bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                  Tickets
-                </span>
-                <span>/</span>
-                <span>Create Request</span>
-              </div>
-              <h2 className="mt-3 text-[24px] font-bold tracking-[-0.03em] text-ink">建立工單</h2>
+              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">建立工單</h2>
               <p className="mt-2 text-[13px] leading-6 text-muted">
-                先把變更目的、目標資料庫與 SQL 內容整理清楚，再交給 Reviewer / DBA 繼續推進。這一頁的重點不是資訊量，而是填寫節奏要順。
+                填寫變更內容與目標資料庫，送出後由 Reviewer / DBA 接手審核與執行。
               </p>
             </div>
             <Link
               to="/tickets"
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
+              className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
             >
               <ArrowLeft className="h-4 w-4" />
               返回列表
             </Link>
-          </div>
-
-          <div className="mt-4 grid gap-2 md:grid-cols-3">
-            <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Ticket Type</span>
-                <FileText className="h-3.5 w-3.5 text-muted" />
-              </div>
-              <p className="mt-1 text-[18px] font-bold tracking-tight text-ink">{ticketType.toUpperCase()}</p>
-              <p className="mt-0.5 text-[12px] text-muted">依資料修改性質選擇 DDL 或 DML</p>
-            </div>
-
-            <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Connection Pool</span>
-                <PanelTopOpen className="h-3.5 w-3.5 text-muted" />
-              </div>
-              <p className="mt-1 text-[16px] font-bold tracking-tight text-ink">
-                {loadingConnections ? '載入中…' : `${connections.length} 個可選連線`}
-              </p>
-              <p className="mt-0.5 text-[12px] text-muted">可綁定既有 DB 連線，也可先不指定</p>
-            </div>
-
-            <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Readiness</span>
-                <ScrollText className="h-3.5 w-3.5 text-muted" />
-              </div>
-              <p className="mt-1 text-[16px] font-bold tracking-tight text-ink">
-                {title.trim() && sqlContent.trim() ? '可送出' : '待補資料'}
-              </p>
-              <p className="mt-0.5 text-[12px] text-muted">至少填寫標題與 SQL 內容才能建立工單</p>
-            </div>
           </div>
         </div>
       </section>
