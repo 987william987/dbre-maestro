@@ -98,14 +98,11 @@ export function NewTicketPage() {
             </div>
           </div>
 
-          <div className="mx-4 mt-4 rounded-lg border border-border bg-panel-soft px-4 py-3">
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Metadata</p>
-            <p className="mt-1.5 text-[12px] text-muted">先定義工單上下文，讓後續審核者快速理解這筆 SQL 的目標與風險。</p>
-          </div>
-
           <div className="grid gap-4 px-4 py-4">
             <label className="flex flex-col gap-1.5">
-              <span className="text-[12px] font-semibold text-ink">標題</span>
+              <span className="text-[12px] font-semibold text-ink">
+                標題 <span className="text-danger">*</span>
+              </span>
               <input
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
@@ -169,7 +166,9 @@ export function NewTicketPage() {
           </div>
 
           <label className="flex h-full flex-col gap-1.5 px-4 py-4">
-            <span className="text-[12px] font-semibold text-ink">SQL 內容</span>
+            <span className="text-[12px] font-semibold text-ink">
+              SQL 內容 <span className="text-danger">*</span>
+            </span>
             <textarea
               value={sqlContent}
               onChange={(event) => setSqlContent(event.target.value)}
@@ -179,12 +178,6 @@ export function NewTicketPage() {
             />
           </label>
 
-          <div className="mx-4 mb-4 rounded-lg border border-border bg-panel-soft px-4 py-3">
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Execution Notes</p>
-            <p className="mt-1.5 text-[12px] leading-6 text-muted">
-              後端目前要求 `title` 與 `sql_content` 必填，`ticket_type` 必須是 `ddl` 或 `dml`。先把 SQL 以可審核的形式整理乾淨，比堆更多欄位重要。
-            </p>
-          </div>
         </section>
 
         <div className="xl:col-span-2">
