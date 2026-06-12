@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Database, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, SquareTerminal, Ticket, Users } from 'lucide-react'
+import { Bell, ChevronDown, Database, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
 import { hasAnyPermission, TICKET_WORKSPACE_PERMISSIONS } from '@/shared/auth/permissions'
 import { useAuth } from '@/shared/auth/AuthContext'
+import type { NotificationItem } from '@/shared/types/notification'
+import { useToast } from '@/shared/ui/ToastContext'
 
 type NavItem = {
   to: string
@@ -83,8 +86,15 @@ const NAV_GROUPS = [
 export function AppShell() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const { pushToast } = useToast()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [notificationOpen, setNotificationOpen] = useState(false)
+  const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
   const menuRef = useRef<HTMLDivElement | null>(null)
+  const notificationRef = useRef<HTMLDivElement | null>(null)
+  const bootstrappedNotificationsRef = useRef(false)
+  const seenNotificationIDsRef = useRef<Set<number>>(new Set())
 
   if (!user) {
     return null
@@ -92,8 +102,12 @@ export function AppShell() {
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node
+      if (!menuRef.current?.contains(target)) {
         setMenuOpen(false)
+      }
+      if (!notificationRef.current?.contains(target)) {
+        setNotificationOpen(false)
       }
     }
 
@@ -111,10 +125,95 @@ export function AppShell() {
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadNotifications(showToastForNew: boolean) {
+      try {
+        const response = await listNotifications(8, 0)
+        if (cancelled) {
+          return
+        }
+
+        setNotifications(response.notifications)
+        setUnreadCount(response.unread)
+
+        const nextIDs = new Set(response.notifications.map((item) => item.id))
+        if (!bootstrappedNotificationsRef.current) {
+          seenNotificationIDsRef.current = nextIDs
+          bootstrappedNotificationsRef.current = true
+          return
+        }
+
+        if (!showToastForNew) {
+          seenNotificationIDsRef.current = nextIDs
+          return
+        }
+
+        const newNotifications = response.notifications.filter((item) => !seenNotificationIDsRef.current.has(item.id))
+        seenNotificationIDsRef.current = nextIDs
+
+        for (const notification of newNotifications) {
+          if (notification.type === 'ticket_pending_review') {
+            pushToast(`有工單待審批：${notification.title}`, 'info', { placement: 'center', durationMs: 3200 })
+          }
+          if (notification.type === 'ticket_pending_execution') {
+            pushToast(`有工單待執行：${notification.title}`, 'info', { placement: 'center', durationMs: 3200 })
+          }
+        }
+      } catch {
+        if (!bootstrappedNotificationsRef.current) {
+          bootstrappedNotificationsRef.current = true
+        }
+      }
+    }
+
+    void loadNotifications(false)
+    const timer = window.setInterval(() => {
+      void loadNotifications(true)
+    }, 30000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [pushToast])
+
   const handleLogout = async () => {
     setMenuOpen(false)
+    setNotificationOpen(false)
     await logout()
     navigate('/login', { replace: true })
+  }
+
+  async function handleMarkAllRead() {
+    try {
+      await markAllNotificationsRead()
+      setNotifications((current) => current.map((item) => ({ ...item, is_read: true })))
+      setUnreadCount(0)
+    } catch {
+      pushToast('通知標示已讀失敗。', 'error')
+    }
+  }
+
+  async function handleOpenNotification(notification: NotificationItem) {
+    if (!notification.is_read) {
+      try {
+        await markNotificationRead(notification.id)
+        setNotifications((current) =>
+          current.map((item) => (item.id === notification.id ? { ...item, is_read: true } : item)),
+        )
+        setUnreadCount((current) => Math.max(0, current - 1))
+      } catch {
+        pushToast('通知標示已讀失敗。', 'error')
+        return
+      }
+    }
+
+    setNotificationOpen(false)
+    if (notification.resource_type === 'ticket' && notification.resource_id) {
+      navigate(`/tickets/${notification.resource_id}`)
+    }
   }
 
   const navItems = NAV_ITEMS.filter((item) => item.allowed(user.permissions))
@@ -198,6 +297,68 @@ export function AppShell() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13px] font-semibold text-ink">DBRE Maestro</p>
               <p className="hidden truncate text-[11px] text-muted sm:block">Operations Control Plane</p>
+            </div>
+
+            <div ref={notificationRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setNotificationOpen((current) => !current)}
+                className={cn(
+                  'relative inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-panel text-muted transition-colors',
+                  notificationOpen ? 'bg-panel-soft text-ink' : 'hover:bg-panel-soft hover:text-ink',
+                )}
+                aria-label="Notifications"
+              >
+                <Bell className="h-4 w-4" />
+                {unreadCount > 0 ? (
+                  <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                ) : null}
+              </button>
+
+              {notificationOpen ? (
+                <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-border bg-panel shadow-card">
+                  <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                    <p className="text-[15px] font-semibold text-ink">Notifications</p>
+                    <button
+                      type="button"
+                      onClick={() => void handleMarkAllRead()}
+                      disabled={unreadCount === 0}
+                      className="text-[12px] font-medium text-muted transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      全部標示已讀
+                    </button>
+                  </div>
+
+                  {notifications.length === 0 ? (
+                    <div className="px-4 py-5 text-[13px] text-muted">目前沒有站內信通知。</div>
+                  ) : (
+                    <div className="max-h-[420px] overflow-y-auto">
+                      {notifications.map((notification) => (
+                        <button
+                          key={notification.id}
+                          type="button"
+                          onClick={() => void handleOpenNotification(notification)}
+                          className={cn(
+                            'flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-panel-soft',
+                            !notification.is_read && 'bg-white',
+                          )}
+                        >
+                          <span className={cn('mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full', notification.is_read ? 'bg-border' : 'bg-brand')} />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-start justify-between gap-3">
+                              <span className="line-clamp-1 text-[14px] font-semibold text-ink">{notification.title}</span>
+                              <span className="shrink-0 text-[11px] text-muted">{formatRelativeTime(notification.created_at)}</span>
+                            </span>
+                            <span className="mt-1 block text-[12px] leading-5 text-muted">{notification.body}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
 
             <div ref={menuRef} className="relative">
@@ -293,4 +454,31 @@ export function AppShell() {
       </div>
     </div>
   )
+}
+
+function formatRelativeTime(value: string) {
+  const target = new Date(value)
+  const diffMs = Date.now() - target.getTime()
+  if (!Number.isFinite(diffMs)) {
+    return '剛剛'
+  }
+
+  const diffMinutes = Math.floor(diffMs / 60000)
+  if (diffMinutes < 1) {
+    return '剛剛'
+  }
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`
+  }
+
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) {
+    return `${diffHours}h ago`
+  }
+
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays === 1) {
+    return 'Yesterday'
+  }
+  return `${diffDays}d ago`
 }

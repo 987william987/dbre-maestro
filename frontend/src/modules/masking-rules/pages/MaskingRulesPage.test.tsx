@@ -131,7 +131,7 @@ describe('MaskingRulesPage', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Masking Rules' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '資料遮罩規則' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '新增規則' }))
     fireEvent.change(screen.getByLabelText('Column Name'), { target: { value: 'email' } })
     fireEvent.click(screen.getByRole('button', { name: '建立規則' }))
@@ -194,7 +194,7 @@ describe('MaskingRulesPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByText('phone')).toBeInTheDocument())
-    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: '刪除' })[0])
     fireEvent.click(screen.getByRole('button', { name: '確認刪除' }))
 
     await waitFor(() => {

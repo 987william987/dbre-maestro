@@ -61,10 +61,20 @@ describe('App routing', () => {
         })
       }
 
-      if (url === '/api/tickets') {
+      if (url === '/api/tickets?limit=20&offset=0') {
         return jsonResponse({
           tickets: null,
           limit: 20,
+          offset: 0,
+        })
+      }
+
+      if (url.startsWith('/api/notifications')) {
+        return jsonResponse({
+          notifications: [],
+          total: 0,
+          unread: 0,
+          limit: 8,
           offset: 0,
         })
       }
@@ -85,7 +95,7 @@ describe('App routing', () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        '/api/tickets',
+        '/api/tickets?limit=20&offset=0',
         expect.objectContaining({
           credentials: 'same-origin',
           headers: expect.any(Headers),

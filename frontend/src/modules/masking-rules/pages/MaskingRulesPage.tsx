@@ -330,17 +330,10 @@ export function MaskingRulesPage() {
   return (
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
       <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
-        <div className="border-b border-border/80 px-4 py-3 sm:px-5">
+        <div className="px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-muted">
-                <span className="rounded-full border border-border bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                  Governance
-                </span>
-                <span>/</span>
-                <span>Masking Rules</span>
-              </div>
-              <h2 className="mt-3 text-[24px] font-bold tracking-[-0.03em] text-ink">Masking Rules</h2>
+              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">資料遮罩規則</h2>
               <p className="mt-2 text-[13px] leading-6 text-muted">
                 目前只支援 MySQL。Global rule 只管理欄位名稱與遮罩模式；Whitelist 則用於精準解除特定實例 / database / table / column 的誤殺。
               </p>
@@ -352,9 +345,9 @@ export function MaskingRulesPage() {
             ) : null}
           </div>
         </div>
+      </section>
 
-        <div className="grid gap-3 px-4 py-3 sm:px-5">
-          {error ? <InlineAlert>{error}</InlineAlert> : null}
+      {error ? <InlineAlert>{error}</InlineAlert> : null}
 
           <SectionCard
             title="Global Masking Rules"
@@ -433,8 +426,6 @@ export function MaskingRulesPage() {
               />
             )}
           </SectionCard>
-        </div>
-      </section>
 
       {ruleDrawer ? createPortal(
         <DrawerLayout
@@ -741,7 +732,7 @@ function ActionCell({
   deleting: boolean
 }) {
   if (!canWrite) {
-    return <span className="text-muted">Read only</span>
+    return <span className="text-muted">唯讀</span>
   }
   return (
     <div className="flex flex-nowrap items-center gap-1.5 whitespace-nowrap">
@@ -751,7 +742,7 @@ function ActionCell({
         className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page"
       >
         <Pencil className="h-3.5 w-3.5" />
-        Edit
+        編輯
       </button>
       <button
         type="button"
@@ -760,7 +751,7 @@ function ActionCell({
         className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2.5 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
       >
         {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-        Delete
+        刪除
       </button>
     </div>
   )
