@@ -469,25 +469,11 @@ export function UsersPage() {
     <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
       <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
         <div className="border-b border-border/80 px-4 py-3 sm:px-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-muted">
-                <span className="rounded-full border border-border bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                  Admin
-                </span>
-                <span>/</span>
-                <span>Access Control</span>
-              </div>
-              <h2 className="mt-3 text-[24px] font-bold tracking-[-0.03em] text-ink">RBAC 管理</h2>
-              <p className="mt-2 text-[13px] leading-6 text-muted">
-                以 User 與 Auth Group 兩個視角維護權限、直接能力與 DB Scope。所有修改只在最後儲存時生效，並先顯示確認摘要。
-              </p>
-            </div>
-
-            <div className="grid min-w-[220px] gap-2 text-[12px] text-muted sm:grid-cols-2">
-              <MetricCard label="Users" value={String(users.length)} />
-              <MetricCard label="Auth Groups" value={String(authGroups.length)} />
-            </div>
+          <div className="max-w-3xl">
+            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">使用者管理</h2>
+            <p className="mt-2 text-[13px] leading-6 text-muted">
+              以 User 與 Auth Group 兩個視角維護權限、直接能力與 DB Scope。所有修改只在最後儲存時生效，並先顯示確認摘要。
+            </p>
           </div>
         </div>
 
@@ -1278,15 +1264,6 @@ function filterConnections(connections: DBConnection[], search: string, excluded
     ].join(' ').toLowerCase()
     return haystack.includes(keyword)
   })
-}
-
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-soft">
-      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">{label}</p>
-      <p className="mt-1 text-[20px] font-bold tracking-tight text-ink">{value}</p>
-    </div>
-  )
 }
 
 function ViewButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
