@@ -477,25 +477,25 @@ export function UsersPage() {
           </div>
         </div>
 
-        <div className="border-b border-border/80 px-4 py-3 sm:px-5">
+        <div className="border-b border-border/80 px-4 sm:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap gap-2">
-              <ViewButton active={viewMode === 'users'} label="By User" onClick={() => setViewMode('users')} />
-              <ViewButton active={viewMode === 'auth-groups'} label="By Auth Group" onClick={() => setViewMode('auth-groups')} />
+            <div className="flex gap-1">
+              <ViewButton active={viewMode === 'users'} label="依使用者" onClick={() => setViewMode('users')} />
+              <ViewButton active={viewMode === 'auth-groups'} label="依授權群組" onClick={() => setViewMode('auth-groups')} />
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 py-2">
               <button
                 type="button"
                 onClick={openCreateUserDrawer}
                 className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
               >
                 <UserPlus className="h-4 w-4" />
-                建立 User
+                建立使用者
               </button>
               <button
                 type="button"
                 onClick={openCreateAuthGroupDrawer}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
               >
                 <Shield className="h-4 w-4" />
                 建立 Auth Group
@@ -722,7 +722,7 @@ export function UsersPage() {
                         className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
                       >
                         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        {drawerState.mode === 'create-user' ? '建立使用者' : userDraft.pendingDelete ? '確認刪除此 User' : '儲存變更'}
+                        {drawerState.mode === 'create-user' ? '確認建立' : userDraft.pendingDelete ? '確認刪除此 User' : '儲存變更'}
                       </button>
                     </form>
                   </CardSection>
@@ -1271,8 +1271,8 @@ function ViewButton({ active, label, onClick }: { active: boolean; label: string
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex h-9 items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition ${
-        active ? 'border-brand bg-brand text-white' : 'border-border bg-white text-ink hover:bg-panel-soft'
+      className={`inline-flex items-center border-b-2 px-3 py-3 text-[13px] font-semibold transition-colors ${
+        active ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'
       }`}
     >
       {label}

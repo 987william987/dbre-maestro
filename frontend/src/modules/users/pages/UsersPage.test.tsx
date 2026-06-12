@@ -132,13 +132,13 @@ describe('UsersPage', () => {
 
     renderPage()
 
-    fireEvent.click(await screen.findByRole('button', { name: '建立 User' }))
+    fireEvent.click(await screen.findByRole('button', { name: '建立使用者' }))
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'alice' } })
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'alice@example.com' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Secret123!' } })
     fireEvent.change(screen.getByLabelText('User auth group membership selection'), { target: { value: 'developer' } })
     fireEvent.click(screen.getByRole('button', { name: '加入群組' }))
-    fireEvent.click(screen.getByRole('button', { name: '建立使用者' }))
+    fireEvent.click(screen.getByRole('button', { name: '確認建立' }))
 
     await waitFor(() => {
       expect(mockedCreateUser).toHaveBeenCalledWith({
@@ -349,7 +349,7 @@ describe('UsersPage', () => {
 
     renderPage()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'By Auth Group' }))
+    fireEvent.click(await screen.findByRole('button', { name: '依授權群組' }))
     fireEvent.click((await screen.findAllByRole('button', { name: '管理' }))[0])
     expect((await screen.findAllByText('Created')).length).toBeGreaterThan(0)
     expect(screen.getAllByText('Updated').length).toBeGreaterThan(0)
