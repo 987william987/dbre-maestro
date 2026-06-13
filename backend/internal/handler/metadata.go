@@ -473,12 +473,13 @@ func (h *MetadataHandler) loadPostgresMetadata(
 
 	rows, err := queryDB.QueryContext(ctx,
 		`SELECT
-			table_schema,
-			table_name
-		 FROM information_schema.tables
-		 WHERE table_type = 'BASE TABLE'
-		   AND table_schema = $1
-		 ORDER BY table_name`,
+			n.nspname AS table_schema,
+			c.relname AS table_name
+		 FROM pg_class c
+		 JOIN pg_namespace n ON n.oid = c.relnamespace
+		 WHERE n.nspname = $1
+		   AND c.relkind IN ('r', 'p')
+		 ORDER BY c.relname`,
 		selectedSchema,
 	)
 	if err != nil {

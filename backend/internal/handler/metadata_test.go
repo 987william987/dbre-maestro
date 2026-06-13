@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/DATA-DOG/go-sqlmock"
 	"log/slog"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -105,5 +107,69 @@ func TestLogMetadataQueryError(t *testing.T) {
 		if !strings.Contains(logged, expected) {
 			t.Fatalf("log output %q does not contain %q", logged, expected)
 		}
+	}
+}
+
+func TestLoadPostgresSchemaTablesIncludesPartitionedTables(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mockRows := sqlmock.NewRows([]string{"table_schema", "table_name"}).
+		AddRow("public", "activities").
+		AddRow("public", "activities_000")
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT
+			n.nspname AS table_schema,
+			c.relname AS table_name
+		 FROM pg_class c
+		 JOIN pg_namespace n ON n.oid = c.relnamespace
+		 WHERE n.nspname = $1
+		   AND c.relkind IN ('r', 'p')
+		 ORDER BY c.relname`)).
+		WithArgs("public").
+		WillReturnRows(mockRows)
+
+	rows, err := db.Query(`SELECT
+			n.nspname AS table_schema,
+			c.relname AS table_name
+		 FROM pg_class c
+		 JOIN pg_namespace n ON n.oid = c.relnamespace
+		 WHERE n.nspname = $1
+		   AND c.relkind IN ('r', 'p')
+		 ORDER BY c.relname`, "public")
+	if err != nil {
+		t.Fatalf("db.Query() error = %v", err)
+	}
+	defer rows.Close()
+
+	items := make([]metadataItem, 0)
+	for rows.Next() {
+		var schemaName string
+		var tableName string
+		if err := rows.Scan(&schemaName, &tableName); err != nil {
+			t.Fatalf("rows.Scan() error = %v", err)
+		}
+		items = append(items, metadataItem{
+			Kind:     "table",
+			Name:     tableName,
+			Database: "capy_indexer",
+			Schema:   schemaName,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err() error = %v", err)
+	}
+
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want 2", len(items))
+	}
+	if items[0].Name != "activities" || items[1].Name != "activities_000" {
+		t.Fatalf("items = %#v", items)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
 	}
 }
