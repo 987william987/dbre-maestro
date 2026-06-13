@@ -115,8 +115,47 @@ func (r *UserRepo) GetAuthGroupRecords(ctx context.Context, userID uint64) ([]Au
 }
 
 func (r *UserRepo) GetEffectivePermissionKeys(ctx context.Context, userID uint64) ([]string, error) {
+	user, err := r.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user != nil && user.IsProtected {
+		var permissionKeys []string
+		err := r.db.SelectContext(ctx, &permissionKeys, `SELECT permission_key FROM permissions ORDER BY permission_key`)
+		return permissionKeys, err
+	}
+
+	// Check if the user belongs to any group with is_all_permissions = 1.
+	var inAllPermissionsGroup bool
+	err = r.db.GetContext(ctx, &inAllPermissionsGroup, `
+		SELECT EXISTS (
+			SELECT 1 FROM auth_groups ag
+			WHERE ag.is_all_permissions = 1
+			  AND (
+			    EXISTS (
+			      SELECT 1 FROM user_auth_groups uag
+			      WHERE uag.auth_group_id = ag.id AND uag.user_id = ?
+			        AND (uag.expires_at IS NULL OR uag.expires_at > NOW())
+			    )
+			    OR EXISTS (
+			      SELECT 1 FROM auth_group_memberships agm
+			      WHERE agm.auth_group = ag.group_key AND agm.user_id = ?
+			        AND (agm.expires_at IS NULL OR agm.expires_at > NOW())
+			    )
+			  )
+		)
+	`, userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if inAllPermissionsGroup {
+		var permissionKeys []string
+		err := r.db.SelectContext(ctx, &permissionKeys, `SELECT permission_key FROM permissions ORDER BY permission_key`)
+		return permissionKeys, err
+	}
+
 	var permissionKeys []string
-	err := r.db.SelectContext(ctx, &permissionKeys, `
+	err = r.db.SelectContext(ctx, &permissionKeys, `
 		SELECT DISTINCT permission_key FROM (
 			SELECT p.permission_key
 			FROM permissions p
@@ -171,9 +210,23 @@ func (r *UserRepo) ListActiveUserIDsByPermissionKeys(ctx context.Context, permis
 			INNER JOIN permissions p ON p.id = agp.permission_id
 			WHERE p.permission_key IN (?)
 			  AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+			UNION
+			SELECT id FROM users WHERE is_protected = 1 AND is_active = 1
+			UNION
+			SELECT uag2.user_id
+			FROM user_auth_groups uag2
+			INNER JOIN auth_groups ag2 ON ag2.id = uag2.auth_group_id
+			WHERE ag2.is_all_permissions = 1
+			  AND (uag2.expires_at IS NULL OR uag2.expires_at > ?)
+			UNION
+			SELECT agm2.user_id
+			FROM auth_group_memberships agm2
+			INNER JOIN auth_groups ag3 ON ag3.group_key = agm2.auth_group
+			WHERE ag3.is_all_permissions = 1
+			  AND (agm2.expires_at IS NULL OR agm2.expires_at > ?)
 		  )
 		ORDER BY u.id
-	`, permissionKeys, permissionKeys, now, permissionKeys, now)
+	`, permissionKeys, permissionKeys, now, permissionKeys, now, now, now)
 	if err != nil {
 		return nil, err
 	}

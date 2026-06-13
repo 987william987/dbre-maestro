@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -29,6 +30,15 @@ type TicketHandler struct {
 	sqlReviewRules *repository.SQLReviewRuleRepo
 	notifRepo      *repository.NotificationRepo
 	lark           *notification.Client // nil = notifications disabled
+}
+
+type ticketResponse struct {
+	model.Ticket
+	DBConnectionName *string `json:"db_connection_name,omitempty"`
+	SubmitterName    string  `json:"submitter_name"`
+	ReviewerName     *string `json:"reviewer_name,omitempty"`
+	ExecutorName     *string `json:"executor_name,omitempty"`
+	RevokedByName    *string `json:"revoked_by_name,omitempty"`
 }
 
 func NewTicketHandler(
@@ -140,6 +150,13 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.tickets.CreateWithScopes(r.Context(), t, req.Scopes)
 	if err != nil {
+		slog.Error("create ticket failed",
+			"err", err,
+			"title", req.Title,
+			"ticket_type", req.TicketType,
+			"db_connection_id", req.DBConnectionID,
+			"submitter_id", userID,
+		)
 		jsonErr(w, http.StatusInternalServerError, "create ticket failed")
 		return
 	}
@@ -200,7 +217,17 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 		tickets = []model.Ticket{}
 	}
 
-	jsonOK(w, map[string]any{"tickets": tickets, "limit": limit, "offset": offset})
+	responseTickets := make([]ticketResponse, 0, len(tickets))
+	for _, ticket := range tickets {
+		enriched, enrichErr := h.buildTicketResponse(r.Context(), &ticket)
+		if enrichErr != nil {
+			jsonErr(w, http.StatusInternalServerError, "list tickets failed")
+			return
+		}
+		responseTickets = append(responseTickets, enriched)
+	}
+
+	jsonOK(w, map[string]any{"tickets": responseTickets, "limit": limit, "offset": offset})
 }
 
 // GET /tickets/{id}
@@ -271,8 +298,14 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	enrichedTicket, err := h.buildTicketResponse(r.Context(), ticket)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "get ticket failed")
+		return
+	}
+
 	jsonOK(w, map[string]any{
-		"ticket":         ticket,
+		"ticket":         enrichedTicket,
 		"executions":     executions,
 		"scopes":         scopes,
 		"export_request": exportDetail,
@@ -284,6 +317,63 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"can_download_export":   ticket.TicketType == model.TicketTypeSQLExport && ticket.Status == model.TicketStatusApproved && ticket.SubmitterID == userID,
 		},
 	})
+}
+
+func (h *TicketHandler) buildTicketResponse(ctx context.Context, ticket *model.Ticket) (ticketResponse, error) {
+	response := ticketResponse{Ticket: *ticket}
+
+	if ticket.DBConnectionID != nil {
+		conn, err := h.dbConns.GetByID(ctx, *ticket.DBConnectionID)
+		if err != nil {
+			return ticketResponse{}, fmt.Errorf("load db connection %d: %w", *ticket.DBConnectionID, err)
+		}
+		if conn != nil {
+			response.DBConnectionName = &conn.Name
+		}
+	}
+
+	submitterName, err := h.lookupUsername(ctx, ticket.SubmitterID)
+	if err != nil {
+		return ticketResponse{}, err
+	}
+	response.SubmitterName = submitterName
+
+	if ticket.ReviewerID != nil {
+		reviewerName, err := h.lookupUsername(ctx, *ticket.ReviewerID)
+		if err != nil {
+			return ticketResponse{}, err
+		}
+		response.ReviewerName = &reviewerName
+	}
+
+	if ticket.ExecutorID != nil {
+		executorName, err := h.lookupUsername(ctx, *ticket.ExecutorID)
+		if err != nil {
+			return ticketResponse{}, err
+		}
+		response.ExecutorName = &executorName
+	}
+
+	if ticket.RevokedBy != nil {
+		revokedByName, err := h.lookupUsername(ctx, *ticket.RevokedBy)
+		if err != nil {
+			return ticketResponse{}, err
+		}
+		response.RevokedByName = &revokedByName
+	}
+
+	return response, nil
+}
+
+func (h *TicketHandler) lookupUsername(ctx context.Context, userID uint64) (string, error) {
+	user, err := h.users.GetByID(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("load user %d: %w", userID, err)
+	}
+	if user == nil {
+		return strconv.FormatUint(userID, 10), nil
+	}
+	return user.Username, nil
 }
 
 // POST /tickets/{id}/approve

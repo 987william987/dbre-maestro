@@ -25,14 +25,6 @@ func (r *TicketRepo) Create(ctx context.Context, t *model.Ticket) (*model.Ticket
 }
 
 func (r *TicketRepo) CreateWithScopes(ctx context.Context, t *model.Ticket, scopes []model.TicketScope) (*model.Ticket, error) {
-	// Generate T-001 style ticket number atomically
-	var nextID int64
-	err := r.db.QueryRowContext(ctx, `SELECT AUTO_INCREMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tickets'`).Scan(&nextID)
-	if err != nil {
-		nextID = 1
-	}
-	ticketNo := fmt.Sprintf("T-%03d", nextID)
-
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin create ticket tx: %w", err)
@@ -42,6 +34,14 @@ func (r *TicketRepo) CreateWithScopes(ctx context.Context, t *model.Ticket, scop
 			_ = tx.Rollback()
 		}
 	}()
+
+	// Derive the next ticket number from current rows inside the same transaction.
+	// `information_schema.TABLES.AUTO_INCREMENT` can drift behind the actual max id.
+	var nextID int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) + 1 FROM tickets FOR UPDATE`).Scan(&nextID); err != nil {
+		return nil, fmt.Errorf("select next ticket id: %w", err)
+	}
+	ticketNo := fmt.Sprintf("T-%03d", nextID)
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO tickets (ticket_no, title, description, sql_content, ticket_type, db_connection_id, status, submitter_id, approved_duration_minutes, approved_until, revoked_at, revoked_by)
