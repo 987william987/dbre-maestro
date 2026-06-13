@@ -1,7 +1,11 @@
 package handler
 
 import (
+	"bytes"
+	"errors"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -68,5 +72,38 @@ func TestBuildPostgresTableDefinition(t *testing.T) {
 
 	if definition != want {
 		t.Fatalf("definition = %q, want %q", definition, want)
+	}
+}
+
+func TestLogMetadataQueryError(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	previous := slog.Default()
+	slog.SetDefault(logger)
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+	})
+
+	logMetadataQueryError("tables", &model.DBConnection{
+		ID:     42,
+		Name:   "aws-sg-bot-pg-nonprod",
+		DBType: "postgres",
+		Host:   "db.example.internal",
+	}, "rdsadmin", "public", "tickets", errors.New(`pg_hba.conf rejects connection for host "10.183.27.22"`))
+
+	logged := buf.String()
+	for _, expected := range []string{
+		`"msg":"metadata query failed"`,
+		`"operation":"tables"`,
+		`"connection_id":42`,
+		`"connection_name":"aws-sg-bot-pg-nonprod"`,
+		`"database":"rdsadmin"`,
+		`"schema":"public"`,
+		`"table":"tickets"`,
+		`pg_hba.conf rejects connection`,
+	} {
+		if !strings.Contains(logged, expected) {
+			t.Fatalf("log output %q does not contain %q", logged, expected)
+		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -97,6 +98,38 @@ type postgresDefinitionIndex struct {
 	Definition string
 }
 
+const metadataTemporaryErrorMessage = "metadata is temporarily unavailable, please try again later"
+
+func logMetadataQueryError(operation string, conn *model.DBConnection, database string, schema string, table string, err error) {
+	if err == nil {
+		return
+	}
+
+	attrs := []any{
+		"operation", operation,
+		"err", err,
+	}
+	if conn != nil {
+		attrs = append(attrs,
+			"connection_id", conn.ID,
+			"connection_name", conn.Name,
+			"db_type", conn.DBType,
+			"host", conn.Host,
+		)
+	}
+	if database != "" {
+		attrs = append(attrs, "database", database)
+	}
+	if schema != "" {
+		attrs = append(attrs, "schema", schema)
+	}
+	if table != "" {
+		attrs = append(attrs, "table", table)
+	}
+
+	slog.Warn("metadata query failed", attrs...)
+}
+
 // GET /db-connections/{id}/metadata
 // Returns list of tables with row counts and sizes across all accessible schemas.
 func (h *MetadataHandler) Tables(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +169,8 @@ func (h *MetadataHandler) Tables(w http.ResponseWriter, r *http.Request) {
 
 	response, err := h.loadMetadata(ctx, resolvedConn, password, selectedDatabase, selectedSchema)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "query metadata failed: "+err.Error())
+		logMetadataQueryError("tables", resolvedConn, selectedDatabase, selectedSchema, "", err)
+		jsonErr(w, http.StatusInternalServerError, metadataTemporaryErrorMessage)
 		return
 	}
 
@@ -187,7 +221,8 @@ func (h *MetadataHandler) Columns(w http.ResponseWriter, r *http.Request) {
 
 	columns, resolvedDatabase, err := h.loadColumns(ctx, resolvedConn, password, selectedDatabase, schema, table)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "query columns failed: "+err.Error())
+		logMetadataQueryError("columns", resolvedConn, selectedDatabase, schema, table, err)
+		jsonErr(w, http.StatusInternalServerError, metadataTemporaryErrorMessage)
 		return
 	}
 
@@ -247,7 +282,8 @@ func (h *MetadataHandler) Definition(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusNotFound, "table definition not found")
 			return
 		}
-		jsonErr(w, http.StatusInternalServerError, "query definition failed: "+err.Error())
+		logMetadataQueryError("definition", resolvedConn, selectedDatabase, schema, table, err)
+		jsonErr(w, http.StatusInternalServerError, metadataTemporaryErrorMessage)
 		return
 	}
 
