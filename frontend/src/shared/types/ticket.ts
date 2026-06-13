@@ -21,10 +21,14 @@ export type Ticket = {
   sql_content: string
   ticket_type: TicketType
   db_connection_id?: number | null
+  db_connection_name?: string | null
   status: TicketStatus
   submitter_id: number
+  submitter_name?: string | null
   reviewer_id?: number | null
+  reviewer_name?: string | null
   executor_id?: number | null
+  executor_name?: string | null
   review_comment?: string | null
   rejection_reason?: string | null
   scheduled_at?: string | null
@@ -34,6 +38,7 @@ export type Ticket = {
   approved_until?: string | null
   revoked_at?: string | null
   revoked_by?: number | null
+  revoked_by_name?: string | null
   created_at: string
   updated_at: string
 }

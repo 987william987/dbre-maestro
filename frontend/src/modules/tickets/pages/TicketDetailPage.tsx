@@ -22,6 +22,16 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
+function formatTicketActor(name: string | null | undefined, id: number | null | undefined) {
+  if (name && name.trim()) {
+    return name
+  }
+  if (id != null) {
+    return String(id)
+  }
+  return '—'
+}
+
 export function TicketDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { user } = useAuth()
@@ -158,16 +168,16 @@ export function TicketDetailPage() {
 
             <dl className="px-4 py-2">
               <InfoRow label="Description" value={ticket.description || '—'} />
-              <InfoRow label="DB Connection" value={ticket.db_connection_id ?? '未指定'} />
-              <InfoRow label="Submitter" value={<span className="font-mono">{ticket.submitter_id}</span>} />
-              <InfoRow label="Reviewer" value={ticket.reviewer_id ? <span className="font-mono">{ticket.reviewer_id}</span> : '—'} />
-              <InfoRow label="Executor" value={ticket.executor_id ? <span className="font-mono">{ticket.executor_id}</span> : '—'} />
+              <InfoRow label="DB Connection" value={ticket.db_connection_name || ticket.db_connection_id || '未指定'} />
+              <InfoRow label="Submitter" value={formatTicketActor(ticket.submitter_name, ticket.submitter_id)} />
+              <InfoRow label="Reviewer" value={formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null)} />
+              <InfoRow label="Executor" value={formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)} />
               <InfoRow label="Review Comment" value={ticket.review_comment || '—'} />
               <InfoRow label="Reject Reason" value={ticket.rejection_reason || '—'} />
               <InfoRow label="Approved Duration" value={ticket.approved_duration_minutes ? `${ticket.approved_duration_minutes} 分鐘` : '—'} />
               <InfoRow label="Approved Until" value={formatDateTime(ticket.approved_until, true)} />
               <InfoRow label="Revoked At" value={formatDateTime(ticket.revoked_at, true)} />
-              <InfoRow label="Revoked By" value={ticket.revoked_by ? <span className="font-mono">{ticket.revoked_by}</span> : '—'} />
+              <InfoRow label="Revoked By" value={formatTicketActor(ticket.revoked_by_name, ticket.revoked_by ?? null)} />
               <InfoRow label="Created At" value={formatDateTime(ticket.created_at, true)} />
               <InfoRow label="Updated At" value={formatDateTime(ticket.updated_at, true)} />
               <InfoRow label="Started At" value={formatDateTime(ticket.started_at, true)} />

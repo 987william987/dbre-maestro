@@ -148,7 +148,7 @@ export function TicketsPage() {
                     <td className="px-4 py-3.5 align-top">
                       <StatusBadge status={ticket.status} />
                     </td>
-                    <td className="px-4 py-3.5 align-top font-mono text-[12px] text-muted">{ticket.submitter_id}</td>
+                    <td className="px-4 py-3.5 align-top text-[12px] text-muted">{ticket.submitter_name || ticket.submitter_id}</td>
                     <td className="px-4 py-3.5 align-top text-[12px] text-muted">{formatDateTime(ticket.created_at)}</td>
                   </tr>
                 ))}

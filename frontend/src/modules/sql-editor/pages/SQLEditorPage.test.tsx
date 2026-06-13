@@ -482,6 +482,30 @@ describe('SQLEditorPage', () => {
     })
   })
 
+  it('metadata 載入失敗時只顯示前端暫時訊息，不外露底層錯誤', async () => {
+    mockedListMetadata.mockRejectedValueOnce(new ApiError(
+      500,
+      'query metadata failed: pg_hba.conf rejects connection for host "10.183.27.22"',
+      { error: 'query metadata failed: pg_hba.conf rejects connection for host "10.183.27.22"' },
+    ))
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
+
+    expect(await screen.findByText('Metadata is temporarily unavailable. Please try again later.')).toBeInTheDocument()
+    expect(screen.queryByText(/pg_hba\.conf rejects connection/i)).not.toBeInTheDocument()
+  })
+
   it('global.sensitive 啟用時會顯示 override 提示', async () => {
     mockedUseAuth.mockReturnValue({
       user: {
@@ -1141,5 +1165,151 @@ describe('SQLEditorPage', () => {
     })
     expect(mockedListMetadata).toHaveBeenCalledTimes(metadataCallCount)
     expect(screen.queryByText('Searching assets...')).not.toBeInTheDocument()
+  })
+
+  it('切換 tab 時會保留各自的 database 選擇上下文', async () => {
+    mockedListMetadata.mockReset()
+    mockedListMetadata.mockImplementation(async (_connectionId, params) => {
+      if (!params?.database) {
+        return {
+          db_type: 'mysql',
+          level: 'database',
+          items: [
+            { kind: 'database', name: 'analytics' },
+            { kind: 'database', name: 'maestro' },
+          ],
+        }
+      }
+
+      return {
+        db_type: 'mysql',
+        level: 'table',
+        database: params.database,
+        items: [],
+      }
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
+    fireEvent.click(await screen.findByText('analytics'))
+
+    expect(screen.getByText('Primary MySQL / analytics')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('New Tab'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
+    fireEvent.click(await screen.findByText('maestro'))
+
+    expect(screen.getByText('Primary MySQL / maestro')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Query 1'))
+
+    expect(screen.getByText('Primary MySQL / analytics')).toBeInTheDocument()
+    expect(screen.queryByText('Primary MySQL / maestro')).not.toBeInTheDocument()
+  })
+
+  it('切換 tab 後回到原分頁，資產樹展開狀態仍會保留', async () => {
+    mockedListMetadata.mockReset()
+    mockedListMetadata.mockImplementation(async (_connectionId, params) => {
+      if (!params?.database) {
+        return {
+          db_type: 'mysql',
+          level: 'database',
+          items: [
+            { kind: 'database', name: 'dev_edgex_ops_intelligence' },
+          ],
+        }
+      }
+
+      return {
+        db_type: 'mysql',
+        level: 'table',
+        database: 'dev_edgex_ops_intelligence',
+        items: [
+          {
+            kind: 'table',
+            database: 'dev_edgex_ops_intelligence',
+            schema: 'dev_edgex_ops_intelligence',
+            name: 't_activity_delivery_attempt',
+          },
+          {
+            kind: 'table',
+            database: 'dev_edgex_ops_intelligence',
+            schema: 'dev_edgex_ops_intelligence',
+            name: 't_activity_delivery_outbox',
+          },
+        ],
+      }
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
+    fireEvent.click(await screen.findByText('dev_edgex_ops_intelligence'))
+    fireEvent.click(screen.getByLabelText('Toggle dev_edgex_ops_intelligence'))
+    fireEvent.click(await screen.findByText('t_activity_delivery_attempt'))
+
+    expect(screen.getByText('Primary MySQL / dev_edgex_ops_intelligence / t_activity_delivery_attempt')).toBeInTheDocument()
+    expect(screen.getByText('t_activity_delivery_outbox')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('New Tab'))
+    fireEvent.click(screen.getByText('Query 1'))
+
+    expect(screen.getByText('Primary MySQL / dev_edgex_ops_intelligence / t_activity_delivery_attempt')).toBeInTheDocument()
+    expect(screen.getByText('t_activity_delivery_outbox')).toBeInTheDocument()
+  })
+
+  it('metadata error 只屬於當前 tab，不會污染新分頁', async () => {
+    mockedListMetadata.mockReset()
+    mockedListMetadata.mockRejectedValueOnce(new ApiError(
+      500,
+      'query metadata failed: pg_hba.conf rejects connection for host "10.183.27.22"',
+      { error: 'query metadata failed: pg_hba.conf rejects connection for host "10.183.27.22"' },
+    ))
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('New Tab'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
+
+    expect(await screen.findByText('Metadata is temporarily unavailable. Please try again later.')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('New Tab'))
+
+    expect(screen.queryByText('Metadata is temporarily unavailable. Please try again later.')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Query 2'))
+
+    expect(screen.getByText('Metadata is temporarily unavailable. Please try again later.')).toBeInTheDocument()
   })
 })

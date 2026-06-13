@@ -121,6 +121,7 @@ describe('TicketsPage', () => {
           ticket_type: 'ddl',
           status: 'pending_review',
           submitter_id: 1,
+          submitter_name: 'alice',
           created_at: '2026-06-12T00:00:00Z',
           updated_at: '2026-06-12T00:00:00Z',
         })),
@@ -138,6 +139,7 @@ describe('TicketsPage', () => {
             ticket_type: 'ddl',
             status: 'pending_review',
             submitter_id: 1,
+            submitter_name: 'alice',
             created_at: '2026-06-12T00:00:00Z',
             updated_at: '2026-06-12T00:00:00Z',
           },
@@ -157,5 +159,55 @@ describe('TicketsPage', () => {
 
     await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith(undefined, 20, 20))
     await waitFor(() => expect(screen.getByText('Ticket 21')).toBeInTheDocument())
+  })
+
+  it('列表優先顯示 submitter 名稱而不是 id', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'dev',
+        authGroups: ['developer'],
+        authGroupDetails: [],
+        permissions: ['tickets.apply'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    mockedListTickets.mockResolvedValueOnce({
+      tickets: [
+        {
+          id: 1,
+          ticket_no: 'T-001',
+          title: 'Readable submitter',
+          description: null,
+          sql_content: 'SELECT 1;',
+          ticket_type: 'ddl',
+          status: 'pending_review',
+          submitter_id: 99,
+          submitter_name: 'alice',
+          created_at: '2026-06-12T00:00:00Z',
+          updated_at: '2026-06-12T00:00:00Z',
+        },
+      ],
+      limit: 20,
+      offset: 0,
+    })
+
+    render(
+      <MemoryRouter>
+        <TicketsPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('alice')).toBeInTheDocument()
+    expect(screen.queryByText(/^99$/)).not.toBeInTheDocument()
   })
 })

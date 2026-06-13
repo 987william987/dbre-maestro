@@ -36,15 +36,21 @@ const baseTicket: Ticket = {
   sql_content: 'UPDATE users SET flagged = 1 WHERE id < 10;',
   ticket_type: 'dml',
   db_connection_id: 3,
+  db_connection_name: 'analytics-primary',
   status: 'pending_review',
   submitter_id: 1,
+  submitter_name: 'alice',
   reviewer_id: null,
+  reviewer_name: null,
   executor_id: null,
+  executor_name: null,
   review_comment: null,
   rejection_reason: null,
   scheduled_at: null,
   started_at: null,
   completed_at: null,
+  revoked_by: null,
+  revoked_by_name: null,
   created_at: '2026-06-09T10:00:00Z',
   updated_at: '2026-06-09T10:00:00Z',
 }
@@ -188,5 +194,36 @@ describe('TicketDetailPage role visibility', () => {
 
     await waitFor(() => expect(screen.getByText('匯出下載')).toBeInTheDocument())
     expect(screen.getByRole('link', { name: '下載匯出檔' })).toHaveAttribute('href', '/api/exports/download/token-123')
+  })
+
+  it('工單資訊優先顯示人類可讀名稱而不是純 id', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      reviewer_id: 2,
+      reviewer_name: 'reviewer.bob',
+      executor_id: 3,
+      executor_name: 'dba.cindy',
+      revoked_by: 4,
+      revoked_by_name: 'ops.dan',
+      revoked_at: '2026-06-10T10:00:00Z',
+    }))
+
+    renderPage()
+
+    expect(await screen.findByText('analytics-primary')).toBeInTheDocument()
+    expect(screen.getByText('alice')).toBeInTheDocument()
+    expect(screen.getByText('reviewer.bob')).toBeInTheDocument()
+    expect(screen.getByText('dba.cindy')).toBeInTheDocument()
+    expect(screen.getByText('ops.dan')).toBeInTheDocument()
+    expect(screen.queryByText(/^3$/)).not.toBeInTheDocument()
   })
 })

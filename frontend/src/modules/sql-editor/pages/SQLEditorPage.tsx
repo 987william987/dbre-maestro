@@ -54,6 +54,27 @@ type EditorTab = {
   id: string
   title: string
   connectionId: number | null
+  database: string
+  schema: string
+  selectedTable: MetadataItem | null
+  metadataError: string
+  explorerNodes: AssetTreeNode[]
+  searchTreeNodes: AssetTreeNode[]
+  explorerSearch: string
+  searchingAssets: boolean
+  assetPickerOpen: boolean
+  assetPickerSearch: string
+  resultView: 'result' | 'vertical' | 'object-meta' | 'history' | 'saved'
+  objectMetaTab: 'columns' | 'definition'
+  columns: MetadataColumn[]
+  definition: MetadataDefinition | null
+  columnsLoading: boolean
+  definitionLoading: boolean
+  columnFilterOpen: boolean
+  visibleColumnIndexes: number[] | null
+  selectedSQL: string
+  sensitiveAccessDuration: number
+  resultPage: number
   sql: string
   result: QueryResult | null
   error: string
@@ -92,6 +113,7 @@ const EDITOR_LINE_HEIGHT = 24
 const EDITOR_VERTICAL_PADDING = 24
 const EDITOR_MIN_HEIGHT = EDITOR_VERTICAL_PADDING + EDITOR_BASE_VISIBLE_LINES * EDITOR_LINE_HEIGHT
 const RESULT_PAGE_SIZE = 50
+const METADATA_ERROR_MESSAGE = 'Metadata is temporarily unavailable. Please try again later.'
 
 function parsePixelValue(value: string): number {
   const parsed = Number.parseFloat(value)
@@ -119,6 +141,13 @@ function measureEditorHeight(container: HTMLDivElement | null, sqlText: string):
   const contentHeight = verticalPadding + measuredLineHeight * contentLineCount
 
   return Math.min(EDITOR_MAX_HEIGHT, Math.max(minimumHeight, contentHeight))
+}
+
+function formatMetadataError(error: unknown): string {
+  if (error instanceof ApiError && error.status < 500) {
+    return error.message
+  }
+  return METADATA_ERROR_MESSAGE
 }
 
 function formatResultMetaLine(params: {
@@ -154,6 +183,27 @@ function createTab(seed = 1): EditorTab {
     id: `tab-${Date.now()}-${seed}`,
     title: `Query ${seed}`,
     connectionId: null,
+    database: '',
+    schema: '',
+    selectedTable: null,
+    metadataError: '',
+    explorerNodes: [],
+    searchTreeNodes: [],
+    explorerSearch: '',
+    searchingAssets: false,
+    assetPickerOpen: false,
+    assetPickerSearch: '',
+    resultView: 'result',
+    objectMetaTab: 'columns',
+    columns: [],
+    definition: null,
+    columnsLoading: false,
+    definitionLoading: false,
+    columnFilterOpen: false,
+    visibleColumnIndexes: null,
+    selectedSQL: '',
+    sensitiveAccessDuration: 10,
+    resultPage: 1,
     sql: DEFAULT_SQL,
     result: null,
     error: '',
@@ -178,6 +228,27 @@ function safeParseState(raw: string | null): PersistedState | null {
         id: typeof tab.id === 'string' ? tab.id : `tab-restored-${index}`,
         title: typeof tab.title === 'string' ? tab.title : `Query ${index + 1}`,
         connectionId: typeof tab.connectionId === 'number' ? tab.connectionId : null,
+        database: typeof tab.database === 'string' ? tab.database : '',
+        schema: typeof tab.schema === 'string' ? tab.schema : '',
+        selectedTable: tab.selectedTable ?? null,
+        metadataError: typeof tab.metadataError === 'string' ? tab.metadataError : '',
+        explorerNodes: Array.isArray(tab.explorerNodes) ? tab.explorerNodes : [],
+        searchTreeNodes: Array.isArray(tab.searchTreeNodes) ? tab.searchTreeNodes : [],
+        explorerSearch: typeof tab.explorerSearch === 'string' ? tab.explorerSearch : '',
+        searchingAssets: typeof tab.searchingAssets === 'boolean' ? tab.searchingAssets : false,
+        assetPickerOpen: typeof tab.assetPickerOpen === 'boolean' ? tab.assetPickerOpen : false,
+        assetPickerSearch: typeof tab.assetPickerSearch === 'string' ? tab.assetPickerSearch : '',
+        resultView: tab.resultView === 'vertical' || tab.resultView === 'object-meta' || tab.resultView === 'history' || tab.resultView === 'saved' ? tab.resultView : 'result',
+        objectMetaTab: tab.objectMetaTab === 'definition' ? 'definition' : 'columns',
+        columns: Array.isArray(tab.columns) ? tab.columns : [],
+        definition: tab.definition ?? null,
+        columnsLoading: typeof tab.columnsLoading === 'boolean' ? tab.columnsLoading : false,
+        definitionLoading: typeof tab.definitionLoading === 'boolean' ? tab.definitionLoading : false,
+        columnFilterOpen: typeof tab.columnFilterOpen === 'boolean' ? tab.columnFilterOpen : false,
+        visibleColumnIndexes: Array.isArray(tab.visibleColumnIndexes) ? tab.visibleColumnIndexes : null,
+        selectedSQL: typeof tab.selectedSQL === 'string' ? tab.selectedSQL : '',
+        sensitiveAccessDuration: typeof tab.sensitiveAccessDuration === 'number' ? tab.sensitiveAccessDuration : 10,
+        resultPage: typeof tab.resultPage === 'number' && tab.resultPage > 0 ? tab.resultPage : 1,
         sql: typeof tab.sql === 'string' && tab.sql.trim() ? tab.sql : DEFAULT_SQL,
         result: tab.result ?? null,
         error: typeof tab.error === 'string' ? tab.error : '',
@@ -501,29 +572,8 @@ export function SQLEditorPage() {
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
   const [runningTabId, setRunningTabId] = useState<string | null>(null)
   const [exportingTabId, setExportingTabId] = useState<string | null>(null)
-  const [explorerNodes, setExplorerNodes] = useState<AssetTreeNode[]>([])
-  const [selectedDatabase, setSelectedDatabase] = useState('')
-  const [selectedSchema, setSelectedSchema] = useState('')
-  const [selectedTable, setSelectedTable] = useState<MetadataItem | null>(null)
-  const [columns, setColumns] = useState<MetadataColumn[]>([])
-  const [definition, setDefinition] = useState<MetadataDefinition | null>(null)
-  const [columnsLoading, setColumnsLoading] = useState(false)
-  const [definitionLoading, setDefinitionLoading] = useState(false)
-  const [metadataError, setMetadataError] = useState('')
-  const [explorerSearch, setExplorerSearch] = useState('')
-  const [searchTreeNodes, setSearchTreeNodes] = useState<AssetTreeNode[]>([])
-  const [searchingAssets, setSearchingAssets] = useState(false)
-  const [assetPickerOpen, setAssetPickerOpen] = useState(false)
-  const [assetPickerSearch, setAssetPickerSearch] = useState('')
-  const [resultView, setResultView] = useState<'result' | 'vertical' | 'object-meta' | 'history' | 'saved'>('result')
-  const [objectMetaTab, setObjectMetaTab] = useState<'columns' | 'definition'>('columns')
-  const [columnFilterOpen, setColumnFilterOpen] = useState(false)
-  const [visibleColumnIndexes, setVisibleColumnIndexes] = useState<number[] | null>(null)
   const [savedQueryToDelete, setSavedQueryToDelete] = useState<SavedQuery | null>(null)
-  const [selectedSQL, setSelectedSQL] = useState('')
-  const [sensitiveAccessDuration, setSensitiveAccessDuration] = useState(10)
   const [editorHeight, setEditorHeight] = useState(`${EDITOR_MIN_HEIGHT}px`)
-  const [resultPage, setResultPage] = useState(1)
 
   useEffect(() => {
     const restored = safeParseState(window.localStorage.getItem(storageKey))
@@ -634,25 +684,45 @@ export function SQLEditorPage() {
     () => accessibleConnections.find((connection) => connection.id === activeTab?.connectionId) ?? null,
     [activeTab?.connectionId, accessibleConnections],
   )
+  const activeDatabase = activeTab?.database ?? ''
+  const activeSchema = activeTab?.schema ?? ''
+  const activeSelectedTable = activeTab?.selectedTable ?? null
+  const activeExplorerNodes = activeTab?.explorerNodes ?? []
+  const activeSearchTreeNodes = activeTab?.searchTreeNodes ?? []
+  const activeExplorerSearch = activeTab?.explorerSearch ?? ''
+  const activeSearchingAssets = activeTab?.searchingAssets ?? false
+  const activeAssetPickerOpen = activeTab?.assetPickerOpen ?? false
+  const activeAssetPickerSearch = activeTab?.assetPickerSearch ?? ''
+  const activeResultView = activeTab?.resultView ?? 'result'
+  const activeObjectMetaTab = activeTab?.objectMetaTab ?? 'columns'
+  const activeColumns = activeTab?.columns ?? []
+  const activeDefinition = activeTab?.definition ?? null
+  const activeColumnsLoading = activeTab?.columnsLoading ?? false
+  const activeDefinitionLoading = activeTab?.definitionLoading ?? false
+  const activeColumnFilterOpen = activeTab?.columnFilterOpen ?? false
+  const activeVisibleColumnIndexes = activeTab?.visibleColumnIndexes ?? null
+  const activeSelectedSQL = activeTab?.selectedSQL ?? ''
+  const activeSensitiveAccessDuration = activeTab?.sensitiveAccessDuration ?? 10
+  const activeResultPage = activeTab?.resultPage ?? 1
   const activePathLabel = useMemo(() => {
     const parts = [activeConnection?.name].filter(Boolean) as string[]
-    if (selectedDatabase) {
-      parts.push(selectedDatabase)
+    if (activeDatabase) {
+      parts.push(activeDatabase)
     }
-    if (selectedSchema && activeConnection?.db_type === 'postgres') {
-      parts.push(selectedSchema)
+    if (activeSchema && activeConnection?.db_type === 'postgres') {
+      parts.push(activeSchema)
     }
-    if (selectedTable) {
-      parts.push(selectedTable.name)
+    if (activeSelectedTable) {
+      parts.push(activeSelectedTable.name)
     }
     return parts
-  }, [activeConnection?.db_type, activeConnection?.name, selectedDatabase, selectedSchema, selectedTable])
+  }, [activeConnection?.db_type, activeConnection?.name, activeDatabase, activeSchema, activeSelectedTable])
   const filteredExplorerNodes = useMemo(
-    () => (explorerSearch.trim() ? searchTreeNodes : filterAssetTree(explorerNodes, explorerSearch)),
-    [explorerNodes, explorerSearch, searchTreeNodes],
+    () => (activeExplorerSearch.trim() ? activeSearchTreeNodes : filterAssetTree(activeExplorerNodes, activeExplorerSearch)),
+    [activeExplorerNodes, activeExplorerSearch, activeSearchTreeNodes],
   )
   const filteredConnections = useMemo(() => {
-    const keyword = assetPickerSearch.trim().toLowerCase()
+    const keyword = activeAssetPickerSearch.trim().toLowerCase()
     if (!keyword) {
       return accessibleConnections
     }
@@ -661,7 +731,7 @@ export function SQLEditorPage() {
       connection.db_type.toLowerCase().includes(keyword) ||
       (connection.database_name ?? '').toLowerCase().includes(keyword),
     )
-  }, [accessibleConnections, assetPickerSearch])
+  }, [accessibleConnections, activeAssetPickerSearch])
 
   useEffect(() => {
     if (accessibleConnections.length === 0) {
@@ -679,120 +749,118 @@ export function SQLEditorPage() {
 
   useEffect(() => {
     if (!activeConnection) {
-      setExplorerNodes([])
-      setSearchTreeNodes([])
-      setSelectedDatabase('')
-      setSelectedSchema('')
-      setSelectedTable(null)
-      setColumns([])
-      setDefinition(null)
       return
     }
 
-    setExplorerNodes((current) => {
+    updateActiveTabExplorerNodes((current) => {
       const existing = current[0]
       if (existing && existing.connectionId === activeConnection.id) {
         return current
       }
       return [createConnectionNode(activeConnection, activeConnection.id)]
     })
-    setSearchTreeNodes([])
-  }, [activeConnection])
+    updateActiveTab({ searchTreeNodes: [] })
+  }, [activeConnection, activeTab?.id])
 
   useEffect(() => {
-    const keyword = explorerSearch.trim()
+    const keyword = activeExplorerSearch.trim()
     if (!keyword || !activeConnection) {
-      setSearchTreeNodes([])
-      setSearchingAssets(false)
+      updateActiveTab({ searchTreeNodes: [], searchingAssets: false })
       return
     }
 
     let active = true
-    setSearchingAssets(true)
+    const tabID = activeTab?.id
+    updateActiveTab({ searchingAssets: true })
 
     void buildSearchNodes(activeConnection, keyword)
       .then((nodes) => {
-        if (!active) {
+        if (!active || !tabID) {
           return
         }
-        setSearchTreeNodes(nodes)
+        updateTabByID(tabID, { searchTreeNodes: nodes })
       })
       .catch((error) => {
-        if (!active) {
+        if (!active || !tabID) {
           return
         }
-        setMetadataError(error instanceof ApiError ? error.message : 'Failed to search metadata.')
-        setSearchTreeNodes([])
+        updateTabByID(tabID, { metadataError: formatMetadataError(error) })
+        updateTabByID(tabID, { searchTreeNodes: [] })
       })
       .finally(() => {
-        if (active) {
-          setSearchingAssets(false)
+        if (active && tabID) {
+          updateTabByID(tabID, { searchingAssets: false })
         }
       })
 
     return () => {
       active = false
     }
-  }, [activeConnection, explorerSearch])
+  }, [activeConnection, activeExplorerSearch, activeTab?.id])
 
   useEffect(() => {
-    if (!explorerSearch.trim()) {
+    if (!activeExplorerSearch.trim()) {
       return
     }
 
-    setSearchTreeNodes((current) =>
-      syncAssetTreeActiveStates(current, activeTab?.connectionId ?? null, selectedDatabase, selectedSchema, selectedTable),
+    updateActiveTabSearchTreeNodes((current) =>
+      syncAssetTreeActiveStates(current, activeTab?.connectionId ?? null, activeDatabase, activeSchema, activeSelectedTable),
     )
-  }, [activeTab?.connectionId, explorerSearch, selectedDatabase, selectedSchema, selectedTable])
+  }, [activeDatabase, activeExplorerSearch, activeSchema, activeSelectedTable, activeTab?.connectionId])
 
   useEffect(() => {
-    setExplorerNodes((current) =>
-      syncAssetTreeActiveStates(current, activeTab?.connectionId ?? null, selectedDatabase, selectedSchema, selectedTable),
+    updateActiveTabExplorerNodes((current) =>
+      syncAssetTreeActiveStates(current, activeTab?.connectionId ?? null, activeDatabase, activeSchema, activeSelectedTable),
     )
-  }, [activeTab?.connectionId, selectedDatabase, selectedSchema, selectedTable])
+  }, [activeDatabase, activeSchema, activeSelectedTable, activeTab?.connectionId, activeTab?.id])
 
   useEffect(() => {
-    if (!activeTab?.connectionId || !selectedTable || activeConnection?.db_type === 'redis') {
-      setColumns([])
-      setDefinition(null)
+    if (!activeTab?.connectionId || !activeSelectedTable || activeConnection?.db_type === 'redis') {
       return
     }
 
     let active = true
     const connectionId = activeTab.connectionId
-    const schema = selectedTable.schema
-    const table = selectedTable.name
+    const schema = activeSelectedTable.schema
+    const table = activeSelectedTable.name
 
     if (!schema) {
-      setColumns([])
-      setDefinition(null)
+      updateActiveTab({ columns: [], definition: null })
       return
     }
     const schemaName = schema
 
     async function loadObjectMeta() {
-      setColumnsLoading(true)
-      setDefinitionLoading(true)
-      setMetadataError('')
+      updateActiveTab({
+        columnsLoading: true,
+        definitionLoading: true,
+        metadataError: '',
+      })
       try {
         const [columnsResponse, definitionResponse] = await Promise.all([
-          listMetadataColumns(connectionId, schemaName, table, selectedDatabase || undefined),
-          listMetadataDefinition(connectionId, schemaName, table, selectedDatabase || undefined),
+          listMetadataColumns(connectionId, schemaName, table, activeDatabase || undefined),
+          listMetadataDefinition(connectionId, schemaName, table, activeDatabase || undefined),
         ])
         if (active) {
-          setColumns(columnsResponse.columns)
-          setDefinition(definitionResponse)
+          updateTabByID(activeTab.id, {
+            columns: columnsResponse.columns,
+            definition: definitionResponse,
+          })
         }
       } catch (error) {
         if (active) {
-          setMetadataError(error instanceof ApiError ? error.message : 'Failed to load columns.')
-          setColumns([])
-          setDefinition(null)
+          updateTabByID(activeTab.id, {
+            metadataError: formatMetadataError(error),
+            columns: [],
+            definition: null,
+          })
         }
       } finally {
         if (active) {
-          setColumnsLoading(false)
-          setDefinitionLoading(false)
+          updateTabByID(activeTab.id, {
+            columnsLoading: false,
+            definitionLoading: false,
+          })
         }
       }
     }
@@ -802,7 +870,7 @@ export function SQLEditorPage() {
     return () => {
       active = false
     }
-  }, [activeConnection?.db_type, activeTab?.connectionId, selectedDatabase, selectedTable])
+  }, [activeConnection?.db_type, activeDatabase, activeSelectedTable, activeTab?.connectionId, activeTab?.id])
 
   function updateActiveTab(patch: Partial<EditorTab>) {
     if (!activeTab) {
@@ -812,16 +880,38 @@ export function SQLEditorPage() {
     setTabs((currentTabs) => currentTabs.map((tab) => (tab.id === activeTab.id ? { ...tab, ...patch } : tab)))
   }
 
+  function updateTabByID(tabID: string, patch: Partial<EditorTab>) {
+    setTabs((currentTabs) => currentTabs.map((tab) => (tab.id === tabID ? { ...tab, ...patch } : tab)))
+  }
+
+  function updateActiveTabExplorerNodes(updater: (nodes: AssetTreeNode[]) => AssetTreeNode[]) {
+    if (!activeTab) {
+      return
+    }
+    setTabs((currentTabs) => currentTabs.map((tab) => (
+      tab.id === activeTab.id ? { ...tab, explorerNodes: updater(tab.explorerNodes) } : tab
+    )))
+  }
+
+  function updateActiveTabSearchTreeNodes(updater: (nodes: AssetTreeNode[]) => AssetTreeNode[]) {
+    if (!activeTab) {
+      return
+    }
+    setTabs((currentTabs) => currentTabs.map((tab) => (
+      tab.id === activeTab.id ? { ...tab, searchTreeNodes: updater(tab.searchTreeNodes) } : tab
+    )))
+  }
+
   async function loadNodeChildren(node: AssetTreeNode) {
     const connection = connections.find((item) => item.id === node.connectionId)
     if (!connection) {
       return
     }
 
-    setExplorerNodes((current) =>
+    updateActiveTabExplorerNodes((current) =>
       updateAssetTreeNode(current, node.id, (target) => ({ ...target, loading: true, expanded: true })),
     )
-    setMetadataError('')
+    updateActiveTab({ metadataError: '' })
 
     try {
       let children: AssetTreeNode[] = []
@@ -919,7 +1009,7 @@ export function SQLEditorPage() {
         }))
       }
 
-      setExplorerNodes((current) =>
+      updateActiveTabExplorerNodes((current) =>
         syncAssetTreeActiveStates(
           updateAssetTreeNode(current, node.id, (target) => ({
             ...target,
@@ -929,14 +1019,14 @@ export function SQLEditorPage() {
             loading: false,
           })),
           activeTab?.connectionId ?? null,
-          selectedDatabase,
-          selectedSchema,
-          selectedTable,
+          activeDatabase,
+          activeSchema,
+          activeSelectedTable,
         ),
       )
     } catch (error) {
-      setMetadataError(error instanceof ApiError ? error.message : 'Failed to load metadata.')
-      setExplorerNodes((current) =>
+      updateActiveTab({ metadataError: formatMetadataError(error) })
+      updateActiveTabExplorerNodes((current) =>
         updateAssetTreeNode(current, node.id, (target) => ({ ...target, loading: false, expanded: true })),
       )
     }
@@ -965,7 +1055,7 @@ export function SQLEditorPage() {
   }
 
   async function handleRunQuery() {
-    const sqlToExecute = selectedSQL.trim() || activeTab?.sql.trim() || ''
+    const sqlToExecute = activeSelectedSQL.trim() || activeTab?.sql.trim() || ''
     if (!activeTab?.connectionId || !sqlToExecute) {
       updateActiveTab({ error: 'Select a database connection and enter a query first.' })
       return
@@ -978,17 +1068,17 @@ export function SQLEditorPage() {
       const result = await executeQuery({
         db_connection_id: activeTab.connectionId,
         sql: sqlToExecute,
-        database: selectedDatabase || undefined,
-        schema: activeConnection?.db_type === 'postgres' ? selectedSchema || undefined : undefined,
-        redis_db_index: activeConnection?.db_type === 'redis' && selectedDatabase ? Number(selectedDatabase) : undefined,
+        database: activeDatabase || undefined,
+        schema: activeConnection?.db_type === 'postgres' ? activeSchema || undefined : undefined,
+        redis_db_index: activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : undefined,
       })
 
       updateActiveTab({
         result,
         error: '',
         lastRunAt: new Date().toISOString(),
+        resultView: 'result',
       })
-      setResultView('result')
       void listQueryHistory(HISTORY_LIMIT).then((response) => setHistory(response.history)).catch(() => undefined)
       pushToast('Query completed.', 'success')
     } catch (error) {
@@ -1012,8 +1102,8 @@ export function SQLEditorPage() {
       const response = await createExportRequest({
         db_connection_id: activeTab.connectionId,
         sql_content: activeTab.sql,
-        database_name: selectedDatabase || undefined,
-        schema_name: activeConnection?.db_type === 'postgres' ? selectedSchema || undefined : undefined,
+        database_name: activeDatabase || undefined,
+        schema_name: activeConnection?.db_type === 'postgres' ? activeSchema || undefined : undefined,
       })
       pushToast(`Export ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
     } catch (error) {
@@ -1036,9 +1126,9 @@ export function SQLEditorPage() {
       const response = await createSensitiveAccessTicket({
         db_connection_id: activeTab.connectionId,
         sql_content: activeTab.sql,
-        database_name: selectedDatabase || undefined,
-        schema_name: selectedSchema || undefined,
-        approved_duration_minutes: sensitiveAccessDuration,
+        database_name: activeDatabase || undefined,
+        schema_name: activeSchema || undefined,
+        approved_duration_minutes: activeSensitiveAccessDuration,
       })
       pushToast(`Sensitive Access ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
     } catch (error) {
@@ -1054,9 +1144,9 @@ export function SQLEditorPage() {
     const existing = savedQueries.find((item) =>
       item.db_connection_id === activeTab.connectionId &&
       item.sql_content === activeTab.sql &&
-      (item.database_name ?? '') === selectedDatabase &&
-      (item.schema_name ?? '') === selectedSchema &&
-      (item.redis_db_index ?? null) === (activeConnection?.db_type === 'redis' && selectedDatabase ? Number(selectedDatabase) : null),
+      (item.database_name ?? '') === activeDatabase &&
+      (item.schema_name ?? '') === activeSchema &&
+      (item.redis_db_index ?? null) === (activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : null),
     )
     if (existing) {
       pushToast('This SQL is already in your saved queries.', 'info')
@@ -1072,9 +1162,9 @@ export function SQLEditorPage() {
       const created = await createSavedQuery({
         label: activeTab.title,
         db_connection_id: activeTab.connectionId,
-        database: selectedDatabase || undefined,
-        schema: selectedSchema || undefined,
-        redis_db_index: activeConnection?.db_type === 'redis' && selectedDatabase ? Number(selectedDatabase) : undefined,
+        database: activeDatabase || undefined,
+        schema: activeSchema || undefined,
+        redis_db_index: activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : undefined,
         sql_content: activeTab.sql,
       })
       setSavedQueries((current) => [created, ...current].slice(0, SAVED_QUERY_LIMIT))
@@ -1093,29 +1183,33 @@ export function SQLEditorPage() {
     setActiveTabId(activeTab.id)
     updateActiveTab({
       connectionId: entry.connectionId,
+      database: entry.database ?? '',
+      schema: entry.schema ?? '',
+      selectedTable: null,
       sql: entry.sql,
       title: entry.label,
       result: null,
       error: '',
+      columns: [],
+      definition: null,
+      objectMetaTab: 'columns',
+      resultView: 'result',
     })
-    setSelectedDatabase(entry.database ?? '')
-    setSelectedSchema(entry.schema ?? '')
-    setSelectedTable(null)
-    setColumns([])
-    setDefinition(null)
-    setObjectMetaTab('columns')
     if (entry.redisDbIndex !== undefined && entry.redisDbIndex !== null) {
-      setSelectedDatabase(String(entry.redisDbIndex))
+      updateActiveTab({
+        database: String(entry.redisDbIndex),
+        schema: '',
+        selectedTable: null,
+      })
     }
-    setResultView('result')
   }
 
   const isFavorited = !!(activeTab && savedQueries.some((item) =>
     item.db_connection_id === activeTab.connectionId &&
     item.sql_content === activeTab.sql &&
-    (item.database_name ?? '') === selectedDatabase &&
-    (item.schema_name ?? '') === selectedSchema &&
-    (item.redis_db_index ?? null) === (activeConnection?.db_type === 'redis' && selectedDatabase ? Number(selectedDatabase) : null),
+    (item.database_name ?? '') === activeDatabase &&
+    (item.schema_name ?? '') === activeSchema &&
+    (item.redis_db_index ?? null) === (activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : null),
   ))
   const editorExtensions = useMemo(
     () => [activeTab && accessibleConnections.find((connection) => connection.id === activeTab.connectionId)?.db_type === 'redis' ? javascript() : sql()],
@@ -1125,11 +1219,11 @@ export function SQLEditorPage() {
     if (!activeTab?.result) {
       return []
     }
-    if (!visibleColumnIndexes || visibleColumnIndexes.length === 0) {
+    if (!activeVisibleColumnIndexes || activeVisibleColumnIndexes.length === 0) {
       return activeTab.result.columns.map((_, index) => index)
     }
-    return visibleColumnIndexes.filter((index) => index >= 0 && index < activeTab.result!.columns.length)
-  }, [activeTab?.result, visibleColumnIndexes])
+    return activeVisibleColumnIndexes.filter((index) => index >= 0 && index < activeTab.result!.columns.length)
+  }, [activeTab?.result, activeVisibleColumnIndexes])
   const sensitiveColumnIndexSet = useMemo(
     () => new Set(activeTab?.result?.sensitive_column_indexes ?? []),
     [activeTab?.result?.sensitive_column_indexes],
@@ -1144,85 +1238,104 @@ export function SQLEditorPage() {
     if (!activeTab?.result) {
       return []
     }
-    const start = (resultPage - 1) * RESULT_PAGE_SIZE
+    const start = (activeResultPage - 1) * RESULT_PAGE_SIZE
     return activeTab.result.rows.slice(start, start + RESULT_PAGE_SIZE)
-  }, [activeTab?.result, resultPage])
-  const detailHint = metadataHint(activeConnection?.db_type)
+  }, [activeResultPage, activeTab?.result])
+  const detailHint = metadataHint(activeConnection?.db_type, activeSchema)
   const resultMetaLine = useMemo(() => formatResultMetaLine({
-    resultView,
+    resultView: activeResultView,
     result: activeTab?.result ?? null,
-    selectedTable,
+    selectedTable: activeSelectedTable,
     detailHint,
     historyCount: history.length,
     savedCount: savedQueries.length,
-    currentPage: resultPage,
+    currentPage: activeResultPage,
     totalPages: totalResultPages,
-  }), [activeTab?.result, detailHint, history.length, resultPage, resultView, savedQueries.length, selectedTable, totalResultPages])
+  }), [activeResultPage, activeResultView, activeSelectedTable, activeTab?.result, detailHint, history.length, savedQueries.length, totalResultPages])
 
   function handleSelectNode(node: AssetTreeNode) {
     if (node.kind === 'connection') {
       if (activeTab?.connectionId !== node.connectionId) {
-        updateActiveTab({ connectionId: node.connectionId, result: null, error: '' })
-        setSelectedDatabase('')
-        setSelectedSchema('')
-        setSelectedTable(null)
-        setColumns([])
-        setDefinition(null)
-        setObjectMetaTab('columns')
+        updateActiveTab({
+          connectionId: node.connectionId,
+          database: '',
+          schema: '',
+          selectedTable: null,
+          columns: [],
+          definition: null,
+          objectMetaTab: 'columns',
+          result: null,
+          error: '',
+        })
       }
       return
     }
 
     if (node.kind === 'database') {
-      setSelectedDatabase(node.database || node.label)
-      setSelectedSchema('')
-      setSelectedTable(null)
-      setColumns([])
-      setDefinition(null)
-      setObjectMetaTab('columns')
+      updateActiveTab({
+        database: node.database || node.label,
+        schema: '',
+        selectedTable: null,
+        columns: [],
+        definition: null,
+        objectMetaTab: 'columns',
+      })
       return
     }
 
     if (node.kind === 'schema') {
-      setSelectedDatabase(node.database || selectedDatabase)
-      setSelectedSchema(node.schema || node.label)
-      setSelectedTable(null)
-      setColumns([])
-      setDefinition(null)
-      setObjectMetaTab('columns')
+      updateActiveTab({
+        database: node.database || activeDatabase,
+        schema: node.schema || node.label,
+        selectedTable: null,
+        columns: [],
+        definition: null,
+        objectMetaTab: 'columns',
+      })
       return
     }
 
     if (node.kind === 'table') {
-      setSelectedDatabase(node.database || selectedDatabase)
-      setSelectedSchema(node.schema || '')
-      setSelectedTable(node.item ?? null)
-      setObjectMetaTab('columns')
-      setResultView('object-meta')
+      updateActiveTab({
+        database: node.database || activeDatabase,
+        schema: node.schema || '',
+        selectedTable: node.item ?? null,
+        objectMetaTab: 'columns',
+        resultView: 'object-meta',
+      })
       return
     }
 
-    setSelectedDatabase(node.database || node.label.replace('DB ', ''))
-    setSelectedSchema('')
-    setSelectedTable(null)
-    setColumns([])
-    setDefinition(null)
-    setObjectMetaTab('columns')
+    updateActiveTab({
+      database: node.database || node.label.replace('DB ', ''),
+      schema: '',
+      selectedTable: null,
+      columns: [],
+      definition: null,
+      objectMetaTab: 'columns',
+    })
   }
 
   function handleSelectConnection(connection: DBConnection) {
-    updateActiveTab({ connectionId: connection.id, result: null, error: '' })
-    setSelectedDatabase('')
-    setSelectedSchema('')
-    setSelectedTable(null)
-    setColumns([])
-    setDefinition(null)
-    setObjectMetaTab('columns')
-    setMetadataError('')
-    setExplorerSearch('')
-    setAssetPickerOpen(false)
-    setAssetPickerSearch('')
-    setExplorerNodes([createConnectionNode(connection, connection.id)])
+    updateActiveTab({
+      connectionId: connection.id,
+      database: '',
+      schema: '',
+      selectedTable: null,
+      columns: [],
+      definition: null,
+      objectMetaTab: 'columns',
+      result: null,
+      error: '',
+      explorerSearch: '',
+      assetPickerOpen: false,
+      assetPickerSearch: '',
+    })
+    updateActiveTab({ metadataError: '' })
+    updateActiveTab({
+      explorerNodes: [createConnectionNode(connection, connection.id)],
+      searchTreeNodes: [],
+    })
   }
 
   async function handleToggleNode(node: AssetTreeNode) {
@@ -1239,16 +1352,16 @@ export function SQLEditorPage() {
       return
     }
 
-    setExplorerNodes((current) =>
+    updateActiveTabExplorerNodes((current) =>
       updateAssetTreeNode(current, node.id, (target) => ({ ...target, expanded: !target.expanded })),
     )
   }
 
-  function metadataHint(dbType: string | undefined) {
+  function metadataHint(dbType: string | undefined, schema: string) {
     if (dbType === 'redis') {
       return 'Redis currently supports DB 0-15 selection only. Key browsing is not available yet.'
     }
-    if (dbType === 'postgres' && !selectedSchema) {
+    if (dbType === 'postgres' && !schema) {
       return 'Select a schema first.'
     }
     return ''
@@ -1256,23 +1369,34 @@ export function SQLEditorPage() {
 
   useEffect(() => {
     if (!activeTab?.result) {
-      setVisibleColumnIndexes(null)
+      if (activeTab?.visibleColumnIndexes !== null) {
+        updateActiveTab({ visibleColumnIndexes: null })
+      }
       return
     }
-    setVisibleColumnIndexes(activeTab.result.columns.map((_, index) => index))
+    const nextIndexes = activeTab.result.columns.map((_, index) => index)
+    const currentIndexes = activeTab.visibleColumnIndexes
+    const isSame =
+      Array.isArray(currentIndexes) &&
+      currentIndexes.length === nextIndexes.length &&
+      currentIndexes.every((value, index) => value === nextIndexes[index])
+    if (!isSame) {
+      updateActiveTab({ visibleColumnIndexes: nextIndexes })
+    }
   }, [activeTab?.id, activeTab?.result])
 
   useEffect(() => {
-    setSelectedSQL('')
-  }, [activeTabId])
-
-  useEffect(() => {
-    if (resultView !== 'result' && resultView !== 'vertical') {
-      setResultPage(1)
+    if (activeResultView !== 'result' && activeResultView !== 'vertical') {
+      if (activeResultPage !== 1) {
+        updateActiveTab({ resultPage: 1 })
+      }
       return
     }
-    setResultPage((current) => Math.min(current, totalResultPages))
-  }, [activeTab?.id, activeTab?.result, resultView, totalResultPages, visibleColumnIndexes])
+    const nextPage = Math.min(activeResultPage, totalResultPages)
+    if (nextPage !== activeResultPage) {
+      updateActiveTab({ resultPage: nextPage })
+    }
+  }, [activeResultPage, activeResultView, activeTab?.id, activeTab?.result, totalResultPages, activeVisibleColumnIndexes])
 
   useLayoutEffect(() => {
     const updateHeight = () => {
@@ -1301,13 +1425,14 @@ export function SQLEditorPage() {
   }
 
   function toggleVisibleColumn(index: number) {
-    setVisibleColumnIndexes((current) => {
-      const base = current ?? activeTab?.result?.columns.map((_, columnIndex) => columnIndex) ?? []
-      if (base.includes(index)) {
-        return base.filter((item) => item !== index)
-      }
-      return [...base, index].sort((left, right) => left - right)
-    })
+    const base = activeVisibleColumnIndexes ?? activeTab?.result?.columns.map((_, columnIndex) => columnIndex) ?? []
+    let next: number[]
+    if (base.includes(index)) {
+      next = base.filter((item) => item !== index)
+    } else {
+      next = [...base, index].sort((left, right) => left - right)
+    }
+    updateActiveTab({ visibleColumnIndexes: next })
   }
 
   return (
@@ -1319,16 +1444,56 @@ export function SQLEditorPage() {
 
       {connectionsError ? <InlineAlert>{connectionsError}</InlineAlert> : null}
 
-      <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <section className="flex min-h-0 flex-col rounded-xl border border-border bg-panel shadow-soft">
-          <div className="border-b border-border/80 px-4 py-3">
-            <div className="relative">
+      <section className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-panel shadow-soft">
+        <div className="border-b border-border/80 px-4">
+          <div className="flex flex-wrap items-center gap-5">
+            {tabs.map((tab) => (
               <button
+                key={tab.id}
                 type="button"
-                aria-label="Asset Selector"
-                onClick={() => setAssetPickerOpen((current) => !current)}
-                className="flex w-full items-center gap-2 text-left text-[12px] text-ink transition"
+                onClick={() => setActiveTabId(tab.id)}
+                className={cn(
+                  'inline-flex items-center gap-2 border-b-2 px-0.5 py-3 text-[13px] font-medium transition-colors',
+                  tab.id === activeTabId
+                    ? 'border-ink text-ink'
+                    : 'border-transparent text-muted hover:text-ink',
+                )}
               >
+                <span>{tab.title}</span>
+                <span
+                  role="button"
+                  aria-label={`Close ${tab.title}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    handleCloseTab(tab.id)
+                  }}
+                  className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted hover:bg-panel-soft hover:text-ink"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </span>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={handleAddTab}
+              className="inline-flex items-center gap-2 border-b-2 border-transparent px-0.5 py-3 text-[13px] font-medium text-muted transition-colors hover:text-ink"
+            >
+              <Plus className="h-4 w-4" />
+              New Tab
+            </button>
+          </div>
+        </div>
+
+        <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
+          <section className="flex min-h-0 flex-col border-r border-border/80 bg-panel">
+            <div className="px-4 py-3">
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label="Asset Selector"
+                  onClick={() => updateActiveTab({ assetPickerOpen: !activeAssetPickerOpen })}
+                  className="flex w-full items-center gap-2 text-left text-[12px] text-ink transition"
+                >
                 <FolderTree className="h-4 w-4 shrink-0 text-muted" />
                 <div className="min-w-0 flex-1">
                   {activeConnection ? (
@@ -1339,22 +1504,20 @@ export function SQLEditorPage() {
                       </p>
                     </>
                   ) : (
-                    <>
-                      <p className="text-[13px] font-semibold text-ink">Select assets</p>
-                    </>
+                    <p className="text-[13px] font-semibold text-ink">Select assets</p>
                   )}
                 </div>
                 <ChevronDown className="h-4 w-4 shrink-0 text-faint" />
-              </button>
+                </button>
 
-              {assetPickerOpen ? (
+              {activeAssetPickerOpen ? (
                 <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-lg border border-border bg-white p-2 shadow-soft">
                   <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-panel-soft px-2.5">
                     <Search className="h-3.5 w-3.5 text-faint" />
                     <input
                       aria-label="Asset Picker Search"
-                      value={assetPickerSearch}
-                      onChange={(event) => setAssetPickerSearch(event.target.value)}
+                      value={activeAssetPickerSearch}
+                      onChange={(event) => updateActiveTab({ assetPickerSearch: event.target.value })}
                       placeholder="Select assets"
                       className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
                     />
@@ -1398,99 +1561,60 @@ export function SQLEditorPage() {
                   </div>
                 </div>
               ) : null}
-            </div>
-          </div>
-
-          <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
-            {metadataError ? <InlineAlert className="mb-2" tone="info">{metadataError}</InlineAlert> : null}
-            <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-panel-soft px-2.5">
-              <Search className="h-3.5 w-3.5 text-faint" />
-              <input
-                aria-label="Explorer Search"
-                value={explorerSearch}
-                onChange={(event) => setExplorerSearch(event.target.value)}
-                placeholder="Search objects"
-                className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
-              />
-            </label>
-            <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t border-border/80 pt-3">
-              {connectionsLoading ? (
-                <p className="px-1 py-2 text-[12px] text-muted">Loading connections...</p>
-              ) : searchingAssets ? (
-                <p className="px-1 py-2 text-[12px] text-muted">Searching assets...</p>
-              ) : !activeConnection || explorerNodes.length === 0 ? (
-                <p className="px-1 py-2 text-[12px] text-muted">No DB connections available.</p>
-              ) : filteredExplorerNodes.length === 0 ? (
-                <p className="px-1 py-2 text-[12px] text-muted">No matching assets.</p>
-              ) : (
-                <AssetTree
-                  nodes={filteredExplorerNodes}
-                  onSelect={handleSelectNode}
-                  onToggle={(node) => void handleToggleNode(node)}
-                />
-              )}
-            </div>
-          </div>
-        </section>
-
-        <section className="flex min-h-0 flex-col rounded-xl border border-border bg-panel shadow-soft">
-          <div className="border-b border-border/80 px-4">
-            <div className="flex flex-wrap items-center gap-5">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTabId(tab.id)}
-                  className={cn(
-                    'inline-flex items-center gap-2 border-b-2 px-0.5 py-3 text-[13px] font-medium transition-colors',
-                    tab.id === activeTabId
-                      ? 'border-ink text-ink'
-                      : 'border-transparent text-muted hover:text-ink',
-                  )}
-                >
-                  <span>{tab.title}</span>
-                  <span
-                    role="button"
-                    aria-label={`Close ${tab.title}`}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      handleCloseTab(tab.id)
-                    }}
-                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted hover:bg-panel-soft hover:text-ink"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </span>
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={handleAddTab}
-                className="inline-flex items-center gap-2 border-b-2 border-transparent px-0.5 py-3 text-[13px] font-medium text-muted transition-colors hover:text-ink"
-              >
-                <Plus className="h-4 w-4" />
-                New Tab
-              </button>
-            </div>
-          </div>
-
-          {!activeTab ? (
-            <LoadingBlock message="Loading editor..." className="m-4 min-h-[320px] rounded-xl border-border bg-panel" />
-          ) : (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-4 py-3">
-                <div className="inline-flex h-10 min-w-[260px] flex-1 items-center rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-muted">
-                  <span className="truncate">{activePathLabel.length > 0 ? activePathLabel.join(' / ') : 'Select a data source from the Explorer'}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleRunQuery}
-                  disabled={runningTabId === activeTab.id || !activeTab.connectionId}
-                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Play className="h-4 w-4" />
-                  {runningTabId === activeTab.id ? 'Running...' : 'Run Query'}
-                </button>
               </div>
+            </div>
+
+            <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
+              {activeTab?.metadataError ? <InlineAlert className="mb-2" tone="info">{activeTab.metadataError}</InlineAlert> : null}
+              <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-panel-soft px-2.5">
+                <Search className="h-3.5 w-3.5 text-faint" />
+                <input
+                  aria-label="Explorer Search"
+                  value={activeExplorerSearch}
+                  onChange={(event) => updateActiveTab({ explorerSearch: event.target.value })}
+                  placeholder="Search objects"
+                  className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
+                />
+              </label>
+              <div className="mt-3 min-h-0 flex-1 overflow-y-auto pt-1">
+                {connectionsLoading ? (
+                  <p className="px-1 py-2 text-[12px] text-muted">Loading connections...</p>
+                ) : activeSearchingAssets ? (
+                  <p className="px-1 py-2 text-[12px] text-muted">Searching assets...</p>
+                ) : !activeConnection || activeExplorerNodes.length === 0 ? (
+                  <p className="px-1 py-2 text-[12px] text-muted">No DB connections available.</p>
+                ) : filteredExplorerNodes.length === 0 ? (
+                  <p className="px-1 py-2 text-[12px] text-muted">No matching assets.</p>
+                ) : (
+                  <AssetTree
+                    nodes={filteredExplorerNodes}
+                    onSelect={handleSelectNode}
+                    onToggle={(node) => void handleToggleNode(node)}
+                  />
+                )}
+              </div>
+            </div>
+          </section>
+
+          <section className="flex min-h-0 flex-col bg-panel">
+            {!activeTab ? (
+              <LoadingBlock message="Loading editor..." className="m-4 min-h-[320px] rounded-xl border-border bg-panel" />
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col">
+                <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-4 py-3">
+                  <div className="inline-flex h-10 min-w-[260px] flex-1 items-center rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-muted">
+                    <span className="truncate">{activePathLabel.length > 0 ? activePathLabel.join(' / ') : 'Select a data source from the Explorer'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRunQuery}
+                    disabled={runningTabId === activeTab.id || !activeTab.connectionId}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Play className="h-4 w-4" />
+                    {runningTabId === activeTab.id ? 'Running...' : 'Run Query'}
+                  </button>
+                </div>
 
               <div className="shrink-0 p-4">
                 <div ref={editorContainerRef} className="overflow-hidden rounded-xl border border-border bg-panel-soft">
@@ -1499,7 +1623,7 @@ export function SQLEditorPage() {
                     height={editorHeight}
                     extensions={editorExtensions}
                     onChange={(value) => updateActiveTab({ sql: value })}
-                    onStatistics={(stats) => setSelectedSQL(stats.selectedText ? stats.selectionCode : '')}
+                    onStatistics={(stats) => updateActiveTab({ selectedSQL: stats.selectedText ? stats.selectionCode : '' })}
                     theme="light"
                     basicSetup={{
                       lineNumbers: true,
@@ -1521,9 +1645,9 @@ export function SQLEditorPage() {
                     <div className="inline-flex items-center rounded-lg border border-border bg-white p-1">
                       <button
                         type="button"
-                        onClick={() => setResultView('result')}
+                        onClick={() => updateActiveTab({ resultView: 'result' })}
                         className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 ${
-                          resultView === 'result' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
+                          activeResultView === 'result' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
                         }`}
                       >
                         <FileClock className="h-4 w-4" />
@@ -1531,9 +1655,9 @@ export function SQLEditorPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setResultView('vertical')}
+                        onClick={() => updateActiveTab({ resultView: 'vertical' })}
                         className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 ${
-                          resultView === 'vertical' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
+                          activeResultView === 'vertical' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
                         }`}
                       >
                         <Layers3 className="h-4 w-4" />
@@ -1541,9 +1665,9 @@ export function SQLEditorPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setResultView('object-meta')}
+                        onClick={() => updateActiveTab({ resultView: 'object-meta' })}
                         className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 ${
-                          resultView === 'object-meta' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
+                          activeResultView === 'object-meta' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
                         }`}
                       >
                         <Database className="h-4 w-4" />
@@ -1551,9 +1675,9 @@ export function SQLEditorPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setResultView('history')}
+                        onClick={() => updateActiveTab({ resultView: 'history' })}
                         className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 ${
-                          resultView === 'history' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
+                          activeResultView === 'history' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
                         }`}
                       >
                         <History className="h-4 w-4" />
@@ -1564,7 +1688,7 @@ export function SQLEditorPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setResultView('saved')}
+                      onClick={() => updateActiveTab({ resultView: 'saved' })}
                       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Star className="h-4 w-4" />
@@ -1582,8 +1706,8 @@ export function SQLEditorPage() {
                     <div className="inline-flex items-center overflow-hidden rounded-md border border-border bg-white">
                       <DropdownSelect
                         ariaLabel="Sensitive access duration"
-                        value={String(sensitiveAccessDuration)}
-                        onChange={(value) => setSensitiveAccessDuration(Number(value))}
+                        value={String(activeSensitiveAccessDuration)}
+                        onChange={(value) => updateActiveTab({ sensitiveAccessDuration: Number(value) })}
                         disabled={!canApplySensitiveAccess}
                         size="sm"
                         triggerClassName="h-9 rounded-none border-0 border-r border-border bg-transparent px-2 shadow-none hover:border-r hover:border-border"
@@ -1606,20 +1730,20 @@ export function SQLEditorPage() {
                     <div className="relative">
                       <button
                         type="button"
-                        onClick={() => setColumnFilterOpen((current) => !current)}
+                        onClick={() => updateActiveTab({ columnFilterOpen: !activeColumnFilterOpen })}
                         disabled={!activeTab.result}
                         className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <Filter className="h-4 w-4" />
                         Filter Columns
                       </button>
-                      {columnFilterOpen && activeTab.result ? (
+                      {activeColumnFilterOpen && activeTab.result ? (
                         <div className="absolute right-0 top-[calc(100%+8px)] z-10 w-64 rounded-lg border border-border bg-white p-3 shadow-soft">
                           <div className="mb-2 flex items-center justify-between">
                             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">Visible Columns</p>
                             <button
                               type="button"
-                              onClick={() => setVisibleColumnIndexes(activeTab.result?.columns.map((_, index) => index) ?? [])}
+                              onClick={() => updateActiveTab({ visibleColumnIndexes: activeTab.result?.columns.map((_, index) => index) ?? [] })}
                               className="text-[11px] font-semibold text-accent"
                             >
                               Reset
@@ -1656,7 +1780,7 @@ export function SQLEditorPage() {
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted">
-                  {(resultView === 'result' || resultView === 'vertical') && activeTab.result ? (
+                  {(activeResultView === 'result' || activeResultView === 'vertical') && activeTab.result ? (
                     <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
                       Executed in {(activeTab.result.duration_ms / 1000).toFixed(activeTab.result.duration_ms >= 1000 ? 2 : 3)}s
                     </span>
@@ -1670,7 +1794,7 @@ export function SQLEditorPage() {
                 {activeTab.error ? <InlineAlert className="mt-3">{activeTab.error}</InlineAlert> : null}
 
                 <div className="mt-3 min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-white">
-                  {resultView === 'history' ? (
+                  {activeResultView === 'history' ? (
                     history.length === 0 ? (
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
                         No query history yet.
@@ -1699,7 +1823,7 @@ export function SQLEditorPage() {
                         ))}
                       </div>
                     )
-                  ) : resultView === 'saved' ? (
+                  ) : activeResultView === 'saved' ? (
                     savedQueries.length === 0 ? (
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
                         No saved queries yet.
@@ -1738,8 +1862,8 @@ export function SQLEditorPage() {
                         ))}
                       </div>
                     )
-                  ) : resultView === 'object-meta' ? (
-                    !selectedTable ? (
+                  ) : activeResultView === 'object-meta' ? (
+                    !activeSelectedTable ? (
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
                         {detailHint || 'Select a table from the asset tree to inspect its structure.'}
                       </div>
@@ -1749,30 +1873,30 @@ export function SQLEditorPage() {
                           <div className="inline-flex items-center rounded-lg border border-border bg-white p-1">
                             <button
                               type="button"
-                              onClick={() => setObjectMetaTab('columns')}
+                              onClick={() => updateActiveTab({ objectMetaTab: 'columns' })}
                               className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-[12px] font-medium ${
-                                objectMetaTab === 'columns' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
+                                activeObjectMetaTab === 'columns' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
                               }`}
                             >
                               Columns
                             </button>
                             <button
                               type="button"
-                              onClick={() => setObjectMetaTab('definition')}
+                              onClick={() => updateActiveTab({ objectMetaTab: 'definition' })}
                               className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-[12px] font-medium ${
-                                objectMetaTab === 'definition' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
+                                activeObjectMetaTab === 'definition' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
                               }`}
                             >
                               Definition
                             </button>
                           </div>
                         </div>
-                        {objectMetaTab === 'columns' ? (
-                          columnsLoading ? (
+                        {activeObjectMetaTab === 'columns' ? (
+                          activeColumnsLoading ? (
                             <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
                               Loading table structure...
                             </div>
-                          ) : columns.length === 0 ? (
+                          ) : activeColumns.length === 0 ? (
                             <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
                               No table structure available.
                             </div>
@@ -1787,7 +1911,7 @@ export function SQLEditorPage() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {columns.map((column) => (
+                                {activeColumns.map((column) => (
                                   <tr key={column.name} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
                                     <td className="px-3 py-2.5 font-semibold">{column.name}</td>
                                     <td className="px-3 py-2.5">{column.column_type}</td>
@@ -1798,20 +1922,20 @@ export function SQLEditorPage() {
                               </tbody>
                             </table>
                           )
-                        ) : definitionLoading ? (
+                        ) : activeDefinitionLoading ? (
                           <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
                             Loading definition...
                           </div>
-                        ) : !definition?.definition.trim() ? (
+                        ) : !activeDefinition?.definition.trim() ? (
                           <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
                             No definition available.
                           </div>
                         ) : (
-                          <pre className="overflow-x-auto px-4 py-3 font-mono text-[12px] leading-6 text-ink">{definition.definition}</pre>
+                          <pre className="overflow-x-auto px-4 py-3 font-mono text-[12px] leading-6 text-ink">{activeDefinition.definition}</pre>
                         )}
                       </div>
                     )
-                  ) : resultView === 'vertical' ? (
+                  ) : activeResultView === 'vertical' ? (
                     !activeTab.result ? (
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
                         No query has been executed yet.
@@ -1819,9 +1943,9 @@ export function SQLEditorPage() {
                     ) : (
                       <div className="divide-y divide-border">
                         {pagedResultRows.map((row, rowOffset) => (
-                          <div key={`${activeTab.id}-vertical-${resultPage}-${rowOffset}`} className="px-4 py-2.5">
+                          <div key={`${activeTab.id}-vertical-${activeResultPage}-${rowOffset}`} className="px-4 py-2.5">
                             <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-faint">
-                              Row {(resultPage - 1) * RESULT_PAGE_SIZE + rowOffset + 1}
+                              Row {(activeResultPage - 1) * RESULT_PAGE_SIZE + rowOffset + 1}
                             </p>
                             <div className="overflow-hidden rounded-lg border border-border bg-panel-soft">
                               {visibleResultColumnIndexes.map((columnIndex) => (
@@ -1862,7 +1986,7 @@ export function SQLEditorPage() {
                       </thead>
                       <tbody>
                         {pagedResultRows.map((row, rowOffset) => (
-                          <tr key={`${activeTab.id}-row-${resultPage}-${rowOffset}`} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
+                          <tr key={`${activeTab.id}-row-${activeResultPage}-${rowOffset}`} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
                             {visibleResultColumnIndexes.map((columnIndex) => (
                               <td key={`${activeTab.id}-cell-${rowOffset}-${columnIndex}`} className="px-3 py-2.5 align-top">
                                 {!Array.isArray(row)
@@ -1878,26 +2002,27 @@ export function SQLEditorPage() {
                     </table>
                   ) : (
                     <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                        No query has been executed yet.
+                      No query has been executed yet.
                     </div>
                   )}
                 </div>
-                {(resultView === 'result' || resultView === 'vertical') && activeTab.result && totalResultPages > 1 ? (
+                {(activeResultView === 'result' || activeResultView === 'vertical') && activeTab.result && totalResultPages > 1 ? (
                   <div className="mt-3">
                     <Pagination
-                      offset={(resultPage - 1) * RESULT_PAGE_SIZE}
+                      offset={(activeResultPage - 1) * RESULT_PAGE_SIZE}
                       pageSize={RESULT_PAGE_SIZE}
-                      count={Math.min(activeTab.result.rows.length - (resultPage - 1) * RESULT_PAGE_SIZE, RESULT_PAGE_SIZE)}
+                      count={Math.min(activeTab.result.rows.length - (activeResultPage - 1) * RESULT_PAGE_SIZE, RESULT_PAGE_SIZE)}
                       total={activeTab.result.rows.length}
-                      onChange={(nextOffset) => setResultPage(Math.floor(nextOffset / RESULT_PAGE_SIZE) + 1)}
+                      onChange={(nextOffset) => updateActiveTab({ resultPage: Math.floor(nextOffset / RESULT_PAGE_SIZE) + 1 })}
                     />
                   </div>
                 ) : null}
               </div>
-            </div>
-          )}
-        </section>
-      </div>
+              </div>
+            )}
+          </section>
+        </div>
+      </section>
       <ConfirmDialog
         open={savedQueryToDelete !== null}
         title="Delete Saved Query"
