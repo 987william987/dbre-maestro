@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -35,13 +37,10 @@ func (r *TicketRepo) CreateWithScopes(ctx context.Context, t *model.Ticket, scop
 		}
 	}()
 
-	// Derive the next ticket number from current rows inside the same transaction.
-	// `information_schema.TABLES.AUTO_INCREMENT` can drift behind the actual max id.
-	var nextID int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) + 1 FROM tickets FOR UPDATE`).Scan(&nextID); err != nil {
-		return nil, fmt.Errorf("select next ticket id: %w", err)
+	ticketNo, err := generateTicketNo()
+	if err != nil {
+		return nil, fmt.Errorf("generate ticket number: %w", err)
 	}
-	ticketNo := fmt.Sprintf("T-%03d", nextID)
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO tickets (ticket_no, title, description, sql_content, ticket_type, db_connection_id, status, submitter_id, approved_duration_minutes, approved_until, revoked_at, revoked_by)
@@ -72,6 +71,16 @@ func (r *TicketRepo) CreateWithScopes(ctx context.Context, t *model.Ticket, scop
 	}
 	tx = nil
 	return r.GetByID(ctx, uint64(id))
+}
+
+func generateTicketNo() (string, error) {
+	var suffix [3]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", err
+	}
+
+	timestamp := time.Now().UTC().Format("20060102-150405000")
+	return fmt.Sprintf("TK-%s-%s", timestamp, strings.ToUpper(hex.EncodeToString(suffix[:]))), nil
 }
 
 func (r *TicketRepo) GetByID(ctx context.Context, id uint64) (*model.Ticket, error) {

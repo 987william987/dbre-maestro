@@ -1,0 +1,2 @@
+ALTER TABLE tickets
+    MODIFY COLUMN ticket_no VARCHAR(16) NOT NULL COMMENT 'T-001 format';

@@ -442,7 +442,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	body := fmt.Sprintf("工單 %s 已審核通過", ticket.TicketNo)
+	body := fmt.Sprintf("Ticket %s has been approved", ticket.TicketNo)
 	if req.Comment != nil && *req.Comment != "" {
 		body += " — " + *req.Comment
 	}
@@ -452,8 +452,8 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	h.notifyLark(r.Context(), "工單審核通過", body)
-	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_approved", "工單審核通過", body, "ticket", id)
+	h.notifyLark(r.Context(), "Ticket Approved", body)
+	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_approved", "Ticket Approved", body, "ticket", id)
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
@@ -763,12 +763,12 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 	})
 
 	if finalStatus == model.TicketStatusCompleted {
-		body := fmt.Sprintf("工單 %s 已成功執行", ticket.TicketNo)
-		h.notifyLark(ctx, "工單執行完成", body)
-		h.sendInApp(ctx, ticket.SubmitterID, "ticket_executed", "工單執行完成", body, "ticket", ticket.ID)
+		body := fmt.Sprintf("Ticket %s executed successfully", ticket.TicketNo)
+		h.notifyLark(ctx, "Ticket Executed", body)
+		h.sendInApp(ctx, ticket.SubmitterID, "ticket_executed", "Ticket Executed", body, "ticket", ticket.ID)
 	} else {
-		body := fmt.Sprintf("工單 %s 執行失敗", ticket.TicketNo)
-		h.sendInApp(ctx, ticket.SubmitterID, "ticket_executed", "工單執行失敗", body, "ticket", ticket.ID)
+		body := fmt.Sprintf("Ticket %s execution failed", ticket.TicketNo)
+		h.sendInApp(ctx, ticket.SubmitterID, "ticket_executed", "Ticket Execution Failed", body, "ticket", ticket.ID)
 	}
 }
 
