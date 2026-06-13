@@ -456,7 +456,7 @@ describe('SQLEditorPage', () => {
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
-    expect(screen.getByText('沒有符合的 asset。')).toBeInTheDocument()
+    expect(screen.getByText('No matching assets.')).toBeInTheDocument()
   })
 
   it('只有在使用者手動展開 root connection 時才載入 metadata', async () => {
@@ -659,8 +659,8 @@ describe('SQLEditorPage', () => {
     expect(screen.getAllByText('SELECT 1;').length).toBeGreaterThan(1)
 
     fireEvent.click(screen.getByLabelText('Delete saved query Query 1'))
-    expect(await screen.findByText('刪除常用 SQL')).toBeInTheDocument()
-    const deleteButtons = screen.getAllByText('刪除')
+    expect(await screen.findByText('Delete Saved Query')).toBeInTheDocument()
+    const deleteButtons = screen.getAllByText('Delete')
     fireEvent.click(deleteButtons[deleteButtons.length - 1])
 
     await waitFor(() => {

@@ -141,7 +141,7 @@ function formatResultMetaLine(params: {
     return parts.join(' / ')
   }
   if (resultView === 'object-meta') {
-    return selectedTable ? `${selectedTable.schema}.${selectedTable.name}` : detailHint || '選擇資料表後查看結構'
+    return selectedTable ? `${selectedTable.schema}.${selectedTable.name}` : detailHint || 'Select a table to inspect its structure'
   }
   if (resultView === 'history') {
     return `${historyCount} entries`
@@ -565,7 +565,7 @@ export function SQLEditorPage() {
         setConnections(response.connections)
       } catch (error) {
         if (active) {
-          setConnectionsError(error instanceof ApiError ? error.message : '讀取資料庫連線失敗。')
+          setConnectionsError(error instanceof ApiError ? error.message : 'Failed to load database connections.')
         }
       } finally {
         if (active) {
@@ -592,7 +592,7 @@ export function SQLEditorPage() {
         }
       } catch (error) {
         if (active) {
-          pushToast(error instanceof ApiError ? error.message : '讀取查詢歷史失敗。', 'error')
+          pushToast(error instanceof ApiError ? error.message : 'Failed to load query history.', 'error')
         }
       }
     }
@@ -605,7 +605,7 @@ export function SQLEditorPage() {
         }
       } catch (error) {
         if (active) {
-          pushToast(error instanceof ApiError ? error.message : '讀取常用 SQL 失敗。', 'error')
+          pushToast(error instanceof ApiError ? error.message : 'Failed to load saved queries.', 'error')
         }
       }
     }
@@ -721,7 +721,7 @@ export function SQLEditorPage() {
         if (!active) {
           return
         }
-        setMetadataError(error instanceof ApiError ? error.message : '搜尋 metadata 失敗。')
+        setMetadataError(error instanceof ApiError ? error.message : 'Failed to search metadata.')
         setSearchTreeNodes([])
       })
       .finally(() => {
@@ -785,7 +785,7 @@ export function SQLEditorPage() {
         }
       } catch (error) {
         if (active) {
-          setMetadataError(error instanceof ApiError ? error.message : '讀取欄位失敗。')
+          setMetadataError(error instanceof ApiError ? error.message : 'Failed to load columns.')
           setColumns([])
           setDefinition(null)
         }
@@ -935,7 +935,7 @@ export function SQLEditorPage() {
         ),
       )
     } catch (error) {
-      setMetadataError(error instanceof ApiError ? error.message : '讀取 metadata 失敗。')
+      setMetadataError(error instanceof ApiError ? error.message : 'Failed to load metadata.')
       setExplorerNodes((current) =>
         updateAssetTreeNode(current, node.id, (target) => ({ ...target, loading: false, expanded: true })),
       )
@@ -967,7 +967,7 @@ export function SQLEditorPage() {
   async function handleRunQuery() {
     const sqlToExecute = selectedSQL.trim() || activeTab?.sql.trim() || ''
     if (!activeTab?.connectionId || !sqlToExecute) {
-      updateActiveTab({ error: '請先選擇資料庫連線並輸入查詢內容。' })
+      updateActiveTab({ error: 'Select a database connection and enter a query first.' })
       return
     }
 
@@ -990,9 +990,9 @@ export function SQLEditorPage() {
       })
       setResultView('result')
       void listQueryHistory(HISTORY_LIMIT).then((response) => setHistory(response.history)).catch(() => undefined)
-      pushToast('查詢已完成', 'success')
+      pushToast('Query completed.', 'success')
     } catch (error) {
-      const message = error instanceof ApiError ? error.message : '查詢執行失敗。'
+      const message = error instanceof ApiError ? error.message : 'Query execution failed.'
       updateActiveTab({
         error: message,
         result: null,
@@ -1015,9 +1015,9 @@ export function SQLEditorPage() {
         database_name: selectedDatabase || undefined,
         schema_name: activeConnection?.db_type === 'postgres' ? selectedSchema || undefined : undefined,
       })
-      pushToast(`已建立匯出工單 ${response.ticket_no}`, 'success', { placement: 'center' })
+      pushToast(`Export ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
     } catch (error) {
-      pushToast(error instanceof ApiError ? error.message : '建立匯出請求失敗。', 'error')
+      pushToast(error instanceof ApiError ? error.message : 'Failed to create export request.', 'error')
     } finally {
       setExportingTabId(null)
     }
@@ -1028,7 +1028,7 @@ export function SQLEditorPage() {
       return
     }
     if (activeConnection?.db_type !== 'mysql') {
-      pushToast('Sensitive Access 目前只支援 MySQL。', 'info', { placement: 'center' })
+      pushToast('Sensitive Access currently supports MySQL only.', 'info', { placement: 'center' })
       return
     }
 
@@ -1040,9 +1040,9 @@ export function SQLEditorPage() {
         schema_name: selectedSchema || undefined,
         approved_duration_minutes: sensitiveAccessDuration,
       })
-      pushToast(`已建立 Sensitive Access 工單 ${response.ticket_no}`, 'success', { placement: 'center' })
+      pushToast(`Sensitive Access ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
     } catch (error) {
-      pushToast(error instanceof ApiError ? error.message : '建立 Sensitive Access 工單失敗。', 'error')
+      pushToast(error instanceof ApiError ? error.message : 'Failed to create Sensitive Access ticket.', 'error')
     }
   }
 
@@ -1059,12 +1059,12 @@ export function SQLEditorPage() {
       (item.redis_db_index ?? null) === (activeConnection?.db_type === 'redis' && selectedDatabase ? Number(selectedDatabase) : null),
     )
     if (existing) {
-      pushToast('這條 SQL 已經在常用清單中。', 'info')
+      pushToast('This SQL is already in your saved queries.', 'info')
       return
     }
 
     if (savedQueries.length >= SAVED_QUERY_LIMIT) {
-      pushToast('常用 SQL 最多只能儲存 10 組。', 'error')
+      pushToast('You can save up to 10 queries.', 'error')
       return
     }
 
@@ -1079,10 +1079,10 @@ export function SQLEditorPage() {
       })
       setSavedQueries((current) => [created, ...current].slice(0, SAVED_QUERY_LIMIT))
     } catch (error) {
-      pushToast(error instanceof ApiError ? error.message : '儲存常用 SQL 失敗。', 'error')
+      pushToast(error instanceof ApiError ? error.message : 'Failed to save query.', 'error')
       return
     }
-    pushToast('已加入收藏', 'success')
+    pushToast('Saved query added.', 'success')
   }
 
   function applySavedQuery(entry: { connectionId: number; sql: string; label: string; database?: string | null; schema?: string | null; redisDbIndex?: number | null }) {
@@ -1246,10 +1246,10 @@ export function SQLEditorPage() {
 
   function metadataHint(dbType: string | undefined) {
     if (dbType === 'redis') {
-      return 'Redis 目前先提供 DB 0-15 選擇，key 瀏覽後續再補。'
+      return 'Redis currently supports DB 0-15 selection only. Key browsing is not available yet.'
     }
     if (dbType === 'postgres' && !selectedSchema) {
-      return '先選擇 schema。'
+      return 'Select a schema first.'
     }
     return ''
   }
@@ -1292,9 +1292,9 @@ export function SQLEditorPage() {
     try {
       await deleteSavedQuery(entry.id)
       setSavedQueries((current) => current.filter((item) => item.id !== entry.id))
-      pushToast('已刪除常用 SQL', 'success')
+      pushToast('Saved query deleted.', 'success')
     } catch (error) {
-      pushToast(error instanceof ApiError ? error.message : '刪除常用 SQL 失敗。', 'error')
+      pushToast(error instanceof ApiError ? error.message : 'Failed to delete saved query.', 'error')
     } finally {
       setSavedQueryToDelete(null)
     }
@@ -1340,8 +1340,7 @@ export function SQLEditorPage() {
                     </>
                   ) : (
                     <>
-                      <p className="text-[13px] font-semibold text-ink">Select asset</p>
-                      <p className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-faint">Choose connection</p>
+                      <p className="text-[13px] font-semibold text-ink">Select assets</p>
                     </>
                   )}
                 </div>
@@ -1356,13 +1355,13 @@ export function SQLEditorPage() {
                       aria-label="Asset Picker Search"
                       value={assetPickerSearch}
                       onChange={(event) => setAssetPickerSearch(event.target.value)}
-                      placeholder="Search assets"
+                      placeholder="Select assets"
                       className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
                     />
                   </label>
                   <div className="mt-2 max-h-[220px] overflow-y-auto">
                     {filteredConnections.length === 0 ? (
-                      <p className="px-2 py-2 text-[12px] text-muted">沒有符合的 asset。</p>
+                      <p className="px-2 py-2 text-[12px] text-muted">No matching assets.</p>
                     ) : (
                       filteredConnections.map((connection) => (
                         <button
@@ -1410,7 +1409,7 @@ export function SQLEditorPage() {
                 aria-label="Explorer Search"
                 value={explorerSearch}
                 onChange={(event) => setExplorerSearch(event.target.value)}
-                placeholder="Search assets"
+                placeholder="Search objects"
                 className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
               />
             </label>
@@ -1475,12 +1474,12 @@ export function SQLEditorPage() {
           </div>
 
           {!activeTab ? (
-            <LoadingBlock message="載入 editor 中…" className="m-4 min-h-[320px] rounded-xl border-border bg-panel" />
+            <LoadingBlock message="Loading editor..." className="m-4 min-h-[320px] rounded-xl border-border bg-panel" />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-4 py-3">
                 <div className="inline-flex h-10 min-w-[260px] flex-1 items-center rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-muted">
-                  <span className="truncate">{activePathLabel.length > 0 ? activePathLabel.join(' / ') : '從左側 Explorer 選擇資料源'}</span>
+                  <span className="truncate">{activePathLabel.length > 0 ? activePathLabel.join(' / ') : 'Select a data source from the Explorer'}</span>
                 </div>
                 <button
                   type="button"
@@ -1489,7 +1488,7 @@ export function SQLEditorPage() {
                   className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Play className="h-4 w-4" />
-                  {runningTabId === activeTab.id ? '執行中…' : 'Run Query'}
+                  {runningTabId === activeTab.id ? 'Running...' : 'Run Query'}
                 </button>
               </div>
 
@@ -1514,7 +1513,7 @@ export function SQLEditorPage() {
               <div className="flex min-h-0 flex-1 flex-col border-t border-border/80 px-4 py-3">
                 {hasSensitiveOverride || activeTab.result?.sensitive_override_active ? (
                   <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-                    <span className="font-semibold">Sensitive override active.</span> 此帳號的查詢與匯出結果會直接顯示未脫敏資料。
+                    <span className="font-semibold">Sensitive override active.</span> Queries and exports for this account will display unmasked data directly.
                   </div>
                 ) : null}
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1651,7 +1650,7 @@ export function SQLEditorPage() {
                       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Download className="h-4 w-4" />
-                      {exportingTabId === activeTab.id ? '匯出中…' : 'EXPORT'}
+                      {exportingTabId === activeTab.id ? 'Exporting...' : 'EXPORT'}
                     </button>
                   </div>
                 </div>
@@ -1674,7 +1673,7 @@ export function SQLEditorPage() {
                   {resultView === 'history' ? (
                     history.length === 0 ? (
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                        尚無查詢歷史。
+                        No query history yet.
                       </div>
                     ) : (
                       <div className="divide-y divide-border">
@@ -1703,7 +1702,7 @@ export function SQLEditorPage() {
                   ) : resultView === 'saved' ? (
                     savedQueries.length === 0 ? (
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                        尚無常用 SQL。
+                        No saved queries yet.
                       </div>
                     ) : (
                       <div className="divide-y divide-border">
@@ -1742,7 +1741,7 @@ export function SQLEditorPage() {
                   ) : resultView === 'object-meta' ? (
                     !selectedTable ? (
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                        {detailHint || '從左側資產樹點擊資料表後查看表結構。'}
+                        {detailHint || 'Select a table from the asset tree to inspect its structure.'}
                       </div>
                     ) : (
                       <div className="flex min-h-[180px] flex-col">
@@ -1771,11 +1770,11 @@ export function SQLEditorPage() {
                         {objectMetaTab === 'columns' ? (
                           columnsLoading ? (
                             <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                              載入表結構中…
+                              Loading table structure...
                             </div>
                           ) : columns.length === 0 ? (
                             <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                              尚無表結構資料。
+                              No table structure available.
                             </div>
                           ) : (
                             <table className="min-w-full border-collapse">
@@ -1801,11 +1800,11 @@ export function SQLEditorPage() {
                           )
                         ) : definitionLoading ? (
                           <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                            載入 Definition 中…
+                            Loading definition...
                           </div>
                         ) : !definition?.definition.trim() ? (
                           <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                            尚無 Definition 資料。
+                            No definition available.
                           </div>
                         ) : (
                           <pre className="overflow-x-auto px-4 py-3 font-mono text-[12px] leading-6 text-ink">{definition.definition}</pre>
@@ -1815,7 +1814,7 @@ export function SQLEditorPage() {
                   ) : resultView === 'vertical' ? (
                     !activeTab.result ? (
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                        尚未執行查詢。
+                        No query has been executed yet.
                       </div>
                     ) : (
                       <div className="divide-y divide-border">
@@ -1879,7 +1878,7 @@ export function SQLEditorPage() {
                     </table>
                   ) : (
                     <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                      尚未執行查詢。
+                        No query has been executed yet.
                     </div>
                   )}
                 </div>
@@ -1901,10 +1900,10 @@ export function SQLEditorPage() {
       </div>
       <ConfirmDialog
         open={savedQueryToDelete !== null}
-        title="刪除常用 SQL"
-        description={savedQueryToDelete ? `確認刪除「${savedQueryToDelete.label}」？刪除後若已達 10 筆上限，才可再新增其他常用 SQL。` : ''}
-        confirmLabel="刪除"
-        cancelLabel="取消"
+        title="Delete Saved Query"
+        description={savedQueryToDelete ? `Delete "${savedQueryToDelete.label}"? If you were at the 10-query limit, deleting it will free up a slot.` : ''}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
         tone="danger"
         onCancel={() => setSavedQueryToDelete(null)}
         onConfirm={() => {
