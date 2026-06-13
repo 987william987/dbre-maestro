@@ -52,7 +52,7 @@ export function LoginPage() {
       const nextPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
       navigate(nextPath ?? '/tickets', { replace: true })
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : '登入失敗，請稍後重試。')
+      setError(submitError instanceof Error ? submitError.message : 'Login failed. Please try again later.')
     } finally {
       setLoading(false)
     }
@@ -66,13 +66,13 @@ export function LoginPage() {
 
       <div className="w-full max-w-sm rounded-card border border-border bg-panel p-8 shadow-card">
         <div className="mb-6">
-          <h2 className="font-display text-2xl font-black tracking-tight text-ink">登入</h2>
-          <p className="mt-1.5 text-sm text-muted">輸入帳號與密碼以登入平台</p>
+          <h2 className="font-display text-2xl font-black tracking-tight text-ink">Sign in</h2>
+          <p className="mt-1.5 text-sm text-muted">Enter your username and password to log in</p>
         </div>
 
         <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-semibold text-ink">使用者名稱</span>
+            <span className="text-sm font-semibold text-ink">Username</span>
             <input
               className="h-10 rounded-control border border-border bg-panel px-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
               value={username}
@@ -84,13 +84,13 @@ export function LoginPage() {
           </label>
 
           <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-semibold text-ink">密碼</span>
+            <span className="text-sm font-semibold text-ink">Password</span>
             <div className="relative">
               <input
                 className="h-10 w-full rounded-control border border-border bg-panel px-3 pr-10 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="輸入你的密碼"
+                placeholder="Enter your password"
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="current-password"
                 disabled={loading}
@@ -117,15 +117,15 @@ export function LoginPage() {
             )}
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {loading ? '登入中…' : '登入'}
+            {loading ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
 
         {setupCompleted === false ? (
           <div className="mt-6 rounded-card border border-border bg-panel-soft px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">First Time?</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">First time?</p>
             <p className="mt-1 text-sm text-muted">
-              平台尚未完成初始設定，請先前往
+              The platform has not been initialized yet. Please complete the
               <button
                 type="button"
                 onClick={() => navigate('/setup')}
@@ -133,7 +133,7 @@ export function LoginPage() {
               >
                 Setup Wizard
               </button>
-              。
+              {' '}first.
             </p>
           </div>
         ) : null}

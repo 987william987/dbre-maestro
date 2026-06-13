@@ -122,3 +122,12 @@
 {"ts":"2026-06-13T15:23:32.251Z","cmd":"screenshot","args":"/tmp/setup-current.png","origin":"http://localhost:5173/login","durationMs":19,"status":"ok","hasCookies":false,"mode":"launched"}
 {"ts":"2026-06-13T15:28:20.532Z","cmd":"load-html","args":"/tmp/setup-preview.html","origin":"http://localhost:5173/login","durationMs":8,"status":"ok","hasCookies":false,"mode":"launched"}
 {"ts":"2026-06-13T15:28:20.632Z","cmd":"screenshot","args":"/tmp/setup-step0.png","origin":"http://localhost:5173/login","durationMs":18,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:30:56.277Z","cmd":"viewport","args":"1700x900","origin":"http://localhost:5173/login","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:30:56.329Z","cmd":"load-html","args":"/tmp/setup-all-steps.html","origin":"http://localhost:5173/login","durationMs":7,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:30:56.477Z","cmd":"screenshot","args":"/tmp/setup-preview-all.png","origin":"http://localhost:5173/login","durationMs":58,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:43:40.944Z","cmd":"viewport","args":"1280x720","origin":"http://localhost:5173/login","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:43:41.044Z","cmd":"goto","args":"http://localhost:5173/login","origin":"http://localhost:5173/login","durationMs":52,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:43:41.111Z","cmd":"screenshot","args":"/tmp/login-en.png","origin":"http://localhost:5173/login","durationMs":20,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:45:02.444Z","cmd":"viewport","args":"1700x860","origin":"http://localhost:5173/login","durationMs":4,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:45:02.495Z","cmd":"load-html","args":"/tmp/setup-en.html","origin":"http://localhost:5173/login","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:45:02.571Z","cmd":"screenshot","args":"/tmp/setup-en.png","origin":"http://localhost:5173/login","durationMs":27,"status":"ok","hasCookies":false,"mode":"launched"}

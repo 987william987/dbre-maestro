@@ -24,13 +24,13 @@ interface PasswordRule {
 }
 
 const PASSWORD_RULES: PasswordRule[] = [
-  { label: '至少 8 個字元',   test: p => p.length >= 8 },
-  { label: '包含大寫字母',     test: p => /[A-Z]/.test(p) },
-  { label: '包含小寫字母',     test: p => /[a-z]/.test(p) },
-  { label: '包含數字',         test: p => /[0-9]/.test(p) },
+  { label: 'At least 8 characters', test: p => p.length >= 8 },
+  { label: 'Uppercase letter',       test: p => /[A-Z]/.test(p) },
+  { label: 'Lowercase letter',       test: p => /[a-z]/.test(p) },
+  { label: 'Number',                 test: p => /[0-9]/.test(p) },
 ]
 
-const STEP_LABELS = ['歡迎', '管理員帳號', '通知設定', '完成'] as const
+const STEP_LABELS = ['Welcome', 'Admin account', 'Notifications', 'Done'] as const
 
 // ────────────────────────────────────────────────────────────────────────────
 // Sub-components
@@ -127,18 +127,18 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
 
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-display font-black text-ink tracking-tight">
-          歡迎使用 DBRE Maestro
+          Welcome to DBRE Maestro
         </h1>
         <p className="text-muted text-sm max-w-sm">
-          資料庫安全治理平台——讓工單審核、查詢控制與稽核日誌統一管理。
+          Database security governance — unified ticket review, query control, and audit logging.
         </p>
       </div>
 
       <ul className="flex flex-col gap-2 text-left text-sm text-muted w-full max-w-xs">
         {[
-          '集中管理 DDL/DML 工單審核流程',
-          '查詢結果自動脫敏，保護敏感欄位',
-          '完整稽核日誌，所有操作皆有記錄',
+          'Centralized DDL/DML ticket review workflow',
+          'Automatic query masking for sensitive columns',
+          'Full audit log — every action is recorded',
         ].map((item, i) => (
           <li key={i} className="flex items-start gap-2">
             <CheckCircle2 className="w-4 h-4 text-success mt-0.5 shrink-0" strokeWidth={2.5} />
@@ -148,7 +148,7 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
       </ul>
 
       <Button className="w-full max-w-xs h-10 text-base" onClick={onNext}>
-        開始設定 →
+        Get started →
       </Button>
     </div>
   )
@@ -185,24 +185,24 @@ function AccountStep({
 
   const errors = {
     username: (() => {
-      if (!form.username) return '請輸入使用者名稱'
-      if (form.username.length < 3 || form.username.length > 64) return '3–64 個字元'
-      if (!/^[a-zA-Z0-9_]+$/.test(form.username)) return '僅允許英文字母、數字和底線'
+      if (!form.username) return 'Username is required'
+      if (form.username.length < 3 || form.username.length > 64) return 'Must be 3–64 characters'
+      if (!/^[a-zA-Z0-9_]+$/.test(form.username)) return 'Only letters, numbers, and underscores'
       return ''
     })(),
     email: (() => {
-      if (!form.email) return '請輸入 Email'
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) return 'Email 格式不正確'
+      if (!form.email) return 'Email is required'
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) return 'Invalid email address'
       return ''
     })(),
     password: (() => {
       const failing = PASSWORD_RULES.filter(r => !r.test(form.password))
-      if (failing.length > 0) return `密碼需${failing.map(r => r.label).join('、')}`
+      if (failing.length > 0) return `Password must include: ${failing.map(r => r.label).join(', ')}`
       return ''
     })(),
     confirmPassword: (() => {
-      if (!form.confirmPassword) return '請再次輸入密碼'
-      if (form.confirmPassword !== form.password) return '兩次密碼不一致'
+      if (!form.confirmPassword) return 'Please confirm your password'
+      if (form.confirmPassword !== form.password) return 'Passwords do not match'
       return ''
     })(),
   }
@@ -226,17 +226,17 @@ function AccountStep({
         }),
       })
       if (res.status === 409) {
-        setApiError('平台已完成設定，請直接登入。')
+        setApiError('The platform is already set up. Please log in directly.')
         return
       }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        setApiError((body as { error?: string }).error ?? '建立帳號失敗，請重試。')
+        setApiError((body as { error?: string }).error ?? 'Failed to create account. Please try again.')
         return
       }
       onNext(form.username)
     } catch {
-      setApiError('無法連接伺服器，請確認後端服務已啟動。')
+      setApiError('Cannot reach the server. Please ensure the backend service is running.')
     } finally {
       setLoading(false)
     }
@@ -245,11 +245,11 @@ function AccountStep({
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h2 className="text-xl font-display font-black text-ink">設定管理員帳號</h2>
-        <p className="text-xs text-muted mt-1">這是平台唯一的 Admin 帳號，用於首次登入後管理其他使用者。</p>
+        <h2 className="text-xl font-display font-black text-ink">Set up admin account</h2>
+        <p className="text-xs text-muted mt-1">This is the platform's sole Admin account, used to manage other users after first login.</p>
       </div>
 
-      <FieldGroup label="使用者名稱" error={touched.username ? errors.username : ''}>
+      <FieldGroup label="Username" error={touched.username ? errors.username : ''}>
         <Input
           placeholder="e.g. admin"
           value={form.username}
@@ -270,11 +270,11 @@ function AccountStep({
         />
       </FieldGroup>
 
-      <FieldGroup label="密碼" error={touched.password ? errors.password : ''}>
+      <FieldGroup label="Password" error={touched.password ? errors.password : ''}>
         <div className="relative">
           <Input
             type={showPassword ? 'text' : 'password'}
-            placeholder="至少 8 位，含大小寫與數字"
+            placeholder="Min. 8 chars with upper, lower & number"
             value={form.password}
             onChange={update('password')}
             onBlur={blur('password')}
@@ -289,7 +289,6 @@ function AccountStep({
             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         </div>
-        {/* Inline password strength requirements */}
         {form.password && (
           <div className="grid grid-cols-2 gap-1 mt-1">
             {PASSWORD_RULES.map(rule => (
@@ -308,10 +307,10 @@ function AccountStep({
         )}
       </FieldGroup>
 
-      <FieldGroup label="確認密碼" error={touched.confirmPassword ? errors.confirmPassword : ''}>
+      <FieldGroup label="Confirm password" error={touched.confirmPassword ? errors.confirmPassword : ''}>
         <Input
           type={showPassword ? 'text' : 'password'}
-          placeholder="再次輸入密碼"
+          placeholder="Re-enter your password"
           value={form.confirmPassword}
           onChange={update('confirmPassword')}
           onBlur={blur('confirmPassword')}
@@ -326,11 +325,11 @@ function AccountStep({
       )}
 
       <div className="flex justify-between pt-1">
-        <Button variant="ghost" onClick={onBack}>← 返回</Button>
+        <Button variant="ghost" onClick={onBack}>← Back</Button>
         <Button onClick={handleSubmit} disabled={loading}>
           {loading
-            ? <><Loader2 className="w-4 h-4 animate-spin" /> 建立中...</>
-            : '建立帳號 →'
+            ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating…</>
+            : 'Create account →'
           }
         </Button>
       </div>
@@ -348,8 +347,8 @@ function NotificationsStep({
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h2 className="text-xl font-display font-black text-ink">通知設定 <span className="text-sm font-sans font-normal text-muted">（選填）</span></h2>
-        <p className="text-xs text-muted mt-1">工單狀態變更時，透過 Lark Bot 通知相關人員。</p>
+        <h2 className="text-xl font-display font-black text-ink">Notifications <span className="text-sm font-sans font-normal text-muted">(optional)</span></h2>
+        <p className="text-xs text-muted mt-1">Notify team members via Lark Bot when ticket status changes.</p>
       </div>
 
       <div className="rounded-card border border-border bg-panel-soft p-4 flex flex-col gap-3">
@@ -362,7 +361,7 @@ function NotificationsStep({
           <div>
             <p className="text-sm font-semibold text-ink">Lark Webhook</p>
             <p className="text-xs text-muted mt-0.5">
-              在 Lark 群組中新增 Incoming Webhook Bot，取得 Webhook URL 後設定至環境變數。
+              Add an Incoming Webhook Bot to your Lark group, then set the Webhook URL as an environment variable.
             </p>
           </div>
         </div>
@@ -372,13 +371,13 @@ function NotificationsStep({
         </div>
 
         <p className="text-[11px] text-muted">
-          在 <code className="font-mono bg-page px-1 rounded">.env</code> 檔案中加入此變數，重啟服務後生效。也可於稍後在伺服器設定中調整。
+          Add this variable to your <code className="font-mono bg-page px-1 rounded">.env</code> file and restart the service. You can also configure it later in server settings.
         </p>
       </div>
 
       <div className="flex justify-between pt-1">
-        <Button variant="ghost" onClick={onBack}>← 返回</Button>
-        <Button onClick={onNext}>完成設定 →</Button>
+        <Button variant="ghost" onClick={onBack}>← Back</Button>
+        <Button onClick={onNext}>Finish setup →</Button>
       </div>
     </div>
   )
@@ -394,20 +393,20 @@ function CompleteStep({ username }: { username: string }) {
       </div>
 
       <div className="flex flex-col gap-2">
-        <h2 className="text-2xl font-display font-black text-ink">設定完成！</h2>
+        <h2 className="text-2xl font-display font-black text-ink">Setup complete!</h2>
         <p className="text-muted text-sm max-w-xs">
-          管理員帳號 <code className="font-mono bg-page px-1.5 py-0.5 rounded-pill text-ink text-xs">{username}</code> 已建立。
-          現在可以登入開始使用 DBRE Maestro。
+          Admin account <code className="font-mono bg-page px-1.5 py-0.5 rounded-pill text-ink text-xs">{username}</code> has been created.
+          You can now sign in and start using DBRE Maestro.
         </p>
       </div>
 
       <div className="flex flex-col gap-2 text-left text-xs text-muted bg-panel-soft border border-border rounded-card px-4 py-3 w-full max-w-xs">
-        <p className="font-semibold text-ink text-[11px] uppercase tracking-wide">登入後的第一步</p>
+        <p className="font-semibold text-ink text-[11px] uppercase tracking-wide">First steps after login</p>
         <ul className="flex flex-col gap-1">
           {[
-            '邀請 DBA / 工單審核者加入',
-            '在「資料庫資產」頁面新增目標資料庫',
-            '設定敏感欄位脫敏規則',
+            'Invite DBAs and ticket reviewers',
+            'Add target databases in the Database Assets page',
+            'Configure masking rules for sensitive columns',
           ].map((tip, i) => (
             <li key={i} className="flex items-start gap-1.5">
               <span className="text-faint mt-0.5">›</span> {tip}
@@ -417,7 +416,7 @@ function CompleteStep({ username }: { username: string }) {
       </div>
 
       <Button className="w-full max-w-xs h-10 text-base" onClick={() => navigate('/login')}>
-        前往登入 →
+        Go to login →
       </Button>
     </div>
   )
@@ -463,8 +462,8 @@ export function SetupWizard() {
           <h1 className="font-display text-2xl font-black tracking-tight text-ink">DBRE Maestro</h1>
         </div>
         <div className="w-full max-w-md rounded-card border border-border bg-panel px-8 py-6 shadow-card">
-          <p className="text-sm font-semibold text-ink">正在檢查平台初始化狀態…</p>
-          <p className="mt-1 text-xs text-muted">請稍候，系統正在確認是否仍可進入 Setup Wizard。</p>
+          <p className="text-sm font-semibold text-ink">Checking platform status…</p>
+          <p className="mt-1 text-xs text-muted">Please wait while the system verifies whether the Setup Wizard is still available.</p>
         </div>
       </div>
     )
