@@ -54,6 +54,7 @@ function buildDetail(ticket: Ticket, overrides?: Partial<TicketDetail>): TicketD
     ticket,
     executions: [],
     scopes: [],
+    export_request: null,
     capabilities: {
       can_review: false,
       can_revoke: false,

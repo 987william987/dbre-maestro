@@ -608,6 +608,9 @@ export function AppShell() {
 
           <nav className="flex gap-1.5 overflow-x-auto px-4 pb-3 pt-2 lg:hidden">
             {navItems.map((item) => {
+              if (!item.to) {
+                return null
+              }
               const Icon = item.icon
               return (
                 <NavLink

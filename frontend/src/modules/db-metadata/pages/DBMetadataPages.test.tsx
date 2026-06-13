@@ -44,6 +44,7 @@ describe('DBMetadata pages', () => {
         {
           id: 1,
           snapshot_at: '2026-06-12T10:00:00Z',
+          provider: 'aws',
           engine: 'mysql',
           engine_version: '8.0',
           region: 'ap-northeast-1',
@@ -59,6 +60,7 @@ describe('DBMetadata pages', () => {
         {
           id: 2,
           snapshot_at: '2026-06-12T10:05:00Z',
+          provider: 'aws',
           engine: 'postgres',
           engine_version: '16',
           region: 'ap-northeast-1',
