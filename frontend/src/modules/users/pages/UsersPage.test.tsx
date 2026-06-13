@@ -39,6 +39,11 @@ const mockedGetAuthGroup = vi.mocked(getAuthGroup)
 const mockedCreateAuthGroup = vi.mocked(createAuthGroup)
 const mockedPatchAuthGroup = vi.mocked(patchAuthGroup)
 
+function selectOption(label: string, option: string) {
+  fireEvent.click(screen.getByRole('button', { name: label }))
+  fireEvent.click(screen.getByRole('option', { name: option }))
+}
+
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -313,7 +318,7 @@ describe('UsersPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Create Auth Group' }))
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ops' } })
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'operations' } })
-    fireEvent.change(screen.getByLabelText('Auth Group user selection'), { target: { value: '7' } })
+    selectOption('Auth Group user selection', 'amy')
     fireEvent.click(screen.getByRole('button', { name: 'Add User' }))
     fireEvent.click(screen.getAllByRole('button', { name: 'Add' })[0])
     fireEvent.change(screen.getByPlaceholderText('Search connection name, host, database'), { target: { value: 'analytics' } })
@@ -411,5 +416,31 @@ describe('UsersPage', () => {
     await waitFor(() => {
       expect(mockedDeleteUser).toHaveBeenCalledWith(6)
     })
+  })
+
+  it('paginates the users list', async () => {
+    mockedListUsers.mockResolvedValue({
+      users: Array.from({ length: 21 }, (_, index) => ({
+        id: index + 1,
+        username: `user-${index + 1}`,
+        email: `user-${index + 1}@example.com`,
+        auth_groups: [],
+        db_connection_ids: [],
+        protected: false,
+        is_active: true,
+        created_at: '2026-06-10T00:00:00Z',
+        updated_at: '2026-06-10T00:00:00Z',
+      })),
+    })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('user-1@example.com')).toBeInTheDocument())
+    expect(screen.queryByText('user-21@example.com')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await waitFor(() => expect(screen.getByText('user-21@example.com')).toBeInTheDocument())
+    expect(screen.queryByText('user-1@example.com')).not.toBeInTheDocument()
   })
 })

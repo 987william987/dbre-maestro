@@ -65,3 +65,10 @@ export type MetadataColumn = {
   default?: string
   comment: string
 }
+
+export type MetadataDefinition = {
+  database?: string
+  schema: string
+  table: string
+  definition: string
+}

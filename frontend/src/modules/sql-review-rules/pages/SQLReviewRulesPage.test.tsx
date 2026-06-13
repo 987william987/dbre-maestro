@@ -32,7 +32,7 @@ describe('SQLReviewRulesPage', () => {
     })
   })
 
-  it('可以更新 sql review rule', async () => {
+  it('updates a SQL review rule', async () => {
     mockedPatchSQLReviewRule.mockResolvedValue({
       id: 1,
       rule_name: 'high_row_count',
@@ -53,8 +53,8 @@ describe('SQLReviewRulesPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'SQL Review Rules' })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('checkbox'))
-    fireEvent.change(screen.getByPlaceholderText('threshold'), { target: { value: '5000' } })
+    fireEvent.click(screen.getByRole('switch'))
+    fireEvent.change(screen.getByPlaceholderText('Row limit'), { target: { value: '5000' } })
     fireEvent.click(screen.getByText('Save'))
 
     await waitFor(() => {
@@ -63,5 +63,72 @@ describe('SQLReviewRulesPage', () => {
         threshold: 5000,
       })
     })
+  })
+
+  it('paginates the SQL review rule list', async () => {
+    mockedListSQLReviewRules.mockResolvedValue({
+      rules: Array.from({ length: 21 }, (_, index) => ({
+        id: index + 1,
+        rule_name: `rule_${index + 1}`,
+        enabled: true,
+        threshold: 1000 + index,
+        description: `Rule ${index + 1}`,
+        updated_by: 1,
+        updated_at: '2026-01-01T00:00:00Z',
+      })),
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLReviewRulesPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('rule_1')).toBeInTheDocument()
+    expect(screen.queryByText('rule_21')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await waitFor(() => expect(screen.getByText('rule_21')).toBeInTheDocument())
+    expect(screen.queryByText('rule_1')).not.toBeInTheDocument()
+  })
+
+  it('only allows threshold editing for high_row_count', async () => {
+    mockedListSQLReviewRules.mockResolvedValue({
+      rules: [
+        {
+          id: 1,
+          rule_name: 'ddl_no_comment',
+          enabled: true,
+          threshold: null,
+          description: 'legacy text',
+          updated_by: 1,
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 2,
+          rule_name: 'high_row_count',
+          enabled: true,
+          threshold: 1000,
+          description: 'legacy text',
+          updated_by: 1,
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLReviewRulesPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Require CREATE TABLE statements to include a table comment.')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('1000')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('N/A')).toBeDisabled()
   })
 })

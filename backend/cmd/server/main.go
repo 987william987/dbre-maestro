@@ -280,6 +280,7 @@ func main() {
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSQLEditorQuery).Get("/", metadataH.Tables)
 			r.With(requireSQLEditorQuery).Get("/{schema}/{table}/columns", metadataH.Columns)
+			r.With(requireSQLEditorQuery).Get("/{schema}/{table}/definition", metadataH.Definition)
 		})
 
 		r.Route("/tickets", func(r chi.Router) {

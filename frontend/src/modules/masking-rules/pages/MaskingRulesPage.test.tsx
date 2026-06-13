@@ -58,6 +58,11 @@ const mockedListDBConnections = vi.mocked(listDBConnections)
 const mockedListMetadata = vi.mocked(listMetadata)
 const mockedListMetadataColumns = vi.mocked(listMetadataColumns)
 
+function selectOption(label: string, option: string) {
+  fireEvent.click(screen.getByRole('button', { name: label }))
+  fireEvent.click(screen.getByRole('option', { name: option }))
+}
+
 const rule = {
   id: 2,
   column_name: 'phone',
@@ -123,7 +128,7 @@ describe('MaskingRulesPage', () => {
     })
   })
 
-  it('可建立 global masking rule', async () => {
+  it('creates a global masking rule', async () => {
     mockedListMaskingRules
       .mockResolvedValueOnce({ rules: [] })
       .mockResolvedValueOnce({ rules: [rule] })
@@ -132,9 +137,9 @@ describe('MaskingRulesPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Masking Rules' })).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '新增規則' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New Rule' }))
     fireEvent.change(screen.getByLabelText('Column Name'), { target: { value: 'email' } })
-    fireEvent.click(screen.getByRole('button', { name: '建立規則' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }))
 
     await waitFor(() => {
       expect(mockedCreateMaskingRule).toHaveBeenCalledWith({
@@ -144,7 +149,7 @@ describe('MaskingRulesPage', () => {
     })
   })
 
-  it('可建立 whitelist', async () => {
+  it('creates a whitelist entry', async () => {
     mockedListMaskingWhitelists
       .mockResolvedValueOnce({ whitelist: [] })
       .mockResolvedValueOnce({ whitelist: [whitelist] })
@@ -165,15 +170,15 @@ describe('MaskingRulesPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByText('Unmask Whitelist')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: '新增白名單' }))
-    fireEvent.change(screen.getByLabelText('Connection'), { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'New Whitelist' }))
+    selectOption('Connection', 'analytics-db')
     await waitFor(() => expect(mockedListMetadata).toHaveBeenCalledWith(1))
-    fireEvent.change(screen.getByLabelText('Database'), { target: { value: 'analytics' } })
+    selectOption('Database', 'analytics')
     await waitFor(() => expect(mockedListMetadata).toHaveBeenCalledWith(1, { database: 'analytics' }))
-    fireEvent.change(screen.getByLabelText('Table'), { target: { value: 'tickets' } })
+    selectOption('Table', 'tickets')
     await waitFor(() => expect(mockedListMetadataColumns).toHaveBeenCalledWith(1, 'analytics', 'tickets', 'analytics'))
-    fireEvent.change(screen.getByLabelText('Column'), { target: { value: 'email' } })
-    fireEvent.click(screen.getByRole('button', { name: '建立白名單' }))
+    selectOption('Column', 'email')
+    fireEvent.click(screen.getByRole('button', { name: 'Create Whitelist' }))
 
     await waitFor(() => {
       expect(mockedCreateMaskingWhitelist).toHaveBeenCalledWith({
@@ -185,7 +190,7 @@ describe('MaskingRulesPage', () => {
     })
   })
 
-  it('確認刪除後會呼叫 delete rule API', async () => {
+  it('calls delete rule API after confirmation', async () => {
     mockedListMaskingRules
       .mockResolvedValueOnce({ rules: [rule] })
       .mockResolvedValueOnce({ rules: [] })
@@ -194,11 +199,33 @@ describe('MaskingRulesPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByText('phone')).toBeInTheDocument())
-    fireEvent.click(screen.getAllByRole('button', { name: '刪除' })[0])
-    fireEvent.click(screen.getByRole('button', { name: '確認刪除' }))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Delete' }))
 
     await waitFor(() => {
       expect(mockedDeleteMaskingRule).toHaveBeenCalledWith(2)
     })
+  })
+
+  it('paginates the global masking rule list', async () => {
+    mockedListMaskingRules.mockResolvedValue({
+      rules: Array.from({ length: 21 }, (_, index) => ({
+        id: index + 1,
+        column_name: `column_${String(index + 1).padStart(2, '0')}`,
+        mask_mode: 'partial' as const,
+        created_by: 1,
+        created_at: '2026-01-01T00:00:00Z',
+      })),
+    })
+
+    renderPage()
+
+    expect(await screen.findByText('column_01')).toBeInTheDocument()
+    expect(screen.queryByText('column_21')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await waitFor(() => expect(screen.getByText('column_21')).toBeInTheDocument())
+    expect(screen.queryByText('column_01')).not.toBeInTheDocument()
   })
 })

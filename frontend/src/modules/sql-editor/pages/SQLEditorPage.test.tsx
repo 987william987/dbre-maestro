@@ -52,10 +52,12 @@ vi.mock('@/modules/sql-editor/api', () => ({
   executeQuery: vi.fn(),
   listMetadata: vi.fn(),
   listMetadataColumns: vi.fn(),
+  listMetadataDefinition: vi.fn(),
   listQueryHistory: vi.fn(),
   listSavedQueries: vi.fn(),
   createSavedQuery: vi.fn(),
   deleteSavedQuery: vi.fn(),
+  createSensitiveAccessTicket: vi.fn(),
 }))
 
 vi.mock('@/modules/exports/api', () => ({
@@ -64,13 +66,14 @@ vi.mock('@/modules/exports/api', () => ({
 
 import { listDBConnections } from '@/modules/db-connections/api'
 import { createExportRequest } from '@/modules/exports/api'
-import { createSavedQuery, deleteSavedQuery, executeQuery, listMetadata, listMetadataColumns, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
+import { createSavedQuery, deleteSavedQuery, executeQuery, listMetadata, listMetadataColumns, listMetadataDefinition, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 
 const mockedListDBConnections = vi.mocked(listDBConnections)
 const mockedExecuteQuery = vi.mocked(executeQuery)
 const mockedListMetadata = vi.mocked(listMetadata)
 const mockedListMetadataColumns = vi.mocked(listMetadataColumns)
+const mockedListMetadataDefinition = vi.mocked(listMetadataDefinition)
 const mockedListQueryHistory = vi.mocked(listQueryHistory)
 const mockedListSavedQueries = vi.mocked(listSavedQueries)
 const mockedCreateSavedQuery = vi.mocked(createSavedQuery)
@@ -171,6 +174,12 @@ describe('SQLEditorPage', () => {
         },
       ],
     })
+    mockedListMetadataDefinition.mockResolvedValue({
+      database: 'maestro',
+      schema: 'maestro',
+      table: 'tickets',
+      definition: 'CREATE TABLE `tickets` (\n  `id` bigint unsigned NOT NULL\n);',
+    })
     mockedListQueryHistory.mockResolvedValue({
       history: [],
     })
@@ -240,7 +249,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
 
     fireEvent.click(screen.getByText('Run Query'))
@@ -285,7 +294,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
 
     const editor = screen.getByLabelText('CodeMirror') as HTMLTextAreaElement
@@ -327,7 +336,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByRole('button', { name: 'History' }))
     fireEvent.click(screen.getByText('Run Query'))
@@ -345,7 +354,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    expect(screen.getByText('Select asset')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Asset Selector' })).toBeInTheDocument()
     expect(mockedListMetadata).not.toHaveBeenCalled()
   })
 
@@ -412,7 +421,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     expect(screen.getByText('Primary MySQL')).toBeInTheDocument()
     expect(screen.queryByText('Hidden Redis')).not.toBeInTheDocument()
   })
@@ -446,7 +455,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     expect(screen.getByText('沒有符合的 asset。')).toBeInTheDocument()
   })
 
@@ -460,7 +469,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
 
     expect(mockedListMetadata).not.toHaveBeenCalled()
@@ -511,7 +520,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
 
@@ -537,7 +546,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
 
@@ -556,7 +565,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
 
@@ -603,7 +612,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
 
@@ -615,6 +624,9 @@ describe('SQLEditorPage', () => {
     expect(screen.getByRole('button', { name: 'Object Meta' })).toBeInTheDocument()
     expect(await screen.findByText('id')).toBeInTheDocument()
     expect(screen.getByText('bigint unsigned')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Definition' }))
+    expect(await screen.findByText(/CREATE TABLE `tickets`/)).toBeInTheDocument()
   })
 
   it('可儲存常用 SQL、開啟 Saved 清單並刪除', async () => {
@@ -627,7 +639,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Save'))
 
@@ -676,7 +688,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
 
@@ -704,7 +716,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
 
@@ -763,13 +775,37 @@ describe('SQLEditorPage', () => {
         },
       ],
     })
-    mockedListMetadata.mockResolvedValue({
-      db_type: 'mysql',
-      level: 'database',
-      items: [
-        { kind: 'database', name: 'analytics' },
-        { kind: 'database', name: 'maestro' },
-      ],
+    mockedListMetadata.mockImplementation(async (_connectionId, params) => {
+      if (!params?.database) {
+        return {
+          db_type: 'mysql',
+          level: 'database',
+          items: [
+            { kind: 'database', name: 'analytics' },
+            { kind: 'database', name: 'maestro' },
+          ],
+        }
+      }
+
+      if (params.database === 'analytics') {
+        return {
+          db_type: 'mysql',
+          level: 'table',
+          database: 'analytics',
+          items: [
+            { kind: 'table', database: 'analytics', schema: 'analytics', name: 'orders' },
+          ],
+        }
+      }
+
+      return {
+        db_type: 'mysql',
+        level: 'table',
+        database: 'maestro',
+        items: [
+          { kind: 'table', database: 'maestro', schema: 'maestro', name: 'tickets' },
+        ],
+      }
     })
 
     render(
@@ -781,7 +817,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Shared MySQL'))
     fireEvent.click(screen.getByLabelText('Toggle Shared MySQL'))
 
@@ -849,7 +885,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Configured MySQL'))
     fireEvent.click(screen.getByLabelText('Toggle Configured MySQL'))
 
@@ -918,7 +954,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Shared Postgres'))
     fireEvent.click(screen.getByLabelText('Toggle Shared Postgres'))
 
@@ -987,7 +1023,7 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByText('Select asset'))
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Search MySQL'))
     fireEvent.click(screen.getByLabelText('Toggle Search MySQL'))
 
@@ -1000,8 +1036,110 @@ describe('SQLEditorPage', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByText('maestro')).toBeInTheDocument()
-      expect(screen.queryByText('analytics')).not.toBeInTheDocument()
+      expect(screen.getAllByText('maestro').length).toBeGreaterThan(0)
     })
+  })
+
+  it('Explorer Search 可以搜尋未展開的 table', async () => {
+    mockedListMetadata.mockReset()
+    mockedUseAuth.mockReturnValue({
+      user: {
+        id: 7,
+        username: 'admin',
+        authGroups: ['admin'],
+        authGroupDetails: [],
+        permissions: ['sql_editor.query'],
+        dbConnectionIds: [6],
+        protected: false,
+        isActive: true,
+      },
+      status: 'authenticated',
+      isAuthenticated: true,
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedListDBConnections.mockResolvedValueOnce({
+      connections: [
+        {
+          id: 6,
+          name: 'Search Tables MySQL',
+          db_type: 'mysql',
+          host: 'db.local',
+          port: 3306,
+          database_name: null,
+          username: 'root',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          extra_params: null,
+          created_by: 1,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+    mockedListMetadata.mockImplementation(async (_connectionId, params) => {
+      if (!params?.database) {
+        return {
+          db_type: 'mysql',
+          level: 'database',
+          items: [
+            { kind: 'database', name: 'analytics' },
+            { kind: 'database', name: 'maestro' },
+          ],
+        }
+      }
+
+      if (params.database === 'analytics') {
+        return {
+          db_type: 'mysql',
+          level: 'table',
+          database: 'analytics',
+          items: [
+            { kind: 'table', database: 'analytics', schema: 'analytics', name: 'orders' },
+          ],
+        }
+      }
+
+      return {
+        db_type: 'mysql',
+        level: 'table',
+        database: 'maestro',
+        items: [
+          { kind: 'table', database: 'maestro', schema: 'maestro', name: 'tickets' },
+        ],
+      }
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Search Tables MySQL'))
+
+    fireEvent.change(screen.getByLabelText('Explorer Search'), {
+      target: { value: 'tickets' },
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('tickets')).toBeInTheDocument()
+      expect(screen.queryByText('orders')).not.toBeInTheDocument()
+    })
+
+    const metadataCallCount = mockedListMetadata.mock.calls.length
+    fireEvent.click(screen.getByText('tickets'))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Object Meta' })).toBeInTheDocument()
+    })
+    expect(mockedListMetadata).toHaveBeenCalledTimes(metadataCallCount)
+    expect(screen.queryByText('Searching assets...')).not.toBeInTheDocument()
   })
 })

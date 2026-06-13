@@ -24,12 +24,15 @@ import {
   X,
   Workflow,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { MetadataColumn, MetadataItem, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
+import type { MetadataColumn, MetadataDefinition, MetadataItem, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
+import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
+import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
@@ -42,6 +45,7 @@ import {
   executeQuery,
   listMetadata,
   listMetadataColumns,
+  listMetadataDefinition,
   listQueryHistory,
   listSavedQueries,
 } from '@/modules/sql-editor/api'
@@ -201,6 +205,150 @@ function createConnectionNode(connection: DBConnection, activeConnectionId: numb
   }
 }
 
+function formatConnectionBadge(connection: DBConnection) {
+  return connection.db_type.toUpperCase()
+}
+
+function matchesAssetKeyword(node: {
+  label: string
+  meta?: string
+  database?: string
+  schema?: string
+}, keyword: string) {
+  const loweredKeyword = keyword.trim().toLowerCase()
+  if (!loweredKeyword) {
+    return true
+  }
+
+  return (
+    node.label.toLowerCase().includes(loweredKeyword) ||
+    (node.meta ? node.meta.toLowerCase().includes(loweredKeyword) : false) ||
+    (node.database ? node.database.toLowerCase().includes(loweredKeyword) : false) ||
+    (node.schema ? node.schema.toLowerCase().includes(loweredKeyword) : false)
+  )
+}
+
+async function buildSearchNodes(connection: DBConnection, keyword: string): Promise<AssetTreeNode[]> {
+  const rootNode = createConnectionNode(connection, connection.id)
+  rootNode.expanded = true
+  rootNode.loaded = true
+
+  if (connection.db_type === 'redis') {
+    const response = await listMetadata(connection.id)
+    rootNode.children = response.items
+      .map((item) => ({
+        id: `redis-db-${connection.id}-${item.name}`,
+        kind: 'redis_db' as const,
+        connectionId: connection.id,
+        label: `DB ${item.name}`,
+        database: item.name,
+        schema: item.name,
+        active: false,
+        selectable: true,
+        expanded: false,
+        loaded: true,
+        loading: false,
+        item,
+        children: [],
+      }))
+      .filter((node) => matchesAssetKeyword(node, keyword))
+
+    return rootNode.children.length > 0 || matchesAssetKeyword(rootNode, keyword) ? [rootNode] : []
+  }
+
+  const databaseResponse = await listMetadata(connection.id)
+  const databaseNodes = await Promise.all(databaseResponse.items.map(async (databaseItem) => {
+    const databaseNode: AssetTreeNode = {
+      id: `database-${connection.id}-${databaseItem.name}`,
+      kind: 'database',
+      connectionId: connection.id,
+      label: databaseItem.name,
+      database: databaseItem.name,
+      schema: databaseItem.schema,
+      active: false,
+      selectable: true,
+      expanded: true,
+      loaded: true,
+      loading: false,
+      item: databaseItem,
+      children: [],
+    }
+
+    if (connection.db_type === 'postgres') {
+      const schemaResponse = await listMetadata(connection.id, { database: databaseItem.name })
+      const schemaNodes = await Promise.all(schemaResponse.items.map(async (schemaItem) => {
+        const schemaNode: AssetTreeNode = {
+          id: `schema-${connection.id}-${databaseItem.name}-${schemaItem.name}`,
+          kind: 'schema',
+          connectionId: connection.id,
+          label: schemaItem.name,
+          database: databaseItem.name,
+          schema: schemaItem.name,
+          active: false,
+          selectable: true,
+          expanded: true,
+          loaded: true,
+          loading: false,
+          item: schemaItem,
+          children: [],
+        }
+
+        const tableResponse = await listMetadata(connection.id, {
+          database: databaseItem.name,
+          schema: schemaItem.name,
+        })
+
+        schemaNode.children = tableResponse.items
+          .map((tableItem) => ({
+            id: `table-${connection.id}-${databaseItem.name}-${tableItem.schema}-${tableItem.name}`,
+            kind: 'table' as const,
+            connectionId: connection.id,
+            label: tableItem.name,
+            database: databaseItem.name,
+            schema: tableItem.schema,
+            active: false,
+            selectable: true,
+            expanded: false,
+            loaded: true,
+            loading: false,
+            item: tableItem,
+            children: [],
+          }))
+          .filter((node) => matchesAssetKeyword(node, keyword))
+
+        return matchesAssetKeyword(schemaNode, keyword) || schemaNode.children.length > 0 ? schemaNode : null
+      }))
+
+      databaseNode.children = schemaNodes.filter((node): node is AssetTreeNode => node !== null)
+      return matchesAssetKeyword(databaseNode, keyword) || databaseNode.children.length > 0 ? databaseNode : null
+    }
+
+    const tableResponse = await listMetadata(connection.id, { database: databaseItem.name })
+    databaseNode.children = tableResponse.items
+      .map((tableItem) => ({
+        id: `table-${connection.id}-${databaseItem.name}-${tableItem.schema}-${tableItem.name}`,
+        kind: 'table' as const,
+        connectionId: connection.id,
+        label: tableItem.name,
+        database: databaseItem.name,
+        schema: tableItem.schema,
+        active: false,
+        selectable: true,
+        expanded: false,
+        loaded: true,
+        loading: false,
+        item: tableItem,
+        children: [],
+      }))
+      .filter((node) => matchesAssetKeyword(node, keyword))
+
+    return matchesAssetKeyword(databaseNode, keyword) || databaseNode.children.length > 0 ? databaseNode : null
+  }))
+
+  rootNode.children = databaseNodes.filter((node): node is AssetTreeNode => node !== null)
+  return rootNode.children.length > 0 || matchesAssetKeyword(rootNode, keyword) ? [rootNode] : []
+}
+
 function syncAssetTreeActiveStates(
   nodes: AssetTreeNode[],
   activeConnectionId: number | null,
@@ -251,11 +399,7 @@ function filterAssetTree(nodes: AssetTreeNode[], searchTerm: string): AssetTreeN
   }
 
   return nodes.flatMap((node) => {
-    const selfMatched =
-      node.label.toLowerCase().includes(keyword) ||
-      (node.meta ? node.meta.toLowerCase().includes(keyword) : false) ||
-      (node.database ? node.database.toLowerCase().includes(keyword) : false) ||
-      (node.schema ? node.schema.toLowerCase().includes(keyword) : false)
+    const selfMatched = matchesAssetKeyword(node, keyword)
 
     const filteredChildren = filterAssetTree(node.children, keyword)
     if (!selfMatched && filteredChildren.length === 0) {
@@ -330,12 +474,6 @@ function AssetTree({
             <span className="flex h-4 w-4 items-center justify-center text-muted">{iconForNode(node)}</span>
             <span className="truncate font-medium">{node.label}</span>
             {node.loading ? <span className="text-[10px] font-semibold text-faint">Loading…</span> : null}
-            {node.kind === 'connection' && node.active ? (
-              <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
-                Selected
-              </span>
-            ) : null}
-            {node.meta ? <span className="ml-auto text-[10px] font-semibold uppercase tracking-[0.12em] text-faint">{node.meta}</span> : null}
           </button>
         </div>
         {node.expanded && hasChildren ? <div className="mt-0.5 space-y-0.5">{node.children.map((child) => renderNode(child, depth + 1))}</div> : null}
@@ -368,12 +506,17 @@ export function SQLEditorPage() {
   const [selectedSchema, setSelectedSchema] = useState('')
   const [selectedTable, setSelectedTable] = useState<MetadataItem | null>(null)
   const [columns, setColumns] = useState<MetadataColumn[]>([])
+  const [definition, setDefinition] = useState<MetadataDefinition | null>(null)
   const [columnsLoading, setColumnsLoading] = useState(false)
+  const [definitionLoading, setDefinitionLoading] = useState(false)
   const [metadataError, setMetadataError] = useState('')
   const [explorerSearch, setExplorerSearch] = useState('')
+  const [searchTreeNodes, setSearchTreeNodes] = useState<AssetTreeNode[]>([])
+  const [searchingAssets, setSearchingAssets] = useState(false)
   const [assetPickerOpen, setAssetPickerOpen] = useState(false)
   const [assetPickerSearch, setAssetPickerSearch] = useState('')
   const [resultView, setResultView] = useState<'result' | 'vertical' | 'object-meta' | 'history' | 'saved'>('result')
+  const [objectMetaTab, setObjectMetaTab] = useState<'columns' | 'definition'>('columns')
   const [columnFilterOpen, setColumnFilterOpen] = useState(false)
   const [visibleColumnIndexes, setVisibleColumnIndexes] = useState<number[] | null>(null)
   const [savedQueryToDelete, setSavedQueryToDelete] = useState<SavedQuery | null>(null)
@@ -505,8 +648,8 @@ export function SQLEditorPage() {
     return parts
   }, [activeConnection?.db_type, activeConnection?.name, selectedDatabase, selectedSchema, selectedTable])
   const filteredExplorerNodes = useMemo(
-    () => filterAssetTree(explorerNodes, explorerSearch),
-    [explorerNodes, explorerSearch],
+    () => (explorerSearch.trim() ? searchTreeNodes : filterAssetTree(explorerNodes, explorerSearch)),
+    [explorerNodes, explorerSearch, searchTreeNodes],
   )
   const filteredConnections = useMemo(() => {
     const keyword = assetPickerSearch.trim().toLowerCase()
@@ -537,10 +680,12 @@ export function SQLEditorPage() {
   useEffect(() => {
     if (!activeConnection) {
       setExplorerNodes([])
+      setSearchTreeNodes([])
       setSelectedDatabase('')
       setSelectedSchema('')
       setSelectedTable(null)
       setColumns([])
+      setDefinition(null)
       return
     }
 
@@ -551,7 +696,54 @@ export function SQLEditorPage() {
       }
       return [createConnectionNode(activeConnection, activeConnection.id)]
     })
+    setSearchTreeNodes([])
   }, [activeConnection])
+
+  useEffect(() => {
+    const keyword = explorerSearch.trim()
+    if (!keyword || !activeConnection) {
+      setSearchTreeNodes([])
+      setSearchingAssets(false)
+      return
+    }
+
+    let active = true
+    setSearchingAssets(true)
+
+    void buildSearchNodes(activeConnection, keyword)
+      .then((nodes) => {
+        if (!active) {
+          return
+        }
+        setSearchTreeNodes(nodes)
+      })
+      .catch((error) => {
+        if (!active) {
+          return
+        }
+        setMetadataError(error instanceof ApiError ? error.message : '搜尋 metadata 失敗。')
+        setSearchTreeNodes([])
+      })
+      .finally(() => {
+        if (active) {
+          setSearchingAssets(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [activeConnection, explorerSearch])
+
+  useEffect(() => {
+    if (!explorerSearch.trim()) {
+      return
+    }
+
+    setSearchTreeNodes((current) =>
+      syncAssetTreeActiveStates(current, activeTab?.connectionId ?? null, selectedDatabase, selectedSchema, selectedTable),
+    )
+  }, [activeTab?.connectionId, explorerSearch, selectedDatabase, selectedSchema, selectedTable])
 
   useEffect(() => {
     setExplorerNodes((current) =>
@@ -562,6 +754,7 @@ export function SQLEditorPage() {
   useEffect(() => {
     if (!activeTab?.connectionId || !selectedTable || activeConnection?.db_type === 'redis') {
       setColumns([])
+      setDefinition(null)
       return
     }
 
@@ -572,30 +765,39 @@ export function SQLEditorPage() {
 
     if (!schema) {
       setColumns([])
+      setDefinition(null)
       return
     }
     const schemaName = schema
 
-    async function loadColumns() {
+    async function loadObjectMeta() {
       setColumnsLoading(true)
+      setDefinitionLoading(true)
+      setMetadataError('')
       try {
-        const response = await listMetadataColumns(connectionId, schemaName, table, selectedDatabase || undefined)
+        const [columnsResponse, definitionResponse] = await Promise.all([
+          listMetadataColumns(connectionId, schemaName, table, selectedDatabase || undefined),
+          listMetadataDefinition(connectionId, schemaName, table, selectedDatabase || undefined),
+        ])
         if (active) {
-          setColumns(response.columns)
+          setColumns(columnsResponse.columns)
+          setDefinition(definitionResponse)
         }
       } catch (error) {
         if (active) {
           setMetadataError(error instanceof ApiError ? error.message : '讀取欄位失敗。')
           setColumns([])
+          setDefinition(null)
         }
       } finally {
         if (active) {
           setColumnsLoading(false)
+          setDefinitionLoading(false)
         }
       }
     }
 
-    void loadColumns()
+    void loadObjectMeta()
 
     return () => {
       active = false
@@ -900,6 +1102,8 @@ export function SQLEditorPage() {
     setSelectedSchema(entry.schema ?? '')
     setSelectedTable(null)
     setColumns([])
+    setDefinition(null)
+    setObjectMetaTab('columns')
     if (entry.redisDbIndex !== undefined && entry.redisDbIndex !== null) {
       setSelectedDatabase(String(entry.redisDbIndex))
     }
@@ -963,6 +1167,8 @@ export function SQLEditorPage() {
         setSelectedSchema('')
         setSelectedTable(null)
         setColumns([])
+        setDefinition(null)
+        setObjectMetaTab('columns')
       }
       return
     }
@@ -972,6 +1178,8 @@ export function SQLEditorPage() {
       setSelectedSchema('')
       setSelectedTable(null)
       setColumns([])
+      setDefinition(null)
+      setObjectMetaTab('columns')
       return
     }
 
@@ -980,6 +1188,8 @@ export function SQLEditorPage() {
       setSelectedSchema(node.schema || node.label)
       setSelectedTable(null)
       setColumns([])
+      setDefinition(null)
+      setObjectMetaTab('columns')
       return
     }
 
@@ -987,6 +1197,7 @@ export function SQLEditorPage() {
       setSelectedDatabase(node.database || selectedDatabase)
       setSelectedSchema(node.schema || '')
       setSelectedTable(node.item ?? null)
+      setObjectMetaTab('columns')
       setResultView('object-meta')
       return
     }
@@ -995,6 +1206,8 @@ export function SQLEditorPage() {
     setSelectedSchema('')
     setSelectedTable(null)
     setColumns([])
+    setDefinition(null)
+    setObjectMetaTab('columns')
   }
 
   function handleSelectConnection(connection: DBConnection) {
@@ -1003,6 +1216,8 @@ export function SQLEditorPage() {
     setSelectedSchema('')
     setSelectedTable(null)
     setColumns([])
+    setDefinition(null)
+    setObjectMetaTab('columns')
     setMetadataError('')
     setExplorerSearch('')
     setAssetPickerOpen(false)
@@ -1096,26 +1311,94 @@ export function SQLEditorPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
-        <div className="border-b border-border/80 px-4 py-3 sm:px-5">
-          <div className="max-w-3xl">
-            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">SQL Editor</h2>
-            <p className="mt-2 text-[13px] leading-6 text-muted">
-              Run read-only queries, browse metadata, and keep query history and saved queries — all in one workspace. Create export requests directly from the result panel.
-            </p>
-          </div>
-        </div>
-      </section>
+    <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
+      <PageIntro
+        title="SQL Editor"
+        description="Run read-only queries, browse metadata, and keep query history and saved queries in one workspace. Create export requests directly from the result panel."
+      />
 
       {connectionsError ? <InlineAlert>{connectionsError}</InlineAlert> : null}
 
       <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
         <section className="flex min-h-0 flex-col rounded-xl border border-border bg-panel shadow-soft">
           <div className="border-b border-border/80 px-4 py-3">
-            <div className="flex items-center gap-2">
-              <FolderTree className="h-4 w-4 text-muted" />
-              <p className="text-[13px] font-semibold text-ink">Data Sources</p>
+            <div className="relative">
+              <button
+                type="button"
+                aria-label="Asset Selector"
+                onClick={() => setAssetPickerOpen((current) => !current)}
+                className="flex w-full items-center gap-2 text-left text-[12px] text-ink transition"
+              >
+                <FolderTree className="h-4 w-4 shrink-0 text-muted" />
+                <div className="min-w-0 flex-1">
+                  {activeConnection ? (
+                    <>
+                      <p className="break-all text-[13px] font-semibold leading-5 text-ink">{activeConnection.name}</p>
+                      <p className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-faint">
+                        {formatConnectionBadge(activeConnection)}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-[13px] font-semibold text-ink">Select asset</p>
+                      <p className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-faint">Choose connection</p>
+                    </>
+                  )}
+                </div>
+                <ChevronDown className="h-4 w-4 shrink-0 text-faint" />
+              </button>
+
+              {assetPickerOpen ? (
+                <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-lg border border-border bg-white p-2 shadow-soft">
+                  <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-panel-soft px-2.5">
+                    <Search className="h-3.5 w-3.5 text-faint" />
+                    <input
+                      aria-label="Asset Picker Search"
+                      value={assetPickerSearch}
+                      onChange={(event) => setAssetPickerSearch(event.target.value)}
+                      placeholder="Search assets"
+                      className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
+                    />
+                  </label>
+                  <div className="mt-2 max-h-[220px] overflow-y-auto">
+                    {filteredConnections.length === 0 ? (
+                      <p className="px-2 py-2 text-[12px] text-muted">沒有符合的 asset。</p>
+                    ) : (
+                      filteredConnections.map((connection) => (
+                        <button
+                          key={connection.id}
+                          type="button"
+                          onClick={() => handleSelectConnection(connection)}
+                          className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[12px] ${
+                            activeConnection?.id === connection.id
+                              ? 'bg-panel-soft text-ink ring-1 ring-border-strong'
+                              : 'text-muted hover:bg-panel-soft hover:text-ink'
+                          }`}
+                        >
+                          <span className="flex h-4 w-4 items-center justify-center text-muted">
+                            {activeConnection?.id === connection.id ? (
+                              <Check className="h-3.5 w-3.5 text-ink" />
+                            ) : (
+                              <Workflow className="h-3.5 w-3.5" />
+                            )}
+                          </span>
+                          <div className="min-w-0 flex-1 pr-2">
+                            <p className="break-all font-medium leading-5">{connection.name}</p>
+                            <p className="break-all text-[10px] uppercase tracking-[0.12em] text-faint">
+                              {formatConnectionBadge(connection)}
+                            </p>
+                          </div>
+                          {activeConnection?.id === connection.id ? (
+                            <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink">
+                              Selected
+                            </span>
+                          ) : null}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -1134,6 +1417,8 @@ export function SQLEditorPage() {
             <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t border-border/80 pt-3">
               {connectionsLoading ? (
                 <p className="px-1 py-2 text-[12px] text-muted">Loading connections...</p>
+              ) : searchingAssets ? (
+                <p className="px-1 py-2 text-[12px] text-muted">Searching assets...</p>
               ) : !activeConnection || explorerNodes.length === 0 ? (
                 <p className="px-1 py-2 text-[12px] text-muted">No DB connections available.</p>
               ) : filteredExplorerNodes.length === 0 ? (
@@ -1150,18 +1435,19 @@ export function SQLEditorPage() {
         </section>
 
         <section className="flex min-h-0 flex-col rounded-xl border border-border bg-panel shadow-soft">
-          <div className="border-b border-border/80 px-4 py-3">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="border-b border-border/80 px-4">
+            <div className="flex flex-wrap items-center gap-5">
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTabId(tab.id)}
-                  className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[12px] font-semibold transition ${
+                  className={cn(
+                    'inline-flex items-center gap-2 border-b-2 px-0.5 py-3 text-[13px] font-medium transition-colors',
                     tab.id === activeTabId
-                      ? 'border-border bg-panel-soft text-ink'
-                      : 'border-transparent bg-white text-muted hover:border-border hover:bg-page hover:text-ink'
-                  }`}
+                      ? 'border-ink text-ink'
+                      : 'border-transparent text-muted hover:text-ink',
+                  )}
                 >
                   <span>{tab.title}</span>
                   <span
@@ -1171,7 +1457,7 @@ export function SQLEditorPage() {
                       event.stopPropagation()
                       handleCloseTab(tab.id)
                     }}
-                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted hover:bg-white hover:text-ink"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted hover:bg-panel-soft hover:text-ink"
                   >
                     <X className="h-3.5 w-3.5" />
                   </span>
@@ -1180,7 +1466,7 @@ export function SQLEditorPage() {
               <button
                 type="button"
                 onClick={handleAddTab}
-                className="inline-flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-[12px] font-semibold text-ink transition hover:bg-page"
+                className="inline-flex items-center gap-2 border-b-2 border-transparent px-0.5 py-3 text-[13px] font-medium text-muted transition-colors hover:text-ink"
               >
                 <Plus className="h-4 w-4" />
                 New Tab
@@ -1193,81 +1479,8 @@ export function SQLEditorPage() {
           ) : (
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-4 py-3">
-                <div className="relative min-w-[320px] flex-1 basis-[360px]">
-                  <button
-                    type="button"
-                    onClick={() => setAssetPickerOpen((current) => !current)}
-                    className="flex min-h-[52px] w-full items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-left text-[12px] text-ink"
-                  >
-                    <Workflow className="h-4 w-4 shrink-0 text-faint" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">Selected Asset</p>
-                      {activeConnection ? (
-                        <>
-                          <p className="mt-1 break-all text-[13px] font-medium leading-5 text-ink">{activeConnection.name}</p>
-                          <p className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-faint">
-                            {activeConnection.db_type}
-                            {activeConnection.host ? ` / ${activeConnection.host}` : ''}
-                          </p>
-                        </>
-                      ) : (
-                        <p className="mt-1 text-[13px] font-medium text-ink">Select asset</p>
-                      )}
-                    </div>
-                    <ChevronDown className="h-4 w-4 shrink-0 text-faint" />
-                  </button>
-                  {assetPickerOpen ? (
-                    <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-10 rounded-lg border border-border bg-white p-2 shadow-soft">
-                      <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-panel-soft px-2.5">
-                        <Search className="h-3.5 w-3.5 text-faint" />
-                        <input
-                          aria-label="Asset Picker Search"
-                          value={assetPickerSearch}
-                          onChange={(event) => setAssetPickerSearch(event.target.value)}
-                          placeholder="Search assets"
-                          className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
-                        />
-                      </label>
-                      <div className="mt-2 max-h-[220px] overflow-y-auto">
-                        {filteredConnections.length === 0 ? (
-                          <p className="px-2 py-2 text-[12px] text-muted">沒有符合的 asset。</p>
-                        ) : (
-                          filteredConnections.map((connection) => (
-                            <button
-                              key={connection.id}
-                              type="button"
-                              onClick={() => handleSelectConnection(connection)}
-                              className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[12px] ${
-                                activeConnection?.id === connection.id
-                                  ? 'bg-panel-soft text-ink ring-1 ring-border-strong'
-                                  : 'text-muted hover:bg-panel-soft hover:text-ink'
-                              }`}
-                            >
-                              <span className="flex h-4 w-4 items-center justify-center text-muted">
-                                {activeConnection?.id === connection.id ? (
-                                  <Check className="h-3.5 w-3.5 text-ink" />
-                                ) : (
-                                  <Workflow className="h-3.5 w-3.5" />
-                                )}
-                              </span>
-                              <div className="min-w-0 flex-1 pr-2">
-                                <p className="break-all font-medium leading-5">{connection.name}</p>
-                                <p className="break-all text-[10px] uppercase tracking-[0.12em] text-faint">
-                                  {connection.db_type}
-                                  {connection.host ? ` / ${connection.host}` : ''}
-                                </p>
-                              </div>
-                              {activeConnection?.id === connection.id ? (
-                                <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink">
-                                  Selected
-                                </span>
-                              ) : null}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  ) : null}
+                <div className="inline-flex h-10 min-w-[260px] flex-1 items-center rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-muted">
+                  <span className="truncate">{activePathLabel.length > 0 ? activePathLabel.join(' / ') : '從左側 Explorer 選擇資料源'}</span>
                 </div>
                 <button
                   type="button"
@@ -1278,9 +1491,6 @@ export function SQLEditorPage() {
                   <Play className="h-4 w-4" />
                   {runningTabId === activeTab.id ? '執行中…' : 'Run Query'}
                 </button>
-                <div className="inline-flex h-10 min-w-[220px] items-center rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-muted">
-                  <span className="truncate">{activePathLabel.length > 0 ? activePathLabel.join(' / ') : '從左側 Explorer 選擇資料源'}</span>
-                </div>
               </div>
 
               <div className="shrink-0 p-4">
@@ -1371,16 +1581,20 @@ export function SQLEditorPage() {
                       {isFavorited ? 'Saved' : 'Save'}
                     </button>
                     <div className="inline-flex items-center overflow-hidden rounded-md border border-border bg-white">
-                      <select
-                        value={sensitiveAccessDuration}
-                        onChange={(event) => setSensitiveAccessDuration(Number(event.target.value))}
+                      <DropdownSelect
+                        ariaLabel="Sensitive access duration"
+                        value={String(sensitiveAccessDuration)}
+                        onChange={(value) => setSensitiveAccessDuration(Number(value))}
                         disabled={!canApplySensitiveAccess}
-                        className="h-9 border-r border-border bg-transparent px-2 text-[12px] font-semibold text-ink outline-none disabled:cursor-not-allowed"
-                      >
-                        <option value={10}>10m</option>
-                        <option value={30}>30m</option>
-                        <option value={60}>60m</option>
-                      </select>
+                        size="sm"
+                        triggerClassName="h-9 rounded-none border-0 border-r border-border bg-transparent px-2 shadow-none hover:border-r hover:border-border"
+                        menuClassName="left-0 w-28 rounded-2xl p-2"
+                        options={[
+                          { value: '10', label: '10m' },
+                          { value: '30', label: '30m' },
+                          { value: '60', label: '60m' },
+                        ]}
+                      />
                       <button
                         type="button"
                         onClick={() => void handleCreateSensitiveAccess()}
@@ -1530,35 +1744,73 @@ export function SQLEditorPage() {
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
                         {detailHint || '從左側資產樹點擊資料表後查看表結構。'}
                       </div>
-                    ) : columnsLoading ? (
-                      <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                        載入表結構中…
-                      </div>
-                    ) : columns.length === 0 ? (
-                      <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                        尚無表結構資料。
-                      </div>
                     ) : (
-                      <table className="min-w-full border-collapse">
-                        <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                          <tr>
-                            <th className="px-3 py-3">Column</th>
-                            <th className="px-3 py-3">Type</th>
-                            <th className="px-3 py-3">Nullable</th>
-                            <th className="px-3 py-3">Default</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {columns.map((column) => (
-                            <tr key={column.name} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
-                              <td className="px-3 py-2.5 font-semibold">{column.name}</td>
-                              <td className="px-3 py-2.5">{column.column_type}</td>
-                              <td className="px-3 py-2.5">{column.is_nullable}</td>
-                              <td className="px-3 py-2.5">{column.default || <span className="text-muted">(none)</span>}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                      <div className="flex min-h-[180px] flex-col">
+                        <div className="border-b border-border px-3 py-2">
+                          <div className="inline-flex items-center rounded-lg border border-border bg-white p-1">
+                            <button
+                              type="button"
+                              onClick={() => setObjectMetaTab('columns')}
+                              className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-[12px] font-medium ${
+                                objectMetaTab === 'columns' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
+                              }`}
+                            >
+                              Columns
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setObjectMetaTab('definition')}
+                              className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-[12px] font-medium ${
+                                objectMetaTab === 'definition' ? 'bg-panel-soft text-ink' : 'text-muted hover:text-ink'
+                              }`}
+                            >
+                              Definition
+                            </button>
+                          </div>
+                        </div>
+                        {objectMetaTab === 'columns' ? (
+                          columnsLoading ? (
+                            <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
+                              載入表結構中…
+                            </div>
+                          ) : columns.length === 0 ? (
+                            <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
+                              尚無表結構資料。
+                            </div>
+                          ) : (
+                            <table className="min-w-full border-collapse">
+                              <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+                                <tr>
+                                  <th className="px-3 py-3">Column</th>
+                                  <th className="px-3 py-3">Type</th>
+                                  <th className="px-3 py-3">Nullable</th>
+                                  <th className="px-3 py-3">Default</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {columns.map((column) => (
+                                  <tr key={column.name} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
+                                    <td className="px-3 py-2.5 font-semibold">{column.name}</td>
+                                    <td className="px-3 py-2.5">{column.column_type}</td>
+                                    <td className="px-3 py-2.5">{column.is_nullable}</td>
+                                    <td className="px-3 py-2.5">{column.default || <span className="text-muted">(none)</span>}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )
+                        ) : definitionLoading ? (
+                          <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
+                            載入 Definition 中…
+                          </div>
+                        ) : !definition?.definition.trim() ? (
+                          <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
+                            尚無 Definition 資料。
+                          </div>
+                        ) : (
+                          <pre className="overflow-x-auto px-4 py-3 font-mono text-[12px] leading-6 text-ink">{definition.definition}</pre>
+                        )}
+                      </div>
                     )
                   ) : resultView === 'vertical' ? (
                     !activeTab.result ? (

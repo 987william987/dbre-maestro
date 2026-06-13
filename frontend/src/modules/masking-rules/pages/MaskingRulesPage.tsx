@@ -19,8 +19,11 @@ import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import type { MaskingRule, MaskingWhitelist } from '@/shared/types/maskingRule'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
+import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
+import { PageIntro } from '@/shared/ui/PageIntro'
+import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
 
 type ConnectionOption = {
@@ -68,6 +71,8 @@ const MASK_MODE_OPTIONS: Array<{ value: RuleForm['maskMode']; label: string }> =
   { value: 'hash', label: 'hash' },
 ]
 
+const PAGE_SIZE = 20
+
 export function MaskingRulesPage() {
   const { user } = useAuth()
   const { pushToast } = useToast()
@@ -78,6 +83,8 @@ export function MaskingRulesPage() {
   const [connections, setConnections] = useState<ConnectionOption[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [rulesOffset, setRulesOffset] = useState(0)
+  const [whitelistOffset, setWhitelistOffset] = useState(0)
 
   const [ruleDrawer, setRuleDrawer] = useState<RuleDrawerState>(null)
   const [ruleForm, setRuleForm] = useState<RuleForm>(EMPTY_RULE_FORM)
@@ -105,6 +112,11 @@ export function MaskingRulesPage() {
         return leftKey.localeCompare(rightKey)
       }),
     [whitelist],
+  )
+  const pagedRules = useMemo(() => sortedRules.slice(rulesOffset, rulesOffset + PAGE_SIZE), [rulesOffset, sortedRules])
+  const pagedWhitelist = useMemo(
+    () => sortedWhitelist.slice(whitelistOffset, whitelistOffset + PAGE_SIZE),
+    [sortedWhitelist, whitelistOffset],
   )
 
   useEffect(() => {
@@ -138,6 +150,18 @@ export function MaskingRulesPage() {
     void loadColumns(Number(whitelistForm.dbConnectionId), whitelistForm.databaseName, whitelistForm.tableName)
   }, [whitelistDrawer, whitelistForm.dbConnectionId, whitelistForm.databaseName, whitelistForm.tableName])
 
+  useEffect(() => {
+    if (rulesOffset > 0 && rulesOffset >= sortedRules.length) {
+      setRulesOffset(Math.max(0, Math.floor((Math.max(sortedRules.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
+    }
+  }, [rulesOffset, sortedRules.length])
+
+  useEffect(() => {
+    if (whitelistOffset > 0 && whitelistOffset >= sortedWhitelist.length) {
+      setWhitelistOffset(Math.max(0, Math.floor((Math.max(sortedWhitelist.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
+    }
+  }, [sortedWhitelist.length, whitelistOffset])
+
   async function loadPage() {
     setLoading(true)
     setError('')
@@ -155,7 +179,7 @@ export function MaskingRulesPage() {
           .map((connection) => ({ id: connection.id, name: connection.name })),
       )
     } catch (loadError) {
-      setError(loadError instanceof ApiError ? loadError.message : '讀取 masking 設定失敗。')
+      setError(loadError instanceof ApiError ? loadError.message : 'Failed to load masking settings.')
     } finally {
       setLoading(false)
     }
@@ -257,15 +281,15 @@ export function MaskingRulesPage() {
       }
       if (ruleDrawer.mode === 'create') {
         await createMaskingRule(payload)
-        pushToast(`Global masking rule 已建立: ${payload.column_name}`, 'success')
+        pushToast(`Global masking rule created: ${payload.column_name}`, 'success')
       } else {
         await patchMaskingRule(ruleDrawer.rule.id, payload)
-        pushToast(`Global masking rule 已更新: ${payload.column_name}`, 'success')
+        pushToast(`Global masking rule updated: ${payload.column_name}`, 'success')
       }
       await loadPage()
       closeRuleDrawer()
     } catch (submitError) {
-      setRuleDrawerError(submitError instanceof ApiError ? submitError.message : '儲存 global masking rule 失敗。')
+      setRuleDrawerError(submitError instanceof ApiError ? submitError.message : 'Failed to save the global masking rule.')
     } finally {
       setRuleSubmitting(false)
     }
@@ -288,15 +312,15 @@ export function MaskingRulesPage() {
       }
       if (whitelistDrawer.mode === 'create') {
         await createMaskingWhitelist(payload)
-        pushToast(`Whitelist 已建立: ${payload.database_name}.${payload.table_name}.${payload.column_name}`, 'success')
+        pushToast(`Whitelist created: ${payload.database_name}.${payload.table_name}.${payload.column_name}`, 'success')
       } else {
         await patchMaskingWhitelist(whitelistDrawer.entry.id, payload)
-        pushToast(`Whitelist 已更新: ${payload.database_name}.${payload.table_name}.${payload.column_name}`, 'success')
+        pushToast(`Whitelist updated: ${payload.database_name}.${payload.table_name}.${payload.column_name}`, 'success')
       }
       await loadPage()
       closeWhitelistDrawer()
     } catch (submitError) {
-      setWhitelistDrawerError(submitError instanceof ApiError ? submitError.message : '儲存 whitelist 失敗。')
+      setWhitelistDrawerError(submitError instanceof ApiError ? submitError.message : 'Failed to save the whitelist entry.')
     } finally {
       setWhitelistSubmitting(false)
     }
@@ -313,63 +337,57 @@ export function MaskingRulesPage() {
     try {
       if (pendingDelete.kind === 'rule') {
         await deleteMaskingRule(pendingDelete.id)
-        pushToast('Global masking rule 已刪除', 'success')
+        pushToast('Global masking rule deleted', 'success')
       } else {
         await deleteMaskingWhitelist(pendingDelete.id)
-        pushToast('Whitelist 已刪除', 'success')
+        pushToast('Whitelist deleted', 'success')
       }
       await loadPage()
       setPendingDelete(null)
     } catch (deleteError) {
-      setError(deleteError instanceof ApiError ? deleteError.message : '刪除失敗。')
+      setError(deleteError instanceof ApiError ? deleteError.message : 'Delete failed.')
     } finally {
       setDeletingKey(null)
     }
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
-        <div className="px-4 py-3 sm:px-5">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl">
-              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">Masking Rules</h2>
-              <p className="mt-2 text-[13px] leading-6 text-muted">
-                目前只支援 MySQL。Global rule 只管理欄位名稱與遮罩模式；Whitelist 則用於精準解除特定實例 / database / table / column 的誤殺。
-              </p>
+    <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
+      <PageIntro
+        title="Masking Rules"
+        description="Currently only MySQL is supported. Global rules manage column names and mask modes, while the whitelist is used to precisely exempt specific instance / database / table / column targets from false positives."
+        actions={
+          !canWrite ? (
+            <div className="rounded-lg border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
+              This account only has `masking_rules.read`. You can view rules but cannot modify them.
             </div>
-            {!canWrite ? (
-              <div className="rounded-lg border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
-                目前帳號只有 `masking_rules.read`，可查看但不可調整規則。
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </section>
+          ) : null
+        }
+      />
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
           <SectionCard
             title="Global Masking Rules"
-            description="Truly global，只接受 column_name + mask_mode。命中後會套用在所有 MySQL 查詢與匯出結果。"
+            description="These are truly global rules. Each rule only stores `column_name` and `mask_mode`, and applies to all MySQL query and export results when matched."
             icon={<ShieldAlert className="h-4 w-4 text-accent" />}
             action={
               canWrite ? (
                 <ActionButton onClick={() => openRuleDrawer({ mode: 'create' })}>
                   <Plus className="h-4 w-4" />
-                  新增規則
+                  New Rule
                 </ActionButton>
               ) : null
             }
           >
             {loading ? (
-              <LoadingBlock message="載入 global masking rules 中…" className="m-4 min-h-[180px] rounded-xl border-border bg-panel" />
+              <LoadingBlock message="Loading global masking rules..." className="m-4 min-h-[180px] rounded-xl border-border bg-panel" />
             ) : sortedRules.length === 0 ? (
-              <EmptyState message="尚未建立任何 global masking rule。" />
+              <EmptyState message="No global masking rules yet." />
             ) : (
               <CompactTable
                 headers={['Column', 'Mode', 'Created', 'Actions']}
-                rows={sortedRules.map((rule) => ({
+                rows={pagedRules.map((rule) => ({
                   key: `rule-${rule.id}`,
                   cells: [
                     <span key="column" className="font-semibold text-ink">{rule.column_name}</span>,
@@ -386,29 +404,36 @@ export function MaskingRulesPage() {
                 }))}
               />
             )}
+            <Pagination
+              offset={rulesOffset}
+              pageSize={PAGE_SIZE}
+              count={pagedRules.length}
+              total={sortedRules.length}
+              onChange={setRulesOffset}
+            />
           </SectionCard>
 
           <SectionCard
             title="Unmask Whitelist"
-            description="只支援 MySQL，精準綁定 connection -> database -> table -> column，用於解除 global rule 的誤殺。"
+            description="MySQL only. Each whitelist entry is bound to `connection -> database -> table -> column` so you can precisely exempt a target from an over-matched global rule."
             icon={<ShieldCheck className="h-4 w-4 text-accent" />}
             action={
               canWrite ? (
                 <ActionButton onClick={() => openWhitelistDrawer({ mode: 'create' })}>
                   <Plus className="h-4 w-4" />
-                  新增白名單
+                  New Whitelist
                 </ActionButton>
               ) : null
             }
           >
             {loading ? (
-              <LoadingBlock message="載入 whitelist 中…" className="m-4 min-h-[180px] rounded-xl border-border bg-panel" />
+              <LoadingBlock message="Loading whitelist..." className="m-4 min-h-[180px] rounded-xl border-border bg-panel" />
             ) : sortedWhitelist.length === 0 ? (
-              <EmptyState message="尚未建立任何 whitelist。" />
+              <EmptyState message="No whitelist entries yet." />
             ) : (
               <CompactTable
                 headers={['Connection', 'Target', 'Created', 'Actions']}
-                rows={sortedWhitelist.map((entry) => ({
+                rows={pagedWhitelist.map((entry) => ({
                   key: `whitelist-${entry.id}`,
                   cells: [
                     <span key="connection" className="text-ink">{formatConnectionName(entry.db_connection_id, connections)}</span>,
@@ -425,12 +450,19 @@ export function MaskingRulesPage() {
                 }))}
               />
             )}
+            <Pagination
+              offset={whitelistOffset}
+              pageSize={PAGE_SIZE}
+              count={pagedWhitelist.length}
+              total={sortedWhitelist.length}
+              onChange={setWhitelistOffset}
+            />
           </SectionCard>
 
       {ruleDrawer ? createPortal(
         <DrawerLayout
           eyebrow="Global Masking Rule"
-          title={ruleDrawer.mode === 'create' ? '新增規則' : `編輯 ${ruleDrawer.rule.column_name}`}
+          title={ruleDrawer.mode === 'create' ? 'New Rule' : `Edit ${ruleDrawer.rule.column_name}`}
           onClose={closeRuleDrawer}
         >
           <form className="grid gap-4" onSubmit={handleRuleSubmit}>
@@ -443,18 +475,13 @@ export function MaskingRulesPage() {
               />
             </Field>
             <Field label="Mask Mode">
-              <select
+              <DropdownSelect
+                ariaLabel="Mask Mode"
                 value={ruleForm.maskMode}
-                onChange={(event) => setRuleForm((current) => ({ ...current, maskMode: normalizeMaskMode(event.target.value) }))}
-                className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                onChange={(value) => setRuleForm((current) => ({ ...current, maskMode: normalizeMaskMode(value) }))}
                 disabled={ruleSubmitting}
-              >
-                {MASK_MODE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+                options={MASK_MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+              />
             </Field>
             {ruleDrawerError ? <InlineAlert>{ruleDrawerError}</InlineAlert> : null}
             <button
@@ -463,7 +490,7 @@ export function MaskingRulesPage() {
               className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {ruleSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : ruleDrawer.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-              {ruleDrawer.mode === 'create' ? '建立規則' : '儲存變更'}
+              {ruleDrawer.mode === 'create' ? 'Create Rule' : 'Save Changes'}
             </button>
           </form>
         </DrawerLayout>,
@@ -475,104 +502,92 @@ export function MaskingRulesPage() {
           eyebrow="Unmask Whitelist"
           title={
             whitelistDrawer.mode === 'create'
-              ? '新增白名單'
-              : `編輯 ${whitelistDrawer.entry.database_name}.${whitelistDrawer.entry.table_name}.${whitelistDrawer.entry.column_name}`
+              ? 'New Whitelist'
+              : `Edit ${whitelistDrawer.entry.database_name}.${whitelistDrawer.entry.table_name}.${whitelistDrawer.entry.column_name}`
           }
           onClose={closeWhitelistDrawer}
         >
           <form className="grid gap-4" onSubmit={handleWhitelistSubmit}>
             <Field label="Connection">
-              <select
+              <DropdownSelect
+                ariaLabel="Connection"
                 value={whitelistForm.dbConnectionId}
-                onChange={(event) =>
+                onChange={(value) =>
                   setWhitelistForm({
-                    dbConnectionId: event.target.value,
+                    dbConnectionId: value,
                     databaseName: '',
                     tableName: '',
                     columnName: '',
                   })
                 }
-                className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 disabled={whitelistSubmitting}
-              >
-                <option value="">選擇 MySQL connection</option>
-                {connections.map((connection) => (
-                  <option key={connection.id} value={connection.id}>
-                    {connection.name}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: '', label: 'Select MySQL connection' },
+                  ...connections.map((connection) => ({ value: String(connection.id), label: connection.name })),
+                ]}
+              />
             </Field>
 
             {whitelistForm.dbConnectionId ? (
               <div className="grid gap-3 rounded-xl border border-border bg-panel-soft/60 px-3 py-3">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-[12px] font-semibold text-ink">Metadata 選取</p>
+                  <p className="text-[12px] font-semibold text-ink">Metadata Selection</p>
                   {targetLoading ? <Loader2 className="h-4 w-4 animate-spin text-muted" /> : null}
                 </div>
 
                 <Field label="Database">
-                  <select
+                  <DropdownSelect
+                    ariaLabel="Database"
                     value={whitelistForm.databaseName}
-                    onChange={(event) =>
+                    onChange={(value) =>
                       setWhitelistForm((current) => ({
                         ...current,
-                        databaseName: event.target.value,
+                        databaseName: value,
                         tableName: '',
                         columnName: '',
                       }))
                     }
-                    className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                     disabled={whitelistSubmitting}
-                  >
-                    <option value="">選擇 database</option>
-                    {databaseOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: '', label: 'Select database' },
+                      ...databaseOptions.map((option) => ({ value: option, label: option })),
+                    ]}
+                  />
                 </Field>
 
                 {whitelistForm.databaseName ? (
                   <Field label="Table">
-                    <select
+                    <DropdownSelect
+                      ariaLabel="Table"
                       value={whitelistForm.tableName}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setWhitelistForm((current) => ({
                           ...current,
-                          tableName: event.target.value,
+                          tableName: value,
                           columnName: '',
                         }))
                       }
-                      className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                       disabled={whitelistSubmitting}
-                    >
-                      <option value="">選擇 table</option>
-                      {tableOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
+                      options={[
+                        { value: '', label: 'Select table' },
+                        ...tableOptions.map((option) => ({ value: option, label: option })),
+                      ]}
+                    />
                   </Field>
                 ) : null}
 
                 {whitelistForm.tableName ? (
                   <Field label="Column">
-                    <select
+                    <DropdownSelect
+                      ariaLabel="Column"
                       value={whitelistForm.columnName}
-                      onChange={(event) => setWhitelistForm((current) => ({ ...current, columnName: event.target.value }))}
-                      className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                      onChange={(value) => setWhitelistForm((current) => ({ ...current, columnName: value }))}
                       disabled={whitelistSubmitting}
-                    >
-                      <option value="">選擇 column</option>
-                      {columnOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
+                      options={[
+                        { value: '', label: 'Select column' },
+                        ...columnOptions.map((option) => ({ value: option, label: option })),
+                      ]}
+                    />
                   </Field>
                 ) : null}
               </div>
@@ -609,7 +624,7 @@ export function MaskingRulesPage() {
               className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {whitelistSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : whitelistDrawer.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-              {whitelistDrawer.mode === 'create' ? '建立白名單' : '儲存變更'}
+              {whitelistDrawer.mode === 'create' ? 'Create Whitelist' : 'Save Changes'}
             </button>
           </form>
         </DrawerLayout>,
@@ -618,9 +633,9 @@ export function MaskingRulesPage() {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title={pendingDelete?.kind === 'rule' ? '刪除 global masking rule' : '刪除 unmask whitelist'}
-        description={pendingDelete?.kind === 'rule' ? '確認刪除這筆 global rule？' : '確認刪除這筆 whitelist？'}
-        confirmLabel="確認刪除"
+        title={pendingDelete?.kind === 'rule' ? 'Delete Global Masking Rule' : 'Delete Unmask Whitelist'}
+        description={pendingDelete?.kind === 'rule' ? 'Delete this global masking rule?' : 'Delete this whitelist entry?'}
+        confirmLabel="Confirm Delete"
         tone="danger"
         loading={pendingDelete !== null && deletingKey === `${pendingDelete.kind}:${pendingDelete.id}`}
         onCancel={() => setPendingDelete(null)}
@@ -732,7 +747,7 @@ function ActionCell({
   deleting: boolean
 }) {
   if (!canWrite) {
-    return <span className="text-muted">唯讀</span>
+    return <span className="text-muted">Read only</span>
   }
   return (
     <div className="flex flex-nowrap items-center gap-1.5 whitespace-nowrap">
@@ -742,7 +757,7 @@ function ActionCell({
         className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page"
       >
         <Pencil className="h-3.5 w-3.5" />
-        編輯
+        Edit
       </button>
       <button
         type="button"
@@ -751,7 +766,7 @@ function ActionCell({
         className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2.5 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
       >
         {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-        刪除
+        Delete
       </button>
     </div>
   )
@@ -784,7 +799,7 @@ function DrawerLayout({
             type="button"
             onClick={onClose}
             className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
-            aria-label="關閉"
+            aria-label="Close"
           >
             <X className="h-4 w-4" />
           </button>

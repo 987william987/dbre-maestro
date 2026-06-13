@@ -1,15 +1,33 @@
-import { useEffect, useMemo, useState } from 'react'
-import { DatabaseZap } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, Search, SlidersHorizontal } from 'lucide-react'
 import { DBMetadataSectionTabs } from '@/modules/db-metadata/components/DBMetadataSectionTabs'
 import { listInventorySnapshots } from '@/modules/db-metadata/api'
+import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import type { InventorySnapshot } from '@/shared/types/dbMetadata'
+import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
+import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
 
 const PAGE_SIZE = 10
+
+const INVENTORY_COLUMNS = [
+  { key: 'identifier', label: 'Identifier' },
+  { key: 'engine', label: 'Engine' },
+  { key: 'version', label: 'Version' },
+  { key: 'regionAz', label: 'Region / AZ' },
+  { key: 'role', label: 'Role' },
+  { key: 'size', label: 'Size' },
+  { key: 'mapping', label: 'Mapping' },
+  { key: 'lastSynced', label: 'Last Synced' },
+] as const
+
+type InventoryColumnKey = (typeof INVENTORY_COLUMNS)[number]['key']
+
+const DEFAULT_VISIBLE_COLUMNS: InventoryColumnKey[] = INVENTORY_COLUMNS.map((column) => column.key)
 
 export function DBMetadataInventoryPage() {
   const [items, setItems] = useState<InventorySnapshot[]>([])
@@ -19,6 +37,9 @@ export function DBMetadataInventoryPage() {
   const [engineFilter, setEngineFilter] = useState('all')
   const [roleFilter, setRoleFilter] = useState('all')
   const [identifierKeyword, setIdentifierKeyword] = useState('')
+  const [visibleColumns, setVisibleColumns] = useState<InventoryColumnKey[]>(DEFAULT_VISIBLE_COLUMNS)
+  const [columnMenuOpen, setColumnMenuOpen] = useState(false)
+  const columnMenuRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let active = true
@@ -33,7 +54,7 @@ export function DBMetadataInventoryPage() {
         }
       } catch (loadError) {
         if (active) {
-          setError(loadError instanceof ApiError ? loadError.message : '讀取實例總覽失敗。')
+          setError(loadError instanceof ApiError ? loadError.message : 'Failed to load inventory snapshots.')
         }
       } finally {
         if (active) {
@@ -45,6 +66,28 @@ export function DBMetadataInventoryPage() {
     void bootstrap()
     return () => {
       active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node
+      if (!columnMenuRef.current?.contains(target)) {
+        setColumnMenuOpen(false)
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setColumnMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
     }
   }, [])
 
@@ -74,76 +117,126 @@ export function DBMetadataInventoryPage() {
 
   const pagedItems = filteredItems.slice(offset, offset + PAGE_SIZE)
 
+  function toggleColumn(columnKey: InventoryColumnKey) {
+    setVisibleColumns((current) => {
+      if (current.includes(columnKey)) {
+        if (current.length === 1) {
+          return current
+        }
+        return current.filter((item) => item !== columnKey)
+      }
+      return INVENTORY_COLUMNS.map((column) => column.key).filter((key) => current.includes(key) || key === columnKey)
+    })
+  }
+
   return (
-    <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
-        <div className="px-4 py-4 sm:px-5">
-          <div className="flex items-start gap-3">
-            <div className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-white text-ink shadow-soft">
-              <DatabaseZap className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">DB Metadata / 實例總覽</h2>
-              <p className="mt-2 text-[13px] leading-6 text-muted">
-                這裡顯示 AWS inventory snapshot，不做即時監控；`Mapping` 只根據 endpoint 與 `DB Connection host` 的 exact match。
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
+    <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
+      <PageIntro
+        title="Inventory"
+        description="This view shows AWS inventory snapshots rather than real-time status. `Mapping` is determined only by exact matches between discovered endpoints and `DB Connection host` values."
+      />
 
       <DBMetadataSectionTabs />
 
-      <section className="rounded-xl border border-border bg-panel shadow-soft">
-        <div className="grid gap-3 px-4 py-4 md:grid-cols-3">
-          <label className="grid gap-1.5 text-[12px] font-medium text-muted">
-            Engine
-            <select
+      <section>
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_auto]">
+          <label className="block">
+            <div className="flex h-11 items-center gap-2 rounded-2xl border border-border bg-white px-3 shadow-soft transition focus-within:border-slate-400">
+              <Search className="h-4 w-4 text-faint" />
+              <input
+                aria-label="Identifier Search"
+                value={identifierKeyword}
+                onChange={(event) => {
+                  setIdentifierKeyword(event.target.value)
+                  setOffset(0)
+                }}
+                placeholder="Search DB identifier"
+                className="h-full w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-muted"
+              />
+            </div>
+          </label>
+
+          <div>
+            <DropdownSelect
+              ariaLabel="Engine"
               value={engineFilter}
-              onChange={(event) => {
-                setEngineFilter(event.target.value)
+              onChange={(value) => {
+                setEngineFilter(value)
                 setOffset(0)
               }}
-              className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
-            >
-              {engineOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option === 'all' ? '全部 engines' : option}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="grid gap-1.5 text-[12px] font-medium text-muted">
-            Identifier 搜尋
-            <input
-              value={identifierKeyword}
-              onChange={(event) => {
-                setIdentifierKeyword(event.target.value)
-                setOffset(0)
-              }}
-              placeholder="模糊搜尋 DB identifier"
-              className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
+              options={engineOptions.map((option) => ({
+                value: option,
+                label: option === 'all' ? 'All Engines' : option,
+              }))}
             />
-          </label>
+          </div>
 
-          <label className="grid gap-1.5 text-[12px] font-medium text-muted">
-            Role
-            <select
+          <div>
+            <DropdownSelect
+              ariaLabel="Role"
               value={roleFilter}
-              onChange={(event) => {
-                setRoleFilter(event.target.value)
+              onChange={(value) => {
+                setRoleFilter(value)
                 setOffset(0)
               }}
-              className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
-            >
-              {roleOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option === 'all' ? '全部 roles' : option}
-                </option>
-              ))}
-            </select>
-          </label>
+              options={roleOptions.map((option) => ({
+                value: option,
+                label: option === 'all' ? 'All Roles' : option,
+              }))}
+            />
+          </div>
+
+          <div ref={columnMenuRef} className="flex items-end justify-end">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={columnMenuOpen}
+                aria-label="Visible Columns"
+                onClick={() => setColumnMenuOpen((current) => !current)}
+                className={cn(
+                  'inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-white text-ink shadow-soft transition',
+                  columnMenuOpen ? 'border-slate-300' : 'hover:border-slate-300',
+                )}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+              </button>
+            </div>
+
+            {columnMenuOpen ? (
+              <div className="relative">
+                <div className="absolute right-0 top-2 z-20 w-[280px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-border bg-white p-2 shadow-[0_22px_45px_rgba(15,23,42,0.14)]">
+                  <div className="px-3 py-2">
+                    <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-faint">Table fields</p>
+                    <p className="mt-1 text-[14px] font-semibold text-ink">Column Filter</p>
+                  </div>
+                  <div role="menu" aria-label="Visible columns menu" className="grid gap-1">
+                    {INVENTORY_COLUMNS.map((column) => {
+                      const selected = visibleColumns.includes(column.key)
+                      return (
+                        <button
+                          key={column.key}
+                          type="button"
+                          role="menuitemcheckbox"
+                          aria-checked={selected}
+                          onClick={() => toggleColumn(column.key)}
+                          className={cn(
+                            'flex items-center gap-3 rounded-xl px-4 py-3 text-left text-[13px] transition',
+                            selected ? 'bg-panel-soft text-ink' : 'text-ink hover:bg-panel-soft/70',
+                          )}
+                        >
+                          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                            {selected ? <Check className="h-4 w-4" /> : null}
+                          </span>
+                          <span>{column.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </section>
 
@@ -151,10 +244,10 @@ export function DBMetadataInventoryPage() {
 
       <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
         {loading ? (
-          <LoadingBlock message="載入實例總覽中…" className="min-h-[320px] rounded-none border-0 bg-transparent" />
+          <LoadingBlock message="Loading inventory..." className="min-h-[320px] rounded-none border-0 bg-transparent" />
         ) : filteredItems.length === 0 ? (
           <div className="m-4 flex min-h-[240px] items-center justify-center rounded-xl border border-dashed border-border bg-panel-soft text-sm text-muted">
-            查無符合條件的 inventory snapshot。
+            No inventory snapshots match the current filters.
           </div>
         ) : (
           <div className="grid gap-3 p-3">
@@ -162,36 +255,44 @@ export function DBMetadataInventoryPage() {
             <table className="min-w-full border-collapse">
               <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
                 <tr>
-                  <th className="px-3 py-3">Identifier</th>
-                  <th className="px-3 py-3">Engine</th>
-                  <th className="px-3 py-3">Version</th>
-                  <th className="px-3 py-3">Region / AZ</th>
-                  <th className="px-3 py-3">Role</th>
-                  <th className="px-3 py-3">Size</th>
-                  <th className="px-3 py-3">Mapping</th>
-                  <th className="px-3 py-3">Last Synced</th>
+                  {visibleColumns.includes('identifier') ? <th className="px-3 py-3">Identifier</th> : null}
+                  {visibleColumns.includes('engine') ? <th className="px-3 py-3">Engine</th> : null}
+                  {visibleColumns.includes('version') ? <th className="px-3 py-3">Version</th> : null}
+                  {visibleColumns.includes('regionAz') ? <th className="px-3 py-3">Region / AZ</th> : null}
+                  {visibleColumns.includes('role') ? <th className="px-3 py-3">Role</th> : null}
+                  {visibleColumns.includes('size') ? <th className="px-3 py-3">Size</th> : null}
+                  {visibleColumns.includes('mapping') ? <th className="px-3 py-3">Mapping</th> : null}
+                  {visibleColumns.includes('lastSynced') ? <th className="px-3 py-3">Last Synced</th> : null}
                 </tr>
               </thead>
               <tbody>
                 {pagedItems.map((item) => (
                   <tr key={item.id} className="border-t border-border text-sm text-ink hover:bg-slate-50/70">
-                    <td className="px-3 py-2.5 align-top">
-                      <p className="font-semibold">{item.db_identifier}</p>
-                      <p className="mt-1 break-all font-mono text-[11px] text-muted">{item.instance_endpoint ?? item.cluster_endpoint ?? '-'}</p>
-                    </td>
-                    <td className="px-3 py-2.5 align-top text-[12px]">{item.engine}</td>
-                    <td className="px-3 py-2.5 align-top text-[12px]">{item.engine_version ?? '-'}</td>
-                    <td className="px-3 py-2.5 align-top text-[12px]">
-                      {item.region}
-                      {item.az ? ` / ${item.az}` : ''}
-                    </td>
-                    <td className="px-3 py-2.5 align-top text-[12px]">{item.role ?? '-'}</td>
-                    <td className="px-3 py-2.5 align-top text-[12px]">{item.instance_class ?? '-'}</td>
-                    <td className="px-3 py-2.5 align-top text-[12px]">
-                      <p className="font-semibold">{item.mapping_status}</p>
-                      <p className="mt-1 text-muted">{item.mapping_connections?.join(', ') || '-'}</p>
-                    </td>
-                    <td className="px-3 py-2.5 align-top whitespace-nowrap text-[12px] text-muted">{formatDateTime(item.snapshot_at)}</td>
+                    {visibleColumns.includes('identifier') ? (
+                      <td className="px-3 py-2.5 align-top">
+                        <p className="font-semibold">{item.db_identifier}</p>
+                        <p className="mt-1 break-all font-mono text-[11px] text-muted">{item.instance_endpoint ?? item.cluster_endpoint ?? '-'}</p>
+                      </td>
+                    ) : null}
+                    {visibleColumns.includes('engine') ? <td className="px-3 py-2.5 align-top text-[12px]">{item.engine}</td> : null}
+                    {visibleColumns.includes('version') ? <td className="px-3 py-2.5 align-top text-[12px]">{item.engine_version ?? '-'}</td> : null}
+                    {visibleColumns.includes('regionAz') ? (
+                      <td className="px-3 py-2.5 align-top text-[12px]">
+                        {item.region}
+                        {item.az ? ` / ${item.az}` : ''}
+                      </td>
+                    ) : null}
+                    {visibleColumns.includes('role') ? <td className="px-3 py-2.5 align-top text-[12px]">{item.role ?? '-'}</td> : null}
+                    {visibleColumns.includes('size') ? <td className="px-3 py-2.5 align-top text-[12px]">{item.instance_class ?? '-'}</td> : null}
+                    {visibleColumns.includes('mapping') ? (
+                      <td className="px-3 py-2.5 align-top text-[12px]">
+                        <p className="font-semibold">{item.mapping_status}</p>
+                        <p className="mt-1 text-muted">{item.mapping_connections?.join(', ') || '-'}</p>
+                      </td>
+                    ) : null}
+                    {visibleColumns.includes('lastSynced') ? (
+                      <td className="px-3 py-2.5 align-top whitespace-nowrap text-[12px] text-muted">{formatDateTime(item.snapshot_at)}</td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>

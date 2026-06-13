@@ -8,6 +8,7 @@ import type { Ticket, TicketDetail, TicketScope } from '@/shared/types/ticket'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
+import { PageIntro } from '@/shared/ui/PageIntro'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useToast } from '@/shared/ui/ToastContext'
 import { approveTicket, executeTicket, getTicket, rejectTicket, requestExecution, revokeTicket } from '@/modules/tickets/api'
@@ -108,37 +109,35 @@ export function TicketDetailPage() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
-        <div className="border-b border-border/80 px-4 py-3 sm:px-5">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="max-w-3xl">
-              <div className="flex flex-wrap items-center gap-3">
-                <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">{ticket ? ticket.title : '工單詳情'}</h2>
-                {ticket ? <StatusBadge status={ticket.status} /> : null}
-              </div>
-              <p className="mt-2 text-[13px] leading-6 text-muted">
-                {ticket ? (
-                  <>
-                    <span className="font-mono font-semibold text-ink">{ticket.ticket_no}</span>
-                    <span className="mx-2 text-faint">·</span>
-                    建立於 {formatDateTime(ticket.created_at, true)}
-                  </>
-                ) : (
-                  '檢視工單內容、狀態與依角色可執行的後續操作。'
-                )}
-              </p>
-            </div>
-            <Link
-              to="/tickets"
-              className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              返回列表
-            </Link>
-          </div>
-        </div>
-      </section>
+    <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
+      <PageIntro
+        title={
+          <span className="flex flex-wrap items-center gap-3">
+            <span>{ticket ? ticket.title : '工單詳情'}</span>
+            {ticket ? <StatusBadge status={ticket.status} /> : null}
+          </span>
+        }
+        description={
+          ticket ? (
+            <>
+              <span className="font-mono font-semibold text-ink">{ticket.ticket_no}</span>
+              <span className="mx-2 text-faint">·</span>
+              建立於 {formatDateTime(ticket.created_at, true)}
+            </>
+          ) : (
+            '檢視工單內容、狀態與依角色可執行的後續操作。'
+          )
+        }
+        actions={
+          <Link
+            to="/tickets"
+            className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            返回列表
+          </Link>
+        }
+      />
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 

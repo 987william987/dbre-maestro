@@ -17,6 +17,11 @@ import { listTickets } from '@/modules/tickets/api'
 const mockedUseAuth = vi.mocked(useAuth)
 const mockedListTickets = vi.mocked(listTickets)
 
+function selectOption(label: string, option: string) {
+  fireEvent.click(screen.getByRole('button', { name: label }))
+  fireEvent.click(screen.getByRole('option', { name: option }))
+}
+
 describe('TicketsPage', () => {
   it('切換狀態篩選時會重新請求對應 status', async () => {
     mockedUseAuth.mockReturnValue({
@@ -50,7 +55,7 @@ describe('TicketsPage', () => {
 
     await waitFor(() => expect(mockedListTickets).toHaveBeenCalledWith(undefined, 20, 0))
 
-    fireEvent.change(screen.getByDisplayValue('All'), { target: { value: 'pending_review' } })
+    selectOption('Status', 'Pending Review')
 
     await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith('pending_review', 20, 0))
   })
@@ -82,6 +87,71 @@ describe('TicketsPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('尚無歷史工單')).toBeInTheDocument()
+    expect(await screen.findByText('No ticket history yet')).toBeInTheDocument()
+  })
+
+  it('moves to the next page when pagination is used', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'dev',
+        authGroups: ['developer'],
+        authGroupDetails: [],
+        permissions: ['tickets.apply'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    mockedListTickets
+      .mockResolvedValueOnce({
+        tickets: Array.from({ length: 20 }, (_, index) => ({
+          id: index + 1,
+          ticket_no: `T-${index + 1}`,
+          title: `Ticket ${index + 1}`,
+          description: null,
+          ticket_type: 'ddl',
+          status: 'pending_review',
+          submitter_id: 1,
+          created_at: '2026-06-12T00:00:00Z',
+        })),
+        limit: 20,
+        offset: 0,
+      })
+      .mockResolvedValueOnce({
+        tickets: [
+          {
+            id: 21,
+            ticket_no: 'T-21',
+            title: 'Ticket 21',
+            description: null,
+            ticket_type: 'ddl',
+            status: 'pending_review',
+            submitter_id: 1,
+            created_at: '2026-06-12T00:00:00Z',
+          },
+        ],
+        limit: 20,
+        offset: 20,
+      })
+
+    render(
+      <MemoryRouter>
+        <TicketsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Ticket 1')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith(undefined, 20, 20))
+    await waitFor(() => expect(screen.getByText('Ticket 21')).toBeInTheDocument())
   })
 })

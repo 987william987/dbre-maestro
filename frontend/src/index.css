@@ -3,11 +3,11 @@
 @tailwind utilities;
 
 :root {
-  --page:          #fafafa;
+  --page:          #ffffff;
   --panel:         #ffffff;
   --panel-muted:   #fafafa;
   --panel-soft:    #f4f4f5;
-  --sidebar:       #ffffff;
+  --sidebar:       #ece9e3;
   --editor:        #fafafa;
   --editor-border: #e4e4e7;
   --editor-toolbar:#f4f4f5;

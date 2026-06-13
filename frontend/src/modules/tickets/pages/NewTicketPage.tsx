@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { ArrowLeft, FileText, Loader2, ScrollText } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ApiError } from '@/shared/api/client'
+import { DropdownSelect } from '@/shared/ui/DropdownSelect'
+import { PageIntro } from '@/shared/ui/PageIntro'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { TicketType } from '@/shared/types/ticket'
 import { createTicket, listConnections } from '@/modules/tickets/api'
@@ -68,26 +70,20 @@ export function NewTicketPage() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
-        <div className="border-b border-border/80 px-4 py-3 sm:px-5">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="max-w-3xl">
-              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">New Ticket</h2>
-              <p className="mt-2 text-[13px] leading-6 text-muted">
-                Fill in the change details and target database. After submission, a Reviewer / DBA will handle the review and execution.
-              </p>
-            </div>
-            <Link
-              to="/tickets"
-              className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back to List
-            </Link>
-          </div>
-        </div>
-      </section>
+    <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
+      <PageIntro
+        title="New Ticket"
+        description="Fill in the change details and target database. After submission, a Reviewer / DBA will handle the review and execution."
+        actions={
+          <Link
+            to="/tickets"
+            className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to List
+          </Link>
+        }
+      />
 
       <form className="grid gap-3 xl:grid-cols-[0.95fr_1.05fr]" onSubmit={handleSubmit}>
         <section className="rounded-xl border border-border bg-panel shadow-soft">
@@ -126,32 +122,33 @@ export function NewTicketPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1.5">
                 <span className="text-[12px] font-semibold text-ink">Ticket Type</span>
-                <select
+                <DropdownSelect
+                  ariaLabel="Ticket Type"
                   value={ticketType}
-                  onChange={(event) => setTicketType(event.target.value as TicketType)}
-                  className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] font-semibold text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                  onChange={(value) => setTicketType(value as TicketType)}
                   disabled={submitting}
-                >
-                  <option value="ddl">DDL</option>
-                  <option value="dml">DML</option>
-                </select>
+                  options={[
+                    { value: 'ddl', label: 'DDL' },
+                    { value: 'dml', label: 'DML' },
+                  ]}
+                />
               </label>
 
               <label className="flex flex-col gap-1.5">
                 <span className="text-[12px] font-semibold text-ink">Target DB</span>
-                <select
+                <DropdownSelect
+                  ariaLabel="Target DB"
                   value={dbConnectionId}
-                  onChange={(event) => setDbConnectionId(event.target.value)}
-                  className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                  onChange={setDbConnectionId}
                   disabled={submitting || loadingConnections}
-                >
-                  <option value="">未指定</option>
-                  {connections.map((connection) => (
-                    <option key={connection.id} value={String(connection.id)}>
-                      {connection.name} ({connection.host}:{connection.port})
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: '', label: '未指定' },
+                    ...connections.map((connection) => ({
+                      value: String(connection.id),
+                      label: `${connection.name} (${connection.host}:${connection.port})`,
+                    })),
+                  ]}
+                />
               </label>
             </div>
           </div>

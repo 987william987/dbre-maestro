@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -68,6 +69,32 @@ type columnInfo struct {
 	IsNullable string `json:"is_nullable"`
 	Default    string `json:"default,omitempty"`
 	Comment    string `json:"comment"`
+}
+
+type definitionResponse struct {
+	Database   string `json:"database,omitempty"`
+	Schema     string `json:"schema"`
+	Table      string `json:"table"`
+	Definition string `json:"definition"`
+}
+
+type postgresDefinitionColumn struct {
+	Name         string
+	DataType     string
+	DefaultExpr  string
+	IsNullable   bool
+	IdentityType string
+	Generated    string
+}
+
+type postgresDefinitionConstraint struct {
+	Name       string
+	Definition string
+}
+
+type postgresDefinitionIndex struct {
+	Name       string
+	Definition string
 }
 
 // GET /db-connections/{id}/metadata
@@ -169,6 +196,66 @@ func (h *MetadataHandler) Columns(w http.ResponseWriter, r *http.Request) {
 		"schema":   schema,
 		"table":    table,
 		"columns":  columns,
+	})
+}
+
+// GET /db-connections/{id}/metadata/{schema}/{table}/definition
+// Returns the table definition for a specific table.
+func (h *MetadataHandler) Definition(w http.ResponseWriter, r *http.Request) {
+	connID, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	schema := chi.URLParam(r, "schema")
+	table := chi.URLParam(r, "table")
+	if schema == "" || table == "" {
+		jsonErr(w, http.StatusBadRequest, "schema and table are required")
+		return
+	}
+
+	ok, err := h.checkMetadataAccess(r, connID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "db scope check failed")
+		return
+	}
+	if !ok {
+		jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
+		return
+	}
+
+	conn, err := h.dbConns.GetByID(r.Context(), connID)
+	if err != nil || conn == nil {
+		jsonErr(w, http.StatusNotFound, "connection not found")
+		return
+	}
+
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	selectedDatabase := strings.TrimSpace(r.URL.Query().Get("database"))
+
+	definition, resolvedDatabase, err := h.loadDefinition(ctx, resolvedConn, password, selectedDatabase, schema, table)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			jsonErr(w, http.StatusNotFound, "table definition not found")
+			return
+		}
+		jsonErr(w, http.StatusInternalServerError, "query definition failed: "+err.Error())
+		return
+	}
+
+	jsonOK(w, definitionResponse{
+		Database:   resolvedDatabase,
+		Schema:     schema,
+		Table:      table,
+		Definition: definition,
 	})
 }
 
@@ -465,6 +552,56 @@ func (h *MetadataHandler) loadColumns(
 	}
 }
 
+func (h *MetadataHandler) loadDefinition(
+	ctx context.Context,
+	conn *model.DBConnection,
+	password string,
+	selectedDatabase string,
+	schema string,
+	table string,
+) (string, string, error) {
+	switch conn.DBType {
+	case "postgres", "postgresql":
+		if selectedDatabase == "" {
+			selectedDatabase = connectionDatabaseName(conn)
+		}
+		queryDB, cleanup, err := h.openQueryDB(conn, password, selectedDatabase)
+		if err != nil {
+			return "", "", err
+		}
+		defer cleanup()
+
+		definition, err := loadPostgresTableDefinition(ctx, queryDB, schema, table)
+		if err != nil {
+			return "", "", err
+		}
+		return definition, selectedDatabase, nil
+	case "redis":
+		return "", "", fmt.Errorf("redis does not support table definitions")
+	default:
+		queryDB, cleanup, err := h.openQueryDB(conn, password, "")
+		if err != nil {
+			return "", "", err
+		}
+		defer cleanup()
+
+		targetSchema := schema
+		if selectedDatabase != "" {
+			targetSchema = selectedDatabase
+		}
+
+		query := fmt.Sprintf("SHOW CREATE TABLE %s.%s", quoteMySQLIdentifier(targetSchema), quoteMySQLIdentifier(table))
+		row := queryDB.QueryRowContext(ctx, query)
+
+		var tableName string
+		var definition string
+		if err := row.Scan(&tableName, &definition); err != nil {
+			return "", "", err
+		}
+		return definition, targetSchema, nil
+	}
+}
+
 func (h *MetadataHandler) openQueryDB(
 	conn *model.DBConnection,
 	password string,
@@ -513,6 +650,169 @@ func connectionDatabaseName(conn *model.DBConnection) string {
 		return ""
 	}
 	return strings.TrimSpace(*conn.DatabaseName)
+}
+
+func quotePostgresIdentifier(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
+}
+
+func loadPostgresTableDefinition(ctx context.Context, db *sql.DB, schema string, table string) (string, error) {
+	const columnsQuery = `SELECT
+		a.attname,
+		pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
+		COALESCE(pg_get_expr(ad.adbin, ad.adrelid), '') AS default_expr,
+		NOT a.attnotnull AS is_nullable,
+		COALESCE(a.attidentity, '') AS identity_type,
+		COALESCE(a.attgenerated, '') AS generated
+	FROM pg_attribute a
+	JOIN pg_class c ON c.oid = a.attrelid
+	JOIN pg_namespace n ON n.oid = c.relnamespace
+	LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+	WHERE n.nspname = $1
+	  AND c.relname = $2
+	  AND c.relkind IN ('r', 'p')
+	  AND a.attnum > 0
+	  AND NOT a.attisdropped
+	ORDER BY a.attnum`
+
+	columnRows, err := db.QueryContext(ctx, columnsQuery, schema, table)
+	if err != nil {
+		return "", err
+	}
+	defer columnRows.Close()
+
+	columns := make([]postgresDefinitionColumn, 0)
+	for columnRows.Next() {
+		var column postgresDefinitionColumn
+		if err := columnRows.Scan(
+			&column.Name,
+			&column.DataType,
+			&column.DefaultExpr,
+			&column.IsNullable,
+			&column.IdentityType,
+			&column.Generated,
+		); err != nil {
+			return "", err
+		}
+		columns = append(columns, column)
+	}
+	if err := columnRows.Err(); err != nil {
+		return "", err
+	}
+	if len(columns) == 0 {
+		return "", sql.ErrNoRows
+	}
+
+	regclass := fmt.Sprintf("%s.%s", quotePostgresIdentifier(schema), quotePostgresIdentifier(table))
+	constraintsRows, err := db.QueryContext(ctx, `SELECT
+		conname,
+		pg_get_constraintdef(oid, true) AS definition
+	FROM pg_constraint
+	WHERE conrelid = $1::regclass
+	ORDER BY CASE contype
+		WHEN 'p' THEN 0
+		WHEN 'u' THEN 1
+		WHEN 'f' THEN 2
+		WHEN 'c' THEN 3
+		ELSE 4
+	END, conname`, regclass)
+	if err != nil {
+		return "", err
+	}
+	defer constraintsRows.Close()
+
+	constraints := make([]postgresDefinitionConstraint, 0)
+	for constraintsRows.Next() {
+		var constraint postgresDefinitionConstraint
+		if err := constraintsRows.Scan(&constraint.Name, &constraint.Definition); err != nil {
+			return "", err
+		}
+		constraints = append(constraints, constraint)
+	}
+	if err := constraintsRows.Err(); err != nil {
+		return "", err
+	}
+
+	indexRows, err := db.QueryContext(ctx, `SELECT
+		i.relname AS index_name,
+		pg_get_indexdef(i.oid) AS definition
+	FROM pg_class t
+	JOIN pg_namespace n ON n.oid = t.relnamespace
+	JOIN pg_index ix ON ix.indrelid = t.oid
+	JOIN pg_class i ON i.oid = ix.indexrelid
+	LEFT JOIN pg_constraint c ON c.conindid = i.oid
+	WHERE n.nspname = $1
+	  AND t.relname = $2
+	  AND c.oid IS NULL
+	ORDER BY i.relname`, schema, table)
+	if err != nil {
+		return "", err
+	}
+	defer indexRows.Close()
+
+	indexes := make([]postgresDefinitionIndex, 0)
+	for indexRows.Next() {
+		var index postgresDefinitionIndex
+		if err := indexRows.Scan(&index.Name, &index.Definition); err != nil {
+			return "", err
+		}
+		indexes = append(indexes, index)
+	}
+	if err := indexRows.Err(); err != nil {
+		return "", err
+	}
+
+	return buildPostgresTableDefinition(schema, table, columns, constraints, indexes), nil
+}
+
+func buildPostgresTableDefinition(
+	schema string,
+	table string,
+	columns []postgresDefinitionColumn,
+	constraints []postgresDefinitionConstraint,
+	indexes []postgresDefinitionIndex,
+) string {
+	lines := make([]string, 0, len(columns)+len(constraints))
+	for _, column := range columns {
+		parts := []string{
+			fmt.Sprintf("    %s %s", quotePostgresIdentifier(column.Name), column.DataType),
+		}
+		if column.Generated == "s" && column.DefaultExpr != "" {
+			parts = append(parts, fmt.Sprintf("GENERATED ALWAYS AS (%s) STORED", column.DefaultExpr))
+		} else if column.IdentityType == "a" {
+			parts = append(parts, "GENERATED ALWAYS AS IDENTITY")
+		} else if column.IdentityType == "d" {
+			parts = append(parts, "GENERATED BY DEFAULT AS IDENTITY")
+		} else if strings.TrimSpace(column.DefaultExpr) != "" {
+			parts = append(parts, fmt.Sprintf("DEFAULT %s", column.DefaultExpr))
+		}
+		if !column.IsNullable {
+			parts = append(parts, "NOT NULL")
+		}
+		lines = append(lines, strings.Join(parts, " "))
+	}
+
+	for _, constraint := range constraints {
+		lines = append(lines, fmt.Sprintf("    CONSTRAINT %s %s", quotePostgresIdentifier(constraint.Name), constraint.Definition))
+	}
+
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("CREATE TABLE %s.%s (\n", quotePostgresIdentifier(schema), quotePostgresIdentifier(table)))
+	builder.WriteString(strings.Join(lines, ",\n"))
+	builder.WriteString("\n);")
+
+	if len(indexes) > 0 {
+		builder.WriteString("\n\n")
+		for indexPosition, index := range indexes {
+			if indexPosition > 0 {
+				builder.WriteString("\n")
+			}
+			builder.WriteString(index.Definition)
+			builder.WriteString(";")
+		}
+	}
+
+	return builder.String()
 }
 
 func buildRedisMetadataItems() []metadataItem {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"fmt"
 
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
@@ -59,6 +60,10 @@ func (h *SQLReviewRuleHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "at least one of enabled or threshold must be provided")
 		return
 	}
+	if req.Threshold != nil && !sqlReviewRuleSupportsThreshold(name) {
+		jsonErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("rule %q does not support threshold", name))
+		return
+	}
 	if req.Threshold != nil && *req.Threshold < 0 {
 		jsonErr(w, http.StatusUnprocessableEntity, "threshold must be non-negative")
 		return
@@ -83,4 +88,8 @@ func (h *SQLReviewRuleHandler) Patch(w http.ResponseWriter, r *http.Request) {
 
 	updated, _ := h.rules.GetByName(r.Context(), name)
 	jsonOK(w, updated)
+}
+
+func sqlReviewRuleSupportsThreshold(name string) bool {
+	return name == "high_row_count"
 }

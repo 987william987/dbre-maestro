@@ -38,7 +38,7 @@ describe('App routing', () => {
     })
   })
 
-  it('以已登入狀態進入 /tickets 時，即使後端回傳 null 陣列也不會白屏', async () => {
+  it('does not blank the page at /tickets when the backend returns a null ticket array', async () => {
     window.localStorage.setItem('dbre_maestro.access_token', 'test-token')
     window.history.replaceState({}, '', '/tickets')
 
@@ -91,7 +91,7 @@ describe('App routing', () => {
     )
 
     expect(await screen.findByText('Ticket Workspace')).toBeInTheDocument()
-    expect(await screen.findByText('尚無歷史工單')).toBeInTheDocument()
+    expect(await screen.findByText('No ticket history yet')).toBeInTheDocument()
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

@@ -1,5 +1,5 @@
 import { apiClient } from '@/shared/api/client'
-import type { MetadataColumn, MetadataResponse, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
+import type { MetadataColumn, MetadataDefinition, MetadataResponse, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
 
 type QueryPayload = {
   db_connection_id: number
@@ -98,6 +98,15 @@ export async function listMetadataColumns(connectionId: number, schema: string, 
     ...response,
     columns: Array.isArray(response.columns) ? response.columns : [],
   }
+}
+
+export async function listMetadataDefinition(connectionId: number, schema: string, table: string, database?: string) {
+  const encodedSchema = encodeURIComponent(schema)
+  const encodedTable = encodeURIComponent(table)
+  const query = database ? `?database=${encodeURIComponent(database)}` : ''
+  return apiClient.get<MetadataDefinition>(
+    `/db-connections/${connectionId}/metadata/${encodedSchema}/${encodedTable}/definition${query}`,
+  )
 }
 
 type QueryHistoryResponse = {

@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, Download, Search, X } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, Download, Search, X } from 'lucide-react'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
-import { formatDateTime } from '@/shared/lib/format'
 import type { AuditLog } from '@/shared/types/audit'
+import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
+import { PageIntro } from '@/shared/ui/PageIntro'
 import { exportAuditLogs, listAuditLogs } from '@/modules/audit/api'
 import { useToast } from '@/shared/ui/ToastContext'
 
@@ -86,7 +87,7 @@ export function AuditLogsPage() {
       setLogs(response.logs)
       setTotal(response.total)
     } catch (loadError) {
-      setError(loadError instanceof ApiError ? loadError.message : '讀取稽核日誌失敗。')
+      setError(loadError instanceof ApiError ? loadError.message : 'Failed to load audit logs.')
     } finally {
       setLoading(false)
     }
@@ -104,11 +105,11 @@ export function AuditLogsPage() {
 
   const filterHint = useMemo(() => {
     const active: string[] = []
-    if (filters.actionType) active.push(`動作：${formatActionType(filters.actionType)}`)
-    if (filters.resourceType) active.push(`資源：${formatResourceType(filters.resourceType)}`)
-    if (filters.actorKeyword) active.push(`操作人：${filters.actorKeyword}`)
-    if (filters.resourceKeyword) active.push(`資源名稱：${filters.resourceKeyword}`)
-    if (filters.from || filters.to) active.push(`時間區間：${formatDateFilter(filters.from) || '不限'} 至 ${formatDateFilter(filters.to) || '不限'}`)
+    if (filters.actionType) active.push(`Action: ${formatActionType(filters.actionType)}`)
+    if (filters.resourceType) active.push(`Resource: ${formatResourceType(filters.resourceType)}`)
+    if (filters.actorKeyword) active.push(`Actor: ${filters.actorKeyword}`)
+    if (filters.resourceKeyword) active.push(`Resource Name: ${filters.resourceKeyword}`)
+    if (filters.from || filters.to) active.push(`Time Range: ${formatDateFilter(filters.from) || 'Any'} to ${formatDateFilter(filters.to) || 'Any'}`)
     return active
   }, [filters])
 
@@ -131,29 +132,25 @@ export function AuditLogsPage() {
       anchor.click()
       document.body.removeChild(anchor)
       window.URL.revokeObjectURL(url)
-      pushToast('稽核日誌匯出已開始', 'success', { placement: 'center' })
+      pushToast('Audit log export started.', 'success', { placement: 'center' })
     } catch (exportError) {
-      pushToast(exportError instanceof ApiError ? exportError.message : '匯出稽核日誌失敗', 'error', { placement: 'center', durationMs: 3600 })
+      pushToast(exportError instanceof ApiError ? exportError.message : 'Failed to export audit logs.', 'error', { placement: 'center', durationMs: 3600 })
     }
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
-        <div className="border-b border-border/80 px-4 py-3 sm:px-5">
-          <div className="max-w-3xl">
-            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">Audit Logs</h2>
-            <p className="mt-2 text-[13px] leading-6 text-muted">
-              View operation records for logins, tickets, exports, and configuration changes. Common filters are provided as selects; complex details are shown in the detail panel.
-            </p>
-          </div>
-        </div>
+    <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
+      <PageIntro
+        title="Audit Logs"
+        description="View operation records for logins, tickets, exports, and configuration changes. Common filters are provided as selects; complex details are shown in the detail panel."
+      />
 
-        <form className="px-4 py-3 sm:px-5" onSubmit={handleSubmit}>
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+      <section>
+        <form className="py-1" onSubmit={handleSubmit}>
+          <div className="flex flex-wrap items-end gap-2.5">
             <FilterHint
               hint="Select a common action event, e.g. login, logout, setting change."
-              className="w-full"
+              className="min-w-[180px] flex-1 xl:max-w-[210px]"
             >
               <SelectField
                 value={filters.actionType}
@@ -163,7 +160,7 @@ export function AuditLogsPage() {
             </FilterHint>
             <FilterHint
               hint="Narrow by resource type, e.g. DB connection, ticket, or user."
-              className="w-full"
+              className="min-w-[180px] flex-1 xl:max-w-[210px]"
             >
               <SelectField
                 value={filters.resourceType}
@@ -173,7 +170,7 @@ export function AuditLogsPage() {
             </FilterHint>
             <FilterHint
               hint="Filter by actor name keyword, e.g. admin or william."
-              className="w-full"
+              className="min-w-[160px] flex-1 xl:max-w-[180px]"
             >
               <input
                 value={filters.actorKeyword}
@@ -184,7 +181,7 @@ export function AuditLogsPage() {
             </FilterHint>
             <FilterHint
               hint="Filter by resource name keyword, e.g. a connection name or ticket title."
-              className="w-full"
+              className="min-w-[170px] flex-1 xl:max-w-[190px]"
             >
               <input
                 value={filters.resourceKeyword}
@@ -194,35 +191,33 @@ export function AuditLogsPage() {
               />
             </FilterHint>
             <FilterHint
-              hint="Set start time — only events after this time will be shown."
-              className="w-full"
+              hint="Set the start date and time. Only events after this point will be shown."
+              className="min-w-[210px] flex-1 xl:max-w-[250px]"
             >
-              <input
+              <DateTimeField
                 value={filters.from}
-                onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))}
-                type="datetime-local"
-                className="h-10 w-full rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                onChange={(value) => setFilters((current) => ({ ...current, from: value }))}
+                placeholder="Start date and time"
+                presets={FROM_DATE_PRESETS}
               />
             </FilterHint>
             <FilterHint
-              hint="Set end time — only events before this time will be shown."
-              className="w-full"
+              hint="Set the end date and time. Only events before this point will be shown."
+              className="min-w-[210px] flex-1 xl:max-w-[250px]"
             >
-              <input
+              <DateTimeField
                 value={filters.to}
-                onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))}
-                type="datetime-local"
-                className="h-10 w-full rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                onChange={(value) => setFilters((current) => ({ ...current, to: value }))}
+                placeholder="End date and time"
+                presets={TO_DATE_PRESETS}
               />
             </FilterHint>
-          </div>
 
-          <div className="mt-3 flex flex-wrap justify-end gap-2">
             {canExport ? (
               <button
                 type="button"
                 onClick={handleExport}
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-page"
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-page xl:ml-auto"
               >
                 <Download className="h-4 w-4" />
                 Export
@@ -266,7 +261,7 @@ export function AuditLogsPage() {
               <tbody>
                 {logs.map((log) => (
                   <tr key={log.id} className="border-t border-border text-sm text-ink transition-colors hover:bg-slate-50/70">
-                    <td className="px-3 py-2.5 text-[12px] text-muted whitespace-nowrap">{formatDateTime(log.created_at, true)}</td>
+                    <td className="px-3 py-2.5 text-[12px] text-muted whitespace-nowrap">{formatAuditDateTime(log.created_at, true)}</td>
                     <td className="px-3 py-2.5 text-[13px] font-semibold whitespace-nowrap">{formatActor(log)}</td>
                     <td className="px-3 py-2.5 text-[12px] whitespace-nowrap">{formatActionType(log.action_type)}</td>
                     <td className="max-w-[360px] px-3 py-2.5 text-[12px] text-muted">
@@ -281,7 +276,7 @@ export function AuditLogsPage() {
                         onClick={() => setSelectedLog(log)}
                         className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
                       >
-                        查看
+                        View
                       </button>
                     </td>
                   </tr>
@@ -294,7 +289,7 @@ export function AuditLogsPage() {
 
       <div className="flex items-center justify-between px-1">
         <p className="text-[12px] text-muted">
-          共 {total} 筆，目前顯示 {logs.length === 0 ? 0 : offset + 1} - {Math.min(offset + logs.length, total)}
+          {total} total, showing {logs.length === 0 ? 0 : offset + 1} - {Math.min(offset + logs.length, total)}
         </p>
         <div className="flex gap-2">
           <button
@@ -303,7 +298,7 @@ export function AuditLogsPage() {
             onClick={() => setOffset((current) => Math.max(0, current - PAGE_SIZE))}
             className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
           >
-            上一頁
+            Previous
           </button>
           <button
             type="button"
@@ -311,7 +306,7 @@ export function AuditLogsPage() {
             onClick={() => setOffset((current) => current + PAGE_SIZE)}
             className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
           >
-            下一頁
+            Next
           </button>
         </div>
       </div>
@@ -335,7 +330,7 @@ export function AuditLogsPage() {
                 type="button"
                 onClick={() => setSelectedLog(null)}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
-                aria-label="關閉"
+                aria-label="Close"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -343,15 +338,15 @@ export function AuditLogsPage() {
 
             <div className="grid gap-4 overflow-y-auto px-5 py-4">
               <section className="grid gap-3 sm:grid-cols-2">
-                <InfoBox label="時間" value={formatDateTime(selectedLog.created_at, true)} />
-                <InfoBox label="操作人" value={formatActor(selectedLog)} />
-                <InfoBox label="資源" value={formatResource(selectedLog)} />
-                <InfoBox label="來源 IP" value={formatIPAddress(selectedLog.ip_address)} />
+                <InfoBox label="Timestamp" value={formatAuditDateTime(selectedLog.created_at, true)} />
+                <InfoBox label="Actor" value={formatActor(selectedLog)} />
+                <InfoBox label="Resource" value={formatResource(selectedLog)} />
+                <InfoBox label="Source IP" value={formatIPAddress(selectedLog.ip_address)} />
               </section>
 
               <section className="rounded-xl border border-border bg-panel shadow-soft">
                 <div className="border-b border-border/80 px-4 py-3">
-                  <p className="text-[13px] font-semibold text-ink">完整明細</p>
+                  <p className="text-[13px] font-semibold text-ink">Full Details</p>
                 </div>
                 <div className="px-4 py-4">
                   <pre className="overflow-x-auto rounded-lg bg-panel-soft px-3 py-3 text-[12px] text-muted">
@@ -378,20 +373,12 @@ function SelectField({
   options: ReadonlyArray<{ value: string; label: string }>
 }) {
   return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-10 w-full appearance-none rounded-lg border border-border bg-panel-soft px-3 pr-9 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-    </div>
+    <DropdownSelect
+      ariaLabel="Audit filter select"
+      value={value}
+      onChange={onChange}
+      options={options}
+    />
   )
 }
 
@@ -428,9 +415,9 @@ function formatActor(log: AuditLog) {
     return log.actor_name
   }
   if (log.actor_id) {
-    return `使用者 #${log.actor_id}`
+    return `User #${log.actor_id}`
   }
-  return '系統'
+  return 'System'
 }
 
 function formatActionType(actionType: string) {
@@ -447,7 +434,7 @@ function formatActionType(actionType: string) {
 
 function formatResourceType(resourceType?: string | null) {
   if (!resourceType) {
-    return '未指定資源'
+    return 'Unspecified Resource'
   }
   const option = RESOURCE_OPTIONS.find((item) => item.value === resourceType)
   return option?.label ?? resourceType
@@ -461,14 +448,14 @@ function formatResource(log: AuditLog) {
   if (detailName) {
     return `${label} · ${detailName}`
   }
-  if (label === '未指定資源' && log.resource_id) {
-    return `未指定資源 · ${log.resource_id}`
+  if (label === 'Unspecified Resource' && log.resource_id) {
+    return `Unspecified Resource · ${log.resource_id}`
   }
   return label
 }
 
 function formatIPAddress(ipAddress?: string | null) {
-  return ipAddress?.trim() ? ipAddress : '系統事件'
+  return ipAddress?.trim() ? ipAddress : 'System Event'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -488,7 +475,7 @@ function formatDateFilter(value: string) {
     return ''
   }
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : formatDateTime(date.toISOString(), true)
+  return Number.isNaN(date.getTime()) ? value : formatAuditDateTime(date.toISOString(), true)
 }
 
 function getDownloadFilename(contentDisposition: string | null) {
@@ -497,4 +484,305 @@ function getDownloadFilename(contentDisposition: string | null) {
   }
   const matched = contentDisposition.match(/filename="([^"]+)"/)
   return matched?.[1] ?? null
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] as const
+const WEEKDAY_NAMES = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'] as const
+
+const FROM_DATE_PRESETS = [
+  { label: 'Today', getValue: () => toLocalInputValue(startOfDay(new Date())) },
+  { label: 'Yesterday', getValue: () => toLocalInputValue(startOfDay(addDays(new Date(), -1))) },
+  { label: 'Last 7 Days', getValue: () => toLocalInputValue(startOfDay(addDays(new Date(), -6))) },
+  { label: 'This Month', getValue: () => toLocalInputValue(startOfMonth(new Date())) },
+  { label: 'Clear', getValue: () => '' },
+] as const
+
+const TO_DATE_PRESETS = [
+  { label: 'Now', getValue: () => toLocalInputValue(new Date()) },
+  { label: 'End of Today', getValue: () => toLocalInputValue(endOfDay(new Date())) },
+  { label: 'End of Yesterday', getValue: () => toLocalInputValue(endOfDay(addDays(new Date(), -1))) },
+  { label: 'End of This Month', getValue: () => toLocalInputValue(endOfMonth(new Date())) },
+  { label: 'Clear', getValue: () => '' },
+] as const
+
+function DateTimeField({
+  value,
+  onChange,
+  placeholder,
+  presets,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+  presets: ReadonlyArray<{ label: string; getValue: () => string }>
+}) {
+  const [open, setOpen] = useState(false)
+  const [viewDate, setViewDate] = useState(() => parseLocalDateTime(value) ?? new Date())
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) {
+      setViewDate(parseLocalDateTime(value) ?? new Date())
+    }
+  }, [open, value])
+
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node
+      if (!containerRef.current?.contains(target)) {
+        setOpen(false)
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [])
+
+  const parsed = parseLocalDateTime(value)
+  const displayValue = parsed ? formatAuditLocalDateTime(parsed) : placeholder
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-panel-soft px-3 text-left text-[13px] text-ink transition hover:border-slate-300"
+      >
+        <span className={parsed ? 'text-ink' : 'text-muted'}>{displayValue}</span>
+        <CalendarDays className="h-4 w-4 text-faint" />
+      </button>
+
+      {open ? (
+        <div className="absolute left-0 top-[calc(100%+8px)] z-30 w-[min(720px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-white shadow-[0_22px_45px_rgba(15,23,42,0.14)]">
+          <div className="grid gap-0 md:grid-cols-[180px_minmax(0,1fr)]">
+            <div className="border-b border-border p-3 md:border-b-0 md:border-r">
+              <p className="mb-3 text-[12px] font-semibold text-muted">Quick Range</p>
+              <div className="grid gap-1">
+                {presets.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      onChange(preset.getValue())
+                      setOpen(false)
+                    }}
+                    className="rounded-md px-3 py-2 text-left text-[12px] font-medium text-ink transition hover:bg-panel-soft"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-3">
+              <div className="mb-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewDate((current) => addMonths(current, -1))}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-white text-ink transition hover:bg-panel-soft"
+                  aria-label="Previous month"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <div className="flex-1 text-center text-[18px] font-semibold text-ink">
+                  {MONTH_NAMES[viewDate.getMonth()]} {viewDate.getFullYear()}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setViewDate((current) => addMonths(current, 1))}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-white text-ink transition hover:bg-panel-soft"
+                  aria-label="Next month"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+                {WEEKDAY_NAMES.map((day) => <span key={day}>{day}</span>)}
+              </div>
+              <div className="mt-2 grid grid-cols-7 gap-1">
+                {buildCalendarDays(viewDate).map((day) => {
+                  const selected = parsed && isSameDay(parsed, day.date)
+                  return (
+                    <button
+                      key={day.key}
+                      type="button"
+                      disabled={!day.inCurrentMonth}
+                      onClick={() => {
+                        const next = mergeDatePart(value, day.date)
+                        onChange(next)
+                        setOpen(false)
+                      }}
+                      className={`h-10 rounded-md text-[13px] transition ${
+                        selected
+                          ? 'bg-ink font-semibold text-white'
+                          : day.inCurrentMonth
+                            ? 'text-ink hover:bg-panel-soft'
+                            : 'text-faint'
+                      }`}
+                    >
+                      {day.date.getDate()}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div className="mt-3 flex items-center gap-2">
+                <TimeSelect
+                  value={getTimePart(value)}
+                  onChange={(timeValue) => onChange(updateTimePart(value, timeValue, viewDate))}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange('')
+                    setOpen(false)
+                  }}
+                  className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function TimeSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <DropdownSelect
+      ariaLabel="Select time"
+      value={value}
+      onChange={onChange}
+      options={TIME_OPTIONS}
+      className="min-w-[160px]"
+      triggerClassName="bg-white"
+      menuClassName="max-h-64 overflow-y-auto"
+    />
+  )
+}
+
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
+  const hour = String(Math.floor(index / 2)).padStart(2, '0')
+  const minute = index % 2 === 0 ? '00' : '30'
+  return { value: `${hour}:${minute}`, label: `${hour}:${minute}` }
+})
+
+function buildCalendarDays(viewDate: Date) {
+  const firstDay = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1)
+  const start = addDays(firstDay, -firstDay.getDay())
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = addDays(start, index)
+    return {
+      key: `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`,
+      date,
+      inCurrentMonth: date.getMonth() === viewDate.getMonth(),
+    }
+  })
+}
+
+function formatAuditDateTime(value?: string | null, withSeconds = false) {
+  if (!value) {
+    return '—'
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: withSeconds ? '2-digit' : undefined,
+    hour12: false,
+  }).format(date).replace(',', '')
+}
+
+function formatAuditLocalDateTime(date: Date) {
+  return `${MONTH_NAMES[date.getMonth()]} ${String(date.getDate()).padStart(2, '0')}, ${date.getFullYear()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+function parseLocalDateTime(value: string) {
+  if (!value) {
+    return null
+  }
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function toLocalInputValue(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day}T${hour}:${minute}`
+}
+
+function mergeDatePart(existingValue: string, nextDate: Date) {
+  const base = parseLocalDateTime(existingValue) ?? new Date()
+  const merged = new Date(nextDate.getFullYear(), nextDate.getMonth(), nextDate.getDate(), base.getHours(), base.getMinutes(), 0, 0)
+  return toLocalInputValue(merged)
+}
+
+function updateTimePart(existingValue: string, timeValue: string, fallbackDate: Date) {
+  const [hours, minutes] = timeValue.split(':').map((part) => Number.parseInt(part, 10))
+  const base = parseLocalDateTime(existingValue) ?? fallbackDate
+  const merged = new Date(base.getFullYear(), base.getMonth(), base.getDate(), hours, minutes, 0, 0)
+  return toLocalInputValue(merged)
+}
+
+function getTimePart(value: string) {
+  const parsed = parseLocalDateTime(value)
+  if (!parsed) {
+    return '00:00'
+  }
+  return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`
+}
+
+function addDays(date: Date, amount: number) {
+  const next = new Date(date)
+  next.setDate(next.getDate() + amount)
+  return next
+}
+
+function addMonths(date: Date, amount: number) {
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1)
+}
+
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0)
+}
+
+function endOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 30, 0, 0)
+}
+
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0)
+}
+
+function endOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 30, 0, 0)
+}
+
+function isSameDay(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate()
 }

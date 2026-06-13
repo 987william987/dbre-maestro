@@ -31,6 +31,8 @@ function renderShell(initialEntry = '/tickets') {
             <Route path="/tickets" element={<div>tickets page</div>} />
             <Route path="/tickets/new" element={<div>new ticket page</div>} />
             <Route path="/tickets/:id" element={<div>ticket detail page</div>} />
+            <Route path="/users" element={<div>users page</div>} />
+            <Route path="/users/groups" element={<div>auth groups page</div>} />
             <Route path="/db-metadata/inventory" element={<div>inventory page</div>} />
             <Route path="/db-metadata/objects" element={<div>objects page</div>} />
           </Route>
@@ -131,8 +133,10 @@ describe('AppShell notifications', () => {
 
     await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
     expect(screen.getByRole('button', { name: /DB Metadata/i })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getAllByText('Governance').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('DB Metadata').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Objects').length).toBeGreaterThan(0)
     expect(screen.getByText('Inventory')).toBeInTheDocument()
-    expect(screen.getByText('Objects')).toBeInTheDocument()
   })
 
   it('可手動展開與收合子導航', async () => {
@@ -158,6 +162,7 @@ describe('AppShell notifications', () => {
     renderShell('/tickets')
 
     await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    expect(screen.getAllByText('Workbench').length).toBeGreaterThan(0)
     const ticketsToggle = screen.getByRole('button', { name: /Tickets/i })
     expect(ticketsToggle).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('New Ticket')).toBeInTheDocument()
@@ -167,5 +172,33 @@ describe('AppShell notifications', () => {
 
     fireEvent.click(ticketsToggle)
     expect(ticketsToggle).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('users groups 路由會對應到 Auth Groups breadcrumb', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'admin',
+        authGroups: ['admin'],
+        authGroupDetails: [],
+        permissions: ['users.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/users/groups')
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: /Users/i })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getAllByText('Governance').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Auth Groups').length).toBeGreaterThan(0)
   })
 })

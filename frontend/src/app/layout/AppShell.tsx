@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, ChevronDown, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, SquareTerminal, Ticket, Users } from 'lucide-react'
+import { Bell, BriefcaseBusiness, ChevronDown, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -111,6 +111,41 @@ const NAV_GROUPS = [
     items: ['/users', '/db-connections', '/db-metadata/inventory', '/db-metadata/objects', '/masking-rules', '/sql-review-rules', '/audit-logs', '/settings'],
   },
 ]
+
+function findNavGroupTitle(pathname: string, items: NavItem[]) {
+  for (const group of NAV_GROUPS) {
+    const groupItems = items.filter((item) => (item.to ? group.items.includes(item.to) : false))
+    for (const item of groupItems) {
+      if (item.children?.some((child) => isPathActive(pathname, child.to))) {
+        return group.title
+      }
+      if (item.to != null && isPathActive(pathname, item.to)) {
+        return group.title
+      }
+    }
+  }
+  return 'DBRE Maestro'
+}
+
+function groupIcon(title: string) {
+  switch (title) {
+    case 'Workbench':
+      return BriefcaseBusiness
+    case 'Governance':
+      return ShieldEllipsis
+    default:
+      return BriefcaseBusiness
+  }
+}
+
+function findActiveNavChild(pathname: string, item: NavItem) {
+  if (!item.children) {
+    return null
+  }
+  return [...item.children]
+    .sort((left, right) => right.to.length - left.to.length)
+    .find((child) => isPathActive(pathname, child.to)) ?? null
+}
 
 export function AppShell() {
   const { user, logout } = useAuth()
@@ -251,11 +286,40 @@ export function AppShell() {
     () => NAV_ITEMS.filter((item) => item.allowed(user.permissions)),
     [user.permissions],
   )
+  const activeNavItem = useMemo(
+    () =>
+      navItems.find((item) => {
+        if (findActiveNavChild(location.pathname, item)) {
+          return true
+        }
+        return item.to != null && isPathActive(location.pathname, item.to)
+      }) ?? null,
+    [location.pathname, navItems],
+  )
+  const activeNavChild = useMemo(
+    () => (activeNavItem ? findActiveNavChild(location.pathname, activeNavItem) : null),
+    [activeNavItem, location.pathname],
+  )
+  const currentSectionTitle = useMemo(
+    () => findNavGroupTitle(location.pathname, navItems),
+    [location.pathname, navItems],
+  )
+  const CurrentSectionIcon = groupIcon(currentSectionTitle)
+  const breadcrumbItems = useMemo(() => {
+    const items = ['DBRE Maestro']
+    if (activeNavItem?.label) {
+      items.push(activeNavItem.label)
+    }
+    if (activeNavChild?.label && activeNavChild.label !== activeNavItem?.label) {
+      items.push(activeNavChild.label)
+    }
+    return items
+  }, [activeNavChild, activeNavItem])
 
   useEffect(() => {
     setExpandedNavKeys((current) => {
       const required = navItems
-        .filter((item) => item.children?.some((child) => isPathActive(location.pathname, child.to)))
+        .filter((item) => findActiveNavChild(location.pathname, item))
         .map((item) => item.key)
       const next = new Set([...current, ...required])
       return Array.from(next)
@@ -272,14 +336,14 @@ export function AppShell() {
 
   return (
     <div className="flex h-screen text-ink">
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-panel lg:flex">
-        <div className="flex h-14 items-center gap-2.5 border-b border-border px-4">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-white">
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
+        <div className="flex h-16 items-center gap-3 px-5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand text-white">
             <span className="text-sm font-bold">M</span>
           </div>
           <div className="min-w-0">
-            <p className="truncate text-[13px] font-semibold leading-tight text-ink">DBRE Maestro</p>
-            <p className="truncate text-[11px] leading-tight text-muted">Control Plane</p>
+            <p className="truncate text-[14px] font-semibold leading-tight text-ink">DBRE Maestro</p>
+            <p className="truncate text-[12px] leading-tight text-muted">Operations Control Plane</p>
           </div>
         </div>
 
@@ -399,11 +463,15 @@ export function AppShell() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="relative z-20 shrink-0 border-b border-border bg-panel px-4 sm:px-6">
-          <div className="flex h-14 items-center gap-3">
+        <header className="relative z-20 shrink-0 border-b border-border bg-panel">
+          <div className="flex h-16 items-center gap-3 border-b border-border px-4 sm:px-6">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px] font-semibold text-ink">DBRE Maestro</p>
-              <p className="hidden truncate text-[11px] text-muted sm:block">Operations Control Plane</p>
+              <div className="flex items-center gap-2.5">
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-panel-soft text-ink">
+                  <CurrentSectionIcon className="h-4 w-4" />
+                </span>
+                <p className="truncate text-[15px] font-medium text-ink">{currentSectionTitle}</p>
+              </div>
             </div>
 
             <div ref={notificationRef} className="relative">
@@ -525,7 +593,20 @@ export function AppShell() {
             </div>
           </div>
 
-          <nav className="flex gap-1.5 overflow-x-auto pb-2 lg:hidden">
+          <div className="hidden h-14 items-center px-4 sm:px-6 lg:flex">
+            <div className="flex min-w-0 items-center gap-3 overflow-x-auto text-[14px]">
+              {breadcrumbItems.map((item, index) => (
+                <div key={`${item}-${index}`} className="flex shrink-0 items-center gap-3">
+                  {index > 0 ? <span className="text-muted">/</span> : null}
+                  <span className={cn(index === breadcrumbItems.length - 1 ? 'font-medium text-ink' : 'text-muted')}>
+                    {item}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <nav className="flex gap-1.5 overflow-x-auto px-4 pb-3 pt-2 lg:hidden">
             {navItems.map((item) => {
               const Icon = item.icon
               return (
@@ -555,7 +636,7 @@ export function AppShell() {
           </nav>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto bg-page">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-white">
           <Outlet />
         </main>
       </div>
@@ -566,9 +647,6 @@ export function AppShell() {
 function isPathActive(pathname: string, target: string) {
   if (target === '/tickets') {
     return pathname === '/tickets' || pathname.startsWith('/tickets/')
-  }
-  if (target === '/users') {
-    return pathname === '/users'
   }
   return pathname === target || pathname.startsWith(`${target}/`)
 }

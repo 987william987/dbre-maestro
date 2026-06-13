@@ -7,8 +7,11 @@ import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
+import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
+import { PageIntro } from '@/shared/ui/PageIntro'
+import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
 
 type TestState = {
@@ -52,9 +55,9 @@ const EMPTY_FORM: ConnectionForm = {
 }
 
 const SSL_MODE_OPTIONS = [
-  { value: 'prefer', label: 'prefer', description: '若伺服器支援就走 SSL，不支援也可退回非加密。' },
-  { value: 'disable', label: 'disable', description: '完全不使用 SSL，通常只適合內網或本機開發。' },
-  { value: 'require', label: 'require', description: '強制使用 SSL，目標端不支援時連線會失敗。' },
+  { value: 'prefer', label: 'prefer', description: 'Use SSL when the server supports it, and fall back to an unencrypted connection when it does not.' },
+  { value: 'disable', label: 'disable', description: 'Do not use SSL. This is usually only appropriate for private networks or local development.' },
+  { value: 'require', label: 'require', description: 'Require SSL. The connection fails if the target does not support it.' },
 ] as const
 
 const DB_TYPE_OPTIONS = [
@@ -63,9 +66,12 @@ const DB_TYPE_OPTIONS = [
   { value: 'redis', label: 'Redis' },
 ] as const
 
+const PAGE_SIZE = 20
+
 export function DBConnectionsPage() {
   const { pushToast } = useToast()
   const [connections, setConnections] = useState<DBConnection[]>([])
+  const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [drawerState, setDrawerState] = useState<DrawerState>(null)
@@ -91,7 +97,7 @@ export function DBConnectionsPage() {
       const response = await listDBConnections()
       setConnections(response.connections)
     } catch (loadError) {
-      setError(loadError instanceof ApiError ? loadError.message : '讀取資料庫連線失敗。')
+      setError(loadError instanceof ApiError ? loadError.message : 'Failed to load database connections.')
     } finally {
       setLoading(false)
     }
@@ -144,15 +150,15 @@ export function DBConnectionsPage() {
     try {
       if (drawerState.mode === 'create') {
         await createDBConnection(toPayload(form))
-        pushToast('資料庫連線已建立', 'success')
+        pushToast('Database connection created', 'success')
       } else if (selectedConnection) {
         await patchDBConnection(selectedConnection.id, toPayload(form))
-        pushToast('資料庫連線已更新', 'success')
+        pushToast('Database connection updated', 'success')
       }
       await loadConnections()
       closeDrawer()
     } catch (submitError) {
-      setDrawerError(submitError instanceof ApiError ? submitError.message : drawerState.mode === 'create' ? '建立資料庫連線失敗。' : '更新資料庫連線失敗。')
+      setDrawerError(submitError instanceof ApiError ? submitError.message : drawerState.mode === 'create' ? 'Failed to create the database connection.' : 'Failed to update the database connection.')
     } finally {
       setSubmitting(false)
     }
@@ -168,21 +174,21 @@ export function DBConnectionsPage() {
       setTestState((current) => ({
         ...current,
         [id]: result.ok
-          ? { ok: true, message: '連線測試成功' }
-          : { ok: false, message: result.error ?? '連線測試失敗' },
+          ? { ok: true, message: 'Connection test succeeded' }
+          : { ok: false, message: result.error ?? 'Connection test failed' },
       }))
       if (result.ok) {
-        pushToast(`${connectionName} 連線測試成功`, 'success', { placement: 'center' })
+        pushToast(`${connectionName} connection test succeeded`, 'success', { placement: 'center' })
       } else {
-        pushToast(`${connectionName} 連線測試失敗：${result.error ?? '連線測試失敗'}`, 'error', { placement: 'center', durationMs: 3600 })
+        pushToast(`${connectionName} connection test failed: ${result.error ?? 'Connection test failed'}`, 'error', { placement: 'center', durationMs: 3600 })
       }
     } catch (testError) {
-      const message = testError instanceof ApiError ? testError.message : '連線測試失敗'
+      const message = testError instanceof ApiError ? testError.message : 'Connection test failed'
       setTestState((current) => ({
         ...current,
         [id]: { ok: false, message },
       }))
-      pushToast(`${connectionName} 連線測試失敗：${message}`, 'error', { placement: 'center', durationMs: 3600 })
+      pushToast(`${connectionName} connection test failed: ${message}`, 'error', { placement: 'center', durationMs: 3600 })
     } finally {
       setTestingId(null)
     }
@@ -194,12 +200,12 @@ export function DBConnectionsPage() {
     try {
       await deleteDBConnection(id)
       await loadConnections()
-      pushToast('資料庫連線已刪除', 'success')
+      pushToast('Database connection deleted', 'success')
       if (drawerState?.mode === 'edit' && drawerState.connectionId === id) {
         closeDrawer()
       }
     } catch (deleteError) {
-      setError(deleteError instanceof ApiError ? deleteError.message : '刪除資料庫連線失敗。')
+      setError(deleteError instanceof ApiError ? deleteError.message : 'Failed to delete the database connection.')
     } finally {
       setDeletingId(null)
       setPendingDeleteId(null)
@@ -216,36 +222,37 @@ export function DBConnectionsPage() {
       return right.created_at.localeCompare(left.created_at)
     })
   }, [connections, testState])
+  const pagedConnections = useMemo(() => sortedConnections.slice(offset, offset + PAGE_SIZE), [offset, sortedConnections])
+
+  useEffect(() => {
+    if (offset > 0 && offset >= sortedConnections.length) {
+      setOffset(Math.max(0, Math.floor((Math.max(sortedConnections.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
+    }
+  }, [offset, sortedConnections.length])
 
   return (
-    <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
-        <div className="px-4 py-3 sm:px-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-3xl">
-              <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">DB Connections</h2>
-              <p className="mt-2 max-w-[860px] text-[13px] leading-6 text-muted">
-                Supports MySQL, PostgreSQL, and Redis. Leave `database` empty to let the SQL Editor browse available databases automatically.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={openCreateDrawer}
-              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800"
-            >
-              <Plus className="h-4 w-4" />
-              新增連線
-            </button>
-          </div>
-        </div>
-      </section>
+    <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
+      <PageIntro
+        title="DB Connections"
+        description="Supports MySQL, PostgreSQL, and Redis. Leave `database` empty to let the SQL Editor browse available databases automatically."
+        actions={
+          <button
+            type="button"
+            onClick={openCreateDrawer}
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800"
+          >
+            <Plus className="h-4 w-4" />
+            New Connection
+          </button>
+        }
+      />
 
       <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
             {loading ? (
-              <LoadingBlock message="載入連線中…" className="h-48 rounded-none border-0 bg-transparent" />
+              <LoadingBlock message="Loading connections..." className="h-48 rounded-none border-0 bg-transparent" />
             ) : sortedConnections.length === 0 ? (
               <div className="m-4 flex h-48 items-center justify-center rounded-xl border border-dashed border-border bg-panel-soft text-sm text-muted">
-                尚未建立任何資料庫連線。
+                No database connections yet.
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -259,7 +266,7 @@ export function DBConnectionsPage() {
                         <div className="group relative inline-flex">
                           <span>SSL</span>
                           <div className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-10 hidden w-52 rounded-md border border-border bg-white px-3 py-2 text-[11px] font-medium normal-case tracking-normal text-muted shadow-soft group-hover:block">
-                            支援就走 SSL，不支援可退回非加密。
+                            Use SSL when supported, otherwise fall back to an unencrypted connection.
                           </div>
                         </div>
                       </th>
@@ -269,7 +276,7 @@ export function DBConnectionsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedConnections.map((connection) => {
+                    {pagedConnections.map((connection) => {
                       const result = testState[connection.id]
                       const isFailed = result?.ok === false
                       return (
@@ -302,7 +309,7 @@ export function DBConnectionsPage() {
                                 className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                               >
                                 {testingId === connection.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                                測試
+                                Test
                               </button>
                               <button
                                 type="button"
@@ -310,7 +317,7 @@ export function DBConnectionsPage() {
                                 className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
-                                編輯
+                                Edit
                               </button>
                               <button
                                 type="button"
@@ -319,7 +326,7 @@ export function DBConnectionsPage() {
                                 className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2.5 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
                               >
                                 {deletingId === connection.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                                刪除
+                                Delete
                               </button>
                             </div>
                           </td>
@@ -331,6 +338,14 @@ export function DBConnectionsPage() {
               </div>
             )}
       </section>
+
+      <Pagination
+        offset={offset}
+        pageSize={PAGE_SIZE}
+        count={pagedConnections.length}
+        total={sortedConnections.length}
+        onChange={setOffset}
+      />
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
@@ -346,14 +361,14 @@ export function DBConnectionsPage() {
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Connection Detail</p>
                 <h3 id="db-connections-drawer-title" className="mt-1 text-[22px] font-bold tracking-[-0.03em] text-ink">
-                  {drawerState.mode === 'create' ? '新增連線' : selectedConnection?.name ?? '編輯連線'}
+                  {drawerState.mode === 'create' ? 'New Connection' : selectedConnection?.name ?? 'Edit Connection'}
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={closeDrawer}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
-                aria-label="關閉"
+                aria-label="Close"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -361,7 +376,7 @@ export function DBConnectionsPage() {
 
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               {drawerLoading ? (
-                <LoadingBlock message="載入明細中…" className="min-h-[240px] rounded-xl border-border bg-panel" />
+                <LoadingBlock message="Loading details..." className="min-h-[240px] rounded-xl border-border bg-panel" />
               ) : (
                 <div className="grid gap-4">
                   <CardSection title="Connection Profile" icon={<ServerCog className="h-4 w-4 text-accent" />}>
@@ -379,40 +394,30 @@ export function DBConnectionsPage() {
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="grid gap-1.5 text-[12px] font-medium text-muted">
                           DB Type
-                          <select
+                          <DropdownSelect
+                            ariaLabel="DB Type"
                             value={form.dbType}
-                            onChange={(event) => {
-                              const nextType = normalizeDBType(event.target.value)
+                            onChange={(value) => {
+                              const nextType = normalizeDBType(value)
                               setForm((current) => ({
                                 ...current,
                                 dbType: nextType,
                                 port: current.port === DEFAULT_PORT_BY_DB_TYPE[current.dbType] || current.port === '' ? DEFAULT_PORT_BY_DB_TYPE[nextType] : current.port,
                               }))
                             }}
-                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
-                          >
-                            {DB_TYPE_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
+                            options={DB_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                          />
                         </label>
                         <label className="grid gap-1.5 text-[12px] font-medium text-muted">
                           SSL Mode
-                          <select
+                          <DropdownSelect
+                            ariaLabel="SSL Mode"
                             value={form.sslMode}
-                            onChange={(event) => setForm((current) => ({ ...current, sslMode: normalizeSSLMode(event.target.value) }))}
-                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            onChange={(value) => setForm((current) => ({ ...current, sslMode: normalizeSSLMode(value) }))}
                             disabled={submitting}
-                          >
-                            {SSL_MODE_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
+                            options={SSL_MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                          />
                         </label>
                       </div>
 
@@ -453,7 +458,7 @@ export function DBConnectionsPage() {
                             value={form.readonlyPassword}
                             type="password"
                             onChange={(event) => setForm((current) => ({ ...current, readonlyPassword: event.target.value }))}
-                            placeholder={drawerState.mode === 'edit' ? '留空代表不更新密碼' : ''}
+                            placeholder={drawerState.mode === 'edit' ? 'Leave blank to keep the current password' : ''}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           />
@@ -477,7 +482,7 @@ export function DBConnectionsPage() {
                               value={form.readwritePassword}
                               type="password"
                               onChange={(event) => setForm((current) => ({ ...current, readwritePassword: event.target.value }))}
-                              placeholder={drawerState.mode === 'edit' ? '留空代表不更新密碼' : ''}
+                              placeholder={drawerState.mode === 'edit' ? 'Leave blank to keep the current password' : ''}
                               className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                               disabled={submitting}
                             />
@@ -486,12 +491,12 @@ export function DBConnectionsPage() {
                       ) : null}
 
                       <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
-                        <p className="font-semibold text-ink">Credential 策略</p>
-                        <p className="mt-1">SQL Editor / DB Metadata 走 `readonly`；DDL / DML execute 走 `readwrite`。編輯時若密碼留空，表示保留既有密碼。</p>
+                        <p className="font-semibold text-ink">Credential Policy</p>
+                        <p className="mt-1">SQL Editor and DB Metadata use `readonly`; DDL and DML execution use `readwrite`. In edit mode, leaving a password blank keeps the current password.</p>
                       </div>
 
                       <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
-                        <p className="font-semibold text-ink">SSL Mode 說明</p>
+                        <p className="font-semibold text-ink">SSL Mode Notes</p>
                         <p className="mt-1">{activeSSLMode?.description}</p>
                       </div>
 
@@ -501,7 +506,7 @@ export function DBConnectionsPage() {
                         className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : drawerState.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-                        {drawerState.mode === 'create' ? '建立連線' : '儲存變更'}
+                        {drawerState.mode === 'create' ? 'Create Connection' : 'Save Changes'}
                       </button>
                     </form>
                   </CardSection>
@@ -516,9 +521,9 @@ export function DBConnectionsPage() {
 
       <ConfirmDialog
         open={pendingDeleteId !== null}
-        title="刪除資料庫連線"
-        description="確認刪除這筆資料庫連線？刪除後工單、SQL Editor 與匯出流程都不能再引用它。"
-        confirmLabel="確認刪除"
+        title="Delete Database Connection"
+        description="Delete this database connection? Tickets, SQL Editor, and export flows will no longer be able to reference it."
+        confirmLabel="Confirm Delete"
         tone="danger"
         loading={pendingDeleteId !== null && deletingId === pendingDeleteId}
         onCancel={() => setPendingDeleteId(null)}

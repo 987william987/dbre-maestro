@@ -19,6 +19,11 @@ const mockedListDBConnections = vi.mocked(listDBConnections)
 const mockedCreateDBConnection = vi.mocked(createDBConnection)
 const mockedTestDBConnection = vi.mocked(testDBConnection)
 const mockedDeleteDBConnection = vi.mocked(deleteDBConnection)
+
+function selectOption(label: string, option: string) {
+  fireEvent.click(screen.getByRole('button', { name: label }))
+  fireEvent.click(screen.getByRole('option', { name: option }))
+}
 const mockedPatchDBConnection = vi.mocked(patchDBConnection)
 
 const connection: DBConnection = {
@@ -53,7 +58,7 @@ describe('DBConnectionsPage', () => {
     mockedListDBConnections.mockResolvedValue({ connections: [connection] })
   })
 
-  it('從新增按鈕開 drawer 後可建立連線並重新載入列表', async () => {
+  it('creates a connection from the new connection drawer and reloads the list', async () => {
     mockedListDBConnections
       .mockResolvedValueOnce({ connections: [] })
       .mockResolvedValueOnce({ connections: [connection] })
@@ -63,14 +68,14 @@ describe('DBConnectionsPage', () => {
 
     await waitFor(() => expect(mockedListDBConnections).toHaveBeenCalledTimes(1))
 
-    fireEvent.click(screen.getByRole('button', { name: '新增連線' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New Connection' }))
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'analytics' } })
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'db.internal' } })
     fireEvent.change(screen.getByLabelText('Port'), { target: { value: '3306' } })
     fireEvent.change(screen.getByLabelText('Readonly Username'), { target: { value: 'readonly' } })
     fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
-    fireEvent.click(screen.getByRole('button', { name: '建立連線' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create Connection' }))
 
     await waitFor(() => expect(mockedCreateDBConnection).toHaveBeenCalledWith({
       name: 'analytics',
@@ -86,20 +91,20 @@ describe('DBConnectionsPage', () => {
     await waitFor(() => expect(mockedListDBConnections).toHaveBeenCalledTimes(2))
   })
 
-  it('建立 postgres 時會自動使用 postgres database 並隱藏 database 欄位', async () => {
+  it('uses the postgres database automatically and keeps the database field hidden for postgres', async () => {
     mockedCreateDBConnection.mockResolvedValue({ ...connection, db_type: 'postgres', port: 5432 })
 
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText('analytics').length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: '新增連線' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New Connection' }))
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'warehouse' } })
-    fireEvent.change(screen.getByLabelText('DB Type'), { target: { value: 'postgres' } })
+    selectOption('DB Type', 'PostgreSQL')
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'pg.internal' } })
     fireEvent.change(screen.getByLabelText('Readonly Username'), { target: { value: 'postgres' } })
     fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '建立連線' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create Connection' }))
 
     await waitFor(() => expect(mockedCreateDBConnection).toHaveBeenCalledWith({
       name: 'warehouse',
@@ -114,33 +119,33 @@ describe('DBConnectionsPage', () => {
     }))
   })
 
-  it('從 postgres 切回 mysql 時不會殘留 postgres database name', async () => {
+  it('does not retain the postgres database name when switching back to mysql', async () => {
     mockedCreateDBConnection.mockResolvedValue(connection)
 
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText('analytics').length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: '新增連線' }))
-    fireEvent.change(screen.getByLabelText('DB Type'), { target: { value: 'postgres' } })
+    fireEvent.click(screen.getByRole('button', { name: 'New Connection' }))
+    selectOption('DB Type', 'PostgreSQL')
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('DB Type'), { target: { value: 'mysql' } })
+    selectOption('DB Type', 'MySQL / MariaDB')
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
   })
 
-  it('建立 redis 時可不填 username', async () => {
+  it('allows redis connections without a username', async () => {
     mockedCreateDBConnection.mockResolvedValue({ ...connection, id: 6, db_type: 'redis', port: 6379, username: '' })
 
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText('analytics').length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: '新增連線' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New Connection' }))
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'cache-redis' } })
-    fireEvent.change(screen.getByLabelText('DB Type'), { target: { value: 'redis' } })
+    selectOption('DB Type', 'Redis')
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'redis.internal' } })
     fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
-    fireEvent.click(screen.getByRole('button', { name: '建立連線' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create Connection' }))
 
     await waitFor(() => expect(mockedCreateDBConnection).toHaveBeenCalledWith({
       name: 'cache-redis',
@@ -155,20 +160,20 @@ describe('DBConnectionsPage', () => {
     }))
   })
 
-  it('可對連線執行 test', async () => {
+  it('tests a connection', async () => {
     mockedTestDBConnection.mockResolvedValue({ ok: true })
 
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText('analytics').length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: '測試' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
 
     await waitFor(() => expect(mockedTestDBConnection).toHaveBeenCalledWith(5))
-    await waitFor(() => expect(screen.getByText('analytics 連線測試成功')).toBeInTheDocument())
-    expect(screen.queryByText((content) => content === '連線測試成功')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('analytics connection test succeeded')).toBeInTheDocument())
+    expect(screen.queryByText((content) => content === 'Connection test succeeded')).not.toBeInTheDocument()
   })
 
-  it('連線測試失敗時會將該列浮到最上方並顯示錯誤', async () => {
+  it('moves a failed connection test row to the top and shows the error', async () => {
     const newerConnection: DBConnection = {
       ...connection,
       id: 6,
@@ -182,26 +187,26 @@ describe('DBConnectionsPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText(/analytics|warehouse/).length).toBeGreaterThan(1))
-    fireEvent.click(screen.getAllByRole('button', { name: '測試' })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: 'Test' })[0])
 
-    await waitFor(() => expect(screen.getByText('warehouse 連線測試失敗：連線測試失敗')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('warehouse connection test failed: Connection test failed')).toBeInTheDocument())
 
     const rows = screen.getAllByRole('row')
     expect(rows[1]).toHaveTextContent('warehouse')
-    expect(rows[1]).not.toHaveTextContent('連線測試失敗')
+    expect(rows[1]).not.toHaveTextContent('Connection test failed')
   })
 
-  it('可開啟編輯 drawer 並更新連線', async () => {
+  it('opens the edit drawer and updates the connection', async () => {
     mockedPatchDBConnection.mockResolvedValue({ ...connection, db_type: 'postgres', ssl_mode: 'require' })
 
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText('analytics').length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: '編輯' }))
-    fireEvent.change(screen.getByLabelText('DB Type'), { target: { value: 'postgres' } })
-    fireEvent.change(screen.getByLabelText('SSL Mode'), { target: { value: 'require' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    selectOption('DB Type', 'PostgreSQL')
+    selectOption('SSL Mode', 'require')
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '儲存變更' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
 
     await waitFor(() => expect(mockedPatchDBConnection).toHaveBeenCalledWith(5, {
       name: 'analytics',
@@ -216,20 +221,20 @@ describe('DBConnectionsPage', () => {
     }))
   })
 
-  it('mysql 建立時不顯示 database 欄位且固定送 null', async () => {
+  it('keeps the database field hidden for mysql and always submits null', async () => {
     mockedCreateDBConnection.mockResolvedValue(connection)
 
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText('analytics').length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: '新增連線' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New Connection' }))
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'mysql-conn' } })
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'db.internal' } })
     fireEvent.change(screen.getByLabelText('Port'), { target: { value: '3306' } })
     fireEvent.change(screen.getByLabelText('Readonly Username'), { target: { value: 'root' } })
     fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
-    fireEvent.click(screen.getByRole('button', { name: '建立連線' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create Connection' }))
 
     await waitFor(() => expect(mockedCreateDBConnection).toHaveBeenCalledWith({
       name: 'mysql-conn',
@@ -244,7 +249,7 @@ describe('DBConnectionsPage', () => {
     }))
   })
 
-  it('確認刪除後會呼叫 delete API', async () => {
+  it('calls the delete API after confirmation', async () => {
     mockedListDBConnections
       .mockResolvedValueOnce({ connections: [connection] })
       .mockResolvedValueOnce({ connections: [] })
@@ -253,9 +258,31 @@ describe('DBConnectionsPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText('analytics').length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByRole('button', { name: '刪除' }))
-    fireEvent.click(screen.getByRole('button', { name: '確認刪除' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Delete' }))
 
     await waitFor(() => expect(mockedDeleteDBConnection).toHaveBeenCalledWith(5))
+  })
+
+  it('supports pagination for the connection list', async () => {
+    mockedListDBConnections.mockResolvedValue({
+      connections: Array.from({ length: 21 }, (_, index) => ({
+        ...connection,
+        id: index + 1,
+        name: `conn-${index + 1}`,
+        created_at: `2026-06-${String(index + 1).padStart(2, '0')}T10:00:00Z`,
+        updated_at: `2026-06-${String(index + 1).padStart(2, '0')}T10:00:00Z`,
+      })),
+    })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('conn-21')).toBeInTheDocument())
+    expect(screen.queryByText('conn-1')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await waitFor(() => expect(screen.getByText('conn-1')).toBeInTheDocument())
+    expect(screen.queryByText('conn-21')).not.toBeInTheDocument()
   })
 })

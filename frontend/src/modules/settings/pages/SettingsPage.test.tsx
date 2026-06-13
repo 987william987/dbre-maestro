@@ -20,7 +20,7 @@ describe('SettingsPage', () => {
     mockedListSettingsDBConnections.mockReset()
   })
 
-  it('不依賴 users API 也能載入設定頁', async () => {
+  it('loads the settings page without depending on the users API', async () => {
     mockedGetSettings.mockResolvedValue({
       sensitive_export_reviewer_user_ids: [],
       sensitive_query_access_reviewer_user_ids: [],
@@ -47,11 +47,15 @@ describe('SettingsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('平台設定')).toBeInTheDocument())
-    expect(screen.getByText('Metadata Scope')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Platform Settings')).toBeInTheDocument())
+    expect(screen.queryByText('Metadata Scope')).not.toBeInTheDocument()
     expect(screen.getByDisplayValue('ap-northeast-1')).toBeInTheDocument()
     expect(screen.getByText('analytics-ro')).toBeInTheDocument()
     expect(screen.getByText('warehouse-ro')).toBeInTheDocument()
-    expect(screen.getByText('已選 2 筆')).toBeInTheDocument()
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'analytics-ro selected for object scan' })).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'warehouse-ro selected for object scan' })).toBeInTheDocument()
+    expect(screen.queryByText('ID 12')).not.toBeInTheDocument()
+    expect(screen.queryByText('db-a.internal:3306')).not.toBeInTheDocument()
   })
 })

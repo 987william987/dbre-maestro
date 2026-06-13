@@ -84,20 +84,20 @@ function HistoryEmptyIllustration() {
 const CONFIG = {
   queue: {
     illustration: <ChecklistIllustration />,
-    heading:      '所有工單已處理完畢',
-    body:         'DBA 的工作清零，是值得紀念的時刻。繼續保持！',
-    action:       '查看歷史工單',
+    heading:      'All tickets are cleared',
+    body:         'The DBA queue is empty. Keep it that way.',
+    action:       'View History',
   },
   history: {
     illustration: <HistoryEmptyIllustration />,
-    heading:      '尚無歷史工單',
-    body:         '工單完成或關閉後將顯示於此。',
+    heading:      'No ticket history yet',
+    body:         'Completed or closed tickets will appear here.',
     action:       null,
   },
   search: {
     illustration: <SearchEmptyIllustration />,
-    heading:      '找不到符合的工單',
-    body:         '試著調整篩選條件或清除搜尋關鍵字。',
+    heading:      'No matching tickets',
+    body:         'Try adjusting the filters or clearing the search keyword.',
     action:       null,
   },
 } as const

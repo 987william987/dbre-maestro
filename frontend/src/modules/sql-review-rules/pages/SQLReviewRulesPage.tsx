@@ -1,17 +1,46 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Loader2, ShieldCheck } from 'lucide-react'
 import { ApiError } from '@/shared/api/client'
 import type { SQLReviewRule } from '@/shared/types/sqlReviewRule'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
+import { PageIntro } from '@/shared/ui/PageIntro'
+import { Pagination } from '@/shared/ui/Pagination'
+import { Switch } from '@/shared/ui/Switch'
 import { useToast } from '@/shared/ui/ToastContext'
 import { listSQLReviewRules, patchSQLReviewRule } from '@/modules/sql-review-rules/api'
 
 type DraftMap = Record<string, { enabled: boolean; threshold: string }>
 
+const RULE_METADATA: Record<string, { description: string; thresholdEditable: boolean }> = {
+  ddl_no_comment: {
+    description: 'Require CREATE TABLE statements to include a table comment.',
+    thresholdEditable: false,
+  },
+  dml_no_where: {
+    description: 'Require UPDATE and DELETE statements to include a WHERE clause.',
+    thresholdEditable: false,
+  },
+  full_table_scan: {
+    description: 'Block queries when EXPLAIN detects a full table scan.',
+    thresholdEditable: false,
+  },
+  high_row_count: {
+    description: 'Block queries when EXPLAIN estimated rows exceed the configured threshold.',
+    thresholdEditable: true,
+  },
+  require_utf8mb4: {
+    description: 'Require CREATE and ALTER TABLE statements to use utf8mb4.',
+    thresholdEditable: false,
+  },
+}
+
+const PAGE_SIZE = 20
+
 export function SQLReviewRulesPage() {
   const { pushToast } = useToast()
   const [rules, setRules] = useState<SQLReviewRule[]>([])
+  const [offset, setOffset] = useState(0)
   const [drafts, setDrafts] = useState<DraftMap>({})
   const [loading, setLoading] = useState(true)
   const [savingRuleName, setSavingRuleName] = useState<string | null>(null)
@@ -39,7 +68,7 @@ export function SQLReviewRulesPage() {
         ),
       )
     } catch (loadError) {
-      setError(loadError instanceof ApiError ? loadError.message : '讀取 SQL review rules 失敗。')
+      setError(loadError instanceof ApiError ? loadError.message : 'Failed to load SQL review rules.')
     } finally {
       setLoading(false)
     }
@@ -55,16 +84,19 @@ export function SQLReviewRulesPage() {
     setError('')
     try {
       const payload: { enabled?: boolean; threshold?: number | null } = {}
+      const thresholdEditable = isThresholdEditable(rule.rule_name)
       if (draft.enabled !== rule.enabled) {
         payload.enabled = draft.enabled
       }
-      const nextThreshold = draft.threshold.trim() === '' ? null : Number(draft.threshold)
-      if ((rule.threshold ?? null) !== nextThreshold) {
-        payload.threshold = nextThreshold
+      if (thresholdEditable) {
+        const nextThreshold = draft.threshold.trim() === '' ? null : Number(draft.threshold)
+        if ((rule.threshold ?? null) !== nextThreshold) {
+          payload.threshold = nextThreshold
+        }
       }
 
       if (Object.keys(payload).length === 0) {
-        pushToast('沒有需要更新的內容', 'info')
+        pushToast('No changes to update.', 'info')
         return
       }
 
@@ -77,26 +109,28 @@ export function SQLReviewRulesPage() {
           threshold: updated.threshold == null ? '' : String(updated.threshold),
         },
       }))
-      pushToast('SQL review rule 已更新', 'success')
+      pushToast('SQL review rule updated.', 'success')
     } catch (saveError) {
-      setError(saveError instanceof ApiError ? saveError.message : '更新 SQL review rule 失敗。')
+      setError(saveError instanceof ApiError ? saveError.message : 'Failed to update the SQL review rule.')
     } finally {
       setSavingRuleName(null)
     }
   }
 
+  const pagedRules = useMemo(() => rules.slice(offset, offset + PAGE_SIZE), [offset, rules])
+
+  useEffect(() => {
+    if (offset > 0 && offset >= rules.length) {
+      setOffset(Math.max(0, Math.floor((Math.max(rules.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
+    }
+  }, [offset, rules.length])
+
   return (
-    <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
-        <div className="px-4 py-3 sm:px-5">
-          <div className="max-w-3xl">
-            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">SQL Review Rules</h2>
-            <p className="mt-2 text-[13px] leading-6 text-muted">
-              Manage rules that auto-check ticket SQL during review: enable/disable and configure thresholds. Changes take effect per row on save.
-            </p>
-          </div>
-        </div>
-      </section>
+    <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
+      <PageIntro
+        title="SQL Review Rules"
+        description="Manage SQL checks that run when DDL or DML tickets are submitted. Only `high_row_count` uses a configurable threshold; other rules are simple on/off checks."
+      />
 
       <div className="overflow-hidden overflow-x-auto rounded-xl border border-border bg-panel shadow-soft">
           {loading ? (
@@ -115,46 +149,55 @@ export function SQLReviewRulesPage() {
                 </tr>
               </thead>
               <tbody>
-                {rules.map((rule) => {
+                {pagedRules.map((rule) => {
                   const draft = drafts[rule.rule_name]
                   return (
                     <tr key={rule.rule_name} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
                       <td className="px-3 py-3 font-mono">{rule.rule_name}</td>
-                      <td className="px-3 py-3 text-muted">{rule.description}</td>
+                      <td className="px-3 py-3 text-muted">{getRuleDescription(rule)}</td>
                       <td className="px-3 py-3">
-                        <label className="inline-flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 accent-ink"
+                        <div className="inline-flex items-center gap-3">
+                          <Switch
+                            ariaLabel={`${rule.rule_name} enabled`}
                             checked={draft?.enabled ?? false}
-                            onChange={(event) =>
+                            onChange={(checked) =>
                               setDrafts((current) => ({
                                 ...current,
                                 [rule.rule_name]: {
                                   ...current[rule.rule_name],
-                                  enabled: event.target.checked,
+                                  enabled: checked,
                                 },
                               }))
                             }
                           />
                           <span>{draft?.enabled ? 'Enabled' : 'Disabled'}</span>
-                        </label>
+                        </div>
                       </td>
                       <td className="px-3 py-3">
-                        <input
-                          value={draft?.threshold ?? ''}
-                          onChange={(event) =>
-                            setDrafts((current) => ({
-                              ...current,
-                              [rule.rule_name]: {
-                                ...current[rule.rule_name],
-                                threshold: event.target.value,
-                              },
-                            }))
-                          }
-                          className="h-9 w-[120px] rounded-md border border-border bg-white px-3 text-[12px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                          placeholder="threshold"
-                        />
+                        {isThresholdEditable(rule.rule_name) ? (
+                          <input
+                            value={draft?.threshold ?? ''}
+                            onChange={(event) =>
+                              setDrafts((current) => ({
+                                ...current,
+                                [rule.rule_name]: {
+                                  ...current[rule.rule_name],
+                                  threshold: event.target.value,
+                                },
+                              }))
+                            }
+                            className="h-9 w-[120px] rounded-md border border-border bg-white px-3 text-[12px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            placeholder="Row limit"
+                          />
+                        ) : (
+                          <input
+                            value="N/A"
+                            disabled
+                            readOnly
+                            aria-label={`${rule.rule_name} threshold not applicable`}
+                            className="h-9 w-[120px] cursor-not-allowed rounded-md border border-border bg-panel-soft px-3 text-[12px] font-medium text-muted outline-none disabled:cursor-not-allowed disabled:opacity-100"
+                          />
+                        )}
                       </td>
                       <td className="px-3 py-3">
                         <button
@@ -175,7 +218,23 @@ export function SQLReviewRulesPage() {
           )}
       </div>
 
+      <Pagination
+        offset={offset}
+        pageSize={PAGE_SIZE}
+        count={pagedRules.length}
+        total={rules.length}
+        onChange={setOffset}
+      />
+
       {error ? <InlineAlert>{error}</InlineAlert> : null}
     </div>
   )
+}
+
+function getRuleDescription(rule: SQLReviewRule) {
+  return RULE_METADATA[rule.rule_name]?.description ?? rule.description
+}
+
+function isThresholdEditable(ruleName: string) {
+  return RULE_METADATA[ruleName]?.thresholdEditable ?? false
 }

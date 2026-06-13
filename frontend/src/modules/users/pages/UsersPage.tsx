@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Database, Loader2, Shield, Trash2, UserPlus, Users as UsersIcon, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { createAuthGroup, deleteAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
 import { listDBConnections } from '@/modules/db-connections/api'
 import { createUser, deleteUser, getUser, listUsers, patchUser } from '@/modules/users/api'
@@ -10,8 +11,12 @@ import type { AuthGroup } from '@/shared/types/auth'
 import type { AuthGroupDetail } from '@/shared/types/authGroup'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { UserDetail, UserSummary } from '@/shared/types/user'
+import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
+import { PageIntro } from '@/shared/ui/PageIntro'
+import { Pagination } from '@/shared/ui/Pagination'
+import { PageTabs } from '@/shared/ui/PageTabs'
 import { useToast } from '@/shared/ui/ToastContext'
 
 type PermissionOption = {
@@ -23,30 +28,31 @@ type PermissionOption = {
 }
 
 const PERMISSION_METADATA: PermissionOption[] = [
-  { key: 'users.read', module: 'Users', action: 'Read', label: 'Users Read', description: '查看 Users / RBAC 工作台內容。' },
-  { key: 'users.write', module: 'Users', action: 'Write', label: 'Users Write', description: '管理 user 與 auth group。' },
-  { key: 'audit_logs.read', module: 'Audit Logs', action: 'Read', label: 'Audit Logs Read', description: '查看稽核記錄頁面。' },
-  { key: 'audit_logs.write', module: 'Audit Logs', action: 'Write', label: 'Audit Logs Write', description: '匯出 audit logs 報表。' },
-  { key: 'settings.read', module: 'Settings', action: 'Read', label: 'Settings Read', description: '查看平台設定頁面。' },
-  { key: 'settings.write', module: 'Settings', action: 'Write', label: 'Settings Write', description: '修改平台設定。' },
-  { key: 'db_connections.read', module: 'DB Connections', action: 'Read', label: 'DB Connections Read', description: '查看資料庫連線清單。' },
-  { key: 'db_connections.write', module: 'DB Connections', action: 'Write', label: 'DB Connections Write', description: '新增、修改、刪除資料庫連線。' },
-  { key: 'db_metadata.read', module: 'DB Metadata', action: 'Read', label: 'DB Metadata Read', description: '查看雲端實例總覽與資料庫物件快照。' },
-  { key: 'masking_rules.read', module: 'Masking Rules', action: 'Read', label: 'Masking Rules Read', description: '查看遮罩規則與 whitelist。' },
-  { key: 'masking_rules.write', module: 'Masking Rules', action: 'Write', label: 'Masking Rules Write', description: '管理遮罩規則與 whitelist。' },
-  { key: 'sql_review.read', module: 'SQL Review', action: 'Read', label: 'SQL Review Read', description: '查看 SQL Review 規則。' },
-  { key: 'sql_review.write', module: 'SQL Review', action: 'Write', label: 'SQL Review Write', description: '管理 SQL Review 規則。' },
-  { key: 'tickets.apply', module: 'Tickets', action: 'Apply', label: 'Tickets Apply', description: '建立 DDL / DML 工單。' },
-  { key: 'tickets.review', module: 'Tickets', action: 'Review', label: 'Tickets Review', description: '審批 DDL / DML 工單。' },
-  { key: 'tickets.execute', module: 'Tickets', action: 'Execute', label: 'Tickets Execute', description: '執行 DDL / DML 工單。' },
-  { key: 'sql_editor.query', module: 'SQL Editor', action: 'Query', label: 'SQL Editor Query', description: '使用 SQL Editor 查詢資料。' },
-  { key: 'sql_editor.export', module: 'SQL Editor', action: 'Export', label: 'SQL Editor Export', description: '匯出當前查詢結果。' },
-  { key: 'sql_editor.export_review', module: 'SQL Editor', action: 'Export Review', label: 'Export Review', description: '審批 SQL 匯出工單。' },
-  { key: 'sql_editor.sensitive_apply', module: 'SQL Editor', action: 'Sensitive Apply', label: 'Sensitive Apply', description: '申請臨時敏感資料查看。' },
-  { key: 'sql_editor.sensitive_review', module: 'SQL Editor', action: 'Sensitive Review', label: 'Sensitive Review', description: '審批與撤銷敏感資料查看工單。' },
-  { key: 'sql_editor.sensitive_execute', module: 'SQL Editor', action: 'Sensitive Execute', label: 'Sensitive Execute', description: '執行敏感資料查看工單。' },
-  { key: 'global.sensitive', module: 'Global', action: 'Sensitive', label: 'Global Sensitive', description: '永久繞過遮罩規則查看敏感資料。' },
+  { key: 'users.read', module: 'Users', action: 'Read', label: 'Users Read', description: 'View the Users and RBAC workspace.' },
+  { key: 'users.write', module: 'Users', action: 'Write', label: 'Users Write', description: 'Manage users and auth groups.' },
+  { key: 'audit_logs.read', module: 'Audit Logs', action: 'Read', label: 'Audit Logs Read', description: 'View the audit log page.' },
+  { key: 'audit_logs.write', module: 'Audit Logs', action: 'Write', label: 'Audit Logs Write', description: 'Export audit log reports.' },
+  { key: 'settings.read', module: 'Settings', action: 'Read', label: 'Settings Read', description: 'View the settings page.' },
+  { key: 'settings.write', module: 'Settings', action: 'Write', label: 'Settings Write', description: 'Modify platform settings.' },
+  { key: 'db_connections.read', module: 'DB Connections', action: 'Read', label: 'DB Connections Read', description: 'View the database connection list.' },
+  { key: 'db_connections.write', module: 'DB Connections', action: 'Write', label: 'DB Connections Write', description: 'Create, update, and delete database connections.' },
+  { key: 'db_metadata.read', module: 'DB Metadata', action: 'Read', label: 'DB Metadata Read', description: 'View cloud inventory and database object snapshots.' },
+  { key: 'masking_rules.read', module: 'Masking Rules', action: 'Read', label: 'Masking Rules Read', description: 'View masking rules and whitelist entries.' },
+  { key: 'masking_rules.write', module: 'Masking Rules', action: 'Write', label: 'Masking Rules Write', description: 'Manage masking rules and whitelist entries.' },
+  { key: 'sql_review.read', module: 'SQL Review', action: 'Read', label: 'SQL Review Read', description: 'View SQL review rules.' },
+  { key: 'sql_review.write', module: 'SQL Review', action: 'Write', label: 'SQL Review Write', description: 'Manage SQL review rules.' },
+  { key: 'tickets.apply', module: 'Tickets', action: 'Apply', label: 'Tickets Apply', description: 'Create DDL and DML tickets.' },
+  { key: 'tickets.review', module: 'Tickets', action: 'Review', label: 'Tickets Review', description: 'Review DDL and DML tickets.' },
+  { key: 'tickets.execute', module: 'Tickets', action: 'Execute', label: 'Tickets Execute', description: 'Execute DDL and DML tickets.' },
+  { key: 'sql_editor.query', module: 'SQL Editor', action: 'Query', label: 'SQL Editor Query', description: 'Run queries in SQL Editor.' },
+  { key: 'sql_editor.export', module: 'SQL Editor', action: 'Export', label: 'SQL Editor Export', description: 'Export the current query result.' },
+  { key: 'sql_editor.export_review', module: 'SQL Editor', action: 'Export Review', label: 'Export Review', description: 'Review SQL export requests.' },
+  { key: 'sql_editor.sensitive_apply', module: 'SQL Editor', action: 'Sensitive Apply', label: 'Sensitive Apply', description: 'Request temporary sensitive data access.' },
+  { key: 'sql_editor.sensitive_review', module: 'SQL Editor', action: 'Sensitive Review', label: 'Sensitive Review', description: 'Review or revoke sensitive data access requests.' },
+  { key: 'sql_editor.sensitive_execute', module: 'SQL Editor', action: 'Sensitive Execute', label: 'Sensitive Execute', description: 'Execute sensitive data access requests.' },
+  { key: 'global.sensitive', module: 'Global', action: 'Sensitive', label: 'Global Sensitive', description: 'Bypass masking rules permanently to view sensitive data.' },
 ]
+const PAGE_SIZE = 20
 
 const PERMISSION_INDEX = new Map(PERMISSION_METADATA.map((item) => [item.key, item] as const))
 
@@ -101,7 +107,10 @@ const EMPTY_AUTH_GROUP_DRAFT: AuthGroupDraft = {
 
 export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode }) {
   const { pushToast } = useToast()
+  const navigate = useNavigate()
   const [viewMode, setViewMode] = useState<ViewMode>(initialView)
+  const [usersOffset, setUsersOffset] = useState(0)
+  const [authGroupsOffset, setAuthGroupsOffset] = useState(0)
   const [users, setUsers] = useState<UserSummary[]>([])
   const [authGroups, setAuthGroups] = useState<AuthGroupDetail[]>([])
   const [connections, setConnections] = useState<DBConnection[]>([])
@@ -126,6 +135,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     void bootstrap()
   }, [])
 
+  useEffect(() => {
+    setViewMode(initialView)
+  }, [initialView])
+
   async function bootstrap() {
     setLoading(true)
     setError('')
@@ -139,7 +152,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       setConnections(connectionsResponse.connections)
       setAuthGroups(authGroupDetails)
     } catch (loadError) {
-      setError(loadError instanceof ApiError ? loadError.message : '載入 RBAC 工作台失敗。')
+      setError(loadError instanceof ApiError ? loadError.message : 'Failed to load the RBAC workspace.')
     } finally {
       setLoading(false)
     }
@@ -228,7 +241,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       })
       setPendingUserAuthGroup(authGroupOptions.find((group) => !detail.memberships.some((membership) => membership.auth_group === group)) ?? authGroupOptions[0] ?? '')
     } catch (loadError) {
-      setDrawerError(loadError instanceof ApiError ? loadError.message : '讀取使用者明細失敗。')
+      setDrawerError(loadError instanceof ApiError ? loadError.message : 'Failed to load user details.')
     } finally {
       setDrawerLoading(false)
     }
@@ -261,15 +274,15 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       })
       setPendingAuthGroupUserID('')
     } catch (loadError) {
-      setDrawerError(loadError instanceof ApiError ? loadError.message : '讀取 auth group 明細失敗。')
+      setDrawerError(loadError instanceof ApiError ? loadError.message : 'Failed to load auth group details.')
     } finally {
       setDrawerLoading(false)
     }
   }
 
   function confirmChanges(title: string, lines: string[]) {
-    const summary = lines.length > 0 ? lines.map((line) => `- ${line}`).join('\n') : '- 無欄位變更'
-    return window.confirm(`${title}\n\n${summary}\n\n是否確認送出？`)
+    const summary = lines.length > 0 ? lines.map((line) => `- ${line}`).join('\n') : '- No field changes'
+    return window.confirm(`${title}\n\n${summary}\n\nDo you want to continue?`)
   }
 
   async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
@@ -283,10 +296,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         `Username: ${userDraft.username}`,
         `Email: ${userDraft.email}`,
         `Auth Groups: ${formatAuthGroupList(userDraft.authGroups, authGroupLabelMap)}`,
-        `Direct Permissions: ${userDraft.directPermissions.join(', ') || '無'}`,
+        `Direct Permissions: ${userDraft.directPermissions.join(', ') || 'None'}`,
         `Direct DB Scope: ${formatConnectionIDs(userDraft.directDBConnectionIDs, connections)}`,
       ]
-      if (!confirmChanges('建立 User', createSummary)) {
+      if (!confirmChanges('Create User', createSummary)) {
         return
       }
 
@@ -306,10 +319,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
           })
         }
         await reloadAll()
-        pushToast('使用者已建立', 'success')
+        pushToast('User created', 'success')
         await openEditUserDrawer(created.id)
       } catch (saveError) {
-        setDrawerError(saveError instanceof ApiError ? saveError.message : '建立使用者失敗。')
+        setDrawerError(saveError instanceof ApiError ? saveError.message : 'Failed to create the user.')
       } finally {
         setSaving(false)
       }
@@ -322,10 +335,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
 
     const changeSummary = summarizeUserChanges(selectedUser, userDraft, authGroupLabelMap, connections)
     if (changeSummary.length === 0) {
-      pushToast('沒有需要儲存的變更', 'success')
+      pushToast('No changes to save', 'success')
       return
     }
-    if (!confirmChanges(userDraft.pendingDelete ? '刪除 User' : '儲存 User 變更', changeSummary)) {
+    if (!confirmChanges(userDraft.pendingDelete ? 'Delete User' : 'Save User Changes', changeSummary)) {
       return
     }
 
@@ -335,7 +348,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       if (userDraft.pendingDelete) {
         await deleteUser(drawerState.userId)
         await reloadAll()
-        pushToast('使用者已刪除', 'success')
+        pushToast('User deleted', 'success')
         closeDrawer()
         return
       }
@@ -368,10 +381,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
 
       await patchUser(drawerState.userId, payload)
       await reloadAll()
-      pushToast('使用者資料已更新', 'success')
+      pushToast('User updated', 'success')
       await openEditUserDrawer(drawerState.userId)
     } catch (saveError) {
-      setDrawerError(saveError instanceof ApiError ? saveError.message : '更新使用者失敗。')
+      setDrawerError(saveError instanceof ApiError ? saveError.message : 'Failed to update the user.')
     } finally {
       setSaving(false)
     }
@@ -386,12 +399,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     if (drawerState.mode === 'create-auth-group') {
       const createSummary = [
         `Name: ${authGroupDraft.name}`,
-        `Description: ${authGroupDraft.description || '無'}`,
+        `Description: ${authGroupDraft.description || 'None'}`,
         `Bound Users: ${formatUserIDs(authGroupDraft.userIDs, users)}`,
-        `Permissions: ${authGroupDraft.permissions.join(', ') || '無'}`,
+        `Permissions: ${authGroupDraft.permissions.join(', ') || 'None'}`,
         `DB Scope: ${formatConnectionIDs(authGroupDraft.dbConnectionIDs, connections)}`,
       ]
-      if (!confirmChanges('建立 Auth Group', createSummary)) {
+      if (!confirmChanges('Create Auth Group', createSummary)) {
         return
       }
 
@@ -406,10 +419,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
           db_connection_ids: authGroupDraft.dbConnectionIDs,
         })
         await reloadAll()
-        pushToast('Auth group 已建立', 'success')
+        pushToast('Auth group created', 'success')
         await openEditAuthGroupDrawer(created.name as AuthGroup)
       } catch (saveError) {
-        setDrawerError(saveError instanceof ApiError ? saveError.message : '建立 auth group 失敗。')
+        setDrawerError(saveError instanceof ApiError ? saveError.message : 'Failed to create the auth group.')
       } finally {
         setSaving(false)
       }
@@ -422,10 +435,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
 
     const changeSummary = summarizeAuthGroupChanges(selectedAuthGroup, authGroupDraft, users, connections)
     if (changeSummary.length === 0) {
-      pushToast('沒有需要儲存的變更', 'success')
+      pushToast('No changes to save', 'success')
       return
     }
-    if (!confirmChanges(authGroupDraft.pendingDelete ? '刪除 Auth Group' : '儲存 Auth Group 變更', changeSummary)) {
+    if (!confirmChanges(authGroupDraft.pendingDelete ? 'Delete Auth Group' : 'Save Auth Group Changes', changeSummary)) {
       return
     }
 
@@ -435,7 +448,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       if (authGroupDraft.pendingDelete) {
         await deleteAuthGroup(drawerState.authGroupKey)
         await reloadAll()
-        pushToast('Auth group 已刪除', 'success')
+        pushToast('Auth group deleted', 'success')
         closeDrawer()
         return
       }
@@ -448,10 +461,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         db_connection_ids: authGroupDraft.dbConnectionIDs,
       })
       await reloadAll()
-      pushToast('Auth group 已更新', 'success')
+      pushToast('Auth group updated', 'success')
       await openEditAuthGroupDrawer(drawerState.authGroupKey)
     } catch (saveError) {
-      setDrawerError(saveError instanceof ApiError ? saveError.message : '更新 auth group 失敗。')
+      setDrawerError(saveError instanceof ApiError ? saveError.message : 'Failed to update the auth group.')
     } finally {
       setSaving(false)
     }
@@ -465,50 +478,76 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         : drawerState?.mode === 'create-auth-group'
           ? 'Create Auth Group'
           : selectedAuthGroup?.label ?? 'Auth Group'
+  const pagedUsers = useMemo(() => users.slice(usersOffset, usersOffset + PAGE_SIZE), [users, usersOffset])
+  const pagedAuthGroups = useMemo(
+    () => authGroups.slice(authGroupsOffset, authGroupsOffset + PAGE_SIZE),
+    [authGroups, authGroupsOffset],
+  )
+
+  useEffect(() => {
+    if (usersOffset > 0 && usersOffset >= users.length) {
+      setUsersOffset(Math.max(0, Math.floor((Math.max(users.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
+    }
+  }, [users.length, usersOffset])
+
+  useEffect(() => {
+    if (authGroupsOffset > 0 && authGroupsOffset >= authGroups.length) {
+      setAuthGroupsOffset(Math.max(0, Math.floor((Math.max(authGroups.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
+    }
+  }, [authGroups.length, authGroupsOffset])
 
   return (
-    <div className="flex h-full flex-col gap-3 p-3 sm:p-4">
-      <section className="rounded-xl border border-border bg-panel-soft shadow-soft">
-        <div className="border-b border-border/80 px-4 py-3 sm:px-5">
-          <div className="max-w-3xl">
-            <h2 className="text-[24px] font-bold tracking-[-0.03em] text-ink">User Management</h2>
-            <p className="mt-2 text-[13px] leading-6 text-muted">
-              Manage users and auth groups with their permissions, direct capabilities, and DB scope. All changes take effect only after saving, with a confirmation summary shown first.
-            </p>
-          </div>
-        </div>
+    <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
+      <PageIntro
+        title="User Management"
+        description="Manage users and auth groups with their permissions, direct capabilities, and DB scope. All changes take effect only after saving, with a confirmation summary shown first."
+        actions={
+          <>
+            <button
+              type="button"
+              onClick={openCreateUserDrawer}
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
+            >
+              <UserPlus className="h-4 w-4" />
+              Create User
+            </button>
+            <button
+              type="button"
+              onClick={openCreateAuthGroupDrawer}
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+            >
+              <Shield className="h-4 w-4" />
+              Create Auth Group
+            </button>
+          </>
+        }
+      />
 
-        <div className="border-b border-border/80 px-4 sm:px-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex gap-1">
-              <ViewButton active={viewMode === 'users'} label="Users" onClick={() => setViewMode('users')} />
-              <ViewButton active={viewMode === 'auth-groups'} label="Auth Groups" onClick={() => setViewMode('auth-groups')} />
-            </div>
-            <div className="flex flex-wrap gap-2 py-2">
-              <button
-                type="button"
-                onClick={openCreateUserDrawer}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
-              >
-                <UserPlus className="h-4 w-4" />
-                Create User
-              </button>
-              <button
-                type="button"
-                onClick={openCreateAuthGroupDrawer}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
-              >
-                <Shield className="h-4 w-4" />
-                Create Auth Group
-              </button>
-            </div>
-          </div>
-        </div>
-
-      </section>
+      <PageTabs
+        items={[
+          {
+            key: 'users',
+            label: 'Users',
+            active: viewMode === 'users',
+            onClick: () => {
+              setViewMode('users')
+              navigate('/users')
+            },
+          },
+          {
+            key: 'auth-groups',
+            label: 'Auth Groups',
+            active: viewMode === 'auth-groups',
+            onClick: () => {
+              setViewMode('auth-groups')
+              navigate('/users/groups')
+            },
+          },
+        ]}
+      />
 
       {loading ? (
-        <LoadingBlock message="載入 RBAC 資料中…" className="min-h-[320px] rounded-xl border-border bg-panel" />
+        <LoadingBlock message="Loading RBAC workspace..." className="min-h-[320px] rounded-xl border-border bg-panel" />
       ) : viewMode === 'users' ? (
             <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
               <div className="overflow-x-auto">
@@ -525,7 +564,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((user) => (
+                    {pagedUsers.map((user) => (
                       <tr key={user.id} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-2">
@@ -555,7 +594,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                                 {(user.db_connection_ids ?? []).length > 2 ? (
                                   <span
                                     className="whitespace-nowrap text-[11px] font-semibold text-muted"
-                                    title={(user.db_connection_ids ?? []).slice(2).map((id) => getConnectionLabel(id, connections)).join('、')}
+                                    title={(user.db_connection_ids ?? []).slice(2).map((id) => getConnectionLabel(id, connections)).join(', ')}
                                   >
                                     +{(user.db_connection_ids ?? []).length - 2}
                                   </span>
@@ -602,7 +641,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     </tr>
                   </thead>
                   <tbody>
-                    {authGroups.map((group) => (
+                    {pagedAuthGroups.map((group) => (
                       <tr key={group.name} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
                         <td className="px-3 py-3">
                           <div>
@@ -632,6 +671,14 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
             </section>
           )}
 
+      <Pagination
+        offset={viewMode === 'users' ? usersOffset : authGroupsOffset}
+        pageSize={PAGE_SIZE}
+        count={viewMode === 'users' ? pagedUsers.length : pagedAuthGroups.length}
+        total={viewMode === 'users' ? users.length : authGroups.length}
+        onChange={viewMode === 'users' ? setUsersOffset : setAuthGroupsOffset}
+      />
+
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
       {drawerState ? (
@@ -653,7 +700,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                 type="button"
                 onClick={closeDrawer}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
-                aria-label="關閉"
+                aria-label="Close"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -661,7 +708,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
 
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               {drawerLoading ? (
-                <LoadingBlock message="載入明細中…" className="min-h-[240px] rounded-xl border-border bg-panel" />
+                <LoadingBlock message="Loading details..." className="min-h-[240px] rounded-xl border-border bg-panel" />
               ) : drawerState.mode === 'create-user' || (drawerState.mode === 'edit-user' && selectedUser) ? (
                 <div className="grid gap-4">
                   <CardSection title="User Profile" icon={<UsersIcon className="h-4 w-4 text-accent" />}>
@@ -707,7 +754,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
 
                       {selectedUserIsProtected ? (
                         <div className="rounded-lg border border-danger/20 bg-red-50 px-3 py-3 text-[12px] text-danger">
-                          初始 admin 只允許在此頁修改密碼，其餘欄位不可調整，也不可停用或刪除。
+                          The initial admin can only change the password here. Other fields cannot be edited, disabled, or deleted.
                         </div>
                       ) : null}
 
@@ -731,8 +778,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     <CardSection title="Account Status" icon={<Shield className="h-4 w-4 text-accent" />}>
                       <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-panel-soft px-3 py-3">
                         <div>
-                          <p className="text-[12px] font-semibold text-ink">登入狀態</p>
-                          <p className="mt-1 text-[11px] text-muted">停用只會先留在草稿裡，按下最上方儲存後才會真正生效。</p>
+                          <p className="text-[12px] font-semibold text-ink">Sign-in Status</p>
+                          <p className="mt-1 text-[11px] text-muted">Disabling only updates the draft. The change is applied after you save at the top.</p>
                         </div>
                         <button
                           type="button"
@@ -744,7 +791,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                               : 'border border-border bg-white text-ink hover:bg-page'
                           }`}
                         >
-                          {userDraft.isActive ? '標記為停用' : '標記為啟用'}
+                          {userDraft.isActive ? 'Mark Disabled' : 'Mark Enabled'}
                         </button>
                       </div>
                     </CardSection>
@@ -767,25 +814,24 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                                 }))}
                               />
                             ))
-                          : <span className="text-[12px] text-muted">目前沒有綁定 auth group。</span>}
+                          : <span className="text-[12px] text-muted">No auth groups assigned yet.</span>}
                       </div>
                       <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                        <select
-                          aria-label="User auth group membership selection"
+                        <DropdownSelect
+                          ariaLabel="User auth group membership selection"
                           value={pendingUserAuthGroup}
-                          onChange={(event) => setPendingUserAuthGroup(event.target.value)}
+                          onChange={setPendingUserAuthGroup}
                           disabled={saving || selectedUserIsProtected}
-                          className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
-                        >
-                          <option value="">選擇 auth group</option>
-                          {authGroupOptions
-                            .filter((group) => !userDraft.authGroups.includes(group))
-                            .map((group) => (
-                              <option key={group} value={group}>
-                                {authGroupLabelMap.get(group) ?? group}
-                              </option>
-                            ))}
-                        </select>
+                          options={[
+                            { value: '', label: 'Select auth group' },
+                            ...authGroupOptions
+                              .filter((group) => !userDraft.authGroups.includes(group))
+                              .map((group) => ({
+                                value: group,
+                                label: authGroupLabelMap.get(group) ?? group,
+                              })),
+                          ]}
+                        />
                         <button
                           type="button"
                           onClick={() => {
@@ -812,9 +858,9 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     <CardSection title="Direct Permissions" icon={<Shield className="h-4 w-4 text-accent" />}>
                       <PermissionGroupBoard
                         title="Current Permissions"
-                        description="只作用於這個 user 本人的額外能力。"
+                        description="Extra capabilities granted only to this user."
                         groupedPermissions={groupPermissions(userDraft.directPermissions)}
-                        emptyMessage="目前沒有直接綁定的權限。"
+                        emptyMessage="No direct permissions assigned yet."
                         removable
                         disabled={saving || selectedUserIsProtected}
                         onRemove={(permissionKey) => setUserDraft((current) => ({
@@ -825,12 +871,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       />
                       <PermissionSearchPanel
                         title="Add Direct Permission"
-                        description="依模組瀏覽尚未綁定到此 user 的能力。"
+                        description="Browse unassigned capabilities for this user by module."
                         search={userPermissionSearch}
                         onSearchChange={setUserPermissionSearch}
                         permissions={availableUserPermissions}
                         disabled={saving || selectedUserIsProtected}
-                        emptyMessage="沒有符合搜尋條件、或全部直接權限都已加入。"
+                        emptyMessage="No matches found, or all direct permissions are already assigned."
                         onAdd={(permissionKey) => setUserDraft((current) => ({
                           ...current,
                           directPermissions: [...current.directPermissions, permissionKey],
@@ -844,10 +890,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     <CardSection title="Direct DB Scope" icon={<Database className="h-4 w-4 text-accent" />}>
                       <DBScopeBoard
                         title="Current DB Scope"
-                        description="只對這個 user 額外開放的資料庫連線。"
+                        description="Database connections granted only to this user."
                         connectionIDs={userDraft.directDBConnectionIDs}
                         resolveConnection={(connectionId) => connections.find((item) => item.id === connectionId)}
-                        emptyMessage="目前沒有直接綁定的 DB scope。"
+                        emptyMessage="No direct DB scope assigned yet."
                         removable
                         disabled={saving || selectedUserIsProtected}
                         onRemove={(connectionId) => setUserDraft((current) => ({
@@ -858,11 +904,11 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       />
                       <DBScopePanel
                         title="Add Direct DB Scope"
-                        description="用名稱、host 或 database 搜尋可直接綁定到此 user 的連線。"
+                        description="Search assignable connections by name, host, or database."
                         search={userDBScopeSearch}
                         onSearchChange={setUserDBScopeSearch}
                         connections={availableUserConnections}
-                        emptyMessage="沒有符合搜尋條件、或全部直接 DB scope 都已加入。"
+                        emptyMessage="No matches found, or all direct DB scope entries are already assigned."
                         disabled={saving || selectedUserIsProtected}
                         onAdd={(connectionId) => setUserDraft((current) => ({
                           ...current,
@@ -878,12 +924,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       <InfoList
                         title="Effective Permissions"
                         items={(selectedUser.permissions ?? []).map((permissionKey) => getPermissionMeta(permissionKey).label)}
-                        emptyMessage="目前沒有有效權限。"
+                        emptyMessage="No effective permissions."
                       />
                       <InfoList
                         title="Effective DB Scope"
                         items={(selectedUser.db_connection_ids ?? []).map((connectionId) => getConnectionLabel(connectionId, connections))}
-                        emptyMessage="目前沒有有效 DB scope。"
+                        emptyMessage="No effective DB scope."
                       />
                     </CardSection>
                   ) : null}
@@ -892,8 +938,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     <CardSection title="Danger Zone" icon={<Trash2 className="h-4 w-4 text-danger" />}>
                       <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/20 bg-red-50 px-3 py-3">
                         <div>
-                          <p className="text-[12px] font-semibold text-danger">刪除這個 User</p>
-                          <p className="mt-1 text-[11px] text-danger/80">只會先標記為待刪除，真正刪除要在最上方按「儲存變更」後才會執行。</p>
+                          <p className="text-[12px] font-semibold text-danger">Delete This User</p>
+                          <p className="mt-1 text-[11px] text-danger/80">This only marks the user for deletion. The deletion runs after you confirm Save Changes at the top.</p>
                         </div>
                         <button
                           type="button"
@@ -973,25 +1019,24 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                               />
                             )
                           })
-                        : <span className="text-[12px] text-muted">目前沒有綁定使用者。</span>}
+                        : <span className="text-[12px] text-muted">No users assigned yet.</span>}
                     </div>
                     <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                      <select
-                        aria-label="Auth Group user selection"
+                      <DropdownSelect
+                        ariaLabel="Auth Group user selection"
                         value={pendingAuthGroupUserID}
-                        onChange={(event) => setPendingAuthGroupUserID(event.target.value)}
+                        onChange={setPendingAuthGroupUserID}
                         disabled={saving || selectedAuthGroupIsProtected}
-                        className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
-                      >
-                        <option value="">選擇 user</option>
-                        {users
-                          .filter((user) => !authGroupDraft.userIDs.includes(user.id))
-                          .map((user) => (
-                            <option key={user.id} value={user.id}>
-                              {user.username}
-                            </option>
-                          ))}
-                      </select>
+                        options={[
+                          { value: '', label: 'Select user' },
+                          ...users
+                            .filter((user) => !authGroupDraft.userIDs.includes(user.id))
+                            .map((user) => ({
+                              value: String(user.id),
+                              label: user.username,
+                            })),
+                        ]}
+                      />
                       <button
                         type="button"
                         onClick={() => {
@@ -1017,9 +1062,9 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                   <CardSection title="Permissions" icon={<Shield className="h-4 w-4 text-accent" />}>
                     <PermissionGroupBoard
                       title="Current Permissions"
-                      description="這些能力會套用到整個 auth group。"
+                      description="These capabilities apply to the entire auth group."
                       groupedPermissions={groupPermissions(authGroupDraft.permissions)}
-                      emptyMessage="目前沒有 auth group 權限。"
+                      emptyMessage="No auth group permissions yet."
                       removable
                       disabled={saving || selectedAuthGroupIsProtected}
                       onRemove={(permissionKey) => setAuthGroupDraft((current) => ({
@@ -1030,12 +1075,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     />
                     <PermissionSearchPanel
                       title="Add Permission"
-                      description="依模組瀏覽或搜尋尚未綁定的權限。"
+                      description="Browse or search permissions that are not yet assigned."
                       search={authGroupPermissionSearch}
                       onSearchChange={setAuthGroupPermissionSearch}
                       permissions={availableAuthGroupPermissions}
                       disabled={saving || selectedAuthGroupIsProtected}
-                      emptyMessage="沒有符合搜尋條件、或全部權限都已加入。"
+                      emptyMessage="No matches found, or all permissions are already assigned."
                       onAdd={(permissionKey) => setAuthGroupDraft((current) => ({
                         ...current,
                         permissions: [...current.permissions, permissionKey],
@@ -1047,10 +1092,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                   <CardSection title="DB Scope" icon={<Database className="h-4 w-4 text-accent" />}>
                     <DBScopeBoard
                       title="Current DB Scope"
-                      description="這些資料庫連線會下放給整個 auth group。"
+                      description="These database connections are inherited by the entire auth group."
                       connectionIDs={authGroupDraft.dbConnectionIDs}
                       resolveConnection={(connectionId) => connections.find((item) => item.id === connectionId)}
-                      emptyMessage="目前沒有 auth group DB scope。"
+                      emptyMessage="No auth group DB scope yet."
                       removable
                       disabled={saving || selectedAuthGroupIsProtected}
                       onRemove={(connectionId) => setAuthGroupDraft((current) => ({
@@ -1061,11 +1106,11 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     />
                     <DBScopePanel
                       title="Add DB Scope"
-                      description="用名稱、host 或 database 搜尋可綁定的資料庫資產。"
+                      description="Search assignable database assets by name, host, or database."
                       search={authGroupDBScopeSearch}
                       onSearchChange={setAuthGroupDBScopeSearch}
                       connections={availableAuthGroupConnections}
-                      emptyMessage="沒有符合搜尋條件、或全部 DB scope 都已加入。"
+                      emptyMessage="No matches found, or all DB scope entries are already assigned."
                       disabled={saving || selectedAuthGroupIsProtected}
                       onAdd={(connectionId) => setAuthGroupDraft((current) => ({
                         ...current,
@@ -1079,8 +1124,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     <CardSection title="Danger Zone" icon={<Trash2 className="h-4 w-4 text-danger" />}>
                       <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/20 bg-red-50 px-3 py-3">
                         <div>
-                          <p className="text-[12px] font-semibold text-danger">刪除這個 Auth Group</p>
-                          <p className="mt-1 text-[11px] text-danger/80">只會先標記為待刪除，真正刪除要在最上方儲存後才會執行。</p>
+                          <p className="text-[12px] font-semibold text-danger">Delete This Auth Group</p>
+                          <p className="mt-1 text-[11px] text-danger/80">This only marks the auth group for deletion. The deletion runs after you save at the top.</p>
                         </div>
                         <button
                           type="button"
@@ -1116,7 +1161,7 @@ function summarizeUserChanges(
   connections: DBConnection[],
 ) {
   if (draft.pendingDelete) {
-    return [`刪除 User: ${original.username}`]
+    return [`Delete User: ${original.username}`]
   }
 
   const lines: string[] = []
@@ -1131,7 +1176,7 @@ function summarizeUserChanges(
     lines.push(`Email: ${original.email} -> ${draft.email}`)
   }
   if (draft.password.trim()) {
-    lines.push('Password: 已更新')
+    lines.push('Password: updated')
   }
   if (draft.isActive !== original.is_active) {
     lines.push(`Status: ${original.is_active ? 'active' : 'disabled'} -> ${draft.isActive ? 'active' : 'disabled'}`)
@@ -1140,7 +1185,7 @@ function summarizeUserChanges(
     lines.push(`Auth Groups: ${formatAuthGroupList(draft.authGroups, labelMap)}`)
   }
   if (!equalStringArrays(originalDirectPermissions, draft.directPermissions)) {
-    lines.push(`Direct Permissions: ${draft.directPermissions.join(', ') || '無'}`)
+    lines.push(`Direct Permissions: ${draft.directPermissions.join(', ') || 'None'}`)
   }
   if (!equalNumberArrays(originalDirectConnectionIDs, draft.directDBConnectionIDs)) {
     lines.push(`Direct DB Scope: ${formatConnectionIDs(draft.directDBConnectionIDs, connections)}`)
@@ -1156,7 +1201,7 @@ function summarizeAuthGroupChanges(
   connections: DBConnection[],
 ) {
   if (draft.pendingDelete) {
-    return [`刪除 Auth Group: ${original.label}`]
+    return [`Delete Auth Group: ${original.label}`]
   }
 
   const lines: string[] = []
@@ -1168,13 +1213,13 @@ function summarizeAuthGroupChanges(
     lines.push(`Name: ${original.label} -> ${draft.name}`)
   }
   if (draft.description !== original.description) {
-    lines.push('Description: 已更新')
+    lines.push('Description: updated')
   }
   if (!equalNumberArrays(originalUserIDs, draft.userIDs)) {
     lines.push(`Bound Users: ${formatUserIDs(draft.userIDs, users)}`)
   }
   if (!equalStringArrays(originalPermissions, draft.permissions)) {
-    lines.push(`Permissions: ${draft.permissions.join(', ') || '無'}`)
+    lines.push(`Permissions: ${draft.permissions.join(', ') || 'None'}`)
   }
   if (!equalNumberArrays(originalConnectionIDs, draft.dbConnectionIDs)) {
     lines.push(`DB Scope: ${formatConnectionIDs(draft.dbConnectionIDs, connections)}`)
@@ -1184,15 +1229,15 @@ function summarizeAuthGroupChanges(
 }
 
 function formatAuthGroupList(groups: string[], labelMap: Map<string, string>) {
-  return groups.length > 0 ? groups.map((group) => labelMap.get(group) ?? group).join(', ') : '無'
+  return groups.length > 0 ? groups.map((group) => labelMap.get(group) ?? group).join(', ') : 'None'
 }
 
 function formatUserIDs(userIDs: number[], users: UserSummary[]) {
-  return userIDs.length > 0 ? userIDs.map((userID) => users.find((user) => user.id === userID)?.username ?? `User #${userID}`).join(', ') : '無'
+  return userIDs.length > 0 ? userIDs.map((userID) => users.find((user) => user.id === userID)?.username ?? `User #${userID}`).join(', ') : 'None'
 }
 
 function formatConnectionIDs(connectionIDs: number[], connections: DBConnection[]) {
-  return connectionIDs.length > 0 ? connectionIDs.map((id) => getConnectionLabel(id, connections)).join(', ') : '無'
+  return connectionIDs.length > 0 ? connectionIDs.map((id) => getConnectionLabel(id, connections)).join(', ') : 'None'
 }
 
 function getConnectionLabel(connectionId: number, connections: DBConnection[]) {
@@ -1214,7 +1259,7 @@ function getPermissionMeta(permissionKey: string): PermissionOption {
     module: 'Other',
     action: 'Custom',
     label: permissionKey,
-    description: '未定義描述的自訂權限。',
+    description: 'Custom permission without a predefined description.',
   }
 }
 
@@ -1264,20 +1309,6 @@ function filterConnections(connections: DBConnection[], search: string, excluded
     ].join(' ').toLowerCase()
     return haystack.includes(keyword)
   })
-}
-
-function ViewButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`inline-flex items-center border-b-2 px-3 py-3 text-[13px] font-semibold transition-colors ${
-        active ? 'border-ink text-ink' : 'border-transparent text-muted hover:text-ink'
-      }`}
-    >
-      {label}
-    </button>
-  )
 }
 
 function CardSection({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
@@ -1352,7 +1383,7 @@ function ActionTag({
         onClick={onRemove}
         disabled={disabled}
         className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink disabled:opacity-40"
-        aria-label={`移除 ${label}`}
+        aria-label={`Remove ${label}`}
       >
         <X className="h-3.5 w-3.5" />
       </button>
@@ -1444,7 +1475,7 @@ function PermissionSearchPanel({
       <input
         value={search}
         onChange={(event) => onSearchChange(event.target.value)}
-        placeholder="搜尋 module、action、permission key"
+        placeholder="Search module, action, or permission key"
         className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
         disabled={disabled}
       />
