@@ -49,7 +49,7 @@ export function TicketDetailPage() {
 
     async function loadTicket() {
       if (!id) {
-        setError('缺少工單編號')
+        setError('Missing ticket number')
         setLoading(false)
         return
       }
@@ -64,7 +64,7 @@ export function TicketDetailPage() {
         }
       } catch (loadError) {
         if (active) {
-          setError(loadError instanceof ApiError ? loadError.message : '讀取工單失敗，請稍後重試。')
+          setError(loadError instanceof ApiError ? loadError.message : 'Failed to load ticket. Please try again later.')
         }
       } finally {
         if (active) {
@@ -110,9 +110,9 @@ export function TicketDetailPage() {
       await reloadTicket()
       setComment('')
       setReason('')
-      pushToast('工單狀態已更新', 'success')
+      pushToast('Ticket updated', 'success')
     } catch (actionError) {
-      setError(actionError instanceof ApiError ? actionError.message : '操作失敗，請稍後重試。')
+      setError(actionError instanceof ApiError ? actionError.message : 'Action failed. Please try again later.')
     } finally {
       setActing(null)
     }
@@ -123,7 +123,7 @@ export function TicketDetailPage() {
       <PageIntro
         title={
           <span className="flex flex-wrap items-center gap-3">
-            <span>{ticket ? ticket.title : '工單詳情'}</span>
+            <span>{ticket ? ticket.title : 'Ticket Detail'}</span>
             {ticket ? <StatusBadge status={ticket.status} /> : null}
           </span>
         }
@@ -132,10 +132,10 @@ export function TicketDetailPage() {
             <>
               <span className="font-mono font-semibold text-ink">{ticket.ticket_no}</span>
               <span className="mx-2 text-faint">·</span>
-              建立於 {formatDateTime(ticket.created_at, true)}
+              Created {formatDateTime(ticket.created_at, true)}
             </>
           ) : (
-            '檢視工單內容、狀態與依角色可執行的後續操作。'
+            'View ticket details, status, and available actions based on your role.'
           )
         }
         actions={
@@ -144,7 +144,7 @@ export function TicketDetailPage() {
             className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
           >
             <ArrowLeft className="h-4 w-4" />
-            返回列表
+            Back to list
           </Link>
         }
       />
@@ -152,9 +152,9 @@ export function TicketDetailPage() {
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
       {loading ? (
-        <LoadingBlock message="載入工單詳情中…" className="min-h-[420px] rounded-xl border-border bg-panel" />
+        <LoadingBlock message="Loading ticket…" className="min-h-[420px] rounded-xl border-border bg-panel" />
       ) : !ticket || !detail ? (
-        <div className="rounded-xl border border-border bg-panel p-6 text-sm text-muted shadow-soft">找不到這筆工單。</div>
+        <div className="rounded-xl border border-border bg-panel p-6 text-sm text-muted shadow-soft">Ticket not found.</div>
       ) : (
         <div className="grid gap-3 xl:grid-cols-[1.15fr_0.85fr]">
           <section className="rounded-xl border border-border bg-panel shadow-soft">
@@ -168,13 +168,13 @@ export function TicketDetailPage() {
 
             <dl className="px-4 py-2">
               <InfoRow label="Description" value={ticket.description || '—'} />
-              <InfoRow label="DB Connection" value={ticket.db_connection_name || ticket.db_connection_id || '未指定'} />
+              <InfoRow label="DB Connection" value={ticket.db_connection_name || ticket.db_connection_id || 'Not specified'} />
               <InfoRow label="Submitter" value={formatTicketActor(ticket.submitter_name, ticket.submitter_id)} />
               <InfoRow label="Reviewer" value={formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null)} />
               <InfoRow label="Executor" value={formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)} />
               <InfoRow label="Review Comment" value={ticket.review_comment || '—'} />
               <InfoRow label="Reject Reason" value={ticket.rejection_reason || '—'} />
-              <InfoRow label="Approved Duration" value={ticket.approved_duration_minutes ? `${ticket.approved_duration_minutes} 分鐘` : '—'} />
+              <InfoRow label="Approved Duration" value={ticket.approved_duration_minutes ? `${ticket.approved_duration_minutes} min` : '—'} />
               <InfoRow label="Approved Until" value={formatDateTime(ticket.approved_until, true)} />
               <InfoRow label="Revoked At" value={formatDateTime(ticket.revoked_at, true)} />
               <InfoRow label="Revoked By" value={formatTicketActor(ticket.revoked_by_name, ticket.revoked_by ?? null)} />
@@ -209,14 +209,14 @@ export function TicketDetailPage() {
                 <div className="border-b border-border/80 px-4 py-3">
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="h-4 w-4 text-accent" />
-                    <p className="text-[13px] font-semibold text-ink">審核操作</p>
+                    <p className="text-[13px] font-semibold text-ink">Review</p>
                   </div>
-                  <p className="mt-1 text-[12px] text-muted">當前角色可進行審核。後端仍會再次檢查狀態轉移是否合法。</p>
+                  <p className="mt-1 text-[12px] text-muted">Your role can review this ticket. The backend will re-validate the state transition.</p>
                 </div>
 
                 <div className="px-4 py-4">
                   <label className="flex flex-col gap-1.5">
-                    <span className="text-[12px] font-semibold text-ink">審核意見（通過時選填）</span>
+                    <span className="text-[12px] font-semibold text-ink">Review comment (optional)</span>
                     <textarea
                       value={comment}
                       onChange={(event) => setComment(event.target.value)}
@@ -232,11 +232,11 @@ export function TicketDetailPage() {
                     className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {acting === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                    審核通過
+                    Approve
                   </button>
 
                   <label className="mt-4 flex flex-col gap-1.5">
-                    <span className="text-[12px] font-semibold text-ink">拒絕原因（必填）</span>
+                    <span className="text-[12px] font-semibold text-ink">Rejection reason (required)</span>
                     <textarea
                       value={reason}
                       onChange={(event) => setReason(event.target.value)}
@@ -252,7 +252,7 @@ export function TicketDetailPage() {
                     className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
-                    拒絕工單
+                    Reject
                   </button>
                 </div>
               </div>
@@ -263,9 +263,9 @@ export function TicketDetailPage() {
                 <div className="border-b border-border/80 px-4 py-3">
                   <div className="flex items-center gap-2">
                     <Play className="h-4 w-4 text-accent" />
-                    <p className="text-[13px] font-semibold text-ink">執行流程</p>
+                    <p className="text-[13px] font-semibold text-ink">Execution</p>
                   </div>
-                  <p className="mt-1 text-[12px] text-muted">依工單類型提供送審後執行，或臨時敏感查詢的提前撤銷操作。</p>
+                  <p className="mt-1 text-[12px] text-muted">Execute an approved ticket or revoke an active sensitive query access.</p>
                 </div>
 
                 <div className="flex flex-col gap-3 px-4 py-4">
@@ -295,7 +295,7 @@ export function TicketDetailPage() {
                       className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {acting === 'revoke' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
-                      提前撤銷
+                      Revoke Access
                     </button>
                   ) : null}
                 </div>
@@ -308,9 +308,9 @@ export function TicketDetailPage() {
                 <div className="border-b border-border/80 px-4 py-3">
                   <div className="flex items-center gap-2">
                     <Download className="h-4 w-4 text-accent" />
-                    <p className="text-[13px] font-semibold text-ink">匯出下載</p>
+                    <p className="text-[13px] font-semibold text-ink">Export Download</p>
                   </div>
-                  <p className="mt-1 text-[12px] text-muted">工單審核通過後，從這裡下載 ready export。</p>
+                  <p className="mt-1 text-[12px] text-muted">Download the export result once the ticket is approved.</p>
                 </div>
                 <div className="px-4 py-4">
                   <a
@@ -318,10 +318,10 @@ export function TicketDetailPage() {
                     className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800"
                   >
                     <Download className="h-4 w-4" />
-                    下載匯出檔
+                    Download Export
                   </a>
                   <p className="mt-3 text-[12px] text-muted">
-                    有效期限：{detail.export_request?.expires_at ? formatDateTime(detail.export_request.expires_at, true) : '—'}
+                    Expires: {detail.export_request?.expires_at ? formatDateTime(detail.export_request.expires_at, true) : '—'}
                   </p>
                 </div>
               </div>
@@ -332,15 +332,15 @@ export function TicketDetailPage() {
 
       <ConfirmDialog
         open={confirmAction !== null}
-        title={confirmAction === 'request-execution' ? '送入待執行佇列' : confirmAction === 'execute' ? '觸發執行流程' : '提前撤銷敏感查詢'}
+        title={confirmAction === 'request-execution' ? 'Request Execution' : confirmAction === 'execute' ? 'Execute Ticket' : 'Revoke Sensitive Access'}
         description={
           confirmAction === 'request-execution'
-            ? '確認將這筆工單送入待執行佇列？後續 DBA 可從 pending_execution 狀態再觸發執行。'
+            ? 'Submit this ticket to the execution queue? A DBA can trigger execution from the pending_execution state.'
             : confirmAction === 'execute'
-              ? '確認觸發這筆工單進入執行流程？這會呼叫後端 execute API。'
-              : '確認提前撤銷這筆 Sensitive Access 工單？撤銷後從下一次查詢起立即失效。'
+              ? 'Trigger execution for this ticket? This will call the backend execute API.'
+              : 'Revoke this sensitive access ticket early? Access will be invalidated from the next query onwards.'
         }
-        confirmLabel={confirmAction === 'request-execution' ? '確認送出' : confirmAction === 'execute' ? '確認執行' : '確認撤銷'}
+        confirmLabel={confirmAction === 'request-execution' ? 'Confirm' : confirmAction === 'execute' ? 'Execute' : 'Revoke'}
         loading={confirmAction !== null && acting === confirmAction}
         onCancel={() => setConfirmAction(null)}
         onConfirm={() => {

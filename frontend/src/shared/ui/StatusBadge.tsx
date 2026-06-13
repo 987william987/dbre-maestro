@@ -14,15 +14,15 @@ const STATUS_STYLES: Record<TicketStatus, string> = {
 }
 
 const STATUS_LABELS: Record<TicketStatus, string> = {
-  pending_review: '待審核',
-  approved: '已通過',
-  rejected: '已拒絕',
-  pending_execution: '待執行',
-  executing: '執行中',
-  completed: '已完成',
-  failed: '失敗',
-  stopped: '已停止',
-  interrupted: '已中斷',
+  pending_review: 'Pending Review',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  pending_execution: 'Pending Execution',
+  executing: 'Executing',
+  completed: 'Completed',
+  failed: 'Failed',
+  stopped: 'Stopped',
+  interrupted: 'Interrupted',
 }
 
 export function StatusBadge({ status }: { status: TicketStatus }) {
