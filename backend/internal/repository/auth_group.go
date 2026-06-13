@@ -15,14 +15,15 @@ type AuthGroupRepo struct {
 }
 
 type AuthGroupEntity struct {
-	ID          uint64 `db:"id"`
-	GroupKey    string `db:"group_key"`
-	Name        string `db:"name"`
-	Description string `db:"description"`
-	IsSystem    bool   `db:"is_system"`
-	IsProtected bool   `db:"is_protected"`
-	CreatedAt   string `db:"created_at"`
-	UpdatedAt   string `db:"updated_at"`
+	ID               uint64 `db:"id"`
+	GroupKey         string `db:"group_key"`
+	Name             string `db:"name"`
+	Description      string `db:"description"`
+	IsSystem         bool   `db:"is_system"`
+	IsProtected      bool   `db:"is_protected"`
+	IsAllPermissions bool   `db:"is_all_permissions"`
+	CreatedAt        string `db:"created_at"`
+	UpdatedAt        string `db:"updated_at"`
 }
 
 func NewAuthGroupRepo(db *sqlx.DB) *AuthGroupRepo {
@@ -32,7 +33,7 @@ func NewAuthGroupRepo(db *sqlx.DB) *AuthGroupRepo {
 func (r *AuthGroupRepo) List(ctx context.Context) ([]AuthGroupEntity, error) {
 	var groups []AuthGroupEntity
 	err := r.db.SelectContext(ctx, &groups, `
-		SELECT id, group_key, name, description, is_system, is_protected,
+		SELECT id, group_key, name, description, is_system, is_protected, is_all_permissions,
 		       DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
 		       DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
 		FROM auth_groups
@@ -44,7 +45,7 @@ func (r *AuthGroupRepo) List(ctx context.Context) ([]AuthGroupEntity, error) {
 func (r *AuthGroupRepo) GetByKey(ctx context.Context, groupKey string) (*AuthGroupEntity, error) {
 	var group AuthGroupEntity
 	err := r.db.GetContext(ctx, &group, `
-		SELECT id, group_key, name, description, is_system, is_protected,
+		SELECT id, group_key, name, description, is_system, is_protected, is_all_permissions,
 		       DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
 		       DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
 		FROM auth_groups
@@ -90,7 +91,7 @@ func (r *AuthGroupRepo) Create(ctx context.Context, groupKey, name, description 
 	id, _ := res.LastInsertId()
 	var group AuthGroupEntity
 	if err := r.db.GetContext(ctx, &group, `
-		SELECT id, group_key, name, description, is_system, is_protected,
+		SELECT id, group_key, name, description, is_system, is_protected, is_all_permissions,
 		       DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
 		       DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
 		FROM auth_groups
