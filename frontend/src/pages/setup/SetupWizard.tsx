@@ -458,8 +458,11 @@ export function SetupWizard() {
 
   if (setupCompleted === null) {
     return (
-      <div className="min-h-screen bg-page flex items-center justify-center px-4 py-10">
-        <div className="rounded-card border border-border bg-panel px-6 py-5 shadow-soft">
+      <div className="flex min-h-screen flex-col items-center justify-center bg-page px-4 py-12">
+        <div className="mb-6 text-center">
+          <h1 className="font-display text-2xl font-black tracking-tight text-ink">DBRE Maestro</h1>
+        </div>
+        <div className="w-full max-w-md rounded-card border border-border bg-panel px-8 py-6 shadow-card">
           <p className="text-sm font-semibold text-ink">正在檢查平台初始化狀態…</p>
           <p className="mt-1 text-xs text-muted">請稍候，系統正在確認是否仍可進入 Setup Wizard。</p>
         </div>
@@ -471,36 +474,31 @@ export function SetupWizard() {
   const back = () => setStep(s => (s > 0 ? (s - 1) as Step : s))
 
   return (
-    <div className="min-h-screen bg-page flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-md">
-        {/* Card */}
-        <div className="bg-panel rounded-card border border-border shadow-card px-8 py-8 flex flex-col gap-6">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-faint tracking-widest uppercase">DBRE Maestro</span>
-            <StepProgress current={step} />
-          </div>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-page px-4 py-12">
+      <div className="mb-6 text-center">
+        <h1 className="font-display text-2xl font-black tracking-tight text-ink">DBRE Maestro</h1>
+      </div>
 
-          <div className="h-px bg-border -mx-8" />
-
-          {/* Step content */}
-          <div className="min-h-[320px]">
-            {step === 0 && <WelcomeStep onNext={next} />}
-            {step === 1 && (
-              <AccountStep
-                onNext={(username) => { setAdminUsername(username); next() }}
-                onBack={back}
-              />
-            )}
-            {step === 2 && <NotificationsStep onNext={next} onBack={back} />}
-            {step === 3 && <CompleteStep username={adminUsername} />}
-          </div>
+      <div className="w-full max-w-md rounded-card border border-border bg-panel px-8 py-8 shadow-card flex flex-col gap-6">
+        {/* Step progress */}
+        <div className="flex justify-end">
+          <StepProgress current={step} />
         </div>
 
-        {/* Footer */}
-        <p className="text-center text-[11px] text-faint mt-4">
-          DBRE Maestro — 內部資料庫安全治理平台
-        </p>
+        <div className="h-px bg-border -mx-8" />
+
+        {/* Step content */}
+        <div className="min-h-[320px]">
+          {step === 0 && <WelcomeStep onNext={next} />}
+          {step === 1 && (
+            <AccountStep
+              onNext={(username) => { setAdminUsername(username); next() }}
+              onBack={back}
+            />
+          )}
+          {step === 2 && <NotificationsStep onNext={next} onBack={back} />}
+          {step === 3 && <CompleteStep username={adminUsername} />}
+        </div>
       </div>
     </div>
   )

@@ -112,3 +112,13 @@
 {"ts":"2026-06-12T06:55:29.595Z","cmd":"goto","args":"http://localhost:5173/audit-logs","origin":"http://localhost:5173/audit-logs","durationMs":34,"status":"ok","hasCookies":false,"mode":"launched"}
 {"ts":"2026-06-12T06:55:30.129Z","cmd":"wait","args":"--networkidle","origin":"http://localhost:5173/audit-logs","durationMs":485,"status":"ok","hasCookies":false,"mode":"launched"}
 {"ts":"2026-06-12T06:55:31.038Z","cmd":"screenshot","args":"--viewport /tmp/dr-audit-after2.png","origin":"http://localhost:5173/audit-logs","durationMs":30,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:19:00.801Z","cmd":"goto","args":"https://shadcnblocks-admin.vercel.app/login","origin":"https://shadcnblocks-admin.vercel.app/login","durationMs":458,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:19:00.956Z","cmd":"screenshot","args":"/tmp/login-reference.png","origin":"https://shadcnblocks-admin.vercel.app/login","durationMs":81,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:19:22.369Z","cmd":"goto","args":"http://localhost:5173/login","origin":"http://localhost:5173/login","durationMs":239,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:19:22.592Z","cmd":"screenshot","args":"/tmp/login-current.png","origin":"http://localhost:5173/login","durationMs":173,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:21:59.761Z","cmd":"goto","args":"http://localhost:5173/login","origin":"http://localhost:5173/login","durationMs":56,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:21:59.838Z","cmd":"screenshot","args":"/tmp/login-new.png","origin":"http://localhost:5173/login","durationMs":24,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:23:32.181Z","cmd":"goto","args":"http://localhost:5173/setup","origin":"http://localhost:5173/setup","durationMs":47,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:23:32.251Z","cmd":"screenshot","args":"/tmp/setup-current.png","origin":"http://localhost:5173/login","durationMs":19,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:28:20.532Z","cmd":"load-html","args":"/tmp/setup-preview.html","origin":"http://localhost:5173/login","durationMs":8,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-06-13T15:28:20.632Z","cmd":"screenshot","args":"/tmp/setup-step0.png","origin":"http://localhost:5173/login","durationMs":18,"status":"ok","hasCookies":false,"mode":"launched"}
