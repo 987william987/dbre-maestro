@@ -295,6 +295,8 @@ func main() {
 
 			r.With(requireTicketsWorkspaceRead).Get("/", ticketH.List)
 			r.With(requireTicketsApply).Get("/connections", ticketH.ListConnections)
+			r.With(requireTicketsApply).Get("/connections/{id}/databases", ticketH.ListDatabases)
+			r.With(requireTicketsApply).Post("/review", ticketH.ReviewSQL)
 			r.With(requireTicketsApply).Post("/", ticketH.Create)
 
 			r.Route("/{id}", func(r chi.Router) {

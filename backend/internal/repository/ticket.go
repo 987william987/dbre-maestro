@@ -43,9 +43,9 @@ func (r *TicketRepo) CreateWithScopes(ctx context.Context, t *model.Ticket, scop
 	}
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO tickets (ticket_no, title, description, sql_content, ticket_type, db_connection_id, status, submitter_id, approved_duration_minutes, approved_until, revoked_at, revoked_by)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?, ?, ?, ?)`,
-		ticketNo, t.Title, t.Description, t.SQLContent, t.TicketType, t.DBConnectionID, t.SubmitterID,
+		`INSERT INTO tickets (ticket_no, title, description, sql_content, ticket_type, db_connection_id, database_name, status, submitter_id, approved_duration_minutes, approved_until, revoked_at, revoked_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_review', ?, ?, ?, ?, ?)`,
+		ticketNo, t.Title, t.Description, t.SQLContent, t.TicketType, t.DBConnectionID, t.DatabaseName, t.SubmitterID,
 		t.ApprovedDurationMinutes, t.ApprovedUntil, t.RevokedAt, t.RevokedBy,
 	)
 	if err != nil {
@@ -264,6 +264,51 @@ func (r *TicketRepo) ListExecutions(ctx context.Context, ticketID uint64) ([]mod
 		ticketID,
 	)
 	return execs, err
+}
+
+func (r *TicketRepo) ReplaceReviewResults(ctx context.Context, ticketID uint64, results []model.TicketReviewResult) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin replace review results tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM ticket_review_results WHERE ticket_id = ?`, ticketID); err != nil {
+		return fmt.Errorf("delete ticket review results: %w", err)
+	}
+	for _, result := range results {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO ticket_review_results (ticket_id, seq, sql_stmt, scan_rows, status, message)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			ticketID, result.Seq, result.SQLStmt, result.ScanRows, result.Status, result.Message,
+		); err != nil {
+			return fmt.Errorf("insert ticket review result: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit replace review results: %w", err)
+	}
+	tx = nil
+	return nil
+}
+
+func (r *TicketRepo) ListReviewResults(ctx context.Context, ticketID uint64) ([]model.TicketReviewResult, error) {
+	results := []model.TicketReviewResult{}
+	if err := r.db.SelectContext(ctx, &results,
+		`SELECT id, ticket_id, seq, sql_stmt, scan_rows, status, message, created_at
+		 FROM ticket_review_results
+		 WHERE ticket_id = ?
+		 ORDER BY seq ASC, id ASC`,
+		ticketID,
+	); err != nil {
+		return nil, fmt.Errorf("list ticket review results: %w", err)
+	}
+	return results, nil
 }
 
 // MarkStopped transitions an executing ticket to stopped.

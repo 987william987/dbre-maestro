@@ -16,18 +16,24 @@ vi.mock('react-router-dom', async () => {
 vi.mock('@/modules/tickets/api', () => ({
   createTicket: vi.fn(),
   listConnections: vi.fn(),
+  listTicketDatabases: vi.fn(),
+  reviewTicketSQL: vi.fn(),
 }))
 
-import { createTicket, listConnections } from '@/modules/tickets/api'
+import { createTicket, listConnections, listTicketDatabases, reviewTicketSQL } from '@/modules/tickets/api'
 
 const mockedCreateTicket = vi.mocked(createTicket)
 const mockedListConnections = vi.mocked(listConnections)
+const mockedListTicketDatabases = vi.mocked(listTicketDatabases)
+const mockedReviewTicketSQL = vi.mocked(reviewTicketSQL)
 
 describe('NewTicketPage', () => {
   beforeEach(() => {
     mockedNavigate.mockReset()
     mockedCreateTicket.mockReset()
     mockedListConnections.mockReset()
+    mockedListTicketDatabases.mockReset()
+    mockedReviewTicketSQL.mockReset()
 
     mockedListConnections.mockResolvedValue({
       connections: [
@@ -62,6 +68,23 @@ describe('NewTicketPage', () => {
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
     })
+    mockedReviewTicketSQL.mockResolvedValue({
+      passed: true,
+      results: [
+        {
+          id: 1,
+          ticket_id: 0,
+          seq: 1,
+          sql_stmt: 'ALTER TABLE orders ADD INDEX idx_status (status)',
+          scan_rows: 0,
+          status: 'pass',
+          message: null,
+        },
+      ],
+    })
+    mockedListTicketDatabases.mockResolvedValue({
+      databases: [{ name: 'orders' }, { name: 'orders_archive' }],
+    })
   })
 
   it('renders English copy and target db labels without host or port', async () => {
@@ -75,14 +98,18 @@ describe('NewTicketPage', () => {
     expect(screen.getByPlaceholderText('e.g. Add index, backfill order status')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Add context, affected scope, rollback plan, and execution considerations.')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Target DB' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Target Instance' }))
     expect(await screen.findByRole('option', { name: 'Not Selected' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'orders-primary · MYSQL' })).toBeInTheDocument()
+    const option = screen.getByRole('option', { name: 'orders-primary · MYSQL' })
+    expect(option).toBeInTheDocument()
     expect(screen.queryByText(/orders-primary\.internal/)).not.toBeInTheDocument()
     expect(screen.queryByText(/3306/)).not.toBeInTheDocument()
+    fireEvent.click(option)
+    await waitFor(() => expect(mockedListTicketDatabases).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Target Database' })).toHaveTextContent('orders'))
   })
 
-  it('keeps submit disabled until target db is selected', async () => {
+  it('keeps submit disabled until instance, database, and SQL review are completed', async () => {
     render(
       <MemoryRouter>
         <NewTicketPage />
@@ -96,13 +123,18 @@ describe('NewTicketPage', () => {
 
     expect(screen.getByRole('button', { name: 'Submit Ticket' })).toBeDisabled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Target DB' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Target Instance' }))
     fireEvent.click(await screen.findByRole('option', { name: 'orders-primary · MYSQL' }))
+    await waitFor(() => expect(mockedListTicketDatabases).toHaveBeenCalledWith(1))
 
+    expect(screen.getByRole('button', { name: 'Submit Ticket' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'SQL Review' }))
+    await waitFor(() => expect(mockedReviewTicketSQL).toHaveBeenCalled())
     expect(screen.getByRole('button', { name: 'Submit Ticket' })).not.toBeDisabled()
   })
 
-  it('submits the selected connection id', async () => {
+  it('submits the selected connection id and database name', async () => {
     render(
       <MemoryRouter>
         <NewTicketPage />
@@ -113,8 +145,11 @@ describe('NewTicketPage', () => {
 
     fireEvent.change(screen.getByLabelText(/Title/i), { target: { value: 'Add index' } })
     fireEvent.change(screen.getByLabelText('SQL Content'), { target: { value: 'ALTER TABLE orders ADD INDEX idx_status (status);' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Target DB' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Target Instance' }))
     fireEvent.click(await screen.findByRole('option', { name: 'orders-primary · MYSQL' }))
+    await waitFor(() => expect(mockedListTicketDatabases).toHaveBeenCalledWith(1))
+    fireEvent.click(screen.getByRole('button', { name: 'SQL Review' }))
+    await waitFor(() => expect(mockedReviewTicketSQL).toHaveBeenCalled())
     fireEvent.click(screen.getByRole('button', { name: 'Submit Ticket' }))
 
     await waitFor(() => {
@@ -124,6 +159,7 @@ describe('NewTicketPage', () => {
         sql_content: 'ALTER TABLE orders ADD INDEX idx_status (status);',
         ticket_type: 'ddl',
         db_connection_id: 1,
+        database_name: 'orders',
       })
     })
     expect(mockedNavigate).toHaveBeenCalledWith('/tickets/99', { replace: true })

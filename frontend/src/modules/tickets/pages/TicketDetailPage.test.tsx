@@ -39,6 +39,7 @@ const baseTicket: Ticket = {
   ticket_type: 'dml',
   db_connection_id: 3,
   db_connection_name: 'analytics-primary',
+  database_name: 'analytics_app',
   status: 'pending_review',
   submitter_id: 1,
   submitter_name: 'alice',
@@ -61,6 +62,7 @@ function buildDetail(ticket: Ticket, overrides?: Partial<TicketDetail>): TicketD
   return {
     ticket,
     executions: [],
+    review_results: [],
     scopes: [],
     export_request: null,
     capabilities: {
@@ -113,8 +115,8 @@ describe('TicketDetailPage role visibility', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByText('審核通過')).toBeInTheDocument())
-    expect(screen.getByText('拒絕工單')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Approve')).toBeInTheDocument())
+    expect(screen.getByText('Reject')).toBeInTheDocument()
     expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
   })
 
@@ -195,7 +197,7 @@ describe('TicketDetailPage role visibility', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByText('匯出下載')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Export Download')).toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Download Export' })).toBeInTheDocument()
   })
 
@@ -223,10 +225,43 @@ describe('TicketDetailPage role visibility', () => {
     renderPage()
 
     expect(await screen.findByText('analytics-primary')).toBeInTheDocument()
+    expect(screen.getByText('analytics_app')).toBeInTheDocument()
     expect(screen.getByText('alice')).toBeInTheDocument()
     expect(screen.getByText('reviewer.bob')).toBeInTheDocument()
     expect(screen.getByText('dba.cindy')).toBeInTheDocument()
     expect(screen.getByText('ops.dan')).toBeInTheDocument()
     expect(screen.queryByText(/^3$/)).not.toBeInTheDocument()
+  })
+
+  it('顯示逐句 SQL review 結果', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail(baseTicket, {
+      review_results: [
+        {
+          id: 1,
+          ticket_id: 12,
+          seq: 1,
+          sql_stmt: 'UPDATE users SET flagged = 1 WHERE id < 10',
+          scan_rows: 10,
+          status: 'pass',
+          message: null,
+        },
+      ],
+    }))
+
+    renderPage()
+
+    expect(await screen.findByText('Review Results')).toBeInTheDocument()
+    expect(screen.getByText('UPDATE users SET flagged = 1 WHERE id < 10')).toBeInTheDocument()
+    expect(screen.getByText('10')).toBeInTheDocument()
+    expect(screen.getByText('pass')).toBeInTheDocument()
   })
 })

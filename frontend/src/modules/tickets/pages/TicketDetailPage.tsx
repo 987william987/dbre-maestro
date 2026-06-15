@@ -188,6 +188,7 @@ export function TicketDetailPage() {
             <dl className="px-4 py-2">
               <InfoRow label="Description" value={ticket.description || '—'} />
               <InfoRow label="DB Connection" value={ticket.db_connection_name || ticket.db_connection_id || 'Not specified'} />
+              <InfoRow label="Database" value={ticket.database_name || '—'} />
               <InfoRow label="Submitter" value={formatTicketActor(ticket.submitter_name, ticket.submitter_id)} />
               <InfoRow label="Reviewer" value={formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null)} />
               <InfoRow label="Executor" value={formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)} />
@@ -220,6 +221,36 @@ export function TicketDetailPage() {
                 <code>{ticket.sql_content}</code>
               </pre>
             </div>
+
+            {detail.review_results.length > 0 ? (
+              <div className="border-t border-border px-4 py-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Review Results</p>
+                <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+                  <table className="min-w-full border-collapse">
+                    <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
+                      <tr>
+                        <th className="px-4 py-3">ID</th>
+                        <th className="px-4 py-3">SQL</th>
+                        <th className="px-4 py-3">Scan / Impact Rows</th>
+                        <th className="px-4 py-3">Review Status</th>
+                        <th className="px-4 py-3">Review Message</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border bg-white text-[13px] text-ink">
+                      {detail.review_results.map((result) => (
+                        <tr key={result.id || `${result.seq}-${result.sql_stmt}`}>
+                          <td className="px-4 py-3 align-top">{result.seq}</td>
+                          <td className="px-4 py-3 align-top font-mono text-[12px]">{result.sql_stmt}</td>
+                          <td className="px-4 py-3 align-top">{result.scan_rows}</td>
+                          <td className="px-4 py-3 align-top">{result.status}</td>
+                          <td className="px-4 py-3 align-top text-muted">{result.message || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <section className="flex flex-col gap-3">

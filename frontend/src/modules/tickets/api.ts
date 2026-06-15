@@ -1,6 +1,6 @@
 import { apiClient } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { Ticket, TicketDetail, TicketStatus, TicketType } from '@/shared/types/ticket'
+import type { Ticket, TicketDetail, TicketReviewResult, TicketStatus, TicketType } from '@/shared/types/ticket'
 
 type TicketsResponse = {
   tickets: Ticket[]
@@ -12,12 +12,31 @@ type DBConnectionsResponse = {
   connections: DBConnection[]
 }
 
+type TicketDatabasesResponse = {
+  databases: Array<{
+    name: string
+  }>
+}
+
 type CreateTicketPayload = {
   title: string
   description?: string | null
   sql_content: string
   ticket_type: TicketType
   db_connection_id?: number | null
+  database_name?: string | null
+}
+
+type ReviewTicketPayload = {
+  sql_content: string
+  ticket_type: TicketType
+  db_connection_id: number
+  database_name: string
+}
+
+type ReviewTicketResponse = {
+  passed: boolean
+  results: TicketReviewResult[]
 }
 
 export async function listTickets(status?: TicketStatus, limit?: number, offset?: number) {
@@ -45,8 +64,16 @@ export async function getTicket(id: string) {
   return apiClient.get<TicketDetail>(`/tickets/${id}`).then((response) => ({
     ...response,
     executions: Array.isArray(response.executions) ? response.executions : [],
+    review_results: Array.isArray(response.review_results) ? response.review_results : [],
     scopes: Array.isArray(response.scopes) ? response.scopes : [],
     export_request: response.export_request ?? null,
+  }))
+}
+
+export async function reviewTicketSQL(payload: ReviewTicketPayload) {
+  return apiClient.post<ReviewTicketResponse>('/tickets/review', payload).then((response) => ({
+    ...response,
+    results: Array.isArray(response.results) ? response.results : [],
   }))
 }
 
@@ -84,6 +111,15 @@ export async function listConnections() {
   return {
     ...response,
     connections: Array.isArray(response.connections) ? response.connections : [],
+  }
+}
+
+export async function listTicketDatabases(connectionID: number) {
+  const response = await apiClient.get<TicketDatabasesResponse>(`/tickets/connections/${connectionID}/databases`)
+
+  return {
+    ...response,
+    databases: Array.isArray(response.databases) ? response.databases : [],
   }
 }
 

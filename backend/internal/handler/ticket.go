@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -39,6 +40,18 @@ type ticketResponse struct {
 	ReviewerName     *string `json:"reviewer_name,omitempty"`
 	ExecutorName     *string `json:"executor_name,omitempty"`
 	RevokedByName    *string `json:"revoked_by_name,omitempty"`
+}
+
+type ticketReviewItem struct {
+	Seq      int     `json:"seq"`
+	SQLStmt  string  `json:"sql_stmt"`
+	ScanRows int64   `json:"scan_rows"`
+	Status   string  `json:"status"`
+	Message  *string `json:"message,omitempty"`
+}
+
+type ticketDatabaseOption struct {
+	Name string `json:"name"`
 }
 
 func NewTicketHandler(
@@ -103,6 +116,82 @@ func (h *TicketHandler) ListConnections(w http.ResponseWriter, r *http.Request) 
 	jsonOK(w, map[string]any{"connections": connections})
 }
 
+// GET /tickets/connections/{id}/databases
+func (h *TicketHandler) ListDatabases(w http.ResponseWriter, r *http.Request) {
+	connID, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || connID == 0 {
+		jsonErr(w, http.StatusBadRequest, "invalid connection id")
+		return
+	}
+
+	userID := middleware.UserIDFromCtx(r.Context())
+	hasAccess, err := userCanAccessConnection(r.Context(), h.users, userID, connID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "db scope check failed")
+		return
+	}
+	if !hasAccess {
+		jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
+		return
+	}
+
+	databases, err := h.listTicketDatabases(r.Context(), connID)
+	if err != nil {
+		slog.Warn("list ticket databases failed", "connection_id", connID, "err", err)
+		jsonErr(w, http.StatusInternalServerError, "list ticket databases failed")
+		return
+	}
+
+	jsonOK(w, map[string]any{"databases": databases})
+}
+
+// POST /tickets/review
+func (h *TicketHandler) ReviewSQL(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SQLContent     string           `json:"sql_content"`
+		TicketType     model.TicketType `json:"ticket_type"`
+		DBConnectionID *uint64          `json:"db_connection_id"`
+		DatabaseName   *string          `json:"database_name"`
+	}
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.SQLContent) == "" || req.DBConnectionID == nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "db_connection_id and sql_content are required")
+		return
+	}
+	if strings.TrimSpace(nullableStringValue(req.DatabaseName)) == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "database_name is required")
+		return
+	}
+
+	userID := middleware.UserIDFromCtx(r.Context())
+	hasAccess, err := userCanAccessConnection(r.Context(), h.users, userID, *req.DBConnectionID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "db scope check failed")
+		return
+	}
+	if !hasAccess {
+		jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
+		return
+	}
+
+	results := h.runTicketSQLReview(r.Context(), *req.DBConnectionID, req.SQLContent, req.DatabaseName)
+	blocked := false
+	for _, result := range results {
+		if result.Status == "error" {
+			blocked = true
+			break
+		}
+	}
+
+	jsonOK(w, map[string]any{
+		"passed":  !blocked,
+		"results": results,
+	})
+}
+
 // POST /tickets
 func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
@@ -113,6 +202,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		SQLContent              string              `json:"sql_content"`
 		TicketType              model.TicketType    `json:"ticket_type"`
 		DBConnectionID          *uint64             `json:"db_connection_id"`
+		DatabaseName            *string             `json:"database_name"`
 		ApprovedDurationMinutes *int                `json:"approved_duration_minutes"`
 		Scopes                  []model.TicketScope `json:"scopes"`
 	}
@@ -141,10 +231,22 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if (req.TicketType == model.TicketTypeDDL || req.TicketType == model.TicketTypeDML) && strings.TrimSpace(nullableStringValue(req.DatabaseName)) == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "database_name is required")
+		return
+	}
 
 	// SQL Review: run static + EXPLAIN-based checks if a target DB is specified
+	var reviewResults []ticketReviewItem
 	if req.DBConnectionID != nil && (req.TicketType == model.TicketTypeDDL || req.TicketType == model.TicketTypeDML) {
-		if issues := h.runTicketSQLReview(r.Context(), *req.DBConnectionID, req.SQLContent); len(issues) > 0 {
+		reviewResults = h.runTicketSQLReview(r.Context(), *req.DBConnectionID, req.SQLContent, req.DatabaseName)
+		issues := make([]string, 0)
+		for _, result := range reviewResults {
+			if result.Status == "error" && result.Message != nil && strings.TrimSpace(*result.Message) != "" {
+				issues = append(issues, fmt.Sprintf("statement %d: %s", result.Seq, *result.Message))
+			}
+		}
+		if len(issues) > 0 {
 			jsonErr(w, http.StatusUnprocessableEntity, "SQL review failed: "+strings.Join(issues, "; "))
 			return
 		}
@@ -166,6 +268,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		SQLContent:              req.SQLContent,
 		TicketType:              req.TicketType,
 		DBConnectionID:          req.DBConnectionID,
+		DatabaseName:            optionalTrimmedString(nullableStringValue(req.DatabaseName)),
 		SubmitterID:             userID,
 		ApprovedDurationMinutes: req.ApprovedDurationMinutes,
 	}
@@ -181,6 +284,24 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		)
 		jsonErr(w, http.StatusInternalServerError, "create ticket failed")
 		return
+	}
+	if len(reviewResults) > 0 {
+		persistedResults := make([]model.TicketReviewResult, 0, len(reviewResults))
+		for _, result := range reviewResults {
+			persistedResults = append(persistedResults, model.TicketReviewResult{
+				TicketID: created.ID,
+				Seq:      result.Seq,
+				SQLStmt:  result.SQLStmt,
+				ScanRows: result.ScanRows,
+				Status:   result.Status,
+				Message:  result.Message,
+			})
+		}
+		if err := h.tickets.ReplaceReviewResults(r.Context(), created.ID, persistedResults); err != nil {
+			slog.Error("persist ticket review results failed", "ticket_id", created.ID, "err", err)
+			jsonErr(w, http.StatusInternalServerError, "persist ticket review results failed")
+			return
+		}
 	}
 
 	h.audit.Log(r.Context(), repository.AuditEntry{
@@ -291,6 +412,10 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if scopes == nil {
 		scopes = []model.TicketScope{}
 	}
+	reviewResults, _ := h.tickets.ListReviewResults(r.Context(), id)
+	if reviewResults == nil {
+		reviewResults = []model.TicketReviewResult{}
+	}
 	canReview, err := h.canReviewTicket(r.Context(), ticket, userID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "ticket capability check failed")
@@ -329,6 +454,7 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{
 		"ticket":         enrichedTicket,
 		"executions":     executions,
+		"review_results": reviewResults,
 		"scopes":         scopes,
 		"export_request": exportDetail,
 		"capabilities": map[string]any{
@@ -708,23 +834,12 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 	ctx := context.Background()
 
-	conn, err := h.dbConns.GetByID(ctx, *ticket.DBConnectionID)
-	if err != nil || conn == nil {
-		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "db connection not found")
-		return
-	}
-	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadwrite)
-	if err != nil {
-		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "decrypt password failed")
-		return
-	}
-
-	driver, dsn := pool.BuildDSN(resolvedConn, password)
-	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
+	execDB, cleanup, err := h.openTicketSQLDB(ctx, *ticket.DBConnectionID, model.DBCredentialRoleReadwrite, ticket.DatabaseName)
 	if err != nil {
 		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "cannot connect: "+err.Error())
 		return
 	}
+	defer cleanup()
 
 	stmts := splitSQLStatements(ticket.SQLContent)
 	finalStatus := model.TicketStatusCompleted
@@ -753,7 +868,7 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 		}
 		_ = h.tickets.MarkExecutionRunning(ctx, execID)
 
-		res, execErr := pools.ExecPool.ExecContext(ctx, stmt)
+		res, execErr := execDB.ExecContext(ctx, stmt)
 		var rowsAffected int64
 		var errMsg *string
 		if execErr != nil {
@@ -946,10 +1061,10 @@ func (h *TicketHandler) notifyExecutors(ctx context.Context, ticket *model.Ticke
 
 // runTicketSQLReview runs static + EXPLAIN-based checks against each SQL statement.
 // Returns a list of blocking issue messages.
-func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64, sqlContent string) []string {
+func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64, sqlContent string, databaseName *string) []ticketReviewItem {
 	rules, err := h.sqlReviewRules.List(ctx)
 	if err != nil {
-		return nil // fail open on meta DB error
+		return buildPassThroughReviewItems(sqlContent)
 	}
 
 	ruleMap := make(map[string]bool, len(rules))
@@ -963,7 +1078,8 @@ func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64,
 		}
 	}
 
-	var allIssues []string
+	results := make([]ticketReviewItem, 0)
+	statements := splitSQLStatements(sqlContent)
 
 	// Static checks (no DB connection required)
 	staticNames := []string{"dml_no_where", "ddl_no_comment", "require_utf8mb4"}
@@ -975,50 +1091,212 @@ func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64,
 		}
 	}
 	if hasStatic {
-		for _, stmt := range splitSQLStatements(sqlContent) {
+		for index, stmt := range statements {
 			stmt = strings.TrimSpace(stmt)
 			if stmt == "" {
 				continue
 			}
-			allIssues = append(allIssues, sqlreview.RunStaticChecks(stmt, ruleMap)...)
+			issues := make([]string, 0)
+			if err := sqlreview.CheckLikelyMissingStatementDelimiter(stmt); err != nil {
+				issues = append(issues, err.Error())
+			}
+			issues = append(issues, sqlreview.RunStaticChecks(stmt, ruleMap)...)
+			results = append(results, buildTicketReviewItem(index+1, stmt, 0, issues))
+		}
+	} else {
+		for index, stmt := range statements {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			issues := make([]string, 0)
+			if err := sqlreview.CheckLikelyMissingStatementDelimiter(stmt); err != nil {
+				issues = append(issues, err.Error())
+			}
+			results = append(results, buildTicketReviewItem(index+1, stmt, 0, issues))
 		}
 	}
 
 	// EXPLAIN-based checks (need DB connection)
 	if !ruleMap["full_table_scan"] && !ruleMap["high_row_count"] {
-		return allIssues
+		return results
 	}
 
-	conn, err := h.dbConns.GetByID(ctx, dbConnID)
-	if err != nil || conn == nil {
-		return allIssues // fail open: can't connect, let static issues through
-	}
-	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadwrite)
+	queryDB, cleanup, err := h.openTicketSQLDB(ctx, dbConnID, model.DBCredentialRoleReadonly, databaseName)
 	if err != nil {
-		return allIssues
+		return results
 	}
-	driver, dsn := pool.BuildDSN(resolvedConn, password)
-	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
-	if err != nil {
-		return allIssues // fail open
-	}
+	defer cleanup()
 
-	for _, stmt := range splitSQLStatements(sqlContent) {
+	for index, stmt := range statements {
 		stmt = strings.TrimSpace(stmt)
 		if stmt == "" {
 			continue
 		}
-		issues, err := sqlreview.CheckExplain(ctx, pools.QueryPool, stmt, rowThreshold)
+		issues, err := sqlreview.CheckExplain(ctx, queryDB, stmt, rowThreshold)
 		if err != nil {
-			continue // EXPLAIN not supported for this statement type (DDL etc.), skip
+			continue
 		}
+		maxRows := int64(0)
+		explainMessages := make([]string, 0)
 		for _, issue := range issues {
+			if issue.Rows > maxRows {
+				maxRows = issue.Rows
+			}
 			if ruleMap[issue.Kind] {
-				allIssues = append(allIssues, issue.Msg)
+				explainMessages = append(explainMessages, issue.Msg)
 			}
 		}
+		if len(explainMessages) == 0 && results[index].ScanRows < maxRows {
+			results[index].ScanRows = maxRows
+			continue
+		}
+		if len(explainMessages) > 0 {
+			results[index] = buildTicketReviewItem(index+1, stmt, maxRows, explainMessages)
+		}
 	}
-	return allIssues
+	return results
+}
+
+func (h *TicketHandler) listTicketDatabases(ctx context.Context, connID uint64) ([]ticketDatabaseOption, error) {
+	queryDB, cleanup, conn, err := h.openTicketSQLDBWithConnection(ctx, connID, model.DBCredentialRoleReadonly, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	switch conn.DBType {
+	case "postgres", "postgresql":
+		rows, err := queryDB.QueryContext(ctx,
+			`SELECT datname
+			 FROM pg_database
+			 WHERE datistemplate = false
+			   AND datallowconn = true
+			 ORDER BY datname`,
+		)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		items := make([]ticketDatabaseOption, 0)
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				return nil, err
+			}
+			if shouldSkipPostgresMetadataDatabase(name) {
+				continue
+			}
+			items = append(items, ticketDatabaseOption{Name: name})
+		}
+		return items, rows.Err()
+	default:
+		rows, err := queryDB.QueryContext(ctx,
+			`SELECT SCHEMA_NAME
+			 FROM information_schema.SCHEMATA
+			 WHERE SCHEMA_NAME NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys')
+			 ORDER BY SCHEMA_NAME`,
+		)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		items := make([]ticketDatabaseOption, 0)
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				return nil, err
+			}
+			items = append(items, ticketDatabaseOption{Name: name})
+		}
+		return items, rows.Err()
+	}
+}
+
+func (h *TicketHandler) openTicketSQLDB(
+	ctx context.Context,
+	connID uint64,
+	credentialRole string,
+	databaseName *string,
+) (*sql.DB, func(), error) {
+	db, cleanup, _, err := h.openTicketSQLDBWithConnection(ctx, connID, credentialRole, databaseName)
+	return db, cleanup, err
+}
+
+func (h *TicketHandler) openTicketSQLDBWithConnection(
+	ctx context.Context,
+	connID uint64,
+	credentialRole string,
+	databaseName *string,
+) (*sql.DB, func(), *model.DBConnection, error) {
+	conn, err := h.dbConns.GetByID(ctx, connID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if conn == nil {
+		return nil, nil, nil, fmt.Errorf("db connection not found")
+	}
+
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, credentialRole)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if databaseName != nil && strings.TrimSpace(*databaseName) != "" {
+		targetDatabase := strings.TrimSpace(*databaseName)
+		resolvedConn.DatabaseName = &targetDatabase
+	}
+
+	driver, dsn := pool.BuildDSN(resolvedConn, password)
+	db, err := sql.Open(driver, dsn)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(2 * time.Minute)
+
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(pingCtx); err != nil {
+		_ = db.Close()
+		return nil, nil, nil, err
+	}
+
+	return db, func() { _ = db.Close() }, resolvedConn, nil
+}
+
+func buildPassThroughReviewItems(sqlContent string) []ticketReviewItem {
+	items := make([]ticketReviewItem, 0)
+	for index, stmt := range splitSQLStatements(sqlContent) {
+		trimmed := strings.TrimSpace(stmt)
+		if trimmed == "" {
+			continue
+		}
+		items = append(items, buildTicketReviewItem(index+1, trimmed, 0, nil))
+	}
+	return items
+}
+
+func buildTicketReviewItem(seq int, stmt string, scanRows int64, issues []string) ticketReviewItem {
+	if len(issues) == 0 {
+		return ticketReviewItem{
+			Seq:      seq,
+			SQLStmt:  stmt,
+			ScanRows: scanRows,
+			Status:   "pass",
+		}
+	}
+	message := strings.Join(issues, "; ")
+	return ticketReviewItem{
+		Seq:      seq,
+		SQLStmt:  stmt,
+		ScanRows: scanRows,
+		Status:   "error",
+		Message:  &message,
+	}
 }
 
 // splitSQLStatements splits a multi-statement SQL string by semicolons.

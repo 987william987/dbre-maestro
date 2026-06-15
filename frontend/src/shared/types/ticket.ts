@@ -22,6 +22,7 @@ export type Ticket = {
   ticket_type: TicketType
   db_connection_id?: number | null
   db_connection_name?: string | null
+  database_name?: string | null
   status: TicketStatus
   submitter_id: number
   submitter_name?: string | null
@@ -68,6 +69,16 @@ export type TicketExecution = {
   completed_at?: string | null
 }
 
+export type TicketReviewResult = {
+  id: number
+  ticket_id: number
+  seq: number
+  sql_stmt: string
+  scan_rows: number
+  status: 'pass' | 'error' | string
+  message?: string | null
+}
+
 export type TicketCapabilities = {
   can_review: boolean
   can_revoke: boolean
@@ -79,6 +90,7 @@ export type TicketCapabilities = {
 export type TicketDetail = {
   ticket: Ticket
   executions: TicketExecution[]
+  review_results: TicketReviewResult[]
   scopes: TicketScope[]
   export_request: {
     status: string
