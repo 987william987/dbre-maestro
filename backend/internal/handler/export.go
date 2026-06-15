@@ -317,7 +317,13 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, req.SQLContent, queryExecutionContext{})
+	queryCtx, err := h.exportQueryExecutionContext(r.Context(), req, resolvedConn)
+	if err != nil {
+		http.Error(w, "query context failed", http.StatusInternalServerError)
+		return
+	}
+
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, req.SQLContent, queryCtx)
 	if err != nil {
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return
@@ -376,4 +382,40 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		ResourceID:   &reqID,
 		IPAddress:    clientIP(r),
 	})
+}
+
+func (h *ExportHandler) exportQueryExecutionContext(ctx context.Context, req *model.ExportRequest, conn *model.DBConnection) (queryExecutionContext, error) {
+	queryCtx := exportQueryExecutionContextFromScopes(conn, nil)
+
+	if req == nil || req.TicketID == nil || h.tickets == nil {
+		return queryCtx, nil
+	}
+
+	scopes, err := h.tickets.ListScopes(ctx, *req.TicketID)
+	if err != nil {
+		return queryCtx, err
+	}
+	return exportQueryExecutionContextFromScopes(conn, scopes), nil
+}
+
+func exportQueryExecutionContextFromScopes(conn *model.DBConnection, scopes []model.TicketScope) queryExecutionContext {
+	queryCtx := queryExecutionContext{}
+
+	for _, scope := range scopes {
+		if queryCtx.DatabaseName == "" && scope.DatabaseName != nil {
+			queryCtx.DatabaseName = *scope.DatabaseName
+		}
+		if queryCtx.SchemaName == "" && scope.SchemaName != nil {
+			queryCtx.SchemaName = *scope.SchemaName
+		}
+		if queryCtx.DatabaseName != "" && queryCtx.SchemaName != "" {
+			break
+		}
+	}
+
+	if queryCtx.DatabaseName == "" && conn != nil && conn.DatabaseName != nil {
+		queryCtx.DatabaseName = *conn.DatabaseName
+	}
+
+	return queryCtx
 }
