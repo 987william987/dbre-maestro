@@ -196,7 +196,7 @@ export function AppShell() {
 
     async function loadNotifications(showToastForNew: boolean) {
       try {
-        const response = await listNotifications(8, 0)
+        const response = await listNotifications(10, 0)
         if (cancelled) {
           return
         }
