@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,12 +11,13 @@ import (
 )
 
 type DBMetadataHandler struct {
-	repo    *repository.DBMetadataRepo
-	dbConns *repository.DBConnectionRepo
+	repo     *repository.DBMetadataRepo
+	dbConns  *repository.DBConnectionRepo
+	settings *repository.SettingsRepo
 }
 
-func NewDBMetadataHandler(repo *repository.DBMetadataRepo, dbConns *repository.DBConnectionRepo) *DBMetadataHandler {
-	return &DBMetadataHandler{repo: repo, dbConns: dbConns}
+func NewDBMetadataHandler(repo *repository.DBMetadataRepo, dbConns *repository.DBConnectionRepo, settings *repository.SettingsRepo) *DBMetadataHandler {
+	return &DBMetadataHandler{repo: repo, dbConns: dbConns, settings: settings}
 }
 
 func (h *DBMetadataHandler) ListInventory(w http.ResponseWriter, r *http.Request) {
@@ -54,10 +56,84 @@ func (h *DBMetadataHandler) ListObjects(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	allowedConnectionIDs, err := h.allowedObjectSnapshotConnectionIDs(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load object scan scope failed")
+		return
+	}
+	items = filterObjectSnapshotsByConnectionIDs(items, allowedConnectionIDs)
+
 	jsonOK(w, map[string]any{
 		"items": items,
 		"total": len(items),
 	})
+}
+
+func (h *DBMetadataHandler) allowedObjectSnapshotConnectionIDs(ctx context.Context) (map[uint64]struct{}, error) {
+	settings, err := h.settings.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !settings.DBMetadataObjectEnabled {
+		return map[uint64]struct{}{}, nil
+	}
+
+	selectedIDs := normalizeAllowedConnectionIDs(settings.DBMetadataObjectEnabledConnectionIDs)
+	if len(selectedIDs) == 0 {
+		return map[uint64]struct{}{}, nil
+	}
+
+	connections, err := h.dbConns.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	allowed := make(map[uint64]struct{}, len(selectedIDs))
+	for _, conn := range connections {
+		if _, ok := selectedIDs[conn.ID]; !ok {
+			continue
+		}
+		if !isSupportedObjectSnapshotDBType(conn.DBType) {
+			continue
+		}
+		allowed[conn.ID] = struct{}{}
+	}
+	return allowed, nil
+}
+
+func normalizeAllowedConnectionIDs(ids []uint64) map[uint64]struct{} {
+	allowed := make(map[uint64]struct{}, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		allowed[id] = struct{}{}
+	}
+	return allowed
+}
+
+func isSupportedObjectSnapshotDBType(dbType string) bool {
+	switch strings.ToLower(strings.TrimSpace(dbType)) {
+	case "mysql", "postgres", "postgresql":
+		return true
+	default:
+		return false
+	}
+}
+
+func filterObjectSnapshotsByConnectionIDs(items []model.DBObjectSnapshot, allowed map[uint64]struct{}) []model.DBObjectSnapshot {
+	if len(items) == 0 || len(allowed) == 0 {
+		return []model.DBObjectSnapshot{}
+	}
+
+	filtered := make([]model.DBObjectSnapshot, 0, len(items))
+	for _, item := range items {
+		if _, ok := allowed[item.DBConnectionID]; !ok {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 func mapInventorySnapshot(snapshot model.CloudDBInventorySnapshot, connections []model.DBConnection) (string, []string) {

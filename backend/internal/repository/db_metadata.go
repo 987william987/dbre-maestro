@@ -93,6 +93,35 @@ func (r *DBMetadataRepo) ListObjectSnapshots(ctx context.Context, connectionID u
 	return items, nil
 }
 
+func (r *DBMetadataRepo) DeleteObjectSnapshotsForConnection(ctx context.Context, connectionID uint64) error {
+	if connectionID == 0 {
+		return nil
+	}
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM db_object_snapshots WHERE db_connection_id = ?`, connectionID); err != nil {
+		return fmt.Errorf("delete db_object_snapshots for connection %d: %w", connectionID, err)
+	}
+	return nil
+}
+
+func (r *DBMetadataRepo) DeleteObjectSnapshotsExceptConnectionIDs(ctx context.Context, connectionIDs []uint64) error {
+	if len(connectionIDs) == 0 {
+		if _, err := r.db.ExecContext(ctx, `DELETE FROM db_object_snapshots`); err != nil {
+			return fmt.Errorf("delete all db_object_snapshots: %w", err)
+		}
+		return nil
+	}
+
+	query, args, err := sqlx.In(`DELETE FROM db_object_snapshots WHERE db_connection_id NOT IN (?)`, connectionIDs)
+	if err != nil {
+		return fmt.Errorf("build delete db_object_snapshots except ids query: %w", err)
+	}
+	query = r.db.Rebind(query)
+	if _, err := r.db.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("delete db_object_snapshots except ids: %w", err)
+	}
+	return nil
+}
+
 func (r *DBMetadataRepo) ReplaceInventorySnapshots(ctx context.Context, snapshotAt time.Time, items []model.CloudDBInventorySnapshot) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {

@@ -125,3 +125,42 @@ func TestListObjectSnapshotsWithLimitKeepsLimitClause(t *testing.T) {
 		t.Fatalf("mock expectations not met: %v", err)
 	}
 }
+
+func TestDeleteObjectSnapshotsExceptConnectionIDsWithoutIDsDeletesAll(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewDBMetadataRepo(sqlx.NewDb(db, "sqlmock"))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM db_object_snapshots`)).
+		WillReturnResult(sqlmock.NewResult(0, 3))
+
+	if err := repo.DeleteObjectSnapshotsExceptConnectionIDs(context.Background(), nil); err != nil {
+		t.Fatalf("DeleteObjectSnapshotsExceptConnectionIDs() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
+func TestDeleteObjectSnapshotsForConnection(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewDBMetadataRepo(sqlx.NewDb(db, "sqlmock"))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM db_object_snapshots WHERE db_connection_id = ?`)).
+		WithArgs(uint64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 12))
+
+	if err := repo.DeleteObjectSnapshotsForConnection(context.Background(), 7); err != nil {
+		t.Fatalf("DeleteObjectSnapshotsForConnection() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}

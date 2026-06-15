@@ -120,7 +120,7 @@ func main() {
 	notifH := handler.NewNotificationHandler(notifRepo)
 	whitelistH := handler.NewMaskingWhitelistHandler(dbConnRepo, whitelistRepo, auditRepo)
 	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, dbConnRepo, auditRepo)
-	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo)
+	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo, settingsRepo)
 	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
 	objectJob := job.NewDBMetadataObjectJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
 

@@ -110,6 +110,9 @@ func (j *DBMetadataObjectJob) runIfDue(ctx context.Context) {
 func (j *DBMetadataObjectJob) RunOnce(ctx context.Context, settings *model.PlatformSettings) error {
 	connectionIDs := normalizeObjectConnectionIDs(settings.DBMetadataObjectEnabledConnectionIDs)
 	if len(connectionIDs) == 0 {
+		if err := j.clearObjectSnapshotsExceptConnectionIDs(ctx, nil); err != nil {
+			return fmt.Errorf("clear object snapshots for empty scope: %w", err)
+		}
 		j.logger.Info("db metadata objects: skip empty scope")
 		return nil
 	}
@@ -121,8 +124,22 @@ func (j *DBMetadataObjectJob) RunOnce(ctx context.Context, settings *model.Platf
 
 	selectedConnections := filterObjectConnections(connections, connectionIDs)
 	if len(selectedConnections) == 0 {
+		if err := j.clearObjectSnapshotsExceptConnectionIDs(ctx, nil); err != nil {
+			return fmt.Errorf("clear object snapshots for missing connections: %w", err)
+		}
 		j.logger.Info("db metadata objects: no matching db connections", "selected_connection_ids", len(connectionIDs))
 		return nil
+	}
+
+	activeConnectionIDs := make([]uint64, 0, len(selectedConnections))
+	for i := range selectedConnections {
+		if !isObjectMetadataSupported(selectedConnections[i].DBType) {
+			continue
+		}
+		activeConnectionIDs = append(activeConnectionIDs, selectedConnections[i].ID)
+	}
+	if err := j.clearObjectSnapshotsExceptConnectionIDs(ctx, activeConnectionIDs); err != nil {
+		return fmt.Errorf("clear stale object snapshots: %w", err)
 	}
 
 	sem := make(chan struct{}, objectJobConnectionWorkers)
@@ -154,6 +171,9 @@ func (j *DBMetadataObjectJob) RunOnce(ctx context.Context, settings *model.Platf
 					firstErr = err
 				}
 				errMu.Unlock()
+				if clearErr := j.clearObjectSnapshotsForConnection(ctx, conn.ID); clearErr != nil {
+					j.logger.Warn("db metadata objects: clear stale snapshots failed", "connection_id", conn.ID, "connection_name", conn.Name, "err", clearErr)
+				}
 				j.logger.Warn("db metadata objects: connection sync failed", "connection_id", conn.ID, "connection_name", conn.Name, "err", err)
 				return
 			}
@@ -162,6 +182,20 @@ func (j *DBMetadataObjectJob) RunOnce(ctx context.Context, settings *model.Platf
 
 	wg.Wait()
 	return firstErr
+}
+
+func (j *DBMetadataObjectJob) clearObjectSnapshotsExceptConnectionIDs(ctx context.Context, connectionIDs []uint64) error {
+	if j.snapshots == nil {
+		return nil
+	}
+	return j.snapshots.DeleteObjectSnapshotsExceptConnectionIDs(ctx, connectionIDs)
+}
+
+func (j *DBMetadataObjectJob) clearObjectSnapshotsForConnection(ctx context.Context, connectionID uint64) error {
+	if j.snapshots == nil {
+		return nil
+	}
+	return j.snapshots.DeleteObjectSnapshotsForConnection(ctx, connectionID)
 }
 
 func (j *DBMetadataObjectJob) syncConnection(ctx context.Context, conn *model.DBConnection) error {
