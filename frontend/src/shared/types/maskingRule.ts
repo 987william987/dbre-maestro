@@ -1,7 +1,9 @@
 export type MaskingRule = {
   id: number
   column_name: string
-  mask_mode: 'full' | 'partial' | 'hash'
+  match_type: 'exact' | 'regex'
+  mask_mode: 'full' | 'partial' | 'hash' | 'email' | 'fixed' | 'numeric' | 'datetime' | 'ip'
+  mask_config: Record<string, unknown> | null
   created_by: number
   created_at: string
 }

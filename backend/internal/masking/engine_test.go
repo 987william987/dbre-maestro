@@ -1,6 +1,7 @@
 package masking_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -51,6 +52,27 @@ func TestMaskPartial(t *testing.T) {
 	}
 }
 
+func TestMaskPartialWithConfig(t *testing.T) {
+	e := newEngine(t)
+	config, _ := json.Marshal(map[string]any{
+		"keep_prefix": 3,
+		"keep_suffix": 4,
+		"mask_text":   "......",
+	})
+	result := &masking.QueryResult{
+		Columns: []string{"wallet_address"},
+		Origins: []masking.ColumnOrigin{{Table: "wallets", Column: "wallet_address"}},
+		Rows:    [][]any{{"0x1234567890ABCDEF"}},
+	}
+	rules := []masking.Rule{{Table: "wallets", Column: "wallet_address", Mode: masking.MaskModePartial, Config: config}}
+	if err := e.MaskResult(result, rules); err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Rows[0][0]; got != "0x1......CDEF" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestMaskHashDeterministic(t *testing.T) {
 	e := newEngine(t)
 	rules := []masking.Rule{{Table: "users", Column: "email", Mode: masking.MaskModeHash}}
@@ -93,6 +115,40 @@ func TestMaskHashWithPepperVsWithout(t *testing.T) {
 	e2.MaskResult(r2, rules)
 	if r1.Rows[0][0] == r2.Rows[0][0] {
 		t.Error("same value with different pepper should produce different hashes (TE5)")
+	}
+}
+
+func TestMaskEmailWithConfig(t *testing.T) {
+	e := newEngine(t)
+	config, _ := json.Marshal(map[string]any{
+		"keep_local_prefix": 1,
+		"keep_domain":       true,
+		"replacement":       "****",
+	})
+	result := &masking.QueryResult{
+		Columns: []string{"email"},
+		Origins: []masking.ColumnOrigin{{Table: "users", Column: "email"}},
+		Rows:    [][]any{{"james@gmail.com"}},
+	}
+	rules := []masking.Rule{{Table: "users", Column: "email", Mode: masking.MaskModeEmail, Config: config}}
+	if err := e.MaskResult(result, rules); err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Rows[0][0]; got != "j****@gmail.com" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestMatchColumnPatternRegex(t *testing.T) {
+	matched, err := masking.MatchColumnPattern(masking.Rule{
+		Column: "^(wallet_address|from_addr|to_addr)$",
+		Match:  masking.MatchTypeRegex,
+	}, "from_addr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matched {
+		t.Fatal("expected regex to match from_addr")
 	}
 }
 

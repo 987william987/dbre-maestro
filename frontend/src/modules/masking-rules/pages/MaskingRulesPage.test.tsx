@@ -66,7 +66,9 @@ function selectOption(label: string, option: string) {
 const rule = {
   id: 2,
   column_name: 'phone',
+  match_type: 'exact' as const,
   mask_mode: 'partial' as const,
+  mask_config: { keep_prefix: 3, keep_suffix: 4, mask_char: '*' },
   created_by: 1,
   created_at: '2026-01-01T00:00:00Z',
 }
@@ -138,13 +140,15 @@ describe('MaskingRulesPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Masking Rules' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: 'New Rule' }))
-    fireEvent.change(screen.getByLabelText('Column Name'), { target: { value: 'email' } })
+    fireEvent.change(screen.getByLabelText('Column Pattern'), { target: { value: 'email' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }))
 
     await waitFor(() => {
       expect(mockedCreateMaskingRule).toHaveBeenCalledWith({
         column_name: 'email',
+        match_type: 'exact',
         mask_mode: 'full',
+        mask_config: {},
       })
     })
   })
@@ -212,7 +216,9 @@ describe('MaskingRulesPage', () => {
       rules: Array.from({ length: 21 }, (_, index) => ({
         id: index + 1,
         column_name: `column_${String(index + 1).padStart(2, '0')}`,
+        match_type: 'exact' as const,
         mask_mode: 'partial' as const,
+        mask_config: {},
         created_by: 1,
         created_at: '2026-01-01T00:00:00Z',
       })),

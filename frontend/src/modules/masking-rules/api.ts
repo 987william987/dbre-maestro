@@ -11,7 +11,9 @@ type MaskingWhitelistResponse = {
 
 type CreateMaskingRulePayload = {
   column_name: string
-  mask_mode: 'full' | 'partial' | 'hash'
+  match_type: 'exact' | 'regex'
+  mask_mode: 'full' | 'partial' | 'hash' | 'email' | 'fixed' | 'numeric' | 'datetime' | 'ip'
+  mask_config?: Record<string, unknown>
 }
 
 type CreateMaskingWhitelistPayload = {
@@ -25,7 +27,13 @@ export async function listMaskingRules() {
   const response = await apiClient.get<MaskingRulesResponse>('/masking-rules')
   return {
     ...response,
-    rules: Array.isArray(response.rules) ? response.rules : [],
+    rules: Array.isArray(response.rules)
+      ? response.rules.map((rule) => ({
+          ...rule,
+          match_type: rule.match_type === 'regex' ? 'regex' : 'exact',
+          mask_config: rule.mask_config && typeof rule.mask_config === 'object' && !Array.isArray(rule.mask_config) ? rule.mask_config : {},
+        }))
+      : [],
   }
 }
 

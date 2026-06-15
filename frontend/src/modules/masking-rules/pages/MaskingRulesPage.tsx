@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Pencil, Plus, ShieldAlert, ShieldCheck, Trash2, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { listDBConnections } from '@/modules/db-connections/api'
 import {
   createMaskingRule,
@@ -33,7 +34,9 @@ type ConnectionOption = {
 
 type RuleForm = {
   columnName: string
-  maskMode: 'full' | 'partial' | 'hash'
+  matchType: 'exact' | 'regex'
+  maskMode: 'full' | 'partial' | 'hash' | 'email' | 'fixed' | 'numeric' | 'datetime' | 'ip'
+  maskConfig: string
 }
 
 type WhitelistForm = {
@@ -55,7 +58,9 @@ type WhitelistDrawerState =
 
 const EMPTY_RULE_FORM: RuleForm = {
   columnName: '',
+  matchType: 'exact',
   maskMode: 'full',
+  maskConfig: '{}',
 }
 
 const EMPTY_WHITELIST_FORM: WhitelistForm = {
@@ -69,7 +74,28 @@ const MASK_MODE_OPTIONS: Array<{ value: RuleForm['maskMode']; label: string }> =
   { value: 'full', label: 'full' },
   { value: 'partial', label: 'partial' },
   { value: 'hash', label: 'hash' },
+  { value: 'email', label: 'email' },
+  { value: 'fixed', label: 'fixed' },
+  { value: 'numeric', label: 'numeric' },
+  { value: 'datetime', label: 'datetime' },
+  { value: 'ip', label: 'ip' },
 ]
+
+const MATCH_TYPE_OPTIONS: Array<{ value: RuleForm['matchType']; label: string }> = [
+  { value: 'exact', label: 'exact' },
+  { value: 'regex', label: 'regex' },
+]
+
+const MASK_MODE_EXAMPLES: Record<RuleForm['maskMode'], string> = {
+  full: '{}',
+  partial: '{\n  "keep_prefix": 3,\n  "keep_suffix": 4,\n  "mask_char": "*"\n}',
+  hash: '{}',
+  email: '{\n  "keep_local_prefix": 1,\n  "keep_domain": true,\n  "replacement": "****"\n}',
+  fixed: '{\n  "value": "[REDACTED]"\n}',
+  numeric: '{\n  "operation": "round",\n  "decimals": 0\n}',
+  datetime: '{\n  "granularity": "day"\n}',
+  ip: '{\n  "keep_segments": 2\n}',
+}
 
 const PAGE_SIZE = 20
 
@@ -228,7 +254,9 @@ export function MaskingRulesPage() {
       state?.mode === 'edit'
         ? {
             columnName: state.rule.column_name,
+            matchType: state.rule.match_type,
             maskMode: state.rule.mask_mode,
+            maskConfig: JSON.stringify(state.rule.mask_config ?? {}, null, 2),
           }
         : EMPTY_RULE_FORM,
     )
@@ -275,9 +303,12 @@ export function MaskingRulesPage() {
     setRuleSubmitting(true)
     setRuleDrawerError('')
     try {
+      const parsedMaskConfig = parseMaskConfig(ruleForm.maskConfig)
       const payload = {
         column_name: ruleForm.columnName.trim(),
+        match_type: ruleForm.matchType,
         mask_mode: ruleForm.maskMode,
+        mask_config: parsedMaskConfig,
       }
       if (ruleDrawer.mode === 'create') {
         await createMaskingRule(payload)
@@ -289,7 +320,7 @@ export function MaskingRulesPage() {
       await loadPage()
       closeRuleDrawer()
     } catch (submitError) {
-      setRuleDrawerError(submitError instanceof ApiError ? submitError.message : 'Failed to save the global masking rule.')
+      setRuleDrawerError(submitError instanceof ApiError ? submitError.message : submitError instanceof Error ? submitError.message : 'Failed to save the global masking rule.')
     } finally {
       setRuleSubmitting(false)
     }
@@ -355,13 +386,21 @@ export function MaskingRulesPage() {
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
       <PageIntro
         title="Masking Rules"
-        description="Currently only MySQL is supported. Global rules manage column names and mask modes, while the whitelist is used to precisely exempt specific instance / database / table / column targets from false positives."
+        description="Currently only MySQL is supported. Global rules now use a DSL: `column pattern + match type + mask mode + mask config`, while the whitelist is used to precisely exempt specific instance / database / table / column targets from false positives."
         actions={
-          !canWrite ? (
-            <div className="rounded-lg border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
-              This account only has `masking_rules.read`. You can view rules but cannot modify them.
-            </div>
-          ) : null
+          <>
+            <Link
+              to="/masking-rules/dsl-guide"
+              className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
+            >
+              DSL Guide
+            </Link>
+            {!canWrite ? (
+              <div className="rounded-lg border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
+                This account only has `masking_rules.read`. You can view rules but cannot modify them.
+              </div>
+            ) : null}
+          </>
         }
       />
 
@@ -369,7 +408,7 @@ export function MaskingRulesPage() {
 
           <SectionCard
             title="Global Masking Rules"
-            description="These are truly global rules. Each rule only stores `column_name` and `mask_mode`, and applies to all MySQL query and export results when matched."
+            description="These are truly global rules. Each rule stores `column pattern`, `match_type`, `mask_mode`, and JSON `mask_config`, so DBA can flexibly map field patterns to masking behavior without code changes."
             icon={<ShieldAlert className="h-4 w-4 text-accent" />}
             action={
               canWrite ? (
@@ -386,12 +425,16 @@ export function MaskingRulesPage() {
               <EmptyState message="No global masking rules yet." />
             ) : (
               <CompactTable
-                headers={['Column', 'Mode', 'Created', 'Actions']}
+                headers={['Pattern', 'Match', 'Mode', 'Config', 'Created', 'Actions']}
                 rows={pagedRules.map((rule) => ({
                   key: `rule-${rule.id}`,
                   cells: [
                     <span key="column" className="font-semibold text-ink">{rule.column_name}</span>,
+                    <Badge key="match">{rule.match_type}</Badge>,
                     <Badge key="mode">{rule.mask_mode}</Badge>,
+                    <code key="config" className="max-w-[360px] whitespace-pre-wrap break-all text-[11px] text-muted">
+                      {JSON.stringify(rule.mask_config ?? {}, null, 2)}
+                    </code>,
                     <span key="created" className="whitespace-nowrap text-muted">{formatDateTime(rule.created_at)}</span>,
                     <ActionCell
                       key="actions"
@@ -466,7 +509,7 @@ export function MaskingRulesPage() {
           onClose={closeRuleDrawer}
         >
           <form className="grid gap-4" onSubmit={handleRuleSubmit}>
-            <Field label="Column Name">
+            <Field label="Column Pattern">
               <input
                 value={ruleForm.columnName}
                 onChange={(event) => setRuleForm((current) => ({ ...current, columnName: event.target.value }))}
@@ -474,13 +517,38 @@ export function MaskingRulesPage() {
                 disabled={ruleSubmitting}
               />
             </Field>
+            <Field label="Match Type">
+              <DropdownSelect
+                ariaLabel="Match Type"
+                value={ruleForm.matchType}
+                onChange={(value) => setRuleForm((current) => ({ ...current, matchType: normalizeMatchType(value) }))}
+                disabled={ruleSubmitting}
+                options={MATCH_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+              />
+            </Field>
             <Field label="Mask Mode">
               <DropdownSelect
                 ariaLabel="Mask Mode"
                 value={ruleForm.maskMode}
-                onChange={(value) => setRuleForm((current) => ({ ...current, maskMode: normalizeMaskMode(value) }))}
+                onChange={(value) =>
+                  setRuleForm((current) => ({
+                    ...current,
+                    maskMode: normalizeMaskMode(value),
+                    maskConfig: current.maskConfig.trim() === '' || current.maskConfig === '{}' || current.maskConfig === MASK_MODE_EXAMPLES[current.maskMode]
+                      ? MASK_MODE_EXAMPLES[normalizeMaskMode(value)]
+                      : current.maskConfig,
+                  }))}
                 disabled={ruleSubmitting}
                 options={MASK_MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+              />
+            </Field>
+            <Field label="Mask Config JSON">
+              <textarea
+                value={ruleForm.maskConfig}
+                onChange={(event) => setRuleForm((current) => ({ ...current, maskConfig: event.target.value }))}
+                className="min-h-40 rounded-lg border border-border bg-panel-soft px-3 py-3 font-mono text-[12px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                disabled={ruleSubmitting}
+                placeholder={MASK_MODE_EXAMPLES[ruleForm.maskMode]}
               />
             </Field>
             {ruleDrawerError ? <InlineAlert>{ruleDrawerError}</InlineAlert> : null}
@@ -646,10 +714,27 @@ export function MaskingRulesPage() {
 }
 
 function normalizeMaskMode(value: string): RuleForm['maskMode'] {
-  if (value === 'partial' || value === 'hash') {
+  if (value === 'partial' || value === 'hash' || value === 'email' || value === 'fixed' || value === 'numeric' || value === 'datetime' || value === 'ip') {
     return value
   }
   return 'full'
+}
+
+function normalizeMatchType(value: string): RuleForm['matchType'] {
+  return value === 'regex' ? 'regex' : 'exact'
+}
+
+function parseMaskConfig(value: string) {
+  const trimmed = value.trim()
+  if (trimmed === '') {
+    return {}
+  }
+
+  const parsed = JSON.parse(trimmed) as unknown
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error('Mask Config JSON must be an object.')
+  }
+  return parsed as Record<string, unknown>
 }
 
 function isWhitelistFormSubmittable(form: WhitelistForm) {

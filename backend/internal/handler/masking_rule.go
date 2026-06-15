@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -45,7 +46,9 @@ func (h *MaskingRuleHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
 	rule := &model.MaskingRule{
 		ColumnName: req.ColumnName,
+		MatchType:  req.MatchType,
 		MaskMode:   req.MaskMode,
+		MaskConfig: req.MaskConfig,
 		CreatedBy:  userID,
 	}
 
@@ -87,7 +90,9 @@ func (h *MaskingRuleHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	existing.ColumnName = req.ColumnName
+	existing.MatchType = req.MatchType
 	existing.MaskMode = req.MaskMode
+	existing.MaskConfig = req.MaskConfig
 
 	updated, err := h.rules.Patch(r.Context(), existing)
 	if err != nil {
@@ -144,7 +149,9 @@ func (h *MaskingRuleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func parseMaskingRulePayload(w http.ResponseWriter, r *http.Request) (*struct {
 	ColumnName string `json:"column_name"`
+	MatchType  string `json:"match_type"`
 	MaskMode   string `json:"mask_mode"`
+	MaskConfig json.RawMessage `json:"mask_config"`
 }, bool) {
 	var req struct {
 		DBConnectionID *uint64 `json:"db_connection_id"`
@@ -152,7 +159,9 @@ func parseMaskingRulePayload(w http.ResponseWriter, r *http.Request) (*struct {
 		SchemaName     string  `json:"schema_name"`
 		TableName      string  `json:"table_name"`
 		ColumnName     string  `json:"column_name"`
+		MatchType      string  `json:"match_type"`
 		MaskMode       string  `json:"mask_mode"`
+		MaskConfig     json.RawMessage `json:"mask_config"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -168,23 +177,141 @@ func parseMaskingRulePayload(w http.ResponseWriter, r *http.Request) (*struct {
 		jsonErr(w, http.StatusUnprocessableEntity, "column_name is required")
 		return nil, false
 	}
+	switch masking.MatchType(req.MatchType) {
+	case "", masking.MatchTypeExact:
+		req.MatchType = string(masking.MatchTypeExact)
+	case masking.MatchTypeRegex:
+		if _, err := masking.MatchColumnPattern(masking.Rule{
+			Column: req.ColumnName,
+			Match:  masking.MatchTypeRegex,
+		}, "validation_probe"); err != nil {
+			jsonErr(w, http.StatusUnprocessableEntity, "column_name regex is invalid")
+			return nil, false
+		}
+	default:
+		jsonErr(w, http.StatusUnprocessableEntity, "match_type must be exact or regex")
+		return nil, false
+	}
 	switch masking.MaskMode(req.MaskMode) {
-	case masking.MaskModeFull, masking.MaskModePartial, masking.MaskModeHash:
+	case masking.MaskModeFull,
+		masking.MaskModePartial,
+		masking.MaskModeHash,
+		masking.MaskModeEmail,
+		masking.MaskModeFixed,
+		masking.MaskModeNumeric,
+		masking.MaskModeDateTime,
+		masking.MaskModeIP:
 	case "":
 		req.MaskMode = string(masking.MaskModeFull)
 	default:
-		jsonErr(w, http.StatusUnprocessableEntity, "mask_mode must be full, partial, or hash")
+		jsonErr(w, http.StatusUnprocessableEntity, "mask_mode is not supported")
 		return nil, false
+	}
+	if normalized, err := normalizeMaskConfig(masking.MaskMode(req.MaskMode), req.MaskConfig); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return nil, false
+	} else {
+		req.MaskConfig = normalized
 	}
 	return &struct {
 		ColumnName string `json:"column_name"`
+		MatchType  string `json:"match_type"`
 		MaskMode   string `json:"mask_mode"`
+		MaskConfig json.RawMessage `json:"mask_config"`
 	}{
 		ColumnName: req.ColumnName,
+		MatchType:  req.MatchType,
 		MaskMode:   req.MaskMode,
+		MaskConfig: req.MaskConfig,
 	}, true
 }
 
 func normalizeRuleIdentifier(value string) string {
 	return strings.TrimSpace(value)
+}
+
+func normalizeMaskConfig(mode masking.MaskMode, raw json.RawMessage) (json.RawMessage, error) {
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		raw = json.RawMessage(`{}`)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
+
+	switch mode {
+	case masking.MaskModeFull, masking.MaskModeHash:
+		return json.RawMessage(`{}`), nil
+	case masking.MaskModePartial:
+		if err := requireNonNegativeInteger(payload, "keep_prefix"); err != nil {
+			return nil, err
+		}
+		if err := requireNonNegativeInteger(payload, "keep_suffix"); err != nil {
+			return nil, err
+		}
+		if err := requireOptionalNonNegativeInteger(payload, "fixed_mask_length"); err != nil {
+			return nil, err
+		}
+	case masking.MaskModeEmail:
+		if err := requireOptionalNonNegativeInteger(payload, "keep_local_prefix"); err != nil {
+			return nil, err
+		}
+	case masking.MaskModeFixed:
+		if strings.TrimSpace(stringValue(payload["value"])) == "" {
+			return nil, &fieldValidationError{message: "mask_config.value is required for fixed mode"}
+		}
+	case masking.MaskModeNumeric:
+		op := stringValue(payload["operation"])
+		if op != "" && op != "round" && op != "zero" {
+			return nil, &fieldValidationError{message: "mask_config.operation must be round or zero"}
+		}
+		if err := requireOptionalNonNegativeInteger(payload, "decimals"); err != nil {
+			return nil, err
+		}
+	case masking.MaskModeDateTime:
+		granularity := stringValue(payload["granularity"])
+		if granularity != "" && granularity != "day" && granularity != "hour" {
+			return nil, &fieldValidationError{message: "mask_config.granularity must be day or hour"}
+		}
+	case masking.MaskModeIP:
+		if err := requireOptionalNonNegativeInteger(payload, "keep_segments"); err != nil {
+			return nil, err
+		}
+	}
+
+	normalized, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
+type fieldValidationError struct {
+	message string
+}
+
+func (e *fieldValidationError) Error() string { return e.message }
+
+func requireNonNegativeInteger(payload map[string]any, field string) error {
+	if payload[field] == nil {
+		return &fieldValidationError{message: "mask_config." + field + " is required"}
+	}
+	return requireOptionalNonNegativeInteger(payload, field)
+}
+
+func requireOptionalNonNegativeInteger(payload map[string]any, field string) error {
+	if payload[field] == nil {
+		return nil
+	}
+	number, ok := payload[field].(float64)
+	if !ok || number < 0 || number != float64(int(number)) {
+		return &fieldValidationError{message: "mask_config." + field + " must be a non-negative integer"}
+	}
+	return nil
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return text
 }

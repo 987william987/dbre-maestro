@@ -7,6 +7,7 @@ import { LoginPage } from '@/modules/auth/pages/LoginPage'
 import { DBConnectionsPage } from '@/modules/db-connections/pages/DBConnectionsPage'
 import { DBMetadataInventoryPage } from '@/modules/db-metadata/pages/DBMetadataInventoryPage'
 import { DBMetadataObjectsPage } from '@/modules/db-metadata/pages/DBMetadataObjectsPage'
+import { MaskingDSLGuidePage } from '@/modules/masking-rules/pages/MaskingDSLGuidePage'
 import { MaskingRulesPage } from '@/modules/masking-rules/pages/MaskingRulesPage'
 import { SettingsPage } from '@/modules/settings/pages/SettingsPage'
 import { SQLEditorPage } from '@/modules/sql-editor/pages/SQLEditorPage'
@@ -47,6 +48,7 @@ export default function App() {
             </Route>
             <Route element={<RoleRoute allowedPermissions={['masking_rules.read', 'masking_rules.write']} />}>
               <Route path="/masking-rules" element={<MaskingRulesPage />} />
+              <Route path="/masking-rules/dsl-guide" element={<MaskingDSLGuidePage />} />
             </Route>
             <Route element={<RoleRoute allowedPermissions={['sql_review.read', 'sql_review.write']} />}>
               <Route path="/sql-review-rules" element={<SQLReviewRulesPage />} />

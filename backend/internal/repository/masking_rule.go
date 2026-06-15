@@ -22,7 +22,7 @@ func NewMaskingRuleRepo(db *sqlx.DB) *MaskingRuleRepo {
 func (r *MaskingRuleRepo) List(ctx context.Context) ([]model.MaskingRule, error) {
 	var rules []model.MaskingRule
 	err := r.db.SelectContext(ctx, &rules,
-		`SELECT id, column_name, mask_mode, created_by, created_at
+		`SELECT id, column_name, match_type, mask_mode, COALESCE(mask_config, JSON_OBJECT()) AS mask_config, created_by, created_at
 		 FROM masking_rules
 		 WHERE db_connection_id IS NULL
 		   AND COALESCE(database_name, '') = ''
@@ -33,7 +33,7 @@ func (r *MaskingRuleRepo) List(ctx context.Context) ([]model.MaskingRule, error)
 }
 
 func (r *MaskingRuleRepo) Create(ctx context.Context, rule *model.MaskingRule) (*model.MaskingRule, error) {
-	exists, err := r.ExistsGlobal(ctx, rule.ColumnName, 0)
+	exists, err := r.ExistsGlobal(ctx, rule.ColumnName, rule.MatchType, 0)
 	if err != nil {
 		return nil, fmt.Errorf("check masking rule exists: %w", err)
 	}
@@ -42,9 +42,9 @@ func (r *MaskingRuleRepo) Create(ctx context.Context, rule *model.MaskingRule) (
 	}
 
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO masking_rules (db_connection_id, database_name, schema_name, table_name, column_name, mask_mode, created_by)
-		 VALUES (NULL, '', '', '', ?, ?, ?)`,
-		rule.ColumnName, rule.MaskMode, rule.CreatedBy,
+		`INSERT INTO masking_rules (db_connection_id, database_name, schema_name, table_name, column_name, match_type, mask_mode, mask_config, created_by)
+		 VALUES (NULL, '', '', '', ?, ?, ?, ?, ?)`,
+		rule.ColumnName, rule.MatchType, rule.MaskMode, nullableJSON(rule.MaskConfig), rule.CreatedBy,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create masking rule: %w", err)
@@ -56,7 +56,7 @@ func (r *MaskingRuleRepo) Create(ctx context.Context, rule *model.MaskingRule) (
 func (r *MaskingRuleRepo) GetByID(ctx context.Context, id uint64) (*model.MaskingRule, error) {
 	var rule model.MaskingRule
 	err := r.db.GetContext(ctx, &rule,
-		`SELECT id, column_name, mask_mode, created_by, created_at
+		`SELECT id, column_name, match_type, mask_mode, COALESCE(mask_config, JSON_OBJECT()) AS mask_config, created_by, created_at
 		 FROM masking_rules
 		 WHERE id = ?
 		   AND db_connection_id IS NULL
@@ -77,7 +77,7 @@ func (r *MaskingRuleRepo) Delete(ctx context.Context, id uint64) error {
 }
 
 func (r *MaskingRuleRepo) Patch(ctx context.Context, rule *model.MaskingRule) (*model.MaskingRule, error) {
-	exists, err := r.ExistsGlobal(ctx, rule.ColumnName, rule.ID)
+	exists, err := r.ExistsGlobal(ctx, rule.ColumnName, rule.MatchType, rule.ID)
 	if err != nil {
 		return nil, fmt.Errorf("check masking rule exists: %w", err)
 	}
@@ -87,9 +87,9 @@ func (r *MaskingRuleRepo) Patch(ctx context.Context, rule *model.MaskingRule) (*
 
 	_, err = r.db.ExecContext(ctx,
 		`UPDATE masking_rules
-		 SET db_connection_id = NULL, database_name = '', schema_name = '', table_name = '', column_name = ?, mask_mode = ?
+		 SET db_connection_id = NULL, database_name = '', schema_name = '', table_name = '', column_name = ?, match_type = ?, mask_mode = ?, mask_config = ?
 		 WHERE id = ?`,
-		rule.ColumnName, rule.MaskMode, rule.ID,
+		rule.ColumnName, rule.MatchType, rule.MaskMode, nullableJSON(rule.MaskConfig), rule.ID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("patch masking rule: %w", err)
@@ -101,7 +101,7 @@ func (r *MaskingRuleRepo) Patch(ctx context.Context, rule *model.MaskingRule) (*
 func (r *MaskingRuleRepo) ListForConnection(ctx context.Context, connID uint64) ([]model.MaskingRule, error) {
 	var rules []model.MaskingRule
 	err := r.db.SelectContext(ctx, &rules,
-		`SELECT id, column_name, mask_mode, created_by, created_at
+		`SELECT id, column_name, match_type, mask_mode, COALESCE(mask_config, JSON_OBJECT()) AS mask_config, created_by, created_at
 		 FROM masking_rules
 		 WHERE db_connection_id IS NULL
 		   AND COALESCE(database_name, '') = ''
@@ -112,7 +112,7 @@ func (r *MaskingRuleRepo) ListForConnection(ctx context.Context, connID uint64) 
 	return rules, err
 }
 
-func (r *MaskingRuleRepo) ExistsGlobal(ctx context.Context, columnName string, excludeID uint64) (bool, error) {
+func (r *MaskingRuleRepo) ExistsGlobal(ctx context.Context, columnName string, matchType string, excludeID uint64) (bool, error) {
 	var count int
 	query := `
 		SELECT COUNT(*)
@@ -121,8 +121,9 @@ func (r *MaskingRuleRepo) ExistsGlobal(ctx context.Context, columnName string, e
 		  AND COALESCE(database_name, '') = ''
 		  AND COALESCE(schema_name, '') = ''
 		  AND COALESCE(table_name, '') = ''
-		  AND LOWER(column_name) = LOWER(?)`
-	args := []any{strings.TrimSpace(columnName)}
+		  AND LOWER(column_name) = LOWER(?)
+		  AND LOWER(match_type) = LOWER(?)`
+	args := []any{strings.TrimSpace(columnName), strings.TrimSpace(matchType)}
 	if excludeID != 0 {
 		query += ` AND id <> ?`
 		args = append(args, excludeID)
@@ -131,4 +132,12 @@ func (r *MaskingRuleRepo) ExistsGlobal(ctx context.Context, columnName string, e
 		return false, err
 	}
 	return count > 0, nil
+}
+
+func nullableJSON(raw []byte) any {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "{}" {
+		return nil
+	}
+	return raw
 }

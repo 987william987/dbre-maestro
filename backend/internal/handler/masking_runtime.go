@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/dbre-maestro/maestro/internal/masking"
@@ -123,7 +124,10 @@ func (m *maskingRuntime) analyzeSensitiveColumns(ctx context.Context, conn *mode
 			continue
 		}
 
-		mode, ok := findMaskMode(dbRules, actualColumnName)
+		ruleMatch, ok, err := findMaskRule(dbRules, actualColumnName)
+		if err != nil {
+			return nil, nil, err
+		}
 		if !ok {
 			continue
 		}
@@ -145,7 +149,9 @@ func (m *maskingRuntime) analyzeSensitiveColumns(ctx context.Context, conn *mode
 			Database: databaseName,
 			Table:    tableName,
 			Column:   actualColumnName,
-			Mode:     masking.MaskMode(mode),
+			Match:    masking.MatchTypeExact,
+			Mode:     masking.MaskMode(ruleMatch.MaskMode),
+			Config:   ruleMatch.MaskConfig,
 		})
 	}
 	return preciseRules, sensitiveIndexes, nil
@@ -190,13 +196,20 @@ func supportsMySQLMasking(conn *model.DBConnection) bool {
 	return conn != nil && conn.DBType == "mysql"
 }
 
-func findMaskMode(rules []model.MaskingRule, columnName string) (string, bool) {
+func findMaskRule(rules []model.MaskingRule, columnName string) (model.MaskingRule, bool, error) {
 	for _, rule := range rules {
-		if strings.EqualFold(strings.TrimSpace(rule.ColumnName), strings.TrimSpace(columnName)) {
-			return rule.MaskMode, true
+		matches, err := masking.MatchColumnPattern(masking.Rule{
+			Column: rule.ColumnName,
+			Match:  masking.MatchType(rule.MatchType),
+		}, columnName)
+		if err != nil {
+			return model.MaskingRule{}, false, fmt.Errorf("match masking rule %d for column %q: %w", rule.ID, columnName, err)
+		}
+		if matches {
+			return rule, true, nil
 		}
 	}
-	return "", false
+	return model.MaskingRule{}, false, nil
 }
 
 func originColumnName(origin masking.ColumnOrigin, columnLabel string) string {
