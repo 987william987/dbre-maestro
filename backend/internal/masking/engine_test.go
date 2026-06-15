@@ -50,6 +50,9 @@ func TestMaskPartial(t *testing.T) {
 	if !strings.HasPrefix(got, "138") || !strings.HasSuffix(got, "5678") {
 		t.Errorf("partial mask unexpected: %q", got)
 	}
+	if strings.Count(got, "*") != 4 {
+		t.Errorf("partial mask should use fixed mask length, got %q", got)
+	}
 }
 
 func TestMaskPartialWithConfig(t *testing.T) {
@@ -70,6 +73,27 @@ func TestMaskPartialWithConfig(t *testing.T) {
 	}
 	if got := result.Rows[0][0]; got != "0x1......CDEF" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestMaskPartialWithZeroVisibleSegmentsUsesFixedLength(t *testing.T) {
+	e := newEngine(t)
+	config, _ := json.Marshal(map[string]any{
+		"keep_prefix": 0,
+		"keep_suffix": 0,
+		"mask_char":   "*",
+	})
+	result := &masking.QueryResult{
+		Columns: []string{"username"},
+		Origins: []masking.ColumnOrigin{{Table: "users", Column: "username"}},
+		Rows:    [][]any{{"administrator"}},
+	}
+	rules := []masking.Rule{{Table: "users", Column: "username", Mode: masking.MaskModePartial, Config: config}}
+	if err := e.MaskResult(result, rules); err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Rows[0][0]; got != "****" {
+		t.Fatalf("got %q, want %q", got, "****")
 	}
 }
 

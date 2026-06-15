@@ -37,6 +37,8 @@ const (
 	MatchTypeRegex MatchType = "regex"
 )
 
+const defaultMaskToken = "****"
+
 // Rule describes how one column should be masked.
 type Rule struct {
 	Database string   // database name (case-insensitive)
@@ -53,7 +55,7 @@ type Rule struct {
 func (r Rule) Apply(value string, pepper []byte) (string, error) {
 	switch r.Mode {
 	case MaskModeFull:
-		return "****", nil
+		return defaultMaskToken, nil
 	case MaskModePartial:
 		return partialWithConfig(value, r.Config)
 	case MaskModeHash:
@@ -93,12 +95,13 @@ func hmacHash(value string, pepper []byte) string {
 func partial(value string) string {
 	n := len([]rune(value))
 	switch {
+	case n == 0:
+		return ""
 	case n <= 2:
-		return strings.Repeat("*", n)
+		return defaultMaskToken
 	case n <= 6:
-		return string([]rune(value)[:1]) + strings.Repeat("*", n-2) + string([]rune(value)[n-1:])
+		return string([]rune(value)[:1]) + defaultMaskToken + string([]rune(value)[n-1:])
 	default:
-		// Keep first 3 and last 4 characters
 		runes := []rune(value)
 		keep := 3
 		tail := 4
@@ -106,7 +109,7 @@ func partial(value string) string {
 			keep = 1
 			tail = 1
 		}
-		return string(runes[:keep]) + strings.Repeat("*", n-keep-tail) + string(runes[n-tail:])
+		return string(runes[:keep]) + defaultMaskToken + string(runes[n-tail:])
 	}
 }
 
@@ -147,7 +150,7 @@ func partialWithConfig(value string, raw json.RawMessage) (string, error) {
 		if maskChar == "" {
 			maskChar = "*"
 		}
-		maskLen := n - cfg.KeepPrefix - cfg.KeepSuffix
+		maskLen := len([]rune(defaultMaskToken))
 		if cfg.FixedMaskLength > 0 {
 			maskLen = cfg.FixedMaskLength
 		}
@@ -167,7 +170,7 @@ func maskEmail(value string, raw json.RawMessage) (string, error) {
 	var cfg emailConfig
 	cfg.KeepLocalPrefix = 1
 	cfg.KeepDomain = true
-	cfg.Replacement = "****"
+	cfg.Replacement = defaultMaskToken
 	if len(strings.TrimSpace(string(raw))) > 0 {
 		if err := json.Unmarshal(raw, &cfg); err != nil {
 			return "", fmt.Errorf("parse email config: %w", err)

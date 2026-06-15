@@ -88,6 +88,8 @@
 - `mask_text`
 - `fixed_mask_length`
 
+若未提供 `fixed_mask_length`，系統預設會輸出固定 4 個遮罩字元，避免從遮罩長度反推出原始值長度。
+
 ### `hash`
 
 把原值做 HMAC-SHA256，不可逆，但相同原值會得到相同結果。

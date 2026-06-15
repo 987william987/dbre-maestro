@@ -22,7 +22,7 @@ const MODE_GUIDES = [
   {
     mode: 'partial',
     summary: '保留前後部分內容，中間遮罩。',
-    notes: ['必填：`keep_prefix`、`keep_suffix`', '可選：`mask_char`、`mask_text`、`fixed_mask_length`'],
+    notes: ['必填：`keep_prefix`、`keep_suffix`', '可選：`mask_char`、`mask_text`、`fixed_mask_length`', '未填 `fixed_mask_length` 時，預設固定輸出 4 個遮罩字元'],
   },
   {
     mode: 'hash',
