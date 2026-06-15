@@ -38,7 +38,7 @@ describe('route guards', () => {
     expect(screen.getByText('login page')).toBeInTheDocument()
   })
 
-  it('角色不符時 RoleRoute 會導回 /tickets', () => {
+  it('角色不符時 RoleRoute 會導向第一個可進入的功能頁', () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
       isAuthenticated: true,
@@ -70,6 +70,41 @@ describe('route guards', () => {
     )
 
     expect(screen.getByText('tickets page')).toBeInTheDocument()
+  })
+
+  it('沒有 Ticket 權限時，RoleRoute 會導向其他可用頁面', () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 3,
+        username: 'analyst',
+        authGroups: ['developer'],
+        authGroupDetails: [],
+        permissions: ['sql_editor.query'],
+        dbConnectionIds: [1],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/audit-logs']}>
+        <Routes>
+          <Route path="/tickets" element={<div>tickets page</div>} />
+          <Route path="/sql-editor" element={<div>sql editor</div>} />
+          <Route element={<RoleRoute allowedPermissions={['audit_logs.read']} />}>
+            <Route path="/audit-logs" element={<div>audit logs</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('sql editor')).toBeInTheDocument()
   })
 
   it('audit_logs.write 也可以通過 Audit Logs 頁面守衛', () => {

@@ -1,5 +1,7 @@
 import { apiClient } from '@/shared/api/client'
+import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MaskingRule, MaskingWhitelist } from '@/shared/types/maskingRule'
+import type { MetadataColumn, MetadataResponse } from '@/shared/types/sqlEditor'
 
 type MaskingRulesResponse = {
   rules: MaskingRule[]
@@ -21,6 +23,17 @@ type CreateMaskingWhitelistPayload = {
   database_name: string
   table_name: string
   column_name: string
+}
+
+type MaskingConnectionsResponse = {
+  connections: DBConnection[]
+}
+
+type ColumnsResponse = {
+  database?: string
+  schema: string
+  table: string
+  columns: MetadataColumn[]
 }
 
 export async function listMaskingRules() {
@@ -54,6 +67,45 @@ export async function listMaskingWhitelists() {
   return {
     ...response,
     whitelist: Array.isArray(response.whitelist) ? response.whitelist : [],
+  }
+}
+
+export function listMaskingConnections() {
+  return apiClient.get<MaskingConnectionsResponse>('/masking-whitelist/connections').then((response) => ({
+    ...response,
+    connections: Array.isArray(response.connections) ? response.connections : [],
+  }))
+}
+
+type MaskingMetadataParams = {
+  database?: string
+}
+
+export async function listMaskingMetadata(connectionId: number, params?: MaskingMetadataParams) {
+  const searchParams = new URLSearchParams()
+  if (params?.database) {
+    searchParams.set('database', params.database)
+  }
+  const query = searchParams.toString()
+  const response = await apiClient.get<MetadataResponse>(
+    `/masking-whitelist/connections/${connectionId}/metadata${query ? `?${query}` : ''}`,
+  )
+  return {
+    ...response,
+    items: Array.isArray(response.items) ? response.items : [],
+  }
+}
+
+export async function listMaskingMetadataColumns(connectionId: number, schema: string, table: string, database?: string) {
+  const encodedSchema = encodeURIComponent(schema)
+  const encodedTable = encodeURIComponent(table)
+  const query = database ? `?database=${encodeURIComponent(database)}` : ''
+  const response = await apiClient.get<ColumnsResponse>(
+    `/masking-whitelist/connections/${connectionId}/metadata/${encodedSchema}/${encodedTable}/columns${query}`,
+  )
+  return {
+    ...response,
+    columns: Array.isArray(response.columns) ? response.columns : [],
   }
 }
 

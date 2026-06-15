@@ -3,8 +3,7 @@ import type { FormEvent, ReactNode } from 'react'
 import { Database, Loader2, Shield, Trash2, UserPlus, Users as UsersIcon, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { createAuthGroup, deleteAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
-import { listDBConnections } from '@/modules/db-connections/api'
-import { createUser, deleteUser, getUser, listUsers, patchUser } from '@/modules/users/api'
+import { createUser, deleteUser, getUser, listUserDBConnections, listUsers, patchUser } from '@/modules/users/api'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import type { AuthGroup } from '@/shared/types/auth'
@@ -145,7 +144,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     try {
       const [usersResponse, connectionsResponse, authGroupDetails] = await Promise.all([
         listUsers(),
-        listDBConnections(),
+        listUserDBConnections(),
         loadAuthGroupDetails(),
       ])
       setUsers(usersResponse.users)

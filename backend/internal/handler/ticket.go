@@ -92,6 +92,17 @@ func (h *TicketHandler) sendInApp(ctx context.Context, userID uint64, notifType,
 	_ = h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
 }
 
+// GET /tickets/connections
+func (h *TicketHandler) ListConnections(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromCtx(r.Context())
+	connections, err := listAccessibleConnections(r.Context(), h.dbConns, h.users, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list ticket connections failed")
+		return
+	}
+	jsonOK(w, map[string]any{"connections": connections})
+}
+
 // POST /tickets
 func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
@@ -118,6 +129,17 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	default:
 		jsonErr(w, http.StatusUnprocessableEntity, "invalid ticket_type")
 		return
+	}
+	if req.DBConnectionID != nil {
+		hasAccess, err := userCanAccessConnection(r.Context(), h.users, userID, *req.DBConnectionID)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "db scope check failed")
+			return
+		}
+		if !hasAccess {
+			jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
+			return
+		}
 	}
 
 	// SQL Review: run static + EXPLAIN-based checks if a target DB is specified

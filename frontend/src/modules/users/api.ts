@@ -1,5 +1,6 @@
 import { apiClient } from '@/shared/api/client'
 import type { AuthGroup } from '@/shared/types/auth'
+import type { DBConnection } from '@/shared/types/dbConnection'
 import type { UserDetail, UserSummary } from '@/shared/types/user'
 
 type ListUsersResponse = {
@@ -38,6 +39,10 @@ type DirectPermissionPayload = {
 
 type DirectDBConnectionPayload = {
   db_connection_id: number
+}
+
+type UserDBConnectionsResponse = {
+  connections: DBConnection[]
 }
 
 export function listUsers() {
@@ -99,4 +104,11 @@ export function addUserDirectDBConnection(id: number, payload: DirectDBConnectio
 
 export function removeUserDirectDBConnection(id: number, dbConnectionId: number) {
   return apiClient.delete<void>(`/users/${id}/db-connections/${dbConnectionId}`)
+}
+
+export function listUserDBConnections() {
+  return apiClient.get<UserDBConnectionsResponse>('/users/db-connections').then((response) => ({
+    ...response,
+    connections: Array.isArray(response.connections) ? response.connections : [],
+  }))
 }

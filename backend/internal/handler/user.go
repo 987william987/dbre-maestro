@@ -19,10 +19,28 @@ type UserHandler struct {
 	auths    *repository.AuthGroupRepo
 	sessions *repository.SessionRepo
 	audit    *repository.AuditRepo
+	dbConns  *repository.DBConnectionRepo
 }
 
-func NewUserHandler(users *repository.UserRepo, auths *repository.AuthGroupRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo) *UserHandler {
-	return &UserHandler{users: users, auths: auths, sessions: sessions, audit: audit}
+func NewUserHandler(users *repository.UserRepo, auths *repository.AuthGroupRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, dbConns *repository.DBConnectionRepo) *UserHandler {
+	return &UserHandler{users: users, auths: auths, sessions: sessions, audit: audit, dbConns: dbConns}
+}
+
+// GET /users/db-connections
+func (h *UserHandler) ListDBConnections(w http.ResponseWriter, r *http.Request) {
+	if h.dbConns == nil {
+		jsonErr(w, http.StatusInternalServerError, "db connection repo unavailable")
+		return
+	}
+	connections, err := h.dbConns.List(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list user db connections failed")
+		return
+	}
+	if connections == nil {
+		connections = []model.DBConnection{}
+	}
+	jsonOK(w, map[string]any{"connections": connections})
 }
 
 // GET /users — Admin only

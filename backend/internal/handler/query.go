@@ -88,6 +88,17 @@ func (h *QueryHandler) notifyReviewers(ctx context.Context, ticketID, submitterI
 	}
 }
 
+// GET /query/connections
+func (h *QueryHandler) ListConnections(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromCtx(r.Context())
+	connections, err := listAccessibleConnections(r.Context(), h.dbConns, h.users, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list query connections failed")
+		return
+	}
+	jsonOK(w, map[string]any{"connections": connections})
+}
+
 // POST /query
 // Body: { "db_connection_id": 1, "sql": "SELECT ...", "limit": 200 }
 // Returns: { "columns": [...], "rows": [[...]], "row_count": N, "duration_ms": N }

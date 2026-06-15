@@ -36,13 +36,13 @@ import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
-import { listDBConnections } from '@/modules/db-connections/api'
 import { createExportRequest } from '@/modules/exports/api'
 import {
   createSavedQuery,
   createSensitiveAccessTicket,
   deleteSavedQuery,
   executeQuery,
+  listQueryConnections,
   listMetadata,
   listMetadataColumns,
   listMetadataDefinition,
@@ -607,7 +607,7 @@ export function SQLEditorPage() {
       setConnectionsLoading(true)
       setConnectionsError('')
       try {
-        const response = await listDBConnections()
+        const response = await listQueryConnections()
         if (!active) {
           return
         }

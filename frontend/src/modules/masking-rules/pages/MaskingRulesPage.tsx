@@ -3,9 +3,11 @@ import type { FormEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Pencil, Plus, ShieldAlert, ShieldCheck, Trash2, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { listDBConnections } from '@/modules/db-connections/api'
 import {
   createMaskingRule,
+  listMaskingConnections,
+  listMaskingMetadata,
+  listMaskingMetadataColumns,
   createMaskingWhitelist,
   deleteMaskingRule,
   deleteMaskingWhitelist,
@@ -14,7 +16,6 @@ import {
   patchMaskingRule,
   patchMaskingWhitelist,
 } from '@/modules/masking-rules/api'
-import { listMetadata, listMetadataColumns } from '@/modules/sql-editor/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
@@ -195,7 +196,7 @@ export function MaskingRulesPage() {
       const [rulesResponse, whitelistResponse, connectionsResponse] = await Promise.all([
         listMaskingRules(),
         listMaskingWhitelists(),
-        listDBConnections(),
+        listMaskingConnections(),
       ])
       setRules(rulesResponse.rules)
       setWhitelist(whitelistResponse.whitelist)
@@ -214,7 +215,7 @@ export function MaskingRulesPage() {
   async function loadDatabases(connectionId: number) {
     setTargetLoading(true)
     try {
-      const response = await listMetadata(connectionId)
+      const response = await listMaskingMetadata(connectionId)
       setDatabaseOptions(response.items.map((item) => item.name))
     } catch {
       setDatabaseOptions([])
@@ -226,7 +227,7 @@ export function MaskingRulesPage() {
   async function loadTables(connectionId: number, databaseName: string) {
     setTargetLoading(true)
     try {
-      const response = await listMetadata(connectionId, { database: databaseName })
+      const response = await listMaskingMetadata(connectionId, { database: databaseName })
       setTableOptions(response.items.map((item) => item.name))
     } catch {
       setTableOptions([])
@@ -238,7 +239,7 @@ export function MaskingRulesPage() {
   async function loadColumns(connectionId: number, databaseName: string, tableName: string) {
     setTargetLoading(true)
     try {
-      const response = await listMetadataColumns(connectionId, databaseName, tableName, databaseName)
+      const response = await listMaskingMetadataColumns(connectionId, databaseName, tableName, databaseName)
       setColumnOptions(response.columns.map((column) => column.name))
     } catch {
       setColumnOptions([])

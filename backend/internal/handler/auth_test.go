@@ -44,6 +44,13 @@ func TestAuthHandlerMe(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "group_key", "name", "is_system", "is_protected"}).
 			AddRow(2, "reviewer", "Reviewer", 1, 0).
 			AddRow(3, "dba", "DBA", 1, 0))
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+			AddRow(userID, "alice", "alice@example.com", "hash", 0, 0, 1, now, now))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs(userID, userID).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(`SELECT DISTINCT permission_key FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"permission_key"}).
@@ -68,7 +75,7 @@ func TestAuthHandlerMe(t *testing.T) {
 	http.HandlerFunc(handler.Me).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 
 	var got struct {
@@ -162,6 +169,13 @@ func TestAuthHandlerMeReturnsEmptyArrayForNoGroups(t *testing.T) {
 	mock.ExpectQuery(`SELECT DISTINCT ag\.id, ag\.group_key, ag\.name, ag\.is_system, ag\.is_protected`).
 		WithArgs(userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "group_key", "name", "is_system", "is_protected"}))
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+			AddRow(userID, "bob", "bob@example.com", "hash", 0, 0, 1, now, now))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs(userID, userID).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(`SELECT DISTINCT permission_key FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"permission_key"}))
@@ -182,7 +196,7 @@ func TestAuthHandlerMeReturnsEmptyArrayForNoGroups(t *testing.T) {
 	http.HandlerFunc(handler.Me).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 
 	body := rec.Body.String()
@@ -219,8 +233,11 @@ func TestAuthHandlerMeProtectedUserGetsAllDBConnections(t *testing.T) {
 		WithArgs(userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "group_key", "name", "is_system", "is_protected"}).
 			AddRow(4, "admin", "Admin", 1, 1))
-	mock.ExpectQuery(`SELECT DISTINCT permission_key FROM`).
-		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+			AddRow(userID, "admin", "admin@example.com", "hash", 1, 1, 1, now, now))
+	mock.ExpectQuery(`SELECT permission_key FROM permissions ORDER BY permission_key`).
 		WillReturnRows(sqlmock.NewRows([]string{"permission_key"}).AddRow("sql_editor.query"))
 	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
 		WithArgs(userID).
@@ -238,7 +255,7 @@ func TestAuthHandlerMeProtectedUserGetsAllDBConnections(t *testing.T) {
 	http.HandlerFunc(handler.Me).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), `"db_connection_ids":[7,11]`) {
 		t.Fatalf("body = %s", rec.Body.String())

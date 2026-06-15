@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
@@ -15,10 +17,16 @@ type MaskingWhitelistHandler struct {
 	dbConns   *repository.DBConnectionRepo
 	whitelist *repository.MaskingWhitelistRepo
 	audit     *repository.AuditRepo
+	metadata  *MetadataHandler
 }
 
 func NewMaskingWhitelistHandler(dbConns *repository.DBConnectionRepo, whitelist *repository.MaskingWhitelistRepo, audit *repository.AuditRepo) *MaskingWhitelistHandler {
-	return &MaskingWhitelistHandler{dbConns: dbConns, whitelist: whitelist, audit: audit}
+	return &MaskingWhitelistHandler{
+		dbConns:   dbConns,
+		whitelist: whitelist,
+		audit:     audit,
+		metadata:  NewMetadataHandler(dbConns, nil),
+	}
 }
 
 // GET /masking-whitelist
@@ -32,6 +40,76 @@ func (h *MaskingWhitelistHandler) List(w http.ResponseWriter, r *http.Request) {
 		entries = []model.MaskingWhitelist{}
 	}
 	jsonOK(w, map[string]any{"whitelist": entries})
+}
+
+// GET /masking-whitelist/connections
+func (h *MaskingWhitelistHandler) ListConnections(w http.ResponseWriter, r *http.Request) {
+	connections, err := h.dbConns.List(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list masking connections failed")
+		return
+	}
+	filtered := make([]model.DBConnection, 0, len(connections))
+	for _, connection := range connections {
+		if connection.DBType == "mysql" {
+			filtered = append(filtered, connection)
+		}
+	}
+	jsonOK(w, map[string]any{"connections": filtered})
+}
+
+// GET /masking-whitelist/connections/{id}/metadata
+func (h *MaskingWhitelistHandler) ListMetadata(w http.ResponseWriter, r *http.Request) {
+	connID, conn, resolvedConn, password, ok := h.resolveMySQLConnection(w, r)
+	if !ok {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	selectedDatabase := strings.TrimSpace(r.URL.Query().Get("database"))
+	response, err := h.metadata.loadMetadata(ctx, resolvedConn, password, selectedDatabase, "")
+	if err != nil {
+		logMetadataQueryError("masking_whitelist_metadata", conn, selectedDatabase, "", "", err)
+		jsonErr(w, http.StatusInternalServerError, metadataTemporaryErrorMessage)
+		return
+	}
+	_ = connID
+	jsonOK(w, response)
+}
+
+// GET /masking-whitelist/connections/{id}/metadata/{schema}/{table}/columns
+func (h *MaskingWhitelistHandler) ListColumns(w http.ResponseWriter, r *http.Request) {
+	_, conn, resolvedConn, password, ok := h.resolveMySQLConnection(w, r)
+	if !ok {
+		return
+	}
+
+	schema := chi.URLParam(r, "schema")
+	table := chi.URLParam(r, "table")
+	if schema == "" || table == "" {
+		jsonErr(w, http.StatusBadRequest, "schema and table are required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	selectedDatabase := strings.TrimSpace(r.URL.Query().Get("database"))
+	columns, resolvedDatabase, err := h.metadata.loadColumns(ctx, resolvedConn, password, selectedDatabase, schema, table)
+	if err != nil {
+		logMetadataQueryError("masking_whitelist_columns", conn, selectedDatabase, schema, table, err)
+		jsonErr(w, http.StatusInternalServerError, metadataTemporaryErrorMessage)
+		return
+	}
+
+	jsonOK(w, map[string]any{
+		"database": resolvedDatabase,
+		"schema":   schema,
+		"table":    table,
+		"columns":  columns,
+	})
 }
 
 func (h *MaskingWhitelistHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -185,4 +263,29 @@ func (h *MaskingWhitelistHandler) validateMySQLConnection(w http.ResponseWriter,
 		return false
 	}
 	return true
+}
+
+func (h *MaskingWhitelistHandler) resolveMySQLConnection(w http.ResponseWriter, r *http.Request) (uint64, *model.DBConnection, *model.DBConnection, string, bool) {
+	connID, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid id")
+		return 0, nil, nil, "", false
+	}
+
+	conn, err := h.dbConns.GetByID(r.Context(), connID)
+	if err != nil || conn == nil {
+		jsonErr(w, http.StatusNotFound, "connection not found")
+		return 0, nil, nil, "", false
+	}
+	if conn.DBType != "mysql" {
+		jsonErr(w, http.StatusUnprocessableEntity, "only mysql connections support masking whitelist")
+		return 0, nil, nil, "", false
+	}
+
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal error")
+		return 0, nil, nil, "", false
+	}
+	return connID, conn, resolvedConn, password, true
 }

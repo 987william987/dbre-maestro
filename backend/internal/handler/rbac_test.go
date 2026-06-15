@@ -65,7 +65,7 @@ func TestUserHandlerDeleteProtectedUser(t *testing.T) {
 	defer db.Close()
 
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	handler := NewUserHandler(repository.NewUserRepo(sqlxDB), repository.NewAuthGroupRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB))
+	handler := NewUserHandler(repository.NewUserRepo(sqlxDB), repository.NewAuthGroupRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB), repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")))
 
 	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
 		WithArgs(uint64(1)).
@@ -94,7 +94,7 @@ func TestUserHandlerDeleteSuccess(t *testing.T) {
 	defer db.Close()
 
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	handler := NewUserHandler(repository.NewUserRepo(sqlxDB), repository.NewAuthGroupRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB))
+	handler := NewUserHandler(repository.NewUserRepo(sqlxDB), repository.NewAuthGroupRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB), repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")))
 
 	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
 		WithArgs(uint64(7)).
@@ -127,7 +127,7 @@ func TestUserHandlerPatchProtectedUserReturnsConflict(t *testing.T) {
 	defer db.Close()
 
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	handler := NewUserHandler(repository.NewUserRepo(sqlxDB), repository.NewAuthGroupRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB))
+	handler := NewUserHandler(repository.NewUserRepo(sqlxDB), repository.NewAuthGroupRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB), repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")))
 
 	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
 		WithArgs(uint64(1)).
@@ -156,7 +156,7 @@ func TestUserHandlerRemoveMembershipProtectedUserReturnsConflict(t *testing.T) {
 	defer db.Close()
 
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	handler := NewUserHandler(repository.NewUserRepo(sqlxDB), repository.NewAuthGroupRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB))
+	handler := NewUserHandler(repository.NewUserRepo(sqlxDB), repository.NewAuthGroupRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB), repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")))
 
 	mock.ExpectQuery(`SELECT id, group_key, name, description, is_system, is_protected`).
 		WithArgs("admin").
@@ -186,7 +186,7 @@ func TestUserHandlerPatchDisableUserRevokesSessions(t *testing.T) {
 	defer db.Close()
 
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
-	handler := NewUserHandler(repository.NewUserRepo(sqlxDB), repository.NewAuthGroupRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB))
+	handler := NewUserHandler(repository.NewUserRepo(sqlxDB), repository.NewAuthGroupRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB), repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")))
 
 	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
 		WithArgs(uint64(7)).

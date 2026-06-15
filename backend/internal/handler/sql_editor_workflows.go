@@ -121,6 +121,34 @@ func userCanAccessConnection(ctx context.Context, users *repository.UserRepo, us
 	return false, nil
 }
 
+func listAccessibleConnections(ctx context.Context, dbConns *repository.DBConnectionRepo, users *repository.UserRepo, userID uint64) ([]model.DBConnection, error) {
+	accessibleIDs, err := users.GetEffectiveDBConnectionIDs(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	connections, err := dbConns.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(connections) == 0 {
+		return []model.DBConnection{}, nil
+	}
+
+	accessibleIDSet := make(map[uint64]struct{}, len(accessibleIDs))
+	for _, connectionID := range accessibleIDs {
+		accessibleIDSet[connectionID] = struct{}{}
+	}
+
+	filtered := make([]model.DBConnection, 0, len(connections))
+	for _, connection := range connections {
+		if _, ok := accessibleIDSet[connection.ID]; ok {
+			filtered = append(filtered, connection)
+		}
+	}
+	return filtered, nil
+}
+
 func openConnectionForTicket(ctx context.Context, dbConns *repository.DBConnectionRepo, connectionID uint64) (*model.DBConnection, error) {
 	conn, err := dbConns.GetByID(ctx, connectionID)
 	if err != nil {

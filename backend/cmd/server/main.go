@@ -114,7 +114,7 @@ func main() {
 	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
 	sqlReviewRuleH := handler.NewSQLReviewRuleHandler(sqlReviewRuleRepo, auditRepo)
 	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, maskingEngine, whitelistRepo, notifRepo)
-	userH := handler.NewUserHandler(userRepo, authGroupRepo, sessionRepo, auditRepo)
+	userH := handler.NewUserHandler(userRepo, authGroupRepo, sessionRepo, auditRepo, dbConnRepo)
 	metadataH := handler.NewMetadataHandler(dbConnRepo, userRepo)
 	authGroupH := handler.NewAuthGroupHandler(authGroupRepo, userRepo, auditRepo)
 	notifH := handler.NewNotificationHandler(notifRepo)
@@ -190,6 +190,7 @@ func main() {
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireUsersRead).Get("/", userH.List)
+			r.With(requireUsersRead).Get("/db-connections", userH.ListDBConnections)
 			r.With(requireUsersWrite).Post("/", userH.Create)
 			r.With(requireUsersRead).Get("/{id}", userH.Get)
 			r.With(requireUsersWrite).Patch("/{id}", userH.Patch)
@@ -249,6 +250,9 @@ func main() {
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireMaskingRulesRead).Get("/", whitelistH.List)
+			r.With(requireMaskingRulesRead).Get("/connections", whitelistH.ListConnections)
+			r.With(requireMaskingRulesRead).Get("/connections/{id}/metadata", whitelistH.ListMetadata)
+			r.With(requireMaskingRulesRead).Get("/connections/{id}/metadata/{schema}/{table}/columns", whitelistH.ListColumns)
 			r.With(requireMaskingRulesWrite).Post("/", whitelistH.Create)
 			r.With(requireMaskingRulesWrite).Patch("/{id}", whitelistH.Patch)
 			r.With(requireMaskingRulesWrite).Delete("/{id}", whitelistH.Delete)
@@ -266,6 +270,7 @@ func main() {
 			r.Use(middleware.RequireAuth(cfg.JWTSecret))
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireSQLEditorQuery).Get("/connections", queryH.ListConnections)
 			r.With(requireSQLEditorQuery).Post("/", queryH.Execute)
 			r.With(requireSQLEditorSensitiveApply).Post("/sensitive-access", queryH.CreateSensitiveAccessTicket)
 			r.With(requireSQLEditorQuery).Get("/history", queryH.ListHistory)
@@ -288,11 +293,12 @@ func main() {
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 
-			r.Get("/", ticketH.List)
+			r.With(requireTicketsWorkspaceRead).Get("/", ticketH.List)
+			r.With(requireTicketsApply).Get("/connections", ticketH.ListConnections)
 			r.With(requireTicketsApply).Post("/", ticketH.Create)
 
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", ticketH.Get)
+				r.With(requireTicketsWorkspaceRead).Get("/", ticketH.Get)
 				r.With(requireTicketWorkflowReview).Post("/approve", ticketH.Approve)
 				r.With(requireTicketWorkflowReview).Post("/reject", ticketH.Reject)
 				r.With(requireSensitiveReview).Post("/revoke", ticketH.Revoke)
@@ -416,6 +422,17 @@ func requireTicketsReview(next http.Handler) http.Handler {
 }
 func requireTicketsExecute(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.execute")(next)
+}
+func requireTicketsWorkspaceRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission(
+		"tickets.apply",
+		"tickets.review",
+		"tickets.execute",
+		"sql_editor.export",
+		"sql_editor.export_review",
+		"sql_editor.sensitive_apply",
+		"sql_editor.sensitive_review",
+	)(next)
 }
 func requireTicketWorkflowReview(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.review", "sql_editor.export_review", "sql_editor.sensitive_review")(next)

@@ -3,11 +3,12 @@ import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/shared/auth/AuthContext'
+import { defaultRouteForPermissions } from '@/shared/auth/permissions'
 import { getSetupStatus } from '@/shared/setup/api'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 
 export function LoginPage() {
-  const { isAuthenticated, login, status } = useAuth()
+  const { isAuthenticated, login, status, user } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
@@ -39,7 +40,7 @@ export function LoginPage() {
 
   if (status !== 'loading' && isAuthenticated) {
     const nextPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
-    return <Navigate to={nextPath ?? '/tickets'} replace />
+    return <Navigate to={nextPath ?? defaultRouteForPermissions(user?.permissions ?? [])} replace />
   }
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -50,7 +51,7 @@ export function LoginPage() {
     try {
       await login({ username, password })
       const nextPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
-      navigate(nextPath ?? '/tickets', { replace: true })
+      navigate(nextPath ?? '/', { replace: true })
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Login failed. Please try again later.')
     } finally {

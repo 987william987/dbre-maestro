@@ -44,11 +44,8 @@ vi.mock('@/shared/auth/AuthContext', () => ({
   useAuth: vi.fn(),
 }))
 
-vi.mock('@/modules/db-connections/api', () => ({
-  listDBConnections: vi.fn(),
-}))
-
 vi.mock('@/modules/sql-editor/api', () => ({
+  listQueryConnections: vi.fn(),
   executeQuery: vi.fn(),
   listMetadata: vi.fn(),
   listMetadataColumns: vi.fn(),
@@ -64,12 +61,11 @@ vi.mock('@/modules/exports/api', () => ({
   createExportRequest: vi.fn(),
 }))
 
-import { listDBConnections } from '@/modules/db-connections/api'
 import { createExportRequest } from '@/modules/exports/api'
-import { createSavedQuery, deleteSavedQuery, executeQuery, listMetadata, listMetadataColumns, listMetadataDefinition, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
+import { createSavedQuery, deleteSavedQuery, executeQuery, listMetadata, listMetadataColumns, listMetadataDefinition, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 
-const mockedListDBConnections = vi.mocked(listDBConnections)
+const mockedListQueryConnections = vi.mocked(listQueryConnections)
 const mockedExecuteQuery = vi.mocked(executeQuery)
 const mockedListMetadata = vi.mocked(listMetadata)
 const mockedListMetadataColumns = vi.mocked(listMetadataColumns)
@@ -121,7 +117,7 @@ describe('SQLEditorPage', () => {
       configurable: true,
     })
 
-    mockedListDBConnections.mockResolvedValue({
+    mockedListQueryConnections.mockResolvedValue({
       connections: [
         {
           id: 1,
@@ -377,7 +373,7 @@ describe('SQLEditorPage', () => {
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
-    mockedListDBConnections.mockResolvedValue({
+    mockedListQueryConnections.mockResolvedValue({
       connections: [
         {
           id: 1,
@@ -780,7 +776,7 @@ describe('SQLEditorPage', () => {
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
-    mockedListDBConnections.mockResolvedValueOnce({
+    mockedListQueryConnections.mockResolvedValueOnce({
       connections: [
         {
           id: 2,
@@ -872,7 +868,7 @@ describe('SQLEditorPage', () => {
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
-    mockedListDBConnections.mockResolvedValueOnce({
+    mockedListQueryConnections.mockResolvedValueOnce({
       connections: [
         {
           id: 5,
@@ -941,7 +937,7 @@ describe('SQLEditorPage', () => {
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
-    mockedListDBConnections.mockResolvedValueOnce({
+    mockedListQueryConnections.mockResolvedValueOnce({
       connections: [
         {
           id: 4,
@@ -1010,7 +1006,7 @@ describe('SQLEditorPage', () => {
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
-    mockedListDBConnections.mockResolvedValueOnce({
+    mockedListQueryConnections.mockResolvedValueOnce({
       connections: [
         {
           id: 3,
@@ -1084,7 +1080,7 @@ describe('SQLEditorPage', () => {
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
-    mockedListDBConnections.mockResolvedValueOnce({
+    mockedListQueryConnections.mockResolvedValueOnce({
       connections: [
         {
           id: 6,

@@ -226,3 +226,68 @@ func TestDBConnectionHandlerCreatePostgresDefaultsDatabaseNameToPostgres(t *test
 		t.Fatalf("sql expectations: %v", err)
 	}
 }
+
+func TestTicketHandlerCreateRejectsConnectionOutsideScope(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewTicketHandler(
+		nil,
+		nil,
+		repository.NewAuditRepo(sqlxDB),
+		repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")),
+		repository.NewUserRepo(sqlxDB),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+
+	now := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(uint64(99)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id",
+			"username",
+			"email",
+			"password",
+			"is_setup",
+			"is_protected",
+			"is_active",
+			"created_at",
+			"updated_at",
+		}).AddRow(99, "alan", "alan@example.com", "hash", true, false, true, now, now))
+	mock.ExpectQuery(`SELECT DISTINCT db_connection_id FROM`).
+		WithArgs(uint64(99), uint64(99), sqlmock.AnyArg(), uint64(99), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"db_connection_id"}).AddRow(uint64(1)))
+
+	req := httptest.NewRequest(http.MethodPost, "/tickets", strings.NewReader(`{
+		"title":"Export users",
+		"sql_content":"SELECT * FROM users",
+		"ticket_type":"sql_export",
+		"db_connection_id":2
+	}`))
+	ctx := context.WithValue(req.Context(), middleware.CtxUserID, uint64(99))
+	ctx = context.WithValue(ctx, middleware.CtxUsername, "alan")
+	ctx = context.WithValue(ctx, middleware.CtxPermissions, []string{"tickets.apply"})
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.Create(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "access to this connection is not allowed") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}

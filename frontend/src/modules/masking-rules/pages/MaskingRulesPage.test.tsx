@@ -25,38 +25,33 @@ vi.mock('@/modules/masking-rules/api', () => ({
   patchMaskingRule: vi.fn(),
   deleteMaskingRule: vi.fn(),
   listMaskingWhitelists: vi.fn(),
+  listMaskingConnections: vi.fn(),
+  listMaskingMetadata: vi.fn(),
+  listMaskingMetadataColumns: vi.fn(),
   createMaskingWhitelist: vi.fn(),
   patchMaskingWhitelist: vi.fn(),
   deleteMaskingWhitelist: vi.fn(),
 }))
 
-vi.mock('@/modules/db-connections/api', () => ({
-  listDBConnections: vi.fn(),
-}))
-
-vi.mock('@/modules/sql-editor/api', () => ({
-  listMetadata: vi.fn(),
-  listMetadataColumns: vi.fn(),
-}))
-
 import {
   createMaskingRule,
+  listMaskingConnections,
+  listMaskingMetadata,
+  listMaskingMetadataColumns,
   createMaskingWhitelist,
   deleteMaskingRule,
   listMaskingRules,
   listMaskingWhitelists,
 } from '@/modules/masking-rules/api'
-import { listDBConnections } from '@/modules/db-connections/api'
-import { listMetadata, listMetadataColumns } from '@/modules/sql-editor/api'
 
 const mockedListMaskingRules = vi.mocked(listMaskingRules)
 const mockedCreateMaskingRule = vi.mocked(createMaskingRule)
 const mockedDeleteMaskingRule = vi.mocked(deleteMaskingRule)
 const mockedListMaskingWhitelists = vi.mocked(listMaskingWhitelists)
+const mockedListMaskingConnections = vi.mocked(listMaskingConnections)
+const mockedListMaskingMetadata = vi.mocked(listMaskingMetadata)
+const mockedListMaskingMetadataColumns = vi.mocked(listMaskingMetadataColumns)
 const mockedCreateMaskingWhitelist = vi.mocked(createMaskingWhitelist)
-const mockedListDBConnections = vi.mocked(listDBConnections)
-const mockedListMetadata = vi.mocked(listMetadata)
-const mockedListMetadataColumns = vi.mocked(listMetadataColumns)
 
 function selectOption(label: string, option: string) {
   fireEvent.click(screen.getByRole('button', { name: label }))
@@ -98,7 +93,7 @@ describe('MaskingRulesPage', () => {
     vi.restoreAllMocks()
     mockedListMaskingRules.mockResolvedValue({ rules: [rule] })
     mockedListMaskingWhitelists.mockResolvedValue({ whitelist: [whitelist] })
-    mockedListDBConnections.mockResolvedValue({
+    mockedListMaskingConnections.mockResolvedValue({
       connections: [
         {
           id: 1,
@@ -117,12 +112,12 @@ describe('MaskingRulesPage', () => {
         },
       ],
     })
-    mockedListMetadata.mockResolvedValue({
+    mockedListMaskingMetadata.mockResolvedValue({
       db_type: 'mysql',
       level: 'database',
       items: [{ kind: 'database', name: 'analytics' }],
     })
-    mockedListMetadataColumns.mockResolvedValue({
+    mockedListMaskingMetadataColumns.mockResolvedValue({
       database: 'analytics',
       schema: 'analytics',
       table: 'tickets',
@@ -157,7 +152,7 @@ describe('MaskingRulesPage', () => {
     mockedListMaskingWhitelists
       .mockResolvedValueOnce({ whitelist: [] })
       .mockResolvedValueOnce({ whitelist: [whitelist] })
-    mockedListMetadata
+    mockedListMaskingMetadata
       .mockResolvedValueOnce({
         db_type: 'mysql',
         level: 'database',
@@ -176,11 +171,11 @@ describe('MaskingRulesPage', () => {
     await waitFor(() => expect(screen.getByText('Unmask Whitelist')).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: 'New Whitelist' }))
     selectOption('Connection', 'analytics-db')
-    await waitFor(() => expect(mockedListMetadata).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(mockedListMaskingMetadata).toHaveBeenCalledWith(1))
     selectOption('Database', 'analytics')
-    await waitFor(() => expect(mockedListMetadata).toHaveBeenCalledWith(1, { database: 'analytics' }))
+    await waitFor(() => expect(mockedListMaskingMetadata).toHaveBeenCalledWith(1, { database: 'analytics' }))
     selectOption('Table', 'tickets')
-    await waitFor(() => expect(mockedListMetadataColumns).toHaveBeenCalledWith(1, 'analytics', 'tickets', 'analytics'))
+    await waitFor(() => expect(mockedListMaskingMetadataColumns).toHaveBeenCalledWith(1, 'analytics', 'tickets', 'analytics'))
     selectOption('Column', 'email')
     fireEvent.click(screen.getByRole('button', { name: 'Create Whitelist' }))
 

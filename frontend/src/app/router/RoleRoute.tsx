@@ -1,5 +1,6 @@
 import { Navigate, Outlet } from 'react-router-dom'
 import { useAuth } from '@/shared/auth/AuthContext'
+import { defaultRouteForPermissions } from '@/shared/auth/permissions'
 
 export function RoleRoute({ allowedPermissions }: { allowedPermissions: string[] }) {
   const { user } = useAuth()
@@ -10,7 +11,7 @@ export function RoleRoute({ allowedPermissions }: { allowedPermissions: string[]
 
   const allowed = user.permissions.some((permission) => allowedPermissions.includes(permission))
   if (!allowed) {
-    return <Navigate to="/tickets" replace />
+    return <Navigate to={defaultRouteForPermissions(user.permissions)} replace />
   }
 
   return <Outlet />

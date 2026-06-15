@@ -79,7 +79,7 @@ export async function revokeTicket(id: number) {
 }
 
 export async function listConnections() {
-  const response = await apiClient.get<DBConnectionsResponse>('/db-connections')
+  const response = await apiClient.get<DBConnectionsResponse>('/tickets/connections')
 
   return {
     ...response,

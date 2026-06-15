@@ -19,7 +19,7 @@ describe('LoginPage', () => {
     })))
   })
 
-  it('送出帳密後會呼叫 login 並導向 /tickets', async () => {
+  it('送出帳密後會呼叫 login 並導向首頁路由', async () => {
     const login = vi.fn().mockResolvedValue(undefined)
 
     mockedUseAuth.mockReturnValue({
@@ -36,17 +36,17 @@ describe('LoginPage', () => {
       <MemoryRouter initialEntries={['/login']}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/tickets" element={<div>tickets page</div>} />
+          <Route path="/" element={<div>home page</div>} />
         </Routes>
       </MemoryRouter>,
     )
 
     fireEvent.change(screen.getByPlaceholderText('e.g. admin'), { target: { value: 'admin' } })
-    fireEvent.change(screen.getByPlaceholderText('輸入你的密碼'), { target: { value: 'Password1' } })
-    fireEvent.click(screen.getByRole('button', { name: '登入' }))
+    fireEvent.change(screen.getByPlaceholderText('Enter your password'), { target: { value: 'Password1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
     await waitFor(() => expect(login).toHaveBeenCalledWith({ username: 'admin', password: 'Password1' }))
-    await waitFor(() => expect(screen.getByText('tickets page')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('home page')).toBeInTheDocument())
   })
 
   it('登入失敗時顯示錯誤訊息', async () => {
@@ -69,8 +69,8 @@ describe('LoginPage', () => {
     )
 
     fireEvent.change(screen.getByPlaceholderText('e.g. admin'), { target: { value: 'admin' } })
-    fireEvent.change(screen.getByPlaceholderText('輸入你的密碼'), { target: { value: 'Password1' } })
-    fireEvent.click(screen.getByRole('button', { name: '登入' }))
+    fireEvent.change(screen.getByPlaceholderText('Enter your password'), { target: { value: 'Password1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('invalid credentials'))
   })

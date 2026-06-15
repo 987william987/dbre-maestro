@@ -10,10 +10,7 @@ vi.mock('@/modules/users/api', () => ({
   createUser: vi.fn(),
   patchUser: vi.fn(),
   deleteUser: vi.fn(),
-}))
-
-vi.mock('@/modules/db-connections/api', () => ({
-  listDBConnections: vi.fn(),
+  listUserDBConnections: vi.fn(),
 }))
 
 vi.mock('@/modules/auth-groups/api', () => ({
@@ -25,15 +22,14 @@ vi.mock('@/modules/auth-groups/api', () => ({
 }))
 
 import { createAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
-import { listDBConnections } from '@/modules/db-connections/api'
-import { createUser, deleteUser, getUser, listUsers, patchUser } from '@/modules/users/api'
+import { createUser, deleteUser, getUser, listUserDBConnections, listUsers, patchUser } from '@/modules/users/api'
 
 const mockedListUsers = vi.mocked(listUsers)
 const mockedGetUser = vi.mocked(getUser)
 const mockedCreateUser = vi.mocked(createUser)
 const mockedPatchUser = vi.mocked(patchUser)
 const mockedDeleteUser = vi.mocked(deleteUser)
-const mockedListDBConnections = vi.mocked(listDBConnections)
+const mockedListUserDBConnections = vi.mocked(listUserDBConnections)
 const mockedListAuthGroups = vi.mocked(listAuthGroups)
 const mockedGetAuthGroup = vi.mocked(getAuthGroup)
 const mockedCreateAuthGroup = vi.mocked(createAuthGroup)
@@ -83,7 +79,7 @@ describe('UsersPage', () => {
     vi.restoreAllMocks()
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     mockedListUsers.mockResolvedValue({ users: [] })
-    mockedListDBConnections.mockResolvedValue({ connections: [] })
+    mockedListUserDBConnections.mockResolvedValue({ connections: [] })
     seedAuthGroups()
   })
 
@@ -266,7 +262,7 @@ describe('UsersPage', () => {
   })
 
   it('建立 auth group 不需要 group key 且可帶 users / permissions / db scope', async () => {
-    mockedListDBConnections.mockResolvedValue({
+    mockedListUserDBConnections.mockResolvedValue({
       connections: [
         {
           id: 11,

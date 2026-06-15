@@ -1,4 +1,5 @@
 import { apiClient } from '@/shared/api/client'
+import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataColumn, MetadataDefinition, MetadataResponse, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
 
 type QueryPayload = {
@@ -29,6 +30,10 @@ type LegacyTablesResponse = {
   }>
 }
 
+type QueryConnectionsResponse = {
+  connections: DBConnection[]
+}
+
 export function executeQuery(payload: QueryPayload) {
   return apiClient.post<QueryResult>('/query', payload).then((response) => ({
     ...response,
@@ -38,6 +43,13 @@ export function executeQuery(payload: QueryPayload) {
     rows: Array.isArray(response.rows)
       ? response.rows.map((row) => (Array.isArray(row) ? row : []))
       : [],
+  }))
+}
+
+export function listQueryConnections() {
+  return apiClient.get<QueryConnectionsResponse>('/query/connections').then((response) => ({
+    ...response,
+    connections: Array.isArray(response.connections) ? response.connections : [],
   }))
 }
 

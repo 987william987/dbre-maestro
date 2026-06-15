@@ -17,6 +17,13 @@ import { NewTicketPage } from '@/modules/tickets/pages/NewTicketPage'
 import { TicketsPage } from '@/modules/tickets/pages/TicketsPage'
 import { UsersPage } from '@/modules/users/pages/UsersPage'
 import { SetupWizard } from '@/pages/setup/SetupWizard'
+import { defaultRouteForPermissions, TICKET_WORKSPACE_PERMISSIONS } from '@/shared/auth/permissions'
+import { useAuth } from '@/shared/auth/AuthContext'
+
+function HomeRedirect() {
+  const { user } = useAuth()
+  return <Navigate to={defaultRouteForPermissions(user?.permissions ?? [])} replace />
+}
 
 export default function App() {
   return (
@@ -26,12 +33,14 @@ export default function App() {
         <Route path="/setup" element={<SetupWizard />} />
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
-            <Route path="/" element={<Navigate to="/tickets" replace />} />
-            <Route path="/tickets" element={<TicketsPage />} />
+            <Route path="/" element={<HomeRedirect />} />
+            <Route element={<RoleRoute allowedPermissions={[...TICKET_WORKSPACE_PERMISSIONS]} />}>
+              <Route path="/tickets" element={<TicketsPage />} />
+              <Route path="/tickets/:id" element={<TicketDetailPage />} />
+            </Route>
             <Route element={<RoleRoute allowedPermissions={['tickets.apply']} />}>
               <Route path="/tickets/new" element={<NewTicketPage />} />
             </Route>
-            <Route path="/tickets/:id" element={<TicketDetailPage />} />
             <Route element={<RoleRoute allowedPermissions={['users.read', 'users.write']} />}>
               <Route path="/users" element={<UsersPage />} />
               <Route path="/users/groups" element={<UsersPage initialView="auth-groups" />} />
