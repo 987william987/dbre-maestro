@@ -128,11 +128,15 @@ export const apiClient = {
 
     if (!response.ok) {
       const contentType = response.headers.get('content-type') ?? ''
-      const data = contentType.includes('application/json') ? await response.json() as JsonValue : null
-      const message =
-        typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string'
-          ? data.error
-          : `Request failed with status ${response.status}`
+      const data = contentType.includes('application/json')
+        ? await response.json() as JsonValue
+        : await response.text() as JsonValue
+      let message = `Request failed with status ${response.status}`
+      if (typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string') {
+        message = data.error
+      } else if (typeof data === 'string' && data.trim()) {
+        message = data.trim()
+      }
       throw new ApiError(response.status, message, data)
     }
 

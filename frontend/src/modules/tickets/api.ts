@@ -86,3 +86,33 @@ export async function listConnections() {
     connections: Array.isArray(response.connections) ? response.connections : [],
   }
 }
+
+export async function downloadTicketExport(path: string) {
+  const response = await apiClient.download(path)
+  const blob = await response.blob()
+  const objectURL = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  const contentDisposition = response.headers.get('content-disposition')
+  const filename = getDownloadFilename(contentDisposition) ?? 'export.csv'
+
+  anchor.href = objectURL
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  URL.revokeObjectURL(objectURL)
+}
+
+function getDownloadFilename(contentDisposition: string | null) {
+  if (!contentDisposition) {
+    return null
+  }
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1])
+  }
+
+  const basicMatch = contentDisposition.match(/filename="?([^"]+)"?/i)
+  return basicMatch?.[1] ?? null
+}

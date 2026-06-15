@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { javascript } from '@codemirror/lang-javascript'
 import { sql } from '@codemirror/lang-sql'
+import { format as formatSQL, type Dialect } from 'sql-formatter'
 import {
   Check,
   ChevronDown,
@@ -118,6 +119,59 @@ const METADATA_ERROR_MESSAGE = 'Metadata is temporarily unavailable. Please try 
 function parsePixelValue(value: string): number {
   const parsed = Number.parseFloat(value)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+function buildQueryPayload(tab: EditorTab, sqlText: string, connection: DBConnection | null) {
+  return {
+    db_connection_id: tab.connectionId!,
+    sql: sqlText,
+    database: tab.database || undefined,
+    schema: connection?.db_type === 'postgres' ? tab.schema || undefined : undefined,
+    redis_db_index: connection?.db_type === 'redis' && tab.database ? Number(tab.database) : undefined,
+  }
+}
+
+function buildExplainSQL(sqlText: string) {
+  const trimmed = sqlText.trim().replace(/;+\s*$/, '')
+  if (!trimmed) {
+    return ''
+  }
+  if (/^EXPLAIN\b/i.test(trimmed)) {
+    return `${trimmed};`
+  }
+  if (trimmed.includes(';')) {
+    throw new Error('Explain 目前只支援單一 SQL statement。')
+  }
+  return `EXPLAIN ${trimmed};`
+}
+
+function getSQLFormatterDialect(connection: DBConnection | null): Dialect {
+  if (connection?.db_type === 'postgres') {
+    return 'postgresql'
+  }
+  if (connection?.db_type === 'mysql') {
+    return 'mysql'
+  }
+  return 'sql'
+}
+
+function replaceSelectedSQL(sourceSQL: string, selectedSQL: string, replacement: string) {
+  const trimmedSelected = selectedSQL.trim()
+  if (!trimmedSelected) {
+    return replacement
+  }
+
+  const index = sourceSQL.indexOf(selectedSQL)
+  if (index >= 0) {
+    return `${sourceSQL.slice(0, index)}${replacement}${sourceSQL.slice(index + selectedSQL.length)}`
+  }
+
+  const trimmedIndex = sourceSQL.indexOf(trimmedSelected)
+  if (trimmedIndex >= 0) {
+    return `${sourceSQL.slice(0, trimmedIndex)}${replacement}${sourceSQL.slice(trimmedIndex + trimmedSelected.length)}`
+  }
+
+  return replacement
 }
 
 function measureEditorHeight(container: HTMLDivElement | null, sqlText: string): number {
@@ -1054,7 +1108,7 @@ export function SQLEditorPage() {
     })
   }
 
-  async function handleRunQuery() {
+  async function executeEditorSQL(mode: 'run' | 'explain') {
     const sqlToExecute = activeSelectedSQL.trim() || activeTab?.sql.trim() || ''
     if (!activeTab?.connectionId || !sqlToExecute) {
       updateActiveTab({ error: 'Select a database connection and enter a query first.' })
@@ -1065,13 +1119,8 @@ export function SQLEditorPage() {
     updateActiveTab({ error: '' })
 
     try {
-      const result = await executeQuery({
-        db_connection_id: activeTab.connectionId,
-        sql: sqlToExecute,
-        database: activeDatabase || undefined,
-        schema: activeConnection?.db_type === 'postgres' ? activeSchema || undefined : undefined,
-        redis_db_index: activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : undefined,
-      })
+      const finalSQL = mode === 'explain' ? buildExplainSQL(sqlToExecute) : sqlToExecute
+      const result = await executeQuery(buildQueryPayload(activeTab, finalSQL, activeConnection ?? null))
 
       updateActiveTab({
         result,
@@ -1080,15 +1129,53 @@ export function SQLEditorPage() {
         resultView: 'result',
       })
       void listQueryHistory(HISTORY_LIMIT).then((response) => setHistory(response.history)).catch(() => undefined)
-      pushToast('Query completed.', 'success')
+      pushToast(mode === 'explain' ? 'Explain completed.' : 'Query completed.', 'success')
     } catch (error) {
-      const message = error instanceof ApiError ? error.message : 'Query execution failed.'
+      const message = error instanceof ApiError || error instanceof Error ? error.message : 'Query execution failed.'
       updateActiveTab({
         error: message,
         result: null,
       })
     } finally {
       setRunningTabId(null)
+    }
+  }
+
+  async function handleRunQuery() {
+    await executeEditorSQL('run')
+  }
+
+  async function handleExplainQuery() {
+    await executeEditorSQL('explain')
+  }
+
+  function handleFormatSQL() {
+    if (!activeTab) {
+      return
+    }
+
+    const tabID = activeTab.id
+    const sourceSQL = activeTab.sql
+    const selectedSQL = activeSelectedSQL.trim()
+    const targetSQL = selectedSQL || sourceSQL.trim()
+    if (!targetSQL) {
+      return
+    }
+
+    try {
+      const formatted = formatSQL(targetSQL, {
+        language: getSQLFormatterDialect(activeConnection ?? null),
+        keywordCase: 'upper',
+      }).trimEnd()
+      const nextSQL = selectedSQL
+        ? replaceSelectedSQL(sourceSQL, activeSelectedSQL, formatted)
+        : formatted
+
+      updateTabByID(tabID, { sql: nextSQL, error: '', selectedSQL: '' })
+      pushToast('SQL formatted.', 'success')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'SQL formatting failed.'
+      pushToast(message, 'error')
     }
   }
 
@@ -1444,7 +1531,7 @@ export function SQLEditorPage() {
 
       {connectionsError ? <InlineAlert>{connectionsError}</InlineAlert> : null}
 
-      <section className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-panel shadow-soft">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
         <div className="border-b border-border/80 px-4">
           <div className="flex flex-wrap items-center gap-5">
             {tabs.map((tab) => (
@@ -1601,24 +1688,40 @@ export function SQLEditorPage() {
               <LoadingBlock message="Loading editor..." className="m-4 min-h-[320px] rounded-xl border-border bg-panel" />
             ) : (
               <div className="flex min-h-0 flex-1 flex-col">
-                <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-4 py-3">
-                  <div className="inline-flex h-10 min-w-[260px] flex-1 items-center rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-muted">
-                    <span className="truncate">{activePathLabel.length > 0 ? activePathLabel.join(' / ') : 'Select a data source from the Explorer'}</span>
+                <div className="flex justify-end px-4 pt-3 pb-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleFormatSQL}
+                      disabled={!activeTab.sql.trim()}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Format
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExplainQuery}
+                      disabled={runningTabId === activeTab.id || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {runningTabId === activeTab.id ? 'Running...' : 'Explain'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRunQuery}
+                      disabled={runningTabId === activeTab.id || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Play className="h-4 w-4" />
+                      {runningTabId === activeTab.id ? 'Running...' : 'Run Query'}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleRunQuery}
-                    disabled={runningTabId === activeTab.id || !activeTab.connectionId}
-                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Play className="h-4 w-4" />
-                    {runningTabId === activeTab.id ? 'Running...' : 'Run Query'}
-                  </button>
                 </div>
 
-              <div className="shrink-0 p-4">
+              <div className="shrink-0 px-4 pt-2 pb-3">
                 <div ref={editorContainerRef} className="overflow-hidden rounded-xl border border-border bg-panel-soft">
                   <CodeMirror
+                    key={activeTab.id}
                     value={activeTab.sql}
                     height={editorHeight}
                     extensions={editorExtensions}
@@ -1634,7 +1737,7 @@ export function SQLEditorPage() {
                 </div>
               </div>
 
-              <div className="flex min-h-0 flex-1 flex-col border-t border-border/80 px-4 py-3">
+              <div className="flex min-h-0 flex-1 flex-col px-4 pt-2 pb-3">
                 {hasSensitiveOverride || activeTab.result?.sensitive_override_active ? (
                   <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
                     <span className="font-semibold">Sensitive override active.</span> Queries and exports for this account will display unmasked data directly.

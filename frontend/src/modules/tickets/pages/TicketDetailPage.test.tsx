@@ -14,6 +14,7 @@ vi.mock('@/modules/tickets/api', () => ({
   rejectTicket: vi.fn(),
   requestExecution: vi.fn(),
   executeTicket: vi.fn(),
+  downloadTicketExport: vi.fn(),
 }))
 
 vi.mock('@/shared/ui/ToastContext', () => ({
@@ -23,10 +24,11 @@ vi.mock('@/shared/ui/ToastContext', () => ({
 }))
 
 import { useAuth } from '@/shared/auth/AuthContext'
-import { getTicket } from '@/modules/tickets/api'
+import { downloadTicketExport, getTicket } from '@/modules/tickets/api'
 
 const mockedUseAuth = vi.mocked(useAuth)
 const mockedGetTicket = vi.mocked(getTicket)
+const mockedDownloadTicketExport = vi.mocked(downloadTicketExport)
 
 const baseTicket: Ticket = {
   id: 12,
@@ -86,6 +88,7 @@ function renderPage() {
 describe('TicketDetailPage role visibility', () => {
   beforeEach(() => {
     mockedGetTicket.mockReset()
+    mockedDownloadTicketExport.mockReset()
   })
 
   it('reviewer 在 pending_review 狀態可見 approve / reject', async () => {
@@ -193,7 +196,7 @@ describe('TicketDetailPage role visibility', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByText('匯出下載')).toBeInTheDocument())
-    expect(screen.getByRole('link', { name: '下載匯出檔' })).toHaveAttribute('href', '/api/exports/download/token-123')
+    expect(screen.getByRole('button', { name: 'Download Export' })).toBeInTheDocument()
   })
 
   it('工單資訊優先顯示人類可讀名稱而不是純 id', async () => {

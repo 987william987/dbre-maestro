@@ -340,6 +340,65 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByText('1 rows / 12 ms')).toBeInTheDocument()
   })
 
+  it('點擊 Explain 會用 EXPLAIN 包裝目前 SQL 後執行', async () => {
+    mockedExecuteQuery.mockResolvedValue({
+      columns: ['id', 'select_type'],
+      raw_columns: ['id', 'select_type'],
+      sensitive_column_indexes: [],
+      rows: [[1, 'SIMPLE']],
+      row_count: 1,
+      duration_ms: 9,
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.change(screen.getByLabelText('CodeMirror'), {
+      target: { value: 'SELECT * FROM tickets' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Explain' }))
+
+    await waitFor(() => {
+      expect(mockedExecuteQuery).toHaveBeenCalledWith({
+        db_connection_id: 1,
+        sql: 'EXPLAIN SELECT * FROM tickets;',
+        database: undefined,
+        schema: undefined,
+        redis_db_index: undefined,
+      })
+    })
+  })
+
+  it('點擊 Format 會更新 editor 內容', async () => {
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    const editor = screen.getByLabelText('CodeMirror') as HTMLTextAreaElement
+    fireEvent.change(editor, {
+      target: { value: 'select id, title from tickets where id = 1' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Format' }))
+
+    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toContain('SELECT')
+    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toContain('\nFROM')
+  })
+
   it('初始進入 SQL Editor 時不應自動選擇第一個實例，也不應自動載入 metadata', async () => {
     render(
       <MemoryRouter>
@@ -1165,6 +1224,14 @@ describe('SQLEditorPage', () => {
 
   it('切換 tab 時會保留各自的 database 選擇上下文', async () => {
     mockedListMetadata.mockReset()
+    mockedExecuteQuery.mockResolvedValue({
+      columns: ['id'],
+      raw_columns: ['id'],
+      sensitive_column_indexes: [],
+      rows: [[1]],
+      row_count: 1,
+      duration_ms: 12,
+    })
     mockedListMetadata.mockImplementation(async (_connectionId, params) => {
       if (!params?.database) {
         return {
@@ -1198,21 +1265,44 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
     fireEvent.click(await screen.findByText('analytics'))
-
-    expect(screen.getByText('Primary MySQL / analytics')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Run Query'))
+    await waitFor(() => {
+      expect(mockedExecuteQuery).toHaveBeenLastCalledWith({
+        db_connection_id: 1,
+        sql: 'SELECT 1;',
+        database: 'analytics',
+        schema: undefined,
+        redis_db_index: undefined,
+      })
+    })
 
     fireEvent.click(screen.getByText('New Tab'))
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
     fireEvent.click(await screen.findByText('maestro'))
-
-    expect(screen.getByText('Primary MySQL / maestro')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Run Query'))
+    await waitFor(() => {
+      expect(mockedExecuteQuery).toHaveBeenLastCalledWith({
+        db_connection_id: 1,
+        sql: 'SELECT 1;',
+        database: 'maestro',
+        schema: undefined,
+        redis_db_index: undefined,
+      })
+    })
 
     fireEvent.click(screen.getByText('Query 1'))
-
-    expect(screen.getByText('Primary MySQL / analytics')).toBeInTheDocument()
-    expect(screen.queryByText('Primary MySQL / maestro')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Run Query'))
+    await waitFor(() => {
+      expect(mockedExecuteQuery).toHaveBeenLastCalledWith({
+        db_connection_id: 1,
+        sql: 'SELECT 1;',
+        database: 'analytics',
+        schema: undefined,
+        redis_db_index: undefined,
+      })
+    })
   })
 
   it('切換 tab 後回到原分頁，資產樹展開狀態仍會保留', async () => {
@@ -1265,13 +1355,11 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByLabelText('Toggle dev_edgex_ops_intelligence'))
     fireEvent.click(await screen.findByText('t_activity_delivery_attempt'))
 
-    expect(screen.getByText('Primary MySQL / dev_edgex_ops_intelligence / t_activity_delivery_attempt')).toBeInTheDocument()
     expect(screen.getByText('t_activity_delivery_outbox')).toBeInTheDocument()
 
     fireEvent.click(screen.getByText('New Tab'))
     fireEvent.click(screen.getByText('Query 1'))
 
-    expect(screen.getByText('Primary MySQL / dev_edgex_ops_intelligence / t_activity_delivery_attempt')).toBeInTheDocument()
     expect(screen.getByText('t_activity_delivery_outbox')).toBeInTheDocument()
   })
 

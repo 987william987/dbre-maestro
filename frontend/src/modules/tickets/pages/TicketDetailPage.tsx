@@ -11,7 +11,7 @@ import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useToast } from '@/shared/ui/ToastContext'
-import { approveTicket, executeTicket, getTicket, rejectTicket, requestExecution, revokeTicket } from '@/modules/tickets/api'
+import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, requestExecution, revokeTicket } from '@/modules/tickets/api'
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -43,6 +43,7 @@ export function TicketDetailPage() {
   const [reason, setReason] = useState('')
   const [acting, setActing] = useState<'approve' | 'reject' | 'request-execution' | 'execute' | 'revoke' | null>(null)
   const [confirmAction, setConfirmAction] = useState<'request-execution' | 'execute' | 'revoke' | null>(null)
+  const [downloadingExport, setDownloadingExport] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -115,6 +116,24 @@ export function TicketDetailPage() {
       setError(actionError instanceof ApiError ? actionError.message : 'Action failed. Please try again later.')
     } finally {
       setActing(null)
+    }
+  }
+
+  async function handleDownloadExport() {
+    if (!exportDownloadURL || downloadingExport) {
+      return
+    }
+
+    setDownloadingExport(true)
+    try {
+      await downloadTicketExport(exportDownloadURL)
+    } catch (downloadError) {
+      pushToast(downloadError instanceof ApiError ? downloadError.message : 'Failed to download export.', 'error', {
+        placement: 'center',
+        durationMs: 3600,
+      })
+    } finally {
+      setDownloadingExport(false)
     }
   }
 
@@ -313,13 +332,15 @@ export function TicketDetailPage() {
                   <p className="mt-1 text-[12px] text-muted">Download the export result once the ticket is approved.</p>
                 </div>
                 <div className="px-4 py-4">
-                  <a
-                    href={exportDownloadURL}
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadExport()}
+                    disabled={downloadingExport}
                     className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800"
                   >
-                    <Download className="h-4 w-4" />
-                    Download Export
-                  </a>
+                    {downloadingExport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    {downloadingExport ? 'Downloading…' : 'Download Export'}
+                  </button>
                   <p className="mt-3 text-[12px] text-muted">
                     Expires: {detail.export_request?.expires_at ? formatDateTime(detail.export_request.expires_at, true) : '—'}
                   </p>
