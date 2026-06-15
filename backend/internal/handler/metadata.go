@@ -99,6 +99,11 @@ type postgresDefinitionIndex struct {
 }
 
 const metadataTemporaryErrorMessage = "metadata is temporarily unavailable, please try again later"
+const postgresReservedDatabaseRDSAdmin = "rdsadmin"
+
+func shouldSkipPostgresMetadataDatabase(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), postgresReservedDatabaseRDSAdmin)
+}
 
 func logMetadataQueryError(operation string, conn *model.DBConnection, database string, schema string, table string, err error) {
 	if err == nil {
@@ -423,6 +428,9 @@ func (h *MetadataHandler) loadPostgresMetadata(
 			var name string
 			if err := rows.Scan(&name); err != nil {
 				return nil, err
+			}
+			if shouldSkipPostgresMetadataDatabase(name) {
+				continue
 			}
 			items = append(items, metadataItem{Kind: "database", Name: name})
 		}

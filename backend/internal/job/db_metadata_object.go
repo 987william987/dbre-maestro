@@ -15,9 +15,14 @@ import (
 )
 
 const (
-	objectSchedulerPollInterval = time.Minute
-	objectJobConnectionWorkers  = 4
+	objectSchedulerPollInterval      = time.Minute
+	objectJobConnectionWorkers       = 4
+	postgresReservedDatabaseRDSAdmin = "rdsadmin"
 )
+
+func shouldSkipPostgresMetadataDatabase(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), postgresReservedDatabaseRDSAdmin)
+}
 
 type DBMetadataObjectJob struct {
 	settings  *repository.SettingsRepo
@@ -295,6 +300,9 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 		var databaseName string
 		if err := dbRows.Scan(&databaseName); err != nil {
 			return nil, fmt.Errorf("scan postgres database for connection %d: %w", conn.ID, err)
+		}
+		if shouldSkipPostgresMetadataDatabase(databaseName) {
+			continue
 		}
 		databaseNames = append(databaseNames, databaseName)
 	}

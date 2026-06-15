@@ -46,7 +46,7 @@ func (h *DBMetadataHandler) ListInventory(w http.ResponseWriter, r *http.Request
 
 func (h *DBMetadataHandler) ListObjects(w http.ResponseWriter, r *http.Request) {
 	connectionID := parsePositiveUint64(r.URL.Query().Get("db_connection_id"))
-	limit := parsePositiveInt(r.URL.Query().Get("limit"), 500)
+	limit := parsePositiveInt(r.URL.Query().Get("limit"), 0)
 
 	items, err := h.repo.ListObjectSnapshots(r.Context(), connectionID, limit)
 	if err != nil {

@@ -3,8 +3,8 @@ package handler
 import (
 	"bytes"
 	"errors"
-	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/dbre-maestro/maestro/internal/model"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -107,6 +107,17 @@ func TestLogMetadataQueryError(t *testing.T) {
 		if !strings.Contains(logged, expected) {
 			t.Fatalf("log output %q does not contain %q", logged, expected)
 		}
+	}
+}
+
+func TestShouldSkipPostgresMetadataDatabase(t *testing.T) {
+	for _, name := range []string{"rdsadmin", "RDSADMIN", " rdsadmin "} {
+		if !shouldSkipPostgresMetadataDatabase(name) {
+			t.Fatalf("shouldSkipPostgresMetadataDatabase(%q) = false, want true", name)
+		}
+	}
+	if shouldSkipPostgresMetadataDatabase("postgres") {
+		t.Fatal(`shouldSkipPostgresMetadataDatabase("postgres") = true, want false`)
 	}
 }
 

@@ -61,3 +61,14 @@ func TestIsObjectMetadataSupported(t *testing.T) {
 		t.Fatal("redis should not be supported")
 	}
 }
+
+func TestShouldSkipPostgresMetadataDatabase(t *testing.T) {
+	for _, name := range []string{"rdsadmin", "RDSADMIN", " rdsadmin "} {
+		if !shouldSkipPostgresMetadataDatabase(name) {
+			t.Fatalf("shouldSkipPostgresMetadataDatabase(%q) = false, want true", name)
+		}
+	}
+	if shouldSkipPostgresMetadataDatabase("postgres") {
+		t.Fatal(`shouldSkipPostgresMetadataDatabase("postgres") = true, want false`)
+	}
+}

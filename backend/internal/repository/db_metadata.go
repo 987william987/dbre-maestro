@@ -61,10 +61,6 @@ func (r *DBMetadataRepo) ListInventorySnapshots(ctx context.Context, engine stri
 }
 
 func (r *DBMetadataRepo) ListObjectSnapshots(ctx context.Context, connectionID uint64, limit int) ([]model.DBObjectSnapshot, error) {
-	if limit <= 0 {
-		limit = 500
-	}
-
 	baseQuery := `SELECT
 		id,
 		snapshot_at,
@@ -84,8 +80,11 @@ func (r *DBMetadataRepo) ListObjectSnapshots(ctx context.Context, connectionID u
 		baseQuery += ` WHERE db_connection_id = ?`
 		args = append(args, connectionID)
 	}
-	baseQuery += ` ORDER BY snapshot_at DESC, id DESC LIMIT ?`
-	args = append(args, limit)
+	baseQuery += ` ORDER BY snapshot_at DESC, id DESC`
+	if limit > 0 {
+		baseQuery += ` LIMIT ?`
+		args = append(args, limit)
+	}
 
 	var items []model.DBObjectSnapshot
 	if err := r.db.SelectContext(ctx, &items, baseQuery, args...); err != nil {
