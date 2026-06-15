@@ -170,7 +170,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	h.notifyTicketReviewers(r.Context(), created, "新的工單待審核", fmt.Sprintf("工單 %s 已提交，等待審核", created.TicketNo))
+	h.notifyTicketReviewers(r.Context(), created, "New Ticket Pending Review", fmt.Sprintf("Ticket %s has been submitted and is awaiting review", created.TicketNo))
 	jsonCreated(w, created)
 }
 
@@ -518,9 +518,9 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	rejectBody := fmt.Sprintf("工單 %s 已拒絕：%s", ticket.TicketNo, req.Reason)
-	h.notifyLark(r.Context(), "工單已拒絕", rejectBody)
-	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_rejected", "工單已拒絕", rejectBody, "ticket", id)
+	rejectBody := fmt.Sprintf("Ticket %s has been rejected: %s", ticket.TicketNo, req.Reason)
+	h.notifyLark(r.Context(), "Ticket Rejected", rejectBody)
+	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_rejected", "Ticket Rejected", rejectBody, "ticket", id)
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
@@ -563,7 +563,7 @@ func (h *TicketHandler) RequestExecution(w http.ResponseWriter, r *http.Request)
 	}
 
 	_ = userID
-	h.notifyExecutors(r.Context(), ticket, "工單待執行", fmt.Sprintf("工單 %s 已進入待執行佇列", ticket.TicketNo))
+	h.notifyExecutors(r.Context(), ticket, "Ticket Pending Execution", fmt.Sprintf("Ticket %s has entered the execution queue", ticket.TicketNo))
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
 }
@@ -827,8 +827,8 @@ func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	body := fmt.Sprintf("工單 %s 已提前撤銷，下一次查詢起立即失效", ticket.TicketNo)
-	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_revoked", "工單已撤銷", body, "ticket", id)
+	body := fmt.Sprintf("Ticket %s has been revoked early and will be invalidated from the next query onwards", ticket.TicketNo)
+	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_revoked", "Ticket Revoked", body, "ticket", id)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
 }
