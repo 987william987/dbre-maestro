@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/masking"
@@ -19,14 +20,15 @@ import (
 )
 
 type ExportHandler struct {
-	exports   *repository.ExportRepo
-	tickets   *repository.TicketRepo
-	dbConns   *repository.DBConnectionRepo
-	users     *repository.UserRepo
-	audit     *repository.AuditRepo
-	masking   *maskingRuntime
-	notifRepo *repository.NotificationRepo
-	lark      *notification.Client
+	exports             *repository.ExportRepo
+	tickets             *repository.TicketRepo
+	dbConns             *repository.DBConnectionRepo
+	users               *repository.UserRepo
+	audit               *repository.AuditRepo
+	masking             *maskingRuntime
+	notifRepo           *repository.NotificationRepo
+	lark                *notification.Client
+	downloadRateLimiter *exportDownloadRateLimiter
 }
 
 func NewExportHandler(
@@ -42,15 +44,57 @@ func NewExportHandler(
 	lark *notification.Client,
 ) *ExportHandler {
 	return &ExportHandler{
-		exports:   exports,
-		tickets:   tickets,
-		dbConns:   dbConns,
-		users:     users,
-		audit:     audit,
-		masking:   newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
-		notifRepo: notifRepo,
-		lark:      lark,
+		exports:             exports,
+		tickets:             tickets,
+		dbConns:             dbConns,
+		users:               users,
+		audit:               audit,
+		masking:             newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
+		notifRepo:           notifRepo,
+		lark:                lark,
+		downloadRateLimiter: newExportDownloadRateLimiter(3, time.Minute),
 	}
+}
+
+type exportDownloadRateLimiter struct {
+	mu      sync.Mutex
+	limit   int
+	window  time.Duration
+	history map[string][]time.Time
+}
+
+func newExportDownloadRateLimiter(limit int, window time.Duration) *exportDownloadRateLimiter {
+	return &exportDownloadRateLimiter{
+		limit:   limit,
+		window:  window,
+		history: make(map[string][]time.Time),
+	}
+}
+
+func (l *exportDownloadRateLimiter) Allow(key string, now time.Time) bool {
+	if l == nil || key == "" || l.limit <= 0 || l.window <= 0 {
+		return true
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	cutoff := now.Add(-l.window)
+	current := l.history[key]
+	filtered := current[:0]
+	for _, hitAt := range current {
+		if hitAt.After(cutoff) {
+			filtered = append(filtered, hitAt)
+		}
+	}
+	if len(filtered) >= l.limit {
+		l.history[key] = append([]time.Time(nil), filtered...)
+		return false
+	}
+
+	filtered = append(filtered, now)
+	l.history[key] = append([]time.Time(nil), filtered...)
+	return true
 }
 
 func (h *ExportHandler) notifyLark(ctx context.Context, title, body string) {
@@ -292,6 +336,10 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 	// 403 for not-found, expired, or not-yet-approved — no token enumeration
 	if req == nil || time.Now().After(req.ExpiresAt) || req.Status != model.ExportStatusReady {
 		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if !h.downloadRateLimiter.Allow(token, time.Now()) {
+		http.Error(w, "一分鐘內最多只能下載三次，請稍後再試", http.StatusTooManyRequests)
 		return
 	}
 

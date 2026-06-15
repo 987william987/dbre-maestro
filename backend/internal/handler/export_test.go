@@ -2,6 +2,7 @@ package handler
 
 import (
 	"testing"
+	"time"
 
 	"github.com/dbre-maestro/maestro/internal/model"
 )
@@ -30,5 +31,22 @@ func TestExportQueryExecutionContextFromScopesUsesTicketScopes(t *testing.T) {
 	}
 	if queryCtx.SchemaName != "public" {
 		t.Fatalf("queryCtx.SchemaName = %q, want %q", queryCtx.SchemaName, "public")
+	}
+}
+
+func TestExportDownloadRateLimiterAllowsOnlyThreeHitsPerMinute(t *testing.T) {
+	limiter := newExportDownloadRateLimiter(3, time.Minute)
+	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	for i := 0; i < 3; i++ {
+		if !limiter.Allow("token-1", now.Add(time.Duration(i)*time.Second)) {
+			t.Fatalf("Allow() denied hit %d, want allowed", i+1)
+		}
+	}
+	if limiter.Allow("token-1", now.Add(30*time.Second)) {
+		t.Fatal("Allow() = true on 4th hit within one minute, want false")
+	}
+	if !limiter.Allow("token-1", now.Add(61*time.Second)) {
+		t.Fatal("Allow() = false after window elapsed, want true")
 	}
 }
