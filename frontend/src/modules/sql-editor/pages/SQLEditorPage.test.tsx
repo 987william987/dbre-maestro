@@ -197,8 +197,8 @@ describe('SQLEditorPage', () => {
     mockedDeleteSavedQuery.mockResolvedValue(undefined)
   })
 
-  it('會以 user.id 為 namespace 保存 editor 狀態', async () => {
-    render(
+  it('重新掛載後會重置成單一預設 tab 與 SELECT 1;', async () => {
+    const { unmount } = render(
       <MemoryRouter>
         <ToastProvider>
           <SQLEditorPage />
@@ -211,11 +211,23 @@ describe('SQLEditorPage', () => {
     fireEvent.change(screen.getByLabelText('CodeMirror'), {
       target: { value: 'SELECT * FROM tickets;' },
     })
+    fireEvent.click(screen.getByRole('button', { name: 'New Tab' }))
 
-    await waitFor(() => {
-      const saved = window.localStorage.getItem('dbre_maestro.sql_editor.7')
-      expect(saved).toContain('SELECT * FROM tickets;')
-    })
+    expect(screen.getAllByText(/Query \d+/)).toHaveLength(2)
+
+    unmount()
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(screen.getAllByText(/Query \d+/)).toHaveLength(1)
+    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT 1;')
   })
 
   it('執行查詢後會顯示結果並可建立匯出請求', async () => {

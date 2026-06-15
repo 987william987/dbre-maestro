@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { javascript } from '@codemirror/lang-javascript'
 import { sql } from '@codemirror/lang-sql'
@@ -82,11 +82,6 @@ type EditorTab = {
   lastRunAt: string | null
 }
 
-type PersistedState = {
-  activeTabId: string
-  tabs: EditorTab[]
-}
-
 type AssetTreeNode = {
   id: string
   kind: 'connection' | 'database' | 'schema' | 'table' | 'redis_db'
@@ -104,7 +99,6 @@ type AssetTreeNode = {
   children: AssetTreeNode[]
 }
 
-const STORAGE_PREFIX = 'dbre_maestro.sql_editor'
 const DEFAULT_SQL = 'SELECT 1;'
 const HISTORY_LIMIT = 20
 const SAVED_QUERY_LIMIT = 10
@@ -115,6 +109,37 @@ const EDITOR_VERTICAL_PADDING = 24
 const EDITOR_MIN_HEIGHT = EDITOR_VERTICAL_PADDING + EDITOR_BASE_VISIBLE_LINES * EDITOR_LINE_HEIGHT
 const RESULT_PAGE_SIZE = 50
 const METADATA_ERROR_MESSAGE = 'Metadata is temporarily unavailable. Please try again later.'
+const SQL_EDITOR_PROFILE_ENABLED = import.meta.env.DEV
+const SQL_EDITOR_EXTENSIONS = [sql()]
+const REDIS_EDITOR_EXTENSIONS = [javascript()]
+const SQL_EDITOR_BASIC_SETUP = {
+  lineNumbers: true,
+  foldGutter: false,
+  highlightActiveLine: false,
+}
+
+type SQLFormatProfile = {
+  id: number
+  tabID: string
+  startedAt: number
+  sourceLength: number
+  selectedLength: number
+  targetLength: number
+  nextLength: number
+  formatterMs: number
+  stateScheduleMs?: number
+  layoutMeasureMs?: number
+  rafMeasureMs?: number
+  totalMs?: number
+  expectedSQL: string
+}
+
+function logSQLFormatProfile(stage: string, profile: Record<string, unknown>) {
+  if (!SQL_EDITOR_PROFILE_ENABLED) {
+    return
+  }
+  console.info('[SQL Editor][Format Profile]', stage, profile)
+}
 
 function parsePixelValue(value: string): number {
   const parsed = Number.parseFloat(value)
@@ -172,6 +197,11 @@ function replaceSelectedSQL(sourceSQL: string, selectedSQL: string, replacement:
   }
 
   return replacement
+}
+
+function hasTabPatchChanges(tab: EditorTab, patch: Partial<EditorTab>) {
+  const entries = Object.entries(patch) as Array<[keyof EditorTab, EditorTab[keyof EditorTab]]>
+  return entries.some(([key, value]) => !Object.is(tab[key], value))
 }
 
 function measureEditorHeight(container: HTMLDivElement | null, sqlText: string): number {
@@ -262,55 +292,6 @@ function createTab(seed = 1): EditorTab {
     result: null,
     error: '',
     lastRunAt: null,
-  }
-}
-
-function safeParseState(raw: string | null): PersistedState | null {
-  if (!raw) {
-    return null
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<PersistedState>
-    if (!Array.isArray(parsed.tabs) || parsed.tabs.length === 0 || typeof parsed.activeTabId !== 'string') {
-      return null
-    }
-
-    return {
-      activeTabId: parsed.activeTabId,
-      tabs: parsed.tabs.map((tab, index) => ({
-        id: typeof tab.id === 'string' ? tab.id : `tab-restored-${index}`,
-        title: typeof tab.title === 'string' ? tab.title : `Query ${index + 1}`,
-        connectionId: typeof tab.connectionId === 'number' ? tab.connectionId : null,
-        database: typeof tab.database === 'string' ? tab.database : '',
-        schema: typeof tab.schema === 'string' ? tab.schema : '',
-        selectedTable: tab.selectedTable ?? null,
-        metadataError: typeof tab.metadataError === 'string' ? tab.metadataError : '',
-        explorerNodes: Array.isArray(tab.explorerNodes) ? tab.explorerNodes : [],
-        searchTreeNodes: Array.isArray(tab.searchTreeNodes) ? tab.searchTreeNodes : [],
-        explorerSearch: typeof tab.explorerSearch === 'string' ? tab.explorerSearch : '',
-        searchingAssets: typeof tab.searchingAssets === 'boolean' ? tab.searchingAssets : false,
-        assetPickerOpen: typeof tab.assetPickerOpen === 'boolean' ? tab.assetPickerOpen : false,
-        assetPickerSearch: typeof tab.assetPickerSearch === 'string' ? tab.assetPickerSearch : '',
-        resultView: tab.resultView === 'vertical' || tab.resultView === 'object-meta' || tab.resultView === 'history' || tab.resultView === 'saved' ? tab.resultView : 'result',
-        objectMetaTab: tab.objectMetaTab === 'definition' ? 'definition' : 'columns',
-        columns: Array.isArray(tab.columns) ? tab.columns : [],
-        definition: tab.definition ?? null,
-        columnsLoading: typeof tab.columnsLoading === 'boolean' ? tab.columnsLoading : false,
-        definitionLoading: typeof tab.definitionLoading === 'boolean' ? tab.definitionLoading : false,
-        columnFilterOpen: typeof tab.columnFilterOpen === 'boolean' ? tab.columnFilterOpen : false,
-        visibleColumnIndexes: Array.isArray(tab.visibleColumnIndexes) ? tab.visibleColumnIndexes : null,
-        selectedSQL: typeof tab.selectedSQL === 'string' ? tab.selectedSQL : '',
-        sensitiveAccessDuration: typeof tab.sensitiveAccessDuration === 'number' ? tab.sensitiveAccessDuration : 10,
-        resultPage: typeof tab.resultPage === 'number' && tab.resultPage > 0 ? tab.resultPage : 1,
-        sql: typeof tab.sql === 'string' && tab.sql.trim() ? tab.sql : DEFAULT_SQL,
-        result: tab.result ?? null,
-        error: typeof tab.error === 'string' ? tab.error : '',
-        lastRunAt: typeof tab.lastRunAt === 'string' ? tab.lastRunAt : null,
-      })),
-    }
-  } catch {
-    return null
   }
 }
 
@@ -611,12 +592,13 @@ function AssetTree({
 
 export function SQLEditorPage() {
   const editorContainerRef = useRef<HTMLDivElement | null>(null)
+  const formatProfileRef = useRef<SQLFormatProfile | null>(null)
+  const formatProfileIDRef = useRef(0)
   const { user } = useAuth()
   const { pushToast } = useToast()
   const hasSensitiveOverride = Boolean(user?.permissions.includes('global.sensitive'))
   const canApplySensitiveAccess = Boolean(user?.permissions.includes('sql_editor.sensitive_apply'))
   const accessibleConnectionIDs = user?.dbConnectionIds ?? []
-  const storageKey = user ? `${STORAGE_PREFIX}.${user.id}` : `${STORAGE_PREFIX}.anonymous`
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [connectionsLoading, setConnectionsLoading] = useState(true)
   const [connectionsError, setConnectionsError] = useState('')
@@ -628,31 +610,6 @@ export function SQLEditorPage() {
   const [exportingTabId, setExportingTabId] = useState<string | null>(null)
   const [savedQueryToDelete, setSavedQueryToDelete] = useState<SavedQuery | null>(null)
   const [editorHeight, setEditorHeight] = useState(`${EDITOR_MIN_HEIGHT}px`)
-
-  useEffect(() => {
-    const restored = safeParseState(window.localStorage.getItem(storageKey))
-    if (!restored) {
-      const firstTab = createTab()
-      setTabs([firstTab])
-      setActiveTabId(firstTab.id)
-      return
-    }
-
-    setTabs(restored.tabs)
-    setActiveTabId(restored.activeTabId)
-  }, [storageKey])
-
-  useEffect(() => {
-    if (!tabs.length) {
-      return
-    }
-
-    const state: PersistedState = {
-      activeTabId,
-      tabs,
-    }
-    window.localStorage.setItem(storageKey, JSON.stringify(state))
-  }, [activeTabId, storageKey, tabs])
 
   useEffect(() => {
     let active = true
@@ -789,16 +746,32 @@ export function SQLEditorPage() {
 
   useEffect(() => {
     if (accessibleConnections.length === 0) {
-      setTabs((currentTabs) => currentTabs.map((tab) => (tab.connectionId === null ? tab : { ...tab, connectionId: null })))
+      setTabs((currentTabs) => {
+        let changed = false
+        const nextTabs = currentTabs.map((tab) => {
+          if (tab.connectionId === null) {
+            return tab
+          }
+          changed = true
+          return { ...tab, connectionId: null }
+        })
+        return changed ? nextTabs : currentTabs
+      })
       return
     }
 
     const accessibleIDSet = new Set(accessibleConnections.map((connection) => connection.id))
-    setTabs((currentTabs) => currentTabs.map((tab) => (
-      tab.connectionId !== null && !accessibleIDSet.has(tab.connectionId)
-        ? { ...tab, connectionId: null }
-        : tab
-    )))
+    setTabs((currentTabs) => {
+      let changed = false
+      const nextTabs = currentTabs.map((tab) => {
+        if (tab.connectionId !== null && !accessibleIDSet.has(tab.connectionId)) {
+          changed = true
+          return { ...tab, connectionId: null }
+        }
+        return tab
+      })
+      return changed ? nextTabs : currentTabs
+    })
   }, [accessibleConnections])
 
   useEffect(() => {
@@ -806,20 +779,30 @@ export function SQLEditorPage() {
       return
     }
 
+    const nextExplorerNodes = updateAssetTreeNode(
+      [createConnectionNode(activeConnection, activeConnection.id)],
+      `connection-${activeConnection.id}`,
+      (node) => node,
+    )
+
     updateActiveTabExplorerNodes((current) => {
       const existing = current[0]
       if (existing && existing.connectionId === activeConnection.id) {
         return current
       }
-      return [createConnectionNode(activeConnection, activeConnection.id)]
+      return nextExplorerNodes
     })
-    updateActiveTab({ searchTreeNodes: [] })
+    if (activeTab?.searchTreeNodes.length) {
+      updateActiveTab({ searchTreeNodes: [] })
+    }
   }, [activeConnection, activeTab?.id])
 
   useEffect(() => {
     const keyword = activeExplorerSearch.trim()
     if (!keyword || !activeConnection) {
-      updateActiveTab({ searchTreeNodes: [], searchingAssets: false })
+      if (activeTab?.searchTreeNodes.length || activeTab?.searchingAssets) {
+        updateActiveTab({ searchTreeNodes: [], searchingAssets: false })
+      }
       return
     }
 
@@ -926,35 +909,50 @@ export function SQLEditorPage() {
     }
   }, [activeConnection?.db_type, activeDatabase, activeSelectedTable, activeTab?.connectionId, activeTab?.id])
 
-  function updateActiveTab(patch: Partial<EditorTab>) {
+  const updateTabByID = useCallback((tabID: string, patch: Partial<EditorTab>) => {
+    setTabs((currentTabs) => currentTabs.map((tab) => {
+      if (tab.id !== tabID || !hasTabPatchChanges(tab, patch)) {
+        return tab
+      }
+      return { ...tab, ...patch }
+    }))
+  }, [])
+
+  const updateActiveTab = useCallback((patch: Partial<EditorTab>) => {
     if (!activeTab) {
       return
     }
 
-    setTabs((currentTabs) => currentTabs.map((tab) => (tab.id === activeTab.id ? { ...tab, ...patch } : tab)))
-  }
+    updateTabByID(activeTab.id, patch)
+  }, [activeTab, updateTabByID])
 
-  function updateTabByID(tabID: string, patch: Partial<EditorTab>) {
-    setTabs((currentTabs) => currentTabs.map((tab) => (tab.id === tabID ? { ...tab, ...patch } : tab)))
-  }
-
-  function updateActiveTabExplorerNodes(updater: (nodes: AssetTreeNode[]) => AssetTreeNode[]) {
-    if (!activeTab) {
-      return
-    }
-    setTabs((currentTabs) => currentTabs.map((tab) => (
-      tab.id === activeTab.id ? { ...tab, explorerNodes: updater(tab.explorerNodes) } : tab
-    )))
-  }
-
-  function updateActiveTabSearchTreeNodes(updater: (nodes: AssetTreeNode[]) => AssetTreeNode[]) {
+  const updateActiveTabExplorerNodes = useCallback((updater: (nodes: AssetTreeNode[]) => AssetTreeNode[]) => {
     if (!activeTab) {
       return
     }
     setTabs((currentTabs) => currentTabs.map((tab) => (
-      tab.id === activeTab.id ? { ...tab, searchTreeNodes: updater(tab.searchTreeNodes) } : tab
+      tab.id === activeTab.id
+        ? (() => {
+            const nextNodes = updater(tab.explorerNodes)
+            return nextNodes === tab.explorerNodes ? tab : { ...tab, explorerNodes: nextNodes }
+          })()
+        : tab
     )))
-  }
+  }, [activeTab])
+
+  const updateActiveTabSearchTreeNodes = useCallback((updater: (nodes: AssetTreeNode[]) => AssetTreeNode[]) => {
+    if (!activeTab) {
+      return
+    }
+    setTabs((currentTabs) => currentTabs.map((tab) => (
+      tab.id === activeTab.id
+        ? (() => {
+            const nextNodes = updater(tab.searchTreeNodes)
+            return nextNodes === tab.searchTreeNodes ? tab : { ...tab, searchTreeNodes: nextNodes }
+          })()
+        : tab
+    )))
+  }, [activeTab])
 
   async function loadNodeChildren(node: AssetTreeNode) {
     const connection = connections.find((item) => item.id === node.connectionId)
@@ -1163,16 +1161,53 @@ export function SQLEditorPage() {
     }
 
     try {
+      const startedAt = performance.now()
+      const formatterStartedAt = performance.now()
       const formatted = formatSQL(targetSQL, {
         language: getSQLFormatterDialect(activeConnection ?? null),
         keywordCase: 'upper',
       }).trimEnd()
+      const formatterMs = performance.now() - formatterStartedAt
       const nextSQL = selectedSQL
         ? replaceSelectedSQL(sourceSQL, activeSelectedSQL, formatted)
         : formatted
 
+      if (nextSQL === sourceSQL) {
+        logSQLFormatProfile('noop', {
+          tabID,
+          sourceLength: sourceSQL.length,
+          selectedLength: activeSelectedSQL.length,
+          targetLength: targetSQL.length,
+          formatterMs,
+        })
+        return
+      }
+
+      const profile: SQLFormatProfile = {
+        id: ++formatProfileIDRef.current,
+        tabID,
+        startedAt,
+        sourceLength: sourceSQL.length,
+        selectedLength: activeSelectedSQL.length,
+        targetLength: targetSQL.length,
+        nextLength: nextSQL.length,
+        formatterMs,
+        stateScheduleMs: performance.now() - startedAt,
+        expectedSQL: nextSQL,
+      }
+      formatProfileRef.current = profile
+      logSQLFormatProfile('scheduled', {
+        id: profile.id,
+        tabID,
+        sourceLength: profile.sourceLength,
+        selectedLength: profile.selectedLength,
+        targetLength: profile.targetLength,
+        nextLength: profile.nextLength,
+        formatterMs: Number(profile.formatterMs.toFixed(2)),
+        stateScheduleMs: Number((profile.stateScheduleMs ?? 0).toFixed(2)),
+      })
+
       updateTabByID(tabID, { sql: nextSQL, error: '', selectedSQL: '' })
-      pushToast('SQL formatted.', 'success')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'SQL formatting failed.'
       pushToast(message, 'error')
@@ -1262,7 +1297,7 @@ export function SQLEditorPage() {
     pushToast('Saved query added.', 'success')
   }
 
-  function applySavedQuery(entry: { connectionId: number; sql: string; label: string; database?: string | null; schema?: string | null; redisDbIndex?: number | null }) {
+  const applySavedQuery = useCallback((entry: { connectionId: number; sql: string; label: string; database?: string | null; schema?: string | null; redisDbIndex?: number | null }) => {
     if (!activeTab) {
       return
     }
@@ -1289,7 +1324,7 @@ export function SQLEditorPage() {
         selectedTable: null,
       })
     }
-  }
+  }, [activeTab, updateActiveTab])
 
   const isFavorited = !!(activeTab && savedQueries.some((item) =>
     item.db_connection_id === activeTab.connectionId &&
@@ -1299,9 +1334,15 @@ export function SQLEditorPage() {
     (item.redis_db_index ?? null) === (activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : null),
   ))
   const editorExtensions = useMemo(
-    () => [activeTab && accessibleConnections.find((connection) => connection.id === activeTab.connectionId)?.db_type === 'redis' ? javascript() : sql()],
-    [activeTab, accessibleConnections],
+    () => (activeConnection?.db_type === 'redis' ? REDIS_EDITOR_EXTENSIONS : SQL_EDITOR_EXTENSIONS),
+    [activeConnection?.db_type],
   )
+  const handleEditorChange = useCallback((value: string) => {
+    updateActiveTab({ sql: value })
+  }, [updateActiveTab])
+  const handleEditorStatistics = useCallback((stats: { selectedText: boolean; selectionCode: string }) => {
+    updateActiveTab({ selectedSQL: stats.selectedText ? stats.selectionCode : '' })
+  }, [updateActiveTab])
   const visibleResultColumnIndexes = useMemo(() => {
     if (!activeTab?.result) {
       return []
@@ -1486,13 +1527,47 @@ export function SQLEditorPage() {
   }, [activeResultPage, activeResultView, activeTab?.id, activeTab?.result, totalResultPages, activeVisibleColumnIndexes])
 
   useLayoutEffect(() => {
-    const updateHeight = () => {
+    const profile = formatProfileRef.current
+    const isPendingFormatProfile = Boolean(
+      profile &&
+      activeTab?.id === profile.tabID &&
+      (activeTab?.sql ?? DEFAULT_SQL) === profile.expectedSQL,
+    )
+
+    const updateHeight = (stage: 'layout' | 'raf') => {
+      const measureStartedAt = performance.now()
       const nextHeight = measureEditorHeight(editorContainerRef.current, activeTab?.sql ?? DEFAULT_SQL)
       setEditorHeight(`${nextHeight}px`)
+      const measureMs = performance.now() - measureStartedAt
+
+      if (profile && isPendingFormatProfile) {
+        if (stage === 'layout') {
+          profile.layoutMeasureMs = measureMs
+          logSQLFormatProfile('layout', {
+            id: profile.id,
+            tabID: profile.tabID,
+            layoutMeasureMs: Number(measureMs.toFixed(2)),
+            elapsedMs: Number((performance.now() - profile.startedAt).toFixed(2)),
+          })
+        } else {
+          profile.rafMeasureMs = measureMs
+          profile.totalMs = performance.now() - profile.startedAt
+          logSQLFormatProfile('paint', {
+            id: profile.id,
+            tabID: profile.tabID,
+            rafMeasureMs: Number(measureMs.toFixed(2)),
+            totalMs: Number((profile.totalMs ?? 0).toFixed(2)),
+            formatterMs: Number(profile.formatterMs.toFixed(2)),
+            stateScheduleMs: Number((profile.stateScheduleMs ?? 0).toFixed(2)),
+            layoutMeasureMs: Number((profile.layoutMeasureMs ?? 0).toFixed(2)),
+          })
+          formatProfileRef.current = null
+        }
+      }
     }
 
-    updateHeight()
-    const frameID = window.requestAnimationFrame(updateHeight)
+    updateHeight('layout')
+    const frameID = window.requestAnimationFrame(() => updateHeight('raf'))
 
     return () => {
       window.cancelAnimationFrame(frameID)
@@ -1511,7 +1586,7 @@ export function SQLEditorPage() {
     }
   }
 
-  function toggleVisibleColumn(index: number) {
+  const toggleVisibleColumn = useCallback((index: number) => {
     const base = activeVisibleColumnIndexes ?? activeTab?.result?.columns.map((_, columnIndex) => columnIndex) ?? []
     let next: number[]
     if (base.includes(index)) {
@@ -1520,7 +1595,7 @@ export function SQLEditorPage() {
       next = [...base, index].sort((left, right) => left - right)
     }
     updateActiveTab({ visibleColumnIndexes: next })
-  }
+  }, [activeTab?.result?.columns, activeVisibleColumnIndexes, updateActiveTab])
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
@@ -1725,14 +1800,10 @@ export function SQLEditorPage() {
                     value={activeTab.sql}
                     height={editorHeight}
                     extensions={editorExtensions}
-                    onChange={(value) => updateActiveTab({ sql: value })}
-                    onStatistics={(stats) => updateActiveTab({ selectedSQL: stats.selectedText ? stats.selectionCode : '' })}
+                    onChange={handleEditorChange}
+                    onStatistics={handleEditorStatistics}
                     theme="light"
-                    basicSetup={{
-                      lineNumbers: true,
-                      foldGutter: false,
-                      highlightActiveLine: false,
-                    }}
+                    basicSetup={SQL_EDITOR_BASIC_SETUP}
                   />
                 </div>
               </div>
