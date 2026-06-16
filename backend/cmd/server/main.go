@@ -117,7 +117,7 @@ func main() {
 	auditH := handler.NewAuditHandler(auditRepo)
 	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
 	sqlReviewRuleH := handler.NewSQLReviewRuleHandler(sqlReviewRuleRepo, auditRepo)
-	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, settingsRepo, maskingEngine, whitelistRepo, notifRepo, larkDispatcher)
+	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, settingsRepo, maskingEngine, whitelistRepo, notifRepo, larkDispatcher, cfg.AppBaseURL)
 	userH := handler.NewUserHandler(userRepo, authGroupRepo, sessionRepo, auditRepo, dbConnRepo)
 	metadataH := handler.NewMetadataHandler(dbConnRepo, userRepo)
 	authGroupH := handler.NewAuthGroupHandler(authGroupRepo, userRepo, auditRepo)

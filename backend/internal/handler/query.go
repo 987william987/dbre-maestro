@@ -68,6 +68,7 @@ type QueryHandler struct {
 	masking      *maskingRuntime
 	notifRepo    *repository.NotificationRepo
 	lark         *notification.Dispatcher
+	appBaseURL   string
 }
 
 type queryExecutionContext struct {
@@ -88,6 +89,7 @@ func NewQueryHandler(
 	whitelist *repository.MaskingWhitelistRepo,
 	notifRepo *repository.NotificationRepo,
 	lark *notification.Dispatcher,
+	appBaseURL string,
 ) *QueryHandler {
 	return &QueryHandler{
 		dbConns:      dbConns,
@@ -100,6 +102,7 @@ func NewQueryHandler(
 		masking:      newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:    notifRepo,
 		lark:         lark,
+		appBaseURL:   strings.TrimRight(appBaseURL, "/"),
 	}
 }
 
@@ -148,7 +151,15 @@ func (h *QueryHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, ti
 	}
 }
 
-func (h *QueryHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body string) {
+func (h *QueryHandler) ticketLink(ticketID uint64) string {
+	path := fmt.Sprintf("/tickets/%d", ticketID)
+	if h.appBaseURL == "" {
+		return path
+	}
+	return h.appBaseURL + path
+}
+
+func (h *QueryHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body, ticketNo string) {
 	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorSensitiveRev})
 	if err != nil {
 		return
@@ -158,7 +169,7 @@ func (h *QueryHandler) notifyReviewers(ctx context.Context, ticketID, submitterI
 			continue
 		}
 		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticketID)
-		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body, "")
+		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body, ticketNo)
 	}
 }
 
@@ -378,6 +389,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		SQLContent:              req.SQLContent,
 		TicketType:              model.TicketTypeSensitiveQueryAccess,
 		DBConnectionID:          &req.DBConnectionID,
+		DatabaseName:            optionalTrimmedString(req.DatabaseName),
 		SubmitterID:             userID,
 		ApprovedDurationMinutes: &req.ApprovedDurationMinutes,
 	}, analysis.Scopes)
@@ -400,10 +412,15 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		},
 		IPAddress: clientIP(r),
 	})
-	body := fmt.Sprintf("工單 %s 已提交，等待敏感查詢審核", ticket.TicketNo)
-	h.sendInApp(r.Context(), userID, "ticket_submitted", "Sensitive Access 工單已建立", body, "ticket", ticket.ID)
-	h.notifyLarkUsers(r.Context(), []uint64{userID}, "Sensitive Access 工單已建立", body, ticket.TicketNo)
-	h.notifyReviewers(r.Context(), ticket.ID, userID, "新的 Sensitive Access 工單待審核", body)
+	body := buildTicketNotificationBody(
+		ticket,
+		&conn.Name,
+		exportTicketStateLabel(model.TicketStatusPendingReview),
+		"請審核是否通過此工單",
+		"提交人已送出工單，等待 reviewer 處理。",
+		h.ticketLink(ticket.ID),
+	)
+	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":   ticket.ID,
