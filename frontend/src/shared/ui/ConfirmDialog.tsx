@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { cn } from '@/lib/utils'
 
 type ConfirmDialogProps = {
   open: boolean
@@ -9,6 +10,7 @@ type ConfirmDialogProps = {
   cancelLabel?: string
   tone?: 'default' | 'danger'
   loading?: boolean
+  panelClassName?: string
   onConfirm: () => void
   onCancel: () => void
 }
@@ -21,6 +23,7 @@ export function ConfirmDialog({
   cancelLabel = 'Cancel',
   tone = 'default',
   loading = false,
+  panelClassName,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -30,7 +33,7 @@ export function ConfirmDialog({
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4">
-      <div className="w-full max-w-md rounded-card border border-border bg-panel p-5 shadow-card">
+      <div className={cn('w-full max-w-md rounded-card border border-border bg-panel p-5 shadow-card', panelClassName)}>
         <h3 className="font-display text-xl font-black tracking-tight text-ink">{title}</h3>
         <div className="mt-2 text-sm text-muted">{description}</div>
         <div className="mt-5 flex justify-end gap-2">

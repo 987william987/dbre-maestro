@@ -99,6 +99,19 @@ type AssetTreeNode = {
   children: AssetTreeNode[]
 }
 
+type QueryRequestConfirmState = {
+  kind: 'export' | 'sensitive-access'
+  tabID: string
+  connectionId: number
+  connectionName: string
+  connectionType: string
+  database: string
+  schema: string
+  tableName: string
+  sql: string
+  sensitiveAccessDuration: number
+}
+
 const DEFAULT_SQL = 'SELECT 1;'
 const HISTORY_LIMIT = 20
 const SAVED_QUERY_LIMIT = 10
@@ -608,7 +621,9 @@ export function SQLEditorPage() {
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
   const [runningTabIDs, setRunningTabIDs] = useState<string[]>([])
   const [exportingTabIDs, setExportingTabIDs] = useState<string[]>([])
+  const [sensitiveAccessTabIDs, setSensitiveAccessTabIDs] = useState<string[]>([])
   const [savedQueryToDelete, setSavedQueryToDelete] = useState<SavedQuery | null>(null)
+  const [requestConfirmState, setRequestConfirmState] = useState<QueryRequestConfirmState | null>(null)
   const [editorHeights, setEditorHeights] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -733,7 +748,13 @@ export function SQLEditorPage() {
   }, [accessibleConnections, activeAssetPickerSearch])
   const activeTabRunning = activeTab ? runningTabIDs.includes(activeTab.id) : false
   const activeTabExporting = activeTab ? exportingTabIDs.includes(activeTab.id) : false
+  const activeTabCreatingSensitiveAccess = activeTab ? sensitiveAccessTabIDs.includes(activeTab.id) : false
   const activeEditorHeight = activeTab ? (editorHeights[activeTab.id] ?? `${EDITOR_MIN_HEIGHT}px`) : `${EDITOR_MIN_HEIGHT}px`
+  const requestConfirmLoading = requestConfirmState
+    ? requestConfirmState.kind === 'export'
+      ? exportingTabIDs.includes(requestConfirmState.tabID)
+      : sensitiveAccessTabIDs.includes(requestConfirmState.tabID)
+    : false
 
   useEffect(() => {
     if (accessibleConnections.length === 0) {
@@ -1209,48 +1230,96 @@ export function SQLEditorPage() {
     }
   }
 
-  async function handleExport() {
-    if (!activeTab?.connectionId || !activeExecutionSQL) {
-      return
+  function buildRequestConfirmState(kind: QueryRequestConfirmState['kind']): QueryRequestConfirmState | null {
+    if (!activeTab?.connectionId || !activeExecutionSQL || !activeConnection) {
+      return null
     }
 
-    const tabID = activeTab.id
-    setExportingTabIDs((current) => (current.includes(tabID) ? current : [...current, tabID]))
-    try {
-      const response = await createExportRequest({
-        db_connection_id: activeTab.connectionId,
-        sql_content: activeExecutionSQL,
-        database_name: activeDatabase || undefined,
-        schema_name: activeConnection?.db_type === 'postgres' ? activeSchema || undefined : undefined,
-      })
-      pushToast(`Export ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
-    } catch (error) {
-      pushToast(error instanceof ApiError ? error.message : 'Failed to create export request.', 'error')
-    } finally {
-      setExportingTabIDs((current) => current.filter((id) => id !== tabID))
+    return {
+      kind,
+      tabID: activeTab.id,
+      connectionId: activeTab.connectionId,
+      connectionName: activeConnection.name,
+      connectionType: activeConnection.db_type,
+      database: activeDatabase,
+      schema: activeSchema,
+      tableName: activeSelectedTable?.name ?? '',
+      sql: activeExecutionSQL,
+      sensitiveAccessDuration: activeSensitiveAccessDuration,
     }
   }
 
-  async function handleCreateSensitiveAccess() {
-    if (!activeTab?.connectionId || !activeExecutionSQL) {
+  function openExportConfirm() {
+    const state = buildRequestConfirmState('export')
+    if (!state) {
       return
     }
+    setRequestConfirmState(state)
+  }
+
+  function openSensitiveAccessConfirm() {
     if (activeConnection?.db_type !== 'mysql') {
       pushToast('Sensitive Access currently supports MySQL only.', 'info', { placement: 'center' })
       return
     }
 
+    const state = buildRequestConfirmState('sensitive-access')
+    if (!state) {
+      return
+    }
+    setRequestConfirmState(state)
+  }
+
+  async function handleConfirmRequest() {
+    if (!requestConfirmState) {
+      return
+    }
+
+    const {
+      kind,
+      tabID,
+      connectionId,
+      connectionType,
+      sql,
+      database,
+      schema,
+      sensitiveAccessDuration,
+    } = requestConfirmState
+
+    if (kind === 'export') {
+      setExportingTabIDs((current) => (current.includes(tabID) ? current : [...current, tabID]))
+      try {
+        const response = await createExportRequest({
+          db_connection_id: connectionId,
+          sql_content: sql,
+          database_name: database || undefined,
+          schema_name: connectionType === 'postgres' ? schema || undefined : undefined,
+        })
+        pushToast(`Export ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
+        setRequestConfirmState(null)
+      } catch (error) {
+        pushToast(error instanceof ApiError ? error.message : 'Failed to create export request.', 'error')
+      } finally {
+        setExportingTabIDs((current) => current.filter((id) => id !== tabID))
+      }
+      return
+    }
+
+    setSensitiveAccessTabIDs((current) => (current.includes(tabID) ? current : [...current, tabID]))
     try {
       const response = await createSensitiveAccessTicket({
-        db_connection_id: activeTab.connectionId,
-        sql_content: activeExecutionSQL,
-        database_name: activeDatabase || undefined,
-        schema_name: activeSchema || undefined,
-        approved_duration_minutes: activeSensitiveAccessDuration,
+        db_connection_id: connectionId,
+        sql_content: sql,
+        database_name: database || undefined,
+        schema_name: schema || undefined,
+        approved_duration_minutes: sensitiveAccessDuration,
       })
       pushToast(`Sensitive Access ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
+      setRequestConfirmState(null)
     } catch (error) {
       pushToast(error instanceof ApiError ? error.message : 'Failed to create Sensitive Access ticket.', 'error')
+    } finally {
+      setSensitiveAccessTabIDs((current) => current.filter((id) => id !== tabID))
     }
   }
 
@@ -1895,11 +1964,11 @@ export function SQLEditorPage() {
                       />
                       <button
                         type="button"
-                        onClick={() => void handleCreateSensitiveAccess()}
-                        disabled={!canApplySensitiveAccess || !activeTab.connectionId || !activeExecutionSQL}
+                        onClick={openSensitiveAccessConfirm}
+                        disabled={!canApplySensitiveAccess || activeTabCreatingSensitiveAccess || !activeTab.connectionId || !activeExecutionSQL}
                         className="inline-flex h-9 items-center gap-2 px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        Sensitive Access
+                        {activeTabCreatingSensitiveAccess ? 'Submitting...' : 'Sensitive Access'}
                       </button>
                     </div>
                     <div className="relative">
@@ -1944,7 +2013,7 @@ export function SQLEditorPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => void handleExport()}
+                      onClick={openExportConfirm}
                       disabled={activeTabExporting || !activeTab.connectionId || !activeExecutionSQL}
                       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
@@ -2198,6 +2267,59 @@ export function SQLEditorPage() {
           </section>
         </div>
       </section>
+      <ConfirmDialog
+        open={requestConfirmState !== null}
+        title={requestConfirmState?.kind === 'sensitive-access' ? 'Confirm Sensitive Access Request' : 'Confirm Export Request'}
+        description={requestConfirmState ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border bg-white/80 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">Asset Context</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <div>
+                  <p className="text-[11px] font-semibold text-faint">Connection</p>
+                  <p className="mt-1 text-[13px] font-semibold text-ink">{requestConfirmState.connectionName}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-faint">Type</p>
+                  <p className="mt-1 text-[13px] font-semibold uppercase text-ink">{requestConfirmState.connectionType}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-faint">Database</p>
+                  <p className="mt-1 text-[13px] text-ink">{requestConfirmState.database || 'Not selected'}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-faint">Schema</p>
+                  <p className="mt-1 text-[13px] text-ink">{requestConfirmState.schema || 'Not selected'}</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <p className="text-[11px] font-semibold text-faint">Selected Table</p>
+                  <p className="mt-1 text-[13px] text-ink">{requestConfirmState.tableName || 'No table selected in asset tree'}</p>
+                </div>
+                {requestConfirmState.kind === 'sensitive-access' ? (
+                  <div className="sm:col-span-2">
+                    <p className="text-[11px] font-semibold text-faint">Requested Access Duration</p>
+                    <p className="mt-1 text-[13px] text-ink">{requestConfirmState.sensitiveAccessDuration} minutes</p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <div className="rounded-xl border border-border bg-slate-950 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">SQL To Submit</p>
+              <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-all font-mono text-[12px] leading-5 text-slate-100">
+                {requestConfirmState.sql}
+              </pre>
+            </div>
+          </div>
+        ) : null}
+        confirmLabel={requestConfirmState?.kind === 'sensitive-access' ? 'Confirm and Submit' : 'Confirm and Export'}
+        cancelLabel="Cancel"
+        loading={requestConfirmLoading}
+        panelClassName="max-w-3xl"
+        onCancel={() => setRequestConfirmState(null)}
+        onConfirm={() => {
+          void handleConfirmRequest()
+        }}
+      />
       <ConfirmDialog
         open={savedQueryToDelete !== null}
         title="Delete Saved Query"

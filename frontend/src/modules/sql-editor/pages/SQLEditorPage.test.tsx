@@ -62,7 +62,7 @@ vi.mock('@/modules/exports/api', () => ({
 }))
 
 import { createExportRequest } from '@/modules/exports/api'
-import { createSavedQuery, deleteSavedQuery, executeQuery, listMetadata, listMetadataColumns, listMetadataDefinition, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
+import { createSavedQuery, createSensitiveAccessTicket, deleteSavedQuery, executeQuery, listMetadata, listMetadataColumns, listMetadataDefinition, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 
 const mockedListQueryConnections = vi.mocked(listQueryConnections)
@@ -75,6 +75,7 @@ const mockedListSavedQueries = vi.mocked(listSavedQueries)
 const mockedCreateSavedQuery = vi.mocked(createSavedQuery)
 const mockedDeleteSavedQuery = vi.mocked(deleteSavedQuery)
 const mockedCreateExportRequest = vi.mocked(createExportRequest)
+const mockedCreateSensitiveAccessTicket = vi.mocked(createSensitiveAccessTicket)
 const mockedUseAuth = vi.mocked(useAuth)
 const storage = new Map<string, string>()
 
@@ -230,7 +231,7 @@ describe('SQLEditorPage', () => {
     expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT 1;')
   })
 
-  it('執行查詢後會顯示結果並可建立匯出請求', async () => {
+  it('執行查詢後會先顯示匯出確認窗，確認後才建立匯出請求', async () => {
     mockedExecuteQuery.mockResolvedValue({
       columns: ['id', 'title'],
       raw_columns: ['id', 'title'],
@@ -273,12 +274,88 @@ describe('SQLEditorPage', () => {
 
     fireEvent.click(screen.getByText('EXPORT'))
 
+    expect(screen.getByText('Confirm Export Request')).toBeInTheDocument()
+    expect(screen.getByText('Asset Context')).toBeInTheDocument()
+    expect(screen.getAllByText('Primary MySQL').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('SELECT 1;').length).toBeGreaterThan(0)
+    expect(mockedCreateExportRequest).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and Export' }))
+
     await waitFor(() => {
       expect(mockedCreateExportRequest).toHaveBeenCalledWith({
         db_connection_id: 1,
         sql_content: 'SELECT 1;',
         database_name: undefined,
         schema_name: undefined,
+      })
+    })
+  })
+
+  it('Sensitive Access 會先顯示確認窗，確認後才建立工單', async () => {
+    mockedUseAuth.mockReturnValue({
+      user: {
+        id: 7,
+        username: 'admin',
+        authGroups: ['admin'],
+        authGroupDetails: [],
+        permissions: ['sql_editor.sensitive_apply'],
+        dbConnectionIds: [1],
+        protected: false,
+        isActive: true,
+      },
+      status: 'authenticated',
+      isAuthenticated: true,
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedExecuteQuery.mockResolvedValue({
+      columns: ['id'],
+      raw_columns: ['id'],
+      sensitive_column_indexes: [],
+      rows: [[1]],
+      row_count: 1,
+      duration_ms: 12,
+    })
+    mockedCreateSensitiveAccessTicket.mockResolvedValue({
+      ticket_id: 11,
+      ticket_no: 'T-011',
+      status: 'pending_review',
+      scope_count: 1,
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(screen.getByText('Run Query'))
+    expect(await screen.findByText('1 rows / 12 ms')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sensitive Access' }))
+
+    expect(screen.getByText('Confirm Sensitive Access Request')).toBeInTheDocument()
+    expect(screen.getByText('Requested Access Duration')).toBeInTheDocument()
+    expect(screen.getByText('10 minutes')).toBeInTheDocument()
+    expect(mockedCreateSensitiveAccessTicket).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and Submit' }))
+
+    await waitFor(() => {
+      expect(mockedCreateSensitiveAccessTicket).toHaveBeenCalledWith({
+        db_connection_id: 1,
+        sql_content: 'SELECT 1;',
+        database_name: undefined,
+        schema_name: undefined,
+        approved_duration_minutes: 10,
       })
     })
   })

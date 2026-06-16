@@ -6,3 +6,4 @@ bin/
 backend/vendor/
 .gstack/
 .claude/
+frontend/node_modules/
