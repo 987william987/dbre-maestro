@@ -33,7 +33,7 @@
 |---|---|---|
 | `PORT` | App 服務 port | `8080` |
 | `MIGRATION_DSN` | migration 專用 DSN | 若未指定，跟 app DSN 同邏輯 |
-| `LARK_WEBHOOK_URL` | 工單通知 webhook | 空值代表停用 |
+| `LARK_WEBHOOK_URL` | Lark webhook fallback | 僅在未配置 Settings 內的 Lark App 時使用 |
 | `AWS_PROFILE` | DB metadata inventory 使用的 AWS profile | `default` |
 | `AWS_SDK_LOAD_CONFIG` | 啟用 shared config | Compose 預設 `1` |
 
@@ -107,6 +107,8 @@
 | `sql_editor_app_timeout_seconds` | `30` | SQL Editor `/api/query` app timeout |
 | `sql_editor_mysql_max_execution_time_ms` | `25000` | MySQL session `max_execution_time` |
 | `sql_editor_postgres_statement_timeout_ms` | `25000` | PostgreSQL session `statement_timeout` |
+| `lark_app_id` | `""` | Lark App ID |
+| `lark_app_secret` | `""` | Lark App Secret，加密保存且不會回填明文 |
 | `db_metadata_inventory_enabled` | `true` | 是否啟用 inventory scan |
 | `db_metadata_inventory_regions` | `[]` | AWS 掃描 region 清單 |
 | `db_metadata_inventory_engines` | `aurora-mysql, aurora-postgresql, redis` | engine 篩選 |
@@ -124,6 +126,18 @@
 3. 執行 `make dev`
 
 Compose 會把 `${HOME}/.aws` 掛到 container，因此 app 可以沿用本機 profile。
+
+## Lark 通知設定建議
+
+Lark 通知目前有兩種來源，優先順序如下：
+
+1. `Settings` 頁的 `Lark App ID` + `Lark App Secret`
+2. process env `LARK_WEBHOOK_URL` fallback
+
+建議：
+
+- 正式環境優先使用 `Settings` 頁的 App 模式，才能定向通知 submitter、reviewer、executor
+- `LARK_WEBHOOK_URL` 保留作相容或過渡用途；它只能做 webhook 廣播，無法依使用者定向送達
 
 ## 範例
 

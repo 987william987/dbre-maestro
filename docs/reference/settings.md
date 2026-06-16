@@ -10,11 +10,31 @@
 
 ## 功能分區
 
-目前 Settings 頁分三塊：
+目前 Settings 頁分四塊：
 
+- Lark Notifications
 - SQL Editor Timeout
 - Inventory Scan
 - Object Scan
+
+## Lark Notifications
+
+這一區用來配置工單相關的 Lark 通知，不是站內信設定。
+
+| 欄位 | 對應 key | 用途 |
+|---|---|---|
+| Lark App ID | `lark_app_id` | Lark app 憑證 ID |
+| Lark App Secret | `lark_app_secret` | Lark app 憑證 secret，寫入時會加密保存 |
+
+重點：
+
+- 平台目前使用 `users.email` 作為 Lark 收件人識別
+- `App Secret` 不會明文回填到前端；若已配置，畫面只會顯示已配置狀態
+- 第一次配置時，`Lark App ID` 與 `Lark App Secret` 必須一起提供
+- 後續若只修改其他 Settings，可將 `App Secret` 留白，系統會保留既有 secret
+- 若未配置 App 模式，但 process env 有 `LARK_WEBHOOK_URL`，後端仍會 fallback 使用 webhook 模式
+
+目前會收到 Lark 通知的對象以工單流程為主，包含 submitter、reviewer、executor 等角色的狀態更新。
 
 ## SQL Editor Timeout
 
@@ -63,11 +83,13 @@ Object scan 只會對被勾選的 DB connections 生效。
 
 ### `PATCH /api/settings`
 
-用於寫回 SQL Editor timeout 與 metadata scan 設定。
+用於寫回 Lark、SQL Editor timeout 與 metadata scan 設定。
 
 ## 資料持久化
 
 Settings 存在 Meta DB 的 `platform_settings` 表中，由 `SettingsRepo` 做讀寫。
+
+其中 `lark_app_secret` 會先經過 AES-GCM 加密後再寫入 `platform_settings.value`。
 
 缺省值若資料庫未設定，會由後端在讀取時補上預設值。
 
