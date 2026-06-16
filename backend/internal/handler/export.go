@@ -157,12 +157,8 @@ func (h *ExportHandler) ticketLink(ticketID uint64) string {
 	return h.appBaseURL + path
 }
 
-func exportPendingReviewTitle(ticketNo string) string {
-	trimmed := strings.TrimSpace(ticketNo)
-	if trimmed == "" {
-		return "[工單待審核]"
-	}
-	return fmt.Sprintf("[工單待審核] 工單 %s", trimmed)
+func exportPendingReviewTitle() string {
+	return "工單待審核"
 }
 
 func (h *ExportHandler) loadTicketNotificationContext(ctx context.Context, ticket *model.Ticket) *string {
@@ -176,11 +172,11 @@ func (h *ExportHandler) loadTicketNotificationContext(ctx context.Context, ticke
 	return &conn.Name
 }
 
-func (h *ExportHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body string) {
+func (h *ExportHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body, ticketNo string) {
 	if h.lark == nil || len(userIDs) == 0 {
 		return
 	}
-	result := h.lark.NotifyUsers(ctx, userIDs, notification.Message{Title: title, Body: body})
+	result := h.lark.NotifyUsers(ctx, userIDs, notification.Message{Title: title, Body: body, TicketNo: ticketNo})
 	if result.Err != nil {
 		h.audit.Log(ctx, repository.AuditEntry{
 			ActionType: "notification_failure",
@@ -196,7 +192,7 @@ func (h *ExportHandler) sendInApp(ctx context.Context, userID uint64, notifType,
 	_ = h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
 }
 
-func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body string) {
+func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body, ticketNo string) {
 	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorExportReview})
 	if err != nil {
 		return
@@ -206,7 +202,7 @@ func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitter
 			continue
 		}
 		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticketID)
-		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body)
+		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body, ticketNo)
 	}
 }
 
@@ -290,7 +286,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.ticketLink(ticket.ID),
 	)
 	h.sendInApp(r.Context(), userID, "ticket_submitted", fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
-	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(ticket.TicketNo), body)
+	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":          ticket.ID,
@@ -356,7 +352,7 @@ func (h *ExportHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	})
 
 	approveBody := fmt.Sprintf("Export request #%d was approved. Please download it before it expires.", id)
-	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已通過", approveBody)
+	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已通過", approveBody, "")
 	h.sendInApp(r.Context(), req.RequesterID, "export_approved", "導出申請已通過", approveBody, "export", id)
 
 	jsonOK(w, map[string]any{
@@ -401,7 +397,7 @@ func (h *ExportHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	})
 
 	rejectBody := fmt.Sprintf("Export request #%d was rejected.", id)
-	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已拒絕", rejectBody)
+	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已拒絕", rejectBody, "")
 	h.sendInApp(r.Context(), req.RequesterID, "export_rejected", "導出申請已拒絕", rejectBody, "export", id)
 
 	w.WriteHeader(http.StatusNoContent)

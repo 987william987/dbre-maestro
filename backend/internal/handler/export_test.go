@@ -84,9 +84,9 @@ func TestBuildTicketNotificationBodyIncludesExportContext(t *testing.T) {
 	}
 }
 
-func TestExportPendingReviewTitleIncludesTicketNumber(t *testing.T) {
-	got := exportPendingReviewTitle("TK-20260616-151459000-038A8E")
-	want := "[工單待審核] 工單 TK-20260616-151459000-038A8E"
+func TestExportPendingReviewTitle(t *testing.T) {
+	got := exportPendingReviewTitle()
+	want := "工單待審核"
 	if got != want {
 		t.Fatalf("exportPendingReviewTitle() = %q, want %q", got, want)
 	}
