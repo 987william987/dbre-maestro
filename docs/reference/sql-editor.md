@@ -1,0 +1,208 @@
+# SQL Editor
+
+SQL Editor 是平台上的受控查詢工作區，用於 MySQL、PostgreSQL 與 Redis 的讀取場景。
+
+## 功能定位
+
+- 用於查詢資料，不是通用變更 console
+- 單一 tab 代表一個獨立工作區
+- 支援資產樹瀏覽、查詢、格式化、Explain、歷史、收藏、匯出申請與 Sensitive Access 申請
+
+## 頁面入口
+
+- Route：`/sql-editor`
+- 前端 route guard：`sql_editor.query`
+- 主要 API namespace：`/api/query`
+
+## Tab 工作區狀態
+
+每個 tab 都維護自己的狀態，至少包括：
+
+- 已選資料源 `connectionId`
+- 目標 `database` / `schema`
+- SQL 內容與滑鼠選取片段
+- 資產樹展開狀態與搜尋狀態
+- 查詢結果與錯誤訊息
+- Result view 模式
+- Columns / Definition 詳情
+- Sensitive access duration
+- 分頁頁碼
+
+重新整理頁面或重新登入後，SQL Editor 會重置成單一預設 tab，SQL 內容回到 `SELECT 1;`。
+
+## 支援資料庫類型
+
+| DB Type | 支援項目 |
+|---|---|
+| MySQL | 查詢、metadata、Explain、export、sensitive access |
+| PostgreSQL | 查詢、metadata、Explain、export、sensitive access |
+| Redis | 查詢與部分 metadata / DB index 工作流，無 SQL formatter 語意保證 |
+
+## 查詢限制
+
+### Statement 規則
+
+- 一次只允許單一 statement
+- 只允許唯讀查詢類型
+- `Explain` 也只支援單一 statement
+- 若使用者有選取片段，功能會優先作用在選取 SQL
+
+### Query Timeout
+
+SQL Editor 查詢受三層限制：
+
+| 層級 | 來源 | 預設 |
+|---|---|---|
+| App timeout | `sql_editor_app_timeout_seconds` | `30s` |
+| MySQL session timeout | `sql_editor_mysql_max_execution_time_ms` | `25000ms` |
+| PostgreSQL session timeout | `sql_editor_postgres_statement_timeout_ms` | `25000ms` |
+
+這三個值都由 Settings 頁面控制，而且只作用於 SQL Editor `/api/query`。
+
+## Connection / Pool
+
+SQL Editor 走 `query` pool profile。預設值：
+
+| 參數 | 預設 |
+|---|---|
+| `MaxOpenConns` | `10` |
+| `MaxIdleConns` | `5` |
+| `ConnMaxLifetime` | `5m` |
+| `ConnMaxIdleTime` | `2m` |
+
+## API / Interface
+
+### `GET /api/query/connections`
+
+回傳目前使用者可用的 DB connections。結果已受 DB Scope 過濾。
+
+### `POST /api/query`
+
+請求欄位：
+
+| 欄位 | 型別 | 必填 | 說明 |
+|---|---|---|---|
+| `db_connection_id` | `number` | 是 | 目標資料源 |
+| `sql` | `string` | 是 | 單一查詢 statement |
+| `limit` | `number` | 否 | 結果限制 |
+| `database` | `string` | 否 | 目標 database |
+| `schema` | `string` | 否 | PostgreSQL schema |
+| `redis_db_index` | `number` | 否 | Redis DB index |
+
+回應重點：
+
+- `columns`
+- `raw_columns`
+- `rows`
+- `row_count`
+- `duration_ms`
+- `sensitive_column_indexes`
+
+### `POST /api/query/sensitive-access`
+
+建立 `sensitive_query_access` 工單。
+
+請求欄位：
+
+| 欄位 | 型別 |
+|---|---|
+| `db_connection_id` | `number` |
+| `sql_content` | `string` |
+| `database_name` | `string` |
+| `schema_name` | `string` |
+| `approved_duration_minutes` | `number` |
+
+### Saved Query / History
+
+| API | 用途 |
+|---|---|
+| `GET /api/query/history` | 最近查詢歷史 |
+| `GET /api/query/saved-queries` | 常用 SQL 列表 |
+| `POST /api/query/saved-queries` | 新增收藏 |
+| `DELETE /api/query/saved-queries/{id}` | 刪除收藏 |
+
+## Metadata Explorer
+
+SQL Editor 左側資產樹使用：
+
+- `GET /api/db-connections/{id}/metadata`
+- `GET /api/db-connections/{id}/metadata/{schema}/{table}/columns`
+- `GET /api/db-connections/{id}/metadata/{schema}/{table}/definition`
+
+錯誤策略：
+
+- metadata 讀取失敗時，前端只顯示暫時錯誤訊息
+- 實際錯誤細節應寫入後端日誌
+- 不應把原始錯誤直接灌滿整棵資產樹
+
+## Format / Explain
+
+### Format
+
+- 前端使用 `sql-formatter`
+- Dialect 依資料源決定：MySQL 用 `mysql`、PostgreSQL 用 `postgresql`
+- 若有選取 SQL，優先格式化選取區塊
+
+### Explain
+
+- 若 SQL 已經以 `EXPLAIN` 開頭，直接沿用
+- 否則自動包成 `EXPLAIN <statement>;`
+- 多 statement 會被拒絕
+
+## 匯出
+
+匯出是透過建立 `sql_export` 工單完成，不是直接把查詢結果檔案回傳。
+
+建立匯出需要：
+
+- 頁面權限：`sql_editor.query`
+- 動作權限：`sql_editor.export`
+- 目標資料源必須在使用者 DB Scope 內
+
+下載行為目前另有頻率限制：
+
+- 1 分鐘內最多 3 次
+
+若超過限制，前端應顯示暫時錯誤提示，而不是導向其他頁面。
+
+## 敏感資料
+
+查詢結果若命中敏感欄位：
+
+- 預設依 masking rule 套用脫敏
+- 具備 `global.sensitive` 時可直接看原值
+- 沒有永久權限時，可用 `sql_editor.sensitive_apply` 送 sensitive access 工單
+
+多來源 expression 的規則：
+
+- 若命中 2 個以上敏感來源且 mask mode 不一致，退化成 `full mask`
+
+## 例子
+
+### 基本查詢
+
+```json
+{
+  "db_connection_id": 12,
+  "sql": "SELECT id, email FROM users LIMIT 20;",
+  "database": "app_db"
+}
+```
+
+### PostgreSQL Explain
+
+```json
+{
+  "db_connection_id": 18,
+  "sql": "EXPLAIN SELECT * FROM public.orders WHERE id = 1;",
+  "database": "orders",
+  "schema": "public"
+}
+```
+
+## 相關文件
+
+- [How to 使用 SQL Editor](../how-to/use-sql-editor.md)
+- [Tickets](tickets.md)
+- [Masking 與 DSL](masking-and-dsl.md)
+- [平台 Settings](settings.md)

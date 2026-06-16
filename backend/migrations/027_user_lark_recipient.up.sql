@@ -1,0 +1,2 @@
+ALTER TABLE users
+    ADD COLUMN lark_recipient VARCHAR(255) NOT NULL DEFAULT '' AFTER email;
