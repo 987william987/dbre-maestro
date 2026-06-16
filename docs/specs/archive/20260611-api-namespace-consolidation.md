@@ -1,3 +1,7 @@
+---
+status: archived
+---
+
 # API Namespace 收斂到 `/api/*`
 
 ## 背景

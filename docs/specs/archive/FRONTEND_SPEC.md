@@ -1,3 +1,7 @@
+---
+status: archived
+---
+
 # FRONTEND_SPEC.md
 
 ## 文件目的

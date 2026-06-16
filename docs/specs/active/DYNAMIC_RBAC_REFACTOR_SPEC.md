@@ -1,3 +1,7 @@
+---
+status: active
+---
+
 # DYNAMIC_RBAC_REFACTOR_SPEC.md
 
 ## 文件目的

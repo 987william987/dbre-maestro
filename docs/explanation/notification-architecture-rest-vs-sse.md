@@ -4,8 +4,6 @@
 
 最後更新日期：`2026-06-12`
 
----
-
 ## 1. 目前架構：REST + 輪詢
 
 ### 1.1 核心特性
@@ -13,6 +11,7 @@
 目前系統不是事件驅動。
 
 無論是：
+
 - 工單列表
 - 工單詳情
 - 右上角鈴鐺通知
@@ -115,13 +114,12 @@ POST /api/tickets/{id}/revoke
 - 前端要反覆打 API 才能知道資料更新。
 - 未來若通知密度提高，輪詢效率不佳。
 
----
-
 ## 2. 未來架構：SSE 事件驅動
 
 ### 2.1 適用情境
 
 若未來希望做到：
+
 - 工單狀態幾乎即時更新
 - 鈴鐺通知不靠輪詢
 - 審批/待執行 toast 幾乎立即出現
@@ -213,8 +211,6 @@ SSE Hub
   +--> 斷線時清理 client
 ```
 
----
-
 ## 3. 目前 vs 未來：對照簡表
 
 | 面向 | 現在 REST/輪詢 | 未來 SSE |
@@ -227,17 +223,17 @@ SSE Hub
 | 多機擴展 | 容易 | 需 event bus / pubsub |
 | 適合場景 | 工單、後台、低頻通知 | 即時通知、進度推送、狀態同步 |
 
----
-
 ## 4. 若未來要做 SSE，建議分階段
 
 ### Phase 1：只做通知 SSE
 
 目的：
+
 - 保留現有 notifications table
 - 只把鈴鐺通知從輪詢改成即時推送
 
 建議：
+
 - 新增 `GET /api/notifications/stream`
 - 後端在建立通知時額外發 `notification.created`
 - 前端保留 `GET /api/notifications` 作初始化與重連補償
@@ -245,53 +241,22 @@ SSE Hub
 ### Phase 2：工單詳情 SSE
 
 目的：
+
 - 工單詳情頁不必手動 refresh
 - 執行中工單的狀態、execution rows、completed/failed 可即時更新
 
 建議：
+
 - 新增 `GET /api/tickets/{id}/stream`
 - 發送 `ticket.updated`、`ticket.execution.updated`
 
 ### Phase 3：多機事件分發
 
 目的：
+
 - 支援多台 app server / 多副本部署
 
 建議：
-- 引入 Redis Pub/Sub 或 Outbox Dispatcher
-- application instance 之間不要只靠記憶體內事件
 
----
-
-## 5. 為什麼現在先不做
-
-目前先維持輪詢，主要是因為：
-
-- 既有功能已可用，且需求重點是把通知產品面補齊
-- SSE 需要新增長連線 endpoint
-- 需要補 auth、重連、proxy timeout、event replay 策略
-- 若未來會多機部署，還要同步規劃事件分發層
-
-所以現階段最務實的路線是：
-
-```text
-先用 REST/輪詢把通知與工單體驗補完整
-        |
-        v
-等產品確認需要更高即時性
-        |
-        v
-再升級到 SSE
-```
-
----
-
-## 6. 一句話結論
-
-目前系統是：
-
-> 「狀態先寫進 DB，前端再透過 REST API 重新拉資料。」
-
-未來 SSE 若落地，會變成：
-
-> 「狀態寫進 DB 後，同步發事件，前端透過長連線即時收到更新。」
+- 引入 Redis Pub/Sub、NATS、Kafka 或 Outbox Dispatcher
+- 不再依賴單機記憶體 hub

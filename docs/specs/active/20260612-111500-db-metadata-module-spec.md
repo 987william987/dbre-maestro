@@ -1,4 +1,5 @@
 ---
+status: active
 spec_issue_number:
 spec_issue_url:
 spec_filed_at: 2026-06-12T11:15:00+08:00
@@ -481,7 +482,7 @@ UI 原則：
 | `frontend/src/modules/settings/pages/SettingsPage.tsx` | DB Metadata 設定 UI |
 | `frontend/src/modules/db-connections/pages/DBConnectionsPage.tsx` | credential role 配置 UI |
 | `frontend/src/modules/db-metadata/*` | 新增頁面與 API |
-| `docs/PERMISSIONS_MATRIX.md` | implementation 時需同步更新權限與頁面/API 對照 |
+| `docs/reference/backend-api-and-permissions.md` | implementation 時需同步更新權限與頁面/API 對照 |
 
 ## Out of Scope
 

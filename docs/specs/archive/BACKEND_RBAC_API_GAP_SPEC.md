@@ -1,3 +1,7 @@
+---
+status: archived
+---
+
 # BACKEND_RBAC_API_GAP_SPEC.md
 
 ## 文件目的
@@ -29,7 +33,7 @@
 - `POST /resource-groups/{id}/auth-groups`
 - `DELETE /resource-groups/{id}/auth-groups/{group}`
 
-目前 `auth group` 是固定 enum，定義於 [backend/internal/model/user.go](/Users/william_yeh/work/code/dbre-maestro/backend/internal/model/user.go)：
+目前 `auth group` 是固定 enum，定義於 [backend/internal/model/user.go](../../../backend/internal/model/user.go)：
 
 - `developer`
 - `reviewer`
