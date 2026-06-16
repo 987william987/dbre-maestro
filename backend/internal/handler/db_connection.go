@@ -21,6 +21,14 @@ type DBConnectionHandler struct {
 	audit *repository.AuditRepo
 }
 
+type dbConnectionTestResponse struct {
+	OK             bool       `json:"ok"`
+	Error          string     `json:"error,omitempty"`
+	LastTestStatus string     `json:"last_test_status"`
+	LastTestError  string     `json:"last_test_error,omitempty"`
+	LastTestedAt   *time.Time `json:"last_tested_at,omitempty"`
+}
+
 type connectionCredentialPayload struct {
 	CredentialRole string `json:"credential_role"`
 	Username       string `json:"username"`
@@ -165,7 +173,7 @@ func (h *DBConnectionHandler) Test(w http.ResponseWriter, r *http.Request) {
 
 	resolvedConn, password, err := h.repo.ResolveCredential(conn, role)
 	if err != nil {
-		jsonOK(w, map[string]any{"ok": false, "error": err.Error()})
+		h.writeTestResult(w, r, conn.ID, false, err.Error())
 		return
 	}
 
@@ -181,28 +189,28 @@ func (h *DBConnectionHandler) Test(w http.ResponseWriter, r *http.Request) {
 			DB:       0,
 			SSLMode:  resolvedConn.SSLMode,
 		}); err != nil {
-			jsonOK(w, map[string]any{"ok": false, "error": err.Error()})
+			h.writeTestResult(w, r, conn.ID, false, err.Error())
 			return
 		}
-		jsonOK(w, map[string]any{"ok": true})
+		h.writeTestResult(w, r, conn.ID, true, "")
 		return
 	}
 
 	driver, dsn := pool.BuildDSN(resolvedConn, password)
 	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
 	if err != nil {
-		jsonOK(w, map[string]any{"ok": false, "error": err.Error()})
+		h.writeTestResult(w, r, conn.ID, false, err.Error())
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	if err := pools.QueryPool.PingContext(ctx); err != nil {
-		jsonOK(w, map[string]any{"ok": false, "error": err.Error()})
+		h.writeTestResult(w, r, conn.ID, false, err.Error())
 		return
 	}
 
-	jsonOK(w, map[string]any{"ok": true})
+	h.writeTestResult(w, r, conn.ID, true, "")
 }
 
 // PATCH /db-connections/{id}
@@ -325,6 +333,26 @@ func normalizeDatabaseName(dbType string, databaseName *string) *string {
 	}
 	trimmed := strings.TrimSpace(*databaseName)
 	return &trimmed
+}
+
+func (h *DBConnectionHandler) writeTestResult(w http.ResponseWriter, r *http.Request, connectionID uint64, ok bool, message string) {
+	testedAt, err := h.repo.RecordTestResult(r.Context(), connectionID, ok, message)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "persist test result failed")
+		return
+	}
+
+	response := dbConnectionTestResponse{
+		OK:             ok,
+		LastTestStatus: "passed",
+		LastTestedAt:   &testedAt,
+	}
+	if !ok {
+		response.Error = message
+		response.LastTestStatus = "failed"
+		response.LastTestError = message
+	}
+	jsonOK(w, response)
 }
 
 func normalizeCredentialPayloads(payloads []connectionCredentialPayload) []model.DBConnectionCredentialInput {

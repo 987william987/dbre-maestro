@@ -8,6 +8,9 @@ type ConnectionsResponse = {
 type ConnectionTestResponse = {
   ok: boolean
   error?: string
+  last_test_status: 'passed' | 'failed' | string
+  last_test_error?: string
+  last_tested_at?: string
 }
 
 type CreateConnectionPayload = {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/dbre-maestro/maestro/internal/crypto"
 	"github.com/dbre-maestro/maestro/internal/model"
@@ -173,6 +174,26 @@ func (r *DBConnectionRepo) ReplaceCredentials(ctx context.Context, id uint64, cr
 	}
 	tx = nil
 	return nil
+}
+
+func (r *DBConnectionRepo) RecordTestResult(ctx context.Context, id uint64, ok bool, message string) (time.Time, error) {
+	status := "passed"
+	var errMsg any
+	if !ok {
+		status = "failed"
+		errMsg = strings.TrimSpace(message)
+	}
+	testedAt := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE db_connections
+		 SET last_test_status = ?, last_test_error = ?, last_tested_at = ?, updated_at = NOW()
+		 WHERE id = ?`,
+		status, errMsg, testedAt, id,
+	)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("record db_connection test result: %w", err)
+	}
+	return testedAt, nil
 }
 
 func (r *DBConnectionRepo) replaceCredentialsTx(ctx context.Context, tx *sqlx.Tx, dbConnectionID uint64, credentials []model.DBConnectionCredentialInput) error {

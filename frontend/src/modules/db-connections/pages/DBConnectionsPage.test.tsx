@@ -37,6 +37,9 @@ const connection: DBConnection = {
   encryption_key_version: 1,
   ssl_mode: 'prefer',
   extra_params: null,
+  last_test_status: null,
+  last_test_error: null,
+  last_tested_at: null,
   created_by: 1,
   created_at: '2026-06-09T10:00:00Z',
   updated_at: '2026-06-09T10:00:00Z',
@@ -161,7 +164,11 @@ describe('DBConnectionsPage', () => {
   })
 
   it('tests a connection', async () => {
-    mockedTestDBConnection.mockResolvedValue({ ok: true })
+    mockedTestDBConnection.mockResolvedValue({
+      ok: true,
+      last_test_status: 'passed',
+      last_tested_at: '2026-06-16T12:00:00Z',
+    })
 
     renderPage()
 
@@ -182,14 +189,20 @@ describe('DBConnectionsPage', () => {
       updated_at: '2026-06-10T12:00:00Z',
     }
     mockedListDBConnections.mockResolvedValue({ connections: [connection, newerConnection] })
-    mockedTestDBConnection.mockRejectedValueOnce(new Error('timeout'))
+    mockedTestDBConnection.mockResolvedValueOnce({
+      ok: false,
+      error: 'timeout',
+      last_test_status: 'failed',
+      last_test_error: 'timeout',
+      last_tested_at: '2026-06-16T12:00:00Z',
+    })
 
     renderPage()
 
     await waitFor(() => expect(screen.getAllByText(/analytics|warehouse/).length).toBeGreaterThan(1))
     fireEvent.click(screen.getAllByRole('button', { name: 'Test' })[0])
 
-    await waitFor(() => expect(screen.getByText('warehouse connection test failed: Connection test failed')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('warehouse connection test failed: timeout')).toBeInTheDocument())
 
     const rows = screen.getAllByRole('row')
     expect(rows[1]).toHaveTextContent('warehouse')
