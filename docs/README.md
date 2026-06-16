@@ -36,6 +36,7 @@
 ## Specs
 
 - [Specs 分類總覽](specs/README.md)
+- [20260616 Audit Logs Retention Strategy](specs/active/20260616-audit-logs-retention-strategy.md)
 - [20260612 DB Metadata Module Spec](specs/active/20260612-111500-db-metadata-module-spec.md)
 - [Dynamic RBAC Refactor Spec](specs/active/DYNAMIC_RBAC_REFACTOR_SPEC.md)
 - [20260611 SQL Editor / Export / Sensitive Access / Settings / Notifications](specs/archive/20260611-160346-sql-editor-export-sensitive-access-settings-notifications.md)

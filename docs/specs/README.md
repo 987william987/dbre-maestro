@@ -12,6 +12,14 @@
 
 ## 仍有效
 
+### [20260616 Audit Logs Retention Strategy](active/20260616-audit-logs-retention-strategy.md)
+
+判定：
+
+- 這是從舊 `TODOS.md` 唯一未完成事項 `TE9` 收斂出的獨立 spec
+- 目前仍未落地，且屬於後續治理與維運策略需要補完的 active work
+- 尚未被其他文件取代
+
 ### [20260612 DB Metadata Module Spec](active/20260612-111500-db-metadata-module-spec.md)
 
 判定：
