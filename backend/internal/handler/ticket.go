@@ -32,7 +32,8 @@ type TicketHandler struct {
 	masking        *maskingRuntime
 	sqlReviewRules *repository.SQLReviewRuleRepo
 	notifRepo      *repository.NotificationRepo
-	lark           *notification.Client // nil = notifications disabled
+	lark           *notification.Dispatcher
+	appBaseURL     string
 }
 
 type ticketResponse struct {
@@ -66,8 +67,9 @@ func NewTicketHandler(
 	whitelist *repository.MaskingWhitelistRepo,
 	engine *masking.Engine,
 	sqlReviewRules *repository.SQLReviewRuleRepo,
-	lark *notification.Client,
+	lark *notification.Dispatcher,
 	notifRepo *repository.NotificationRepo,
+	appBaseURL string,
 ) *TicketHandler {
 	return &TicketHandler{
 		tickets:        tickets,
@@ -79,16 +81,15 @@ func NewTicketHandler(
 		sqlReviewRules: sqlReviewRules,
 		notifRepo:      notifRepo,
 		lark:           lark,
+		appBaseURL:     strings.TrimRight(appBaseURL, "/"),
 	}
 }
 
-// notifyLark sends a Lark notification and logs failures to audit_logs.
-// No-op if lark client is not configured.
-func (h *TicketHandler) notifyLark(ctx context.Context, title, body string) {
-	if h.lark == nil {
+func (h *TicketHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body, ticketNo string) {
+	if h.lark == nil || len(userIDs) == 0 {
 		return
 	}
-	result := h.lark.Send(ctx, notification.Message{Title: title, Body: body})
+	result := h.lark.NotifyUsers(ctx, userIDs, notification.Message{Title: title, Body: body, TicketNo: ticketNo})
 	if result.Err != nil {
 		h.audit.Log(ctx, repository.AuditEntry{
 			ActionType: "notification_failure",
@@ -98,6 +99,62 @@ func (h *TicketHandler) notifyLark(ctx context.Context, title, body string) {
 			},
 		})
 	}
+}
+
+func (h *TicketHandler) ticketLink(ticketID uint64) string {
+	path := fmt.Sprintf("/tickets/%d", ticketID)
+	if h.appBaseURL == "" {
+		return path
+	}
+	return h.appBaseURL + path
+}
+
+func (h *TicketHandler) ticketStateLabel(status model.TicketStatus) string {
+	switch status {
+	case model.TicketStatusPendingReview:
+		return "待審核"
+	case model.TicketStatusApproved:
+		return "已核准"
+	case model.TicketStatusRejected:
+		return "已駁回"
+	case model.TicketStatusPendingExecution:
+		return "待執行"
+	case model.TicketStatusExecuting:
+		return "執行中"
+	case model.TicketStatusCompleted:
+		return "已完成"
+	case model.TicketStatusFailed:
+		return "執行失敗"
+	case model.TicketStatusStopped:
+		return "已停止"
+	case model.TicketStatusInterrupted:
+		return "已中斷"
+	default:
+		return string(status)
+	}
+}
+
+func (h *TicketHandler) buildTicketNotificationBody(ticket *model.Ticket, currentStatus model.TicketStatus, nextAction string, detail string) string {
+	parts := []string{
+		fmt.Sprintf("目前狀態：%s", h.ticketStateLabel(currentStatus)),
+	}
+	if nextAction != "" {
+		parts = append(parts, fmt.Sprintf("待執行操作：%s", nextAction))
+	}
+	if ticket.DBConnectionID != nil && h.dbConns != nil {
+		conn, err := h.dbConns.GetByID(context.Background(), *ticket.DBConnectionID)
+		if err == nil && conn != nil {
+			parts = append(parts, fmt.Sprintf("資料來源：%s", conn.Name))
+		}
+	}
+	if ticket.DatabaseName != nil && strings.TrimSpace(*ticket.DatabaseName) != "" {
+		parts = append(parts, fmt.Sprintf("資料庫：%s", strings.TrimSpace(*ticket.DatabaseName)))
+	}
+	if strings.TrimSpace(detail) != "" {
+		parts = append(parts, fmt.Sprintf("說明：%s", strings.TrimSpace(detail)))
+	}
+	parts = append(parts, fmt.Sprintf("工單連結：%s", h.ticketLink(ticket.ID)))
+	return strings.Join(parts, "\n")
 }
 
 func (h *TicketHandler) sendInApp(ctx context.Context, userID uint64, notifType, title, body, resType string, resID uint64) {
@@ -315,7 +372,12 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	h.notifyTicketReviewers(r.Context(), created, "New Ticket Pending Review", fmt.Sprintf("Ticket %s has been submitted and is awaiting review", created.TicketNo))
+	h.notifyTicketReviewers(
+		r.Context(),
+		created,
+		"工單待審核",
+		h.buildTicketNotificationBody(created, model.TicketStatusPendingReview, "請審核是否通過此工單", "提交人已送出工單，等待 reviewer 處理。"),
+	)
 	jsonCreated(w, created)
 }
 
@@ -544,7 +606,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := middleware.UserIDFromCtx(r.Context())
-	allowed, err := h.canReviewTicket(r.Context(), ticket, userID)
+	allowed, err := h.canRejectTicket(r.Context(), ticket, userID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "ticket review check failed")
 		return
@@ -552,6 +614,11 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	if !allowed {
 		jsonErr(w, http.StatusForbidden, "forbidden")
 		return
+	}
+
+	targetStatus := model.TicketStatusApproved
+	if ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML {
+		targetStatus = model.TicketStatusPendingExecution
 	}
 
 	if err := ticketsm.ValidateTransition(ticket.Status, model.TicketStatusApproved); err != nil {
@@ -602,8 +669,30 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	h.notifyLark(r.Context(), "Ticket Approved", body)
-	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_approved", "Ticket Approved", body, "ticket", id)
+	if targetStatus == model.TicketStatusPendingExecution {
+		ok, err = h.tickets.UpdateStatus(r.Context(), id,
+			model.TicketStatusApproved, model.TicketStatusPendingExecution,
+			&userID, req.Comment, nil,
+		)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "move to pending execution failed")
+			return
+		}
+		if !ok {
+			jsonErr(w, http.StatusConflict, "ticket status changed concurrently")
+			return
+		}
+		updated, _ := h.tickets.GetByID(r.Context(), id)
+		if updated != nil {
+			ticket = updated
+		}
+		executorBody := h.buildTicketNotificationBody(ticket, model.TicketStatusPendingExecution, "請執行此工單", "reviewer 已通過審核，工單已進入待執行隊列。")
+		h.notifyExecutors(r.Context(), ticket, "工單待執行", executorBody)
+	} else {
+		approveBody := h.buildTicketNotificationBody(ticket, model.TicketStatusApproved, "請查看工單詳情", body)
+		h.notifyLarkUsers(r.Context(), []uint64{ticket.SubmitterID}, "工單已核准", approveBody, ticket.TicketNo)
+		h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_approved", "工單已核准", approveBody, "ticket", id)
+	}
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
@@ -668,9 +757,13 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	rejectBody := fmt.Sprintf("Ticket %s has been rejected: %s", ticket.TicketNo, req.Reason)
-	h.notifyLark(r.Context(), "Ticket Rejected", rejectBody)
-	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_rejected", "Ticket Rejected", rejectBody, "ticket", id)
+	rejectAction := "請依駁回原因修正後重新提交"
+	if ticket.Status == model.TicketStatusApproved || ticket.Status == model.TicketStatusPendingExecution {
+		rejectAction = "請確認執行前置條件或修正 SQL 後重新提交"
+	}
+	rejectBody := h.buildTicketNotificationBody(ticket, model.TicketStatusRejected, rejectAction, req.Reason)
+	h.notifyLarkUsers(r.Context(), []uint64{ticket.SubmitterID}, "工單已駁回", rejectBody, ticket.TicketNo)
+	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_rejected", "工單已駁回", rejectBody, "ticket", id)
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
@@ -713,7 +806,12 @@ func (h *TicketHandler) RequestExecution(w http.ResponseWriter, r *http.Request)
 	}
 
 	_ = userID
-	h.notifyExecutors(r.Context(), ticket, "Ticket Pending Execution", fmt.Sprintf("Ticket %s has entered the execution queue", ticket.TicketNo))
+	h.notifyExecutors(
+		r.Context(),
+		ticket,
+		"工單待執行",
+		h.buildTicketNotificationBody(ticket, model.TicketStatusPendingExecution, "請執行此工單", "工單已進入待執行隊列。"),
+	)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
 }
@@ -903,12 +1001,20 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 	})
 
 	if finalStatus == model.TicketStatusCompleted {
-		body := fmt.Sprintf("Ticket %s executed successfully", ticket.TicketNo)
-		h.notifyLark(ctx, "Ticket Executed", body)
-		h.sendInApp(ctx, ticket.SubmitterID, "ticket_executed", "Ticket Executed", body, "ticket", ticket.ID)
+		body := h.buildTicketNotificationBody(ticket, model.TicketStatusCompleted, "請查看執行結果", "工單已執行完成。")
+		h.notifyLarkUsers(ctx, []uint64{ticket.SubmitterID}, "工單已完成", body, ticket.TicketNo)
+		h.sendInApp(ctx, ticket.SubmitterID, "ticket_executed", "工單已完成", body, "ticket", ticket.ID)
 	} else {
-		body := fmt.Sprintf("Ticket %s execution failed", ticket.TicketNo)
-		h.sendInApp(ctx, ticket.SubmitterID, "ticket_executed", "Ticket Execution Failed", body, "ticket", ticket.ID)
+		body := h.buildTicketNotificationBody(ticket, model.TicketStatusFailed, "請查看錯誤並重新處理", "工單執行失敗，請查看 execution log。")
+		recipients := []uint64{ticket.SubmitterID}
+		if executorID != 0 {
+			recipients = append(recipients, executorID)
+		}
+		h.notifyLarkUsers(ctx, recipients, "工單執行失敗", body, ticket.TicketNo)
+		h.sendInApp(ctx, ticket.SubmitterID, "ticket_executed", "工單執行失敗", body, "ticket", ticket.ID)
+		if executorID != 0 && executorID != ticket.SubmitterID {
+			h.sendInApp(ctx, executorID, "ticket_executed", "工單執行失敗", body, "ticket", ticket.ID)
+		}
 	}
 }
 
@@ -968,6 +1074,7 @@ func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	})
 
 	body := fmt.Sprintf("Ticket %s has been revoked early and will be invalidated from the next query onwards", ticket.TicketNo)
+	h.notifyLarkUsers(r.Context(), []uint64{ticket.SubmitterID}, "Ticket Revoked", body, ticket.TicketNo)
 	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_revoked", "Ticket Revoked", body, "ticket", id)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
@@ -985,6 +1092,19 @@ func (h *TicketHandler) canReviewTicket(ctx context.Context, ticket *model.Ticke
 	for _, permissionKey := range reviewPermissionsForTicket(ticket.TicketType) {
 		if middleware.HasPermission(ctx, permissionKey) {
 			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (h *TicketHandler) canRejectTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
+	allowed, err := h.canReviewTicket(ctx, ticket, userID)
+	if err != nil || allowed {
+		return allowed, err
+	}
+	if ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML {
+		if ticket.Status == model.TicketStatusApproved || ticket.Status == model.TicketStatusPendingExecution {
+			return middleware.HasPermission(ctx, permissionTicketExecute), nil
 		}
 	}
 	return false, nil
@@ -1043,6 +1163,7 @@ func (h *TicketHandler) notifyTicketReviewers(ctx context.Context, ticket *model
 			continue
 		}
 		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticket.ID)
+		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body, ticket.TicketNo)
 	}
 }
 
@@ -1059,6 +1180,7 @@ func (h *TicketHandler) notifyExecutors(ctx context.Context, ticket *model.Ticke
 			continue
 		}
 		h.sendInApp(ctx, executorID, "ticket_pending_execution", title, body, "ticket", ticket.ID)
+		h.notifyLarkUsers(ctx, []uint64{executorID}, title, body, ticket.TicketNo)
 	}
 }
 

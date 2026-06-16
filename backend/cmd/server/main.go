@@ -92,16 +92,12 @@ func main() {
 	notifRepo := repository.NewNotificationRepo(metaDB)
 	whitelistRepo := repository.NewMaskingWhitelistRepo(metaDB)
 	authGroupRepo := repository.NewAuthGroupRepo(metaDB)
-	settingsRepo := repository.NewSettingsRepo(metaDB)
+	settingsRepo := repository.NewSettingsRepo(metaDB, cfg.EncryptionKey)
 	dbMetadataRepo := repository.NewDBMetadataRepo(metaDB)
 
-	var larkClient *notification.Client
+	larkDispatcher := notification.NewDispatcher(settingsRepo, userRepo, cfg.LarkWebhookURL)
 	if cfg.LarkWebhookURL != "" {
-		larkClient = notification.NewClient(notification.Config{
-			Mode:       notification.ModeWebhook,
-			WebhookURL: cfg.LarkWebhookURL,
-		})
-		slog.Info("lark notifications enabled")
+		slog.Info("lark webhook fallback enabled")
 	}
 
 	maskingRuleRepo := repository.NewMaskingRuleRepo(metaDB)
@@ -115,13 +111,13 @@ func main() {
 
 	healthH := handler.NewHealthHandler(metaDB)
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret)
-	ticketH := handler.NewTicketHandler(ticketRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, larkClient, notifRepo)
+	ticketH := handler.NewTicketHandler(ticketRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, larkDispatcher, notifRepo, cfg.AppBaseURL)
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, auditRepo)
-	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, larkClient)
+	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, larkDispatcher)
 	auditH := handler.NewAuditHandler(auditRepo)
 	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
 	sqlReviewRuleH := handler.NewSQLReviewRuleHandler(sqlReviewRuleRepo, auditRepo)
-	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, settingsRepo, maskingEngine, whitelistRepo, notifRepo)
+	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, settingsRepo, maskingEngine, whitelistRepo, notifRepo, larkDispatcher)
 	userH := handler.NewUserHandler(userRepo, authGroupRepo, sessionRepo, auditRepo, dbConnRepo)
 	metadataH := handler.NewMetadataHandler(dbConnRepo, userRepo)
 	authGroupH := handler.NewAuthGroupHandler(authGroupRepo, userRepo, auditRepo)

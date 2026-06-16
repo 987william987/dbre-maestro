@@ -247,6 +247,7 @@ func TestTicketHandlerCreateRejectsConnectionOutsideScope(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		"",
 	)
 
 	now := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)

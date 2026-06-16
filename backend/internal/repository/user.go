@@ -66,6 +66,23 @@ func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*model.User, e
 	return &u, err
 }
 
+func (r *UserRepo) ListByIDs(ctx context.Context, ids []uint64) ([]model.User, error) {
+	if len(ids) == 0 {
+		return []model.User{}, nil
+	}
+	query, args, err := sqlx.In(`SELECT * FROM users WHERE id IN (?) ORDER BY id`, ids)
+	if err != nil {
+		return nil, err
+	}
+	query = r.db.Rebind(query)
+
+	var users []model.User
+	if err := r.db.SelectContext(ctx, &users, query, args...); err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
 func (r *UserRepo) CountUsers(ctx context.Context) (int, error) {
 	var count int
 	err := r.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM users`)

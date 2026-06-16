@@ -28,7 +28,7 @@ type ExportHandler struct {
 	audit               *repository.AuditRepo
 	masking             *maskingRuntime
 	notifRepo           *repository.NotificationRepo
-	lark                *notification.Client
+	lark                *notification.Dispatcher
 	downloadRateLimiter *exportDownloadRateLimiter
 }
 
@@ -42,7 +42,7 @@ func NewExportHandler(
 	whitelist *repository.MaskingWhitelistRepo,
 	engine *masking.Engine,
 	notifRepo *repository.NotificationRepo,
-	lark *notification.Client,
+	lark *notification.Dispatcher,
 ) *ExportHandler {
 	return &ExportHandler{
 		exports:             exports,
@@ -98,15 +98,15 @@ func (l *exportDownloadRateLimiter) Allow(key string, now time.Time) bool {
 	return true
 }
 
-func (h *ExportHandler) notifyLark(ctx context.Context, title, body string) {
-	if h.lark == nil {
+func (h *ExportHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body string) {
+	if h.lark == nil || len(userIDs) == 0 {
 		return
 	}
-	result := h.lark.Send(ctx, notification.Message{Title: title, Body: body})
+	result := h.lark.NotifyUsers(ctx, userIDs, notification.Message{Title: title, Body: body})
 	if result.Err != nil {
 		h.audit.Log(ctx, repository.AuditEntry{
 			ActionType: "notification_failure",
-			Details:    map[string]any{"err": result.Err.Error()},
+			Details:    map[string]any{"err": result.Err.Error(), "attempts": result.Attempts},
 		})
 	}
 }
@@ -128,6 +128,7 @@ func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitter
 			continue
 		}
 		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticketID)
+		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body)
 	}
 }
 
@@ -268,7 +269,7 @@ func (h *ExportHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	})
 
 	approveBody := fmt.Sprintf("導出申請 #%d 已審批通過，請在有效期內下載", id)
-	h.notifyLark(r.Context(), "導出申請已通過", approveBody)
+	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已通過", approveBody)
 	h.sendInApp(r.Context(), req.RequesterID, "export_approved", "導出申請已通過", approveBody, "export", id)
 
 	jsonOK(w, map[string]any{
@@ -313,7 +314,7 @@ func (h *ExportHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	})
 
 	rejectBody := fmt.Sprintf("導出申請 #%d 已被拒絕", id)
-	h.notifyLark(r.Context(), "導出申請已拒絕", rejectBody)
+	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已拒絕", rejectBody)
 	h.sendInApp(r.Context(), req.RequesterID, "export_rejected", "導出申請已拒絕", rejectBody, "export", id)
 
 	w.WriteHeader(http.StatusNoContent)

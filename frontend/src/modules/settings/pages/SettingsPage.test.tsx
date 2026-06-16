@@ -22,6 +22,8 @@ describe('SettingsPage', () => {
 
   it('loads the settings page without depending on the users API', async () => {
     mockedGetSettings.mockResolvedValue({
+      lark_app_id: '',
+      lark_app_secret_configured: false,
       sensitive_export_reviewer_user_ids: [],
       sensitive_query_access_reviewer_user_ids: [],
       sql_editor_app_timeout_seconds: 30,

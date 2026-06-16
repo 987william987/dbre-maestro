@@ -10,6 +10,9 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     sensitive_query_access_reviewer_user_ids: Array.isArray(settings.sensitive_query_access_reviewer_user_ids)
       ? settings.sensitive_query_access_reviewer_user_ids
       : [],
+    lark_app_id: typeof settings.lark_app_id === 'string' ? settings.lark_app_id : '',
+    lark_app_secret: typeof settings.lark_app_secret === 'string' ? settings.lark_app_secret : '',
+    lark_app_secret_configured: typeof settings.lark_app_secret_configured === 'boolean' ? settings.lark_app_secret_configured : false,
     sql_editor_app_timeout_seconds:
       typeof settings.sql_editor_app_timeout_seconds === 'number' ? settings.sql_editor_app_timeout_seconds : 30,
     sql_editor_mysql_max_execution_time_ms:

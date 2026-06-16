@@ -18,6 +18,7 @@ type Config struct {
 	MigrationDSN   string
 	JWTSecret      []byte
 	EncryptionKey  []byte
+	AppBaseURL     string
 	LarkWebhookURL string // optional; empty = Lark notifications disabled
 	PoolProfiles   map[pool.Profile]pool.ProfileConfig
 }
@@ -27,6 +28,7 @@ func Load() (*Config, error) {
 		Port:         getEnv("PORT", "8080"),
 		DBDSN:        os.Getenv("DB_DSN"),
 		MigrationDSN: os.Getenv("MIGRATION_DSN"),
+		AppBaseURL:   strings.TrimRight(os.Getenv("APP_BASE_URL"), "/"),
 		PoolProfiles: map[pool.Profile]pool.ProfileConfig{
 			pool.ProfileQuery:         pool.DefaultConfigForProfile(pool.ProfileQuery),
 			pool.ProfileExec:          pool.DefaultConfigForProfile(pool.ProfileExec),

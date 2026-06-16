@@ -13,6 +13,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/masking"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
@@ -66,6 +67,7 @@ type QueryHandler struct {
 	settings     *repository.SettingsRepo
 	masking      *maskingRuntime
 	notifRepo    *repository.NotificationRepo
+	lark         *notification.Dispatcher
 }
 
 type queryExecutionContext struct {
@@ -85,6 +87,7 @@ func NewQueryHandler(
 	engine *masking.Engine,
 	whitelist *repository.MaskingWhitelistRepo,
 	notifRepo *repository.NotificationRepo,
+	lark *notification.Dispatcher,
 ) *QueryHandler {
 	return &QueryHandler{
 		dbConns:      dbConns,
@@ -96,6 +99,7 @@ func NewQueryHandler(
 		settings:     settings,
 		masking:      newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:    notifRepo,
+		lark:         lark,
 	}
 }
 
@@ -128,6 +132,22 @@ func (h *QueryHandler) sendInApp(ctx context.Context, userID uint64, notifType, 
 	_ = h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
 }
 
+func (h *QueryHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body, ticketNo string) {
+	if h.lark == nil || len(userIDs) == 0 {
+		return
+	}
+	result := h.lark.NotifyUsers(ctx, userIDs, notification.Message{Title: title, Body: body, TicketNo: ticketNo})
+	if result.Err != nil {
+		h.audit.Log(ctx, repository.AuditEntry{
+			ActionType: "notification_failure",
+			Details: map[string]any{
+				"err":      result.Err.Error(),
+				"attempts": result.Attempts,
+			},
+		})
+	}
+}
+
 func (h *QueryHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body string) {
 	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorSensitiveRev})
 	if err != nil {
@@ -138,6 +158,7 @@ func (h *QueryHandler) notifyReviewers(ctx context.Context, ticketID, submitterI
 			continue
 		}
 		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticketID)
+		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body, "")
 	}
 }
 
@@ -381,6 +402,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 	})
 	body := fmt.Sprintf("工單 %s 已提交，等待敏感查詢審核", ticket.TicketNo)
 	h.sendInApp(r.Context(), userID, "ticket_submitted", "Sensitive Access 工單已建立", body, "ticket", ticket.ID)
+	h.notifyLarkUsers(r.Context(), []uint64{userID}, "Sensitive Access 工單已建立", body, ticket.TicketNo)
 	h.notifyReviewers(r.Context(), ticket.ID, userID, "新的 Sensitive Access 工單待審核", body)
 
 	jsonCreated(w, map[string]any{

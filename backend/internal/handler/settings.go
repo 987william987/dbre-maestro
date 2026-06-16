@@ -84,6 +84,10 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.LarkAppID != "" && req.LarkAppSecret == "" && !req.LarkAppSecretConfigured {
+		jsonErr(w, http.StatusUnprocessableEntity, "lark_app_secret is required when configuring lark for the first time")
+		return
+	}
 	for _, connectionID := range append([]uint64{}, req.DBMetadataObjectEnabledConnectionIDs...) {
 		if err := h.validateConnectionExists(r, connectionID); err != nil {
 			jsonErr(w, http.StatusUnprocessableEntity, err.Error())
@@ -125,6 +129,8 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		Details: map[string]any{
 			"sensitive_export_reviewer_user_ids":          req.SensitiveExportReviewerUserIDs,
 			"sensitive_query_access_reviewer_user_ids":    req.SensitiveQueryAccessReviewerUserIDs,
+			"lark_app_id":                                 req.LarkAppID,
+			"lark_app_secret_configured":                  req.LarkAppSecretConfigured || req.LarkAppSecret != "",
 			"sql_editor_app_timeout_seconds":              req.SQLEditorAppTimeoutSeconds,
 			"sql_editor_mysql_max_execution_time_ms":      req.SQLEditorMySQLMaxExecutionTimeMs,
 			"sql_editor_postgres_statement_timeout_ms":    req.SQLEditorPostgresStatementTimeoutMs,
