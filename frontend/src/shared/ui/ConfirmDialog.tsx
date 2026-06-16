@@ -17,8 +17,8 @@ export function ConfirmDialog({
   open,
   title,
   description,
-  confirmLabel = '確認',
-  cancelLabel = '取消',
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
   tone = 'default',
   loading = false,
   onConfirm,
@@ -50,7 +50,7 @@ export function ConfirmDialog({
               tone === 'danger' ? 'bg-danger hover:bg-red-600' : 'bg-brand hover:bg-slate-800'
             }`}
           >
-            {loading ? '處理中…' : confirmLabel}
+            {loading ? 'Processing…' : confirmLabel}
           </button>
         </div>
       </div>

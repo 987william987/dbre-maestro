@@ -18,16 +18,16 @@ export function FeaturePlaceholder({ eyebrow, title, description, aside }: Featu
 
       <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <section className="rounded-card border border-border bg-panel-soft p-5">
-          <p className="text-sm font-semibold text-ink">此頁面已保留進入點與版面骨架</p>
+          <p className="text-sm font-semibold text-ink">This page scaffold and entry point are already in place</p>
           <p className="mt-2 text-xs text-muted">
-            下一階段會依 `FRONTEND_SPEC.md` 補上資料載入、表單、權限控制與錯誤處理。
+            The next phase will add data loading, forms, permission controls, and error handling based on `FRONTEND_SPEC.md`.
           </p>
         </section>
         <section className="rounded-card border border-border bg-panel p-5">
           {aside ?? (
             <>
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-faint">Next Step</p>
-              <p className="mt-3 text-sm text-muted">目前先確保路由結構、登入態與導覽穩定，再逐頁補上實際功能。</p>
+              <p className="mt-3 text-sm text-muted">For now, the priority is keeping routing, authentication state, and navigation stable before filling in each page's functionality.</p>
             </>
           )}
         </section>

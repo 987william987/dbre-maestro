@@ -221,10 +221,10 @@ export function AppShell() {
 
         for (const notification of newNotifications) {
           if (notification.type === 'ticket_pending_review') {
-            pushToast(`有工單待審批：${notification.title}`, 'info', { placement: 'center', durationMs: 3200 })
+            pushToast(`Ticket pending review: ${notification.title}`, 'info', { placement: 'center', durationMs: 3200 })
           }
           if (notification.type === 'ticket_pending_execution') {
-            pushToast(`有工單待執行：${notification.title}`, 'info', { placement: 'center', durationMs: 3200 })
+            pushToast(`Ticket pending execution: ${notification.title}`, 'info', { placement: 'center', durationMs: 3200 })
           }
         }
       } catch {
@@ -258,7 +258,7 @@ export function AppShell() {
       setNotifications((current) => current.map((item) => ({ ...item, is_read: true })))
       setUnreadCount(0)
     } catch {
-      pushToast('通知標示已讀失敗。', 'error')
+      pushToast('Failed to mark notifications as read.', 'error')
     }
   }
 
@@ -271,7 +271,7 @@ export function AppShell() {
         )
         setUnreadCount((current) => Math.max(0, current - 1))
       } catch {
-        pushToast('通知標示已讀失敗。', 'error')
+        pushToast('Failed to mark notifications as read.', 'error')
         return
       }
     }
@@ -658,12 +658,12 @@ function formatRelativeTime(value: string) {
   const target = new Date(value)
   const diffMs = Date.now() - target.getTime()
   if (!Number.isFinite(diffMs)) {
-    return '剛剛'
+    return 'Just now'
   }
 
   const diffMinutes = Math.floor(diffMs / 60000)
   if (diffMinutes < 1) {
-    return '剛剛'
+    return 'Just now'
   }
   if (diffMinutes < 60) {
     return `${diffMinutes}m ago`

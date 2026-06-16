@@ -10,7 +10,7 @@ function formatUnknownError(error: unknown) {
     return error
   }
 
-  return new Error(typeof error === 'string' ? error : '發生未預期的前端錯誤')
+  return new Error(typeof error === 'string' ? error : 'An unexpected frontend error occurred')
 }
 
 function RuntimeErrorPanel({
@@ -28,7 +28,7 @@ function RuntimeErrorPanel({
         <div className="w-full rounded-card border border-danger/20 bg-panel p-6 shadow-card">
           <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-danger">Frontend Error</p>
           <h1 className="mt-2 font-display text-2xl font-black tracking-tight text-ink">{title}</h1>
-          <p className="mt-3 text-sm text-muted">頁面沒有正常 render。請把下面錯誤內容貼回來，我會直接針對它修。</p>
+          <p className="mt-3 text-sm text-muted">This page did not render correctly. Please share the error details below for debugging.</p>
 
           <div className="mt-5 rounded-card border border-danger/20 bg-red-50 p-4">
             <p className="font-mono text-sm font-semibold text-danger">{error.name}: {error.message}</p>
@@ -66,7 +66,7 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, AppErro
     if (this.state.error) {
       return (
         <RuntimeErrorPanel
-          title="前端執行時發生錯誤"
+          title="Frontend runtime error"
           error={this.state.error}
           detail={this.state.componentStack || undefined}
         />
@@ -112,7 +112,7 @@ export class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, Glo
     if (this.state.error) {
       return (
         <RuntimeErrorPanel
-          title="前端初始化失敗"
+          title="Frontend initialization failed"
           error={this.state.error}
         />
       )

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TicketsPage } from '@/modules/tickets/pages/TicketsPage'
 
 vi.mock('@/shared/auth/AuthContext', () => ({
@@ -23,6 +23,10 @@ function selectOption(label: string, option: string) {
 }
 
 describe('TicketsPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('切換狀態篩選時會重新請求對應 status', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
@@ -44,8 +48,8 @@ describe('TicketsPage', () => {
     })
 
     mockedListTickets
-      .mockResolvedValueOnce({ tickets: [], limit: 20, offset: 0 })
-      .mockResolvedValueOnce({ tickets: [], limit: 20, offset: 0 })
+      .mockResolvedValueOnce({ tickets: [], total: 0, limit: 20, offset: 0 })
+      .mockResolvedValueOnce({ tickets: [], total: 0, limit: 20, offset: 0 })
 
     render(
       <MemoryRouter>
@@ -53,11 +57,28 @@ describe('TicketsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(mockedListTickets).toHaveBeenCalledWith(undefined, 20, 0))
+    await waitFor(() => expect(mockedListTickets).toHaveBeenCalledWith({
+      status: undefined,
+      type: undefined,
+      keyword: undefined,
+      from: undefined,
+      to: undefined,
+      limit: 20,
+      offset: 0,
+    }))
 
     selectOption('Status', 'Pending Review')
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
 
-    await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith('pending_review', 20, 0))
+    await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith({
+      status: 'pending_review',
+      type: undefined,
+      keyword: undefined,
+      from: undefined,
+      to: undefined,
+      limit: 20,
+      offset: 0,
+    }))
   })
 
   it('後端回傳 null tickets 時會退化成空狀態，而不是直接白屏', async () => {
@@ -79,7 +100,7 @@ describe('TicketsPage', () => {
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
-    mockedListTickets.mockResolvedValueOnce({ tickets: null as never, limit: 20, offset: 0 })
+    mockedListTickets.mockResolvedValueOnce({ tickets: null as never, total: 0, limit: 20, offset: 0 })
 
     render(
       <MemoryRouter>
@@ -125,6 +146,7 @@ describe('TicketsPage', () => {
           created_at: '2026-06-12T00:00:00Z',
           updated_at: '2026-06-12T00:00:00Z',
         })),
+        total: 21,
         limit: 20,
         offset: 0,
       })
@@ -144,6 +166,7 @@ describe('TicketsPage', () => {
             updated_at: '2026-06-12T00:00:00Z',
           },
         ],
+        total: 21,
         limit: 20,
         offset: 20,
       })
@@ -157,7 +180,15 @@ describe('TicketsPage', () => {
     await waitFor(() => expect(screen.getByText('Ticket 1')).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
 
-    await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith(undefined, 20, 20))
+    await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith({
+      status: undefined,
+      type: undefined,
+      keyword: undefined,
+      from: undefined,
+      to: undefined,
+      limit: 20,
+      offset: 20,
+    }))
     await waitFor(() => expect(screen.getByText('Ticket 21')).toBeInTheDocument())
   })
 
@@ -197,6 +228,7 @@ describe('TicketsPage', () => {
           updated_at: '2026-06-12T00:00:00Z',
         },
       ],
+      total: 1,
       limit: 20,
       offset: 0,
     })
@@ -209,5 +241,53 @@ describe('TicketsPage', () => {
 
     expect(await screen.findByText('alice')).toBeInTheDocument()
     expect(screen.queryByText(/^99$/)).not.toBeInTheDocument()
+  })
+
+  it('submits keyword, type, and status filters with audit-log-style controls', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'dev',
+        authGroups: ['developer'],
+        authGroupDetails: [],
+        permissions: ['tickets.apply'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    mockedListTickets
+      .mockResolvedValueOnce({ tickets: [], total: 0, limit: 20, offset: 0 })
+      .mockResolvedValueOnce({ tickets: [], total: 0, limit: 20, offset: 0 })
+
+    render(
+      <MemoryRouter>
+        <TicketsPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(mockedListTickets).toHaveBeenCalledTimes(1))
+
+    fireEvent.change(screen.getByPlaceholderText('Ticket no. / title / submitter'), { target: { value: 'TK-2026' } })
+    selectOption('Type', 'SQL Export')
+    selectOption('Status', 'Approved')
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith({
+      status: 'approved',
+      type: 'sql_export',
+      keyword: 'TK-2026',
+      from: undefined,
+      to: undefined,
+      limit: 20,
+      offset: 0,
+    }))
   })
 })

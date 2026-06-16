@@ -9,8 +9,8 @@ export function ProtectedRoute() {
     return (
       <div className="min-h-screen bg-page flex items-center justify-center px-6">
         <div className="rounded-card border border-border bg-panel px-6 py-5 shadow-soft">
-          <p className="text-sm font-semibold text-ink">正在驗證登入狀態…</p>
-          <p className="mt-1 text-xs text-muted">請稍候，系統正在同步目前使用者資訊。</p>
+          <p className="text-sm font-semibold text-ink">Verifying your session…</p>
+          <p className="mt-1 text-xs text-muted">Please wait while we sync your account details.</p>
         </div>
       </div>
     )

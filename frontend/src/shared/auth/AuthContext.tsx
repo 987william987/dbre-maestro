@@ -131,7 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const errorMessage =
         data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
           ? data.error
-          : '讀取目前使用者失敗'
+          : 'Failed to load the current user'
       throw new Error(errorMessage)
     }
 
@@ -221,7 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const message =
         data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
           ? data.error
-          : '登入失敗'
+          : 'Sign-in failed'
       throw new Error(message)
     }
 

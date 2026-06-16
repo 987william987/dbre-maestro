@@ -165,7 +165,7 @@ function buildExplainSQL(sqlText: string) {
     return `${trimmed};`
   }
   if (trimmed.includes(';')) {
-    throw new Error('Explain 目前只支援單一 SQL statement。')
+    throw new Error('Explain currently supports only a single SQL statement.')
   }
   return `EXPLAIN ${trimmed};`
 }
