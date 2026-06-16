@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -34,8 +35,8 @@ func TestExportQueryExecutionContextFromScopesUsesTicketScopes(t *testing.T) {
 	}
 }
 
-func TestExportDownloadRateLimiterAllowsOnlyThreeHitsPerMinute(t *testing.T) {
-	limiter := newExportDownloadRateLimiter(3, time.Minute)
+func TestRequestRateLimiterAllowsOnlyThreeHitsPerMinute(t *testing.T) {
+	limiter := newRequestRateLimiter(3, time.Minute)
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
 	for i := 0; i < 3; i++ {
@@ -48,5 +49,37 @@ func TestExportDownloadRateLimiterAllowsOnlyThreeHitsPerMinute(t *testing.T) {
 	}
 	if !limiter.Allow("token-1", now.Add(61*time.Second)) {
 		t.Fatal("Allow() = false after window elapsed, want true")
+	}
+}
+
+func TestBuildTicketNotificationBodyIncludesExportContext(t *testing.T) {
+	databaseName := "analytics"
+	description := "submitter already sent the ticket, waiting for reviewer action."
+	connName := "warehouse-prod"
+	ticket := &model.Ticket{
+		ID:           42,
+		DatabaseName: &databaseName,
+	}
+
+	body := buildTicketNotificationBody(
+		ticket,
+		&connName,
+		exportTicketStateLabel(model.TicketStatusPendingReview),
+		"請審核是否通過此工單",
+		description,
+		"/tickets/42",
+	)
+
+	for _, part := range []string{
+		"目前狀態：待審核",
+		"待執行操作：請審核是否通過此工單",
+		"資料來源：warehouse-prod",
+		"資料庫：analytics",
+		"說明：submitter already sent the ticket, waiting for reviewer action.",
+		"工單連結：/tickets/42",
+	} {
+		if !strings.Contains(body, part) {
+			t.Fatalf("body missing %q: %s", part, body)
+		}
 	}
 }
