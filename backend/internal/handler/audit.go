@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,11 +14,15 @@ import (
 )
 
 type AuditHandler struct {
-	audit *repository.AuditRepo
+	audit             *repository.AuditRepo
+	exportRateLimiter *requestRateLimiter
 }
 
 func NewAuditHandler(audit *repository.AuditRepo) *AuditHandler {
-	return &AuditHandler{audit: audit}
+	return &AuditHandler{
+		audit:             audit,
+		exportRateLimiter: newRequestRateLimiter(3, time.Minute),
+	}
 }
 
 // GET /audit-logs — DBA/Admin only; supports filtering via query params.
@@ -56,6 +61,15 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // GET /audit-logs/export — DBA/Admin only; requires audit_logs.write.
 func (h *AuditHandler) Export(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromCtx(r.Context())
+	if h.exportRateLimiter != nil {
+		key := fmt.Sprintf("audit-export:%d", userID)
+		if !h.exportRateLimiter.Allow(key, time.Now()) {
+			http.Error(w, "At most three exports are allowed per minute. Please try again later.", http.StatusTooManyRequests)
+			return
+		}
+	}
+
 	f, _, _ := parseAuditFilters(r)
 
 	logs, _, err := h.audit.List(r.Context(), f, 5000, 0)
@@ -64,9 +78,8 @@ func (h *AuditHandler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	actorID := middleware.UserIDFromCtx(r.Context())
 	_ = h.audit.Log(r.Context(), repository.AuditEntry{
-		ActorID:      &actorID,
+		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
 		ActionType:   "audit_export",
 		ResourceType: "audit_log",
