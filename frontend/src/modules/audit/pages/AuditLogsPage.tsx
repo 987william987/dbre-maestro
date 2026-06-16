@@ -518,7 +518,9 @@ function DateTimeField({
 }) {
   const [open, setOpen] = useState(false)
   const [viewDate, setViewDate] = useState(() => parseLocalDateTime(value) ?? new Date())
-  const containerRef = useRef<HTMLDivElement | null>(null)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const selectedDate = parseLocalDateTime(value)
+  const valueTime = selectedDate ? formatTimePart(selectedDate) : ''
 
   useEffect(() => {
     if (!open) {
@@ -527,171 +529,159 @@ function DateTimeField({
   }, [open, value])
 
   useEffect(() => {
+    if (!open) {
+      return
+    }
     function handlePointerDown(event: MouseEvent) {
-      const target = event.target as Node
-      if (!containerRef.current?.contains(target)) {
-        setOpen(false)
+      if (rootRef.current?.contains(event.target as Node)) {
+        return
       }
+      setOpen(false)
     }
 
-    function handleKeyDown(event: KeyboardEvent) {
+    function handleEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setOpen(false)
       }
     }
 
-    document.addEventListener('mousedown', handlePointerDown)
-    document.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('mousedown', handlePointerDown)
+    window.addEventListener('keydown', handleEscape)
     return () => {
-      document.removeEventListener('mousedown', handlePointerDown)
-      document.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('mousedown', handlePointerDown)
+      window.removeEventListener('keydown', handleEscape)
     }
-  }, [])
+  }, [open])
 
-  const parsed = parseLocalDateTime(value)
-  const displayValue = parsed ? formatAuditLocalDateTime(parsed) : placeholder
+  const monthLabel = `${MONTH_NAMES[viewDate.getMonth()]} ${viewDate.getFullYear()}`
+  const cells = buildCalendarCells(viewDate)
+
+  function applyDate(nextDate: Date) {
+    const base = selectedDate ?? nextDate
+    const merged = new Date(nextDate)
+    merged.setHours(base.getHours(), base.getMinutes(), 0, 0)
+    onChange(toLocalInputValue(merged))
+    setViewDate(merged)
+  }
+
+  function applyTime(nextTime: string) {
+    const base = selectedDate ?? viewDate
+    const [hoursText, minutesText] = nextTime.split(':')
+    const hours = Number(hoursText)
+    const minutes = Number(minutesText)
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+      return
+    }
+    const merged = new Date(base)
+    merged.setHours(hours, minutes, 0, 0)
+    onChange(toLocalInputValue(merged))
+  }
+
+  function clearValue() {
+    onChange('')
+    setOpen(false)
+  }
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-panel-soft px-3 text-left text-[13px] text-ink transition hover:border-slate-300"
+        aria-label={placeholder}
+        className="inline-flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-border bg-panel-soft px-3 text-left text-[13px] text-ink outline-none transition hover:bg-white focus:border-accent focus:ring-2 focus:ring-accent/20"
       >
-        <span className={parsed ? 'text-ink' : 'text-muted'}>{displayValue}</span>
-        <CalendarDays className="h-4 w-4 text-faint" />
+        <span className={value ? 'text-ink' : 'text-muted'}>{value ? formatDateTimeSummary(value) : placeholder}</span>
+        <CalendarDays className="h-4 w-4 text-muted" />
       </button>
 
       {open ? (
-        <div className="absolute left-0 top-[calc(100%+8px)] z-30 w-[min(720px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-white shadow-[0_22px_45px_rgba(15,23,42,0.14)]">
-          <div className="grid gap-0 md:grid-cols-[180px_minmax(0,1fr)]">
-            <div className="border-b border-border p-3 md:border-b-0 md:border-r">
-              <p className="mb-3 text-[12px] font-semibold text-muted">Quick Range</p>
-              <div className="grid gap-1">
-                {presets.map((preset) => (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    onClick={() => {
-                      onChange(preset.getValue())
-                      setOpen(false)
-                    }}
-                    className="rounded-md px-3 py-2 text-left text-[12px] font-medium text-ink transition hover:bg-panel-soft"
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+        <div className="absolute left-0 top-[calc(100%+8px)] z-30 w-[320px] rounded-xl border border-border bg-white p-3 shadow-[0_18px_50px_rgba(15,23,42,0.15)]">
+          <div className="mb-3 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setViewDate((current) => addMonths(current, -1))}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
+              aria-label="Previous month"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <p className="text-[13px] font-semibold text-ink">{monthLabel}</p>
+            <button
+              type="button"
+              onClick={() => setViewDate((current) => addMonths(current, 1))}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-panel-soft text-muted transition hover:bg-page hover:text-ink"
+              aria-label="Next month"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
 
-            <div className="p-3">
-              <div className="mb-3 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setViewDate((current) => addMonths(current, -1))}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-white text-ink transition hover:bg-panel-soft"
-                  aria-label="Previous month"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <div className="flex-1 text-center text-[18px] font-semibold text-ink">
-                  {MONTH_NAMES[viewDate.getMonth()]} {viewDate.getFullYear()}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setViewDate((current) => addMonths(current, 1))}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-white text-ink transition hover:bg-panel-soft"
-                  aria-label="Next month"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
+          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-faint">
+            {WEEKDAY_NAMES.map((name) => (
+              <span key={name} className="py-1">{name}</span>
+            ))}
+          </div>
 
-              <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
-                {WEEKDAY_NAMES.map((day) => <span key={day}>{day}</span>)}
-              </div>
-              <div className="mt-2 grid grid-cols-7 gap-1">
-                {buildCalendarDays(viewDate).map((day) => {
-                  const selected = parsed && isSameDay(parsed, day.date)
-                  return (
-                    <button
-                      key={day.key}
-                      type="button"
-                      disabled={!day.inCurrentMonth}
-                      onClick={() => {
-                        const next = mergeDatePart(value, day.date)
-                        onChange(next)
-                        setOpen(false)
-                      }}
-                      className={`h-10 rounded-md text-[13px] transition ${
-                        selected
-                          ? 'bg-ink font-semibold text-white'
-                          : day.inCurrentMonth
-                            ? 'text-ink hover:bg-panel-soft'
-                            : 'text-faint'
-                      }`}
-                    >
-                      {day.date.getDate()}
-                    </button>
-                  )
-                })}
-              </div>
-
-              <div className="mt-3 flex items-center gap-2">
-                <TimeSelect
-                  value={getTimePart(value)}
-                  onChange={(timeValue) => onChange(updateTimePart(value, timeValue, viewDate))}
-                />
+          <div className="mt-1 grid grid-cols-7 gap-1">
+            {cells.map((cell) => {
+              const isSelected = selectedDate != null && isSameDay(cell.date, selectedDate)
+              const isCurrentMonth = cell.date.getMonth() === viewDate.getMonth()
+              return (
                 <button
+                  key={cell.key}
                   type="button"
-                  onClick={() => {
-                    onChange('')
-                    setOpen(false)
-                  }}
-                  className="inline-flex h-9 items-center justify-center rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+                  onClick={() => applyDate(cell.date)}
+                  className={`h-9 rounded-md text-[12px] transition ${
+                    isSelected
+                      ? 'bg-brand font-semibold text-white'
+                      : isCurrentMonth
+                        ? 'text-ink hover:bg-page'
+                        : 'text-faint hover:bg-page'
+                  }`}
                 >
-                  Clear
+                  {cell.date.getDate()}
                 </button>
-              </div>
-            </div>
+              )
+            })}
+          </div>
+
+          <div className="mt-3 flex items-center gap-2">
+            <input
+              type="time"
+              value={valueTime}
+              onChange={(event) => applyTime(event.target.value)}
+              className="h-10 flex-1 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+            />
+            {value ? (
+              <button
+                type="button"
+                onClick={clearValue}
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-panel-soft px-3 text-[12px] font-semibold text-muted transition hover:bg-page hover:text-ink"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {presets.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => {
+                  onChange(preset.getValue())
+                  setOpen(false)
+                }}
+                className="inline-flex h-8 items-center justify-center rounded-full border border-border bg-panel-soft px-3 text-[11px] font-semibold text-muted transition hover:bg-page hover:text-ink"
+              >
+                {preset.label}
+              </button>
+            ))}
           </div>
         </div>
       ) : null}
     </div>
   )
-}
-
-function TimeSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return (
-    <DropdownSelect
-      ariaLabel="Select time"
-      value={value}
-      onChange={onChange}
-      options={TIME_OPTIONS}
-      className="min-w-[160px]"
-      triggerClassName="bg-white"
-      menuClassName="max-h-64 overflow-y-auto"
-    />
-  )
-}
-
-const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
-  const hour = String(Math.floor(index / 2)).padStart(2, '0')
-  const minute = index % 2 === 0 ? '00' : '30'
-  return { value: `${hour}:${minute}`, label: `${hour}:${minute}` }
-})
-
-function buildCalendarDays(viewDate: Date) {
-  const firstDay = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1)
-  const start = addDays(firstDay, -firstDay.getDay())
-  return Array.from({ length: 42 }, (_, index) => {
-    const date = addDays(start, index)
-    return {
-      key: `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`,
-      date,
-      inCurrentMonth: date.getMonth() === viewDate.getMonth(),
-    }
-  })
 }
 
 function formatAuditDateTime(value?: string | null, withSeconds = false) {
@@ -713,10 +703,6 @@ function formatAuditDateTime(value?: string | null, withSeconds = false) {
   }).format(date).replace(',', '')
 }
 
-function formatAuditLocalDateTime(date: Date) {
-  return `${MONTH_NAMES[date.getMonth()]} ${String(date.getDate()).padStart(2, '0')}, ${date.getFullYear()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-}
-
 function parseLocalDateTime(value: string) {
   if (!value) {
     return null
@@ -734,35 +720,32 @@ function toLocalInputValue(date: Date) {
   return `${year}-${month}-${day}T${hour}:${minute}`
 }
 
-function mergeDatePart(existingValue: string, nextDate: Date) {
-  const base = parseLocalDateTime(existingValue) ?? new Date()
-  const merged = new Date(nextDate.getFullYear(), nextDate.getMonth(), nextDate.getDate(), base.getHours(), base.getMinutes(), 0, 0)
-  return toLocalInputValue(merged)
-}
-
-function updateTimePart(existingValue: string, timeValue: string, fallbackDate: Date) {
-  const [hours, minutes] = timeValue.split(':').map((part) => Number.parseInt(part, 10))
-  const base = parseLocalDateTime(existingValue) ?? fallbackDate
-  const merged = new Date(base.getFullYear(), base.getMonth(), base.getDate(), hours, minutes, 0, 0)
-  return toLocalInputValue(merged)
-}
-
-function getTimePart(value: string) {
-  const parsed = parseLocalDateTime(value)
-  if (!parsed) {
-    return '00:00'
-  }
-  return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`
-}
-
 function addDays(date: Date, amount: number) {
   const next = new Date(date)
   next.setDate(next.getDate() + amount)
   return next
 }
 
+function buildCalendarCells(viewDate: Date) {
+  const start = startOfWeek(startOfMonth(viewDate))
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = addDays(start, index)
+    return {
+      key: `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`,
+      date,
+    }
+  })
+}
+
+function startOfWeek(date: Date) {
+  const value = new Date(date)
+  value.setHours(0, 0, 0, 0)
+  value.setDate(value.getDate() - value.getDay())
+  return value
+}
+
 function addMonths(date: Date, amount: number) {
-  return new Date(date.getFullYear(), date.getMonth() + amount, 1)
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1, date.getHours(), date.getMinutes(), 0, 0)
 }
 
 function startOfDay(date: Date) {
@@ -785,4 +768,18 @@ function isSameDay(left: Date, right: Date) {
   return left.getFullYear() === right.getFullYear()
     && left.getMonth() === right.getMonth()
     && left.getDate() === right.getDate()
+}
+
+function formatTimePart(date: Date) {
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
+}
+
+function formatDateTimeSummary(value: string) {
+  const date = parseLocalDateTime(value)
+  if (!date) {
+    return value
+  }
+  return formatAuditDateTime(date.toISOString())
 }
