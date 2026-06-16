@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { Database, Loader2, Shield, Trash2, UserPlus, Users as UsersIcon, X } from 'lucide-react'
+import { Database, Info, Loader2, Shield, Trash2, UserPlus, Users as UsersIcon, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { createAuthGroup, deleteAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
 import { createUser, deleteUser, getUser, listUserDBConnections, listUsers, patchUser } from '@/modules/users/api'
@@ -297,7 +297,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       const createSummary = [
         `Username: ${userDraft.username}`,
         `Email: ${userDraft.email}`,
-        `Lark Recipient: ${userDraft.larkRecipient || 'Fallback to email'}`,
+        `Lark Open ID: ${userDraft.larkRecipient || 'Not set'}`,
         `Auth Groups: ${formatAuthGroupList(userDraft.authGroups, authGroupLabelMap)}`,
         `Direct Permissions: ${userDraft.directPermissions.join(', ') || 'None'}`,
         `Direct DB Scope: ${formatConnectionIDs(userDraft.directDBConnectionIDs, connections)}`,
@@ -577,7 +577,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                             <div>
                               <p className="font-semibold">{user.username}</p>
                               <p className="mt-0.5 text-[11px] text-muted">{user.email}</p>
-                              {user.lark_recipient ? <p className="mt-0.5 text-[11px] text-faint">Lark: {user.lark_recipient}</p> : null}
+                              {user.lark_recipient ? <p className="mt-0.5 text-[11px] text-faint">Lark Open ID: {user.lark_recipient}</p> : null}
                             </div>
                             {user.protected ? <Tag label="protected" tone="danger" /> : null}
                           </div>
@@ -741,13 +741,27 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         />
                       </label>
                       <label className="grid gap-1.5 text-[12px] font-medium text-muted">
-                        Lark Recipient
+                        <span className="flex items-center gap-1.5">
+                          <span>Lark Open ID</span>
+                          <span className="group relative inline-flex">
+                            <span
+                              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-faint transition hover:text-muted"
+                              aria-label="Lark Open ID 說明"
+                              tabIndex={0}
+                            >
+                              <Info className="h-3.5 w-3.5" />
+                            </span>
+                            <span className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-20 hidden w-64 rounded-md border border-border bg-white px-3 py-2 text-[11px] font-medium normal-case tracking-normal text-muted shadow-soft group-hover:block group-focus-within:block">
+                              新用戶開通後，請由管理員手動綁定可投遞的 Lark Open ID，否則不會收到工單通知。
+                            </span>
+                          </span>
+                        </span>
                         <input
-                          aria-label="Lark Recipient"
+                          aria-label="Lark Open ID"
                           value={userDraft.larkRecipient}
                           onChange={(event) => setUserDraft((current) => ({ ...current, larkRecipient: event.target.value }))}
                           disabled={saving || selectedUserIsProtected}
-                          placeholder="留空則 fallback 到 Email"
+                          placeholder="輸入 open_id，例如 ou_xxxxxxxxxxxxx"
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
@@ -1194,7 +1208,7 @@ function summarizeUserChanges(
     lines.push(`Email: ${original.email} -> ${draft.email}`)
   }
   if (draft.larkRecipient !== original.lark_recipient) {
-    lines.push(`Lark Recipient: ${original.lark_recipient || 'Fallback to email'} -> ${draft.larkRecipient || 'Fallback to email'}`)
+    lines.push(`Lark Open ID: ${original.lark_recipient || 'Not set'} -> ${draft.larkRecipient || 'Not set'}`)
   }
   if (draft.password.trim()) {
     lines.push('Password: updated')

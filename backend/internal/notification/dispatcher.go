@@ -43,13 +43,10 @@ func (d *Dispatcher) NotifyUsers(ctx context.Context, userIDs []uint64, msg Mess
 		return SendResult{Err: fmt.Errorf("load lark recipients failed: %w", err)}
 	}
 
-	emails := make([]string, 0, len(users))
+	recipients := make([]string, 0, len(users))
 	seen := make(map[string]struct{}, len(users))
 	for _, user := range users {
 		recipient := strings.TrimSpace(user.LarkRecipient)
-		if recipient == "" {
-			recipient = strings.TrimSpace(user.Email)
-		}
 		if recipient == "" {
 			continue
 		}
@@ -58,19 +55,19 @@ func (d *Dispatcher) NotifyUsers(ctx context.Context, userIDs []uint64, msg Mess
 			continue
 		}
 		seen[key] = struct{}{}
-		emails = append(emails, recipient)
+		recipients = append(recipients, recipient)
 	}
-	if len(emails) == 0 {
+	if len(recipients) == 0 {
 		return SendResult{}
 	}
 
 	var failed []string
 	totalAttempts := 0
-	for _, email := range emails {
-		result := client.SendToEmail(ctx, email, msg)
+	for _, recipient := range recipients {
+		result := client.SendToRecipient(ctx, recipient, msg)
 		totalAttempts += result.Attempts
 		if result.Err != nil {
-			failed = append(failed, fmt.Sprintf("%s: %s", email, result.Err.Error()))
+			failed = append(failed, fmt.Sprintf("%s: %s", recipient, result.Err.Error()))
 		}
 	}
 	if len(failed) > 0 {

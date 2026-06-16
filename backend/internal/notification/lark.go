@@ -116,9 +116,10 @@ func (c *Client) Send(ctx context.Context, msg Message) SendResult {
 	}
 }
 
-func (c *Client) SendToEmail(ctx context.Context, email string, msg Message) SendResult {
-	email = strings.TrimSpace(email)
-	if email == "" {
+// SendToRecipient sends an app message to a Lark open_id recipient.
+func (c *Client) SendToRecipient(ctx context.Context, recipient string, msg Message) SendResult {
+	recipient = strings.TrimSpace(recipient)
+	if recipient == "" {
 		return SendResult{}
 	}
 	if c.cfg.Mode == ModeWebhook {
@@ -135,7 +136,7 @@ func (c *Client) SendToEmail(ctx context.Context, email string, msg Message) Sen
 			}
 		}
 
-		status, err := c.postAppMessage(ctx, "email", email, msg)
+		status, err := c.postAppMessage(ctx, "open_id", recipient, msg)
 		if err != nil {
 			var apiErr *larkAPIError
 			if errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 {

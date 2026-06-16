@@ -28,7 +28,7 @@
 
 重點：
 
-- 平台目前優先使用 `users.lark_recipient` 作為 Lark 收件人識別；若空值，才 fallback 到 `users.email`
+- 平台目前使用 `users.lark_recipient` 作為 Lark 收件人識別，值必須是可投遞的 `open_id`
 - `App Secret` 不會明文回填到前端；若已配置，畫面只會顯示已配置狀態
 - 第一次配置時，`Lark App ID` 與 `Lark App Secret` 必須一起提供
 - 後續若只修改其他 Settings，可將 `App Secret` 留白，系統會保留既有 secret
