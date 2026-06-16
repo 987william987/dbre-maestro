@@ -18,6 +18,15 @@ type TicketRepo struct {
 	db *sqlx.DB
 }
 
+type TicketListFilter struct {
+	SubmitterID *uint64
+	Status      *model.TicketStatus
+	Type        *model.TicketType
+	Keyword     *string
+	From        *time.Time
+	To          *time.Time
+}
+
 func NewTicketRepo(db *sqlx.DB) *TicketRepo {
 	return &TicketRepo{db: db}
 }
@@ -106,23 +115,52 @@ func (r *TicketRepo) ListScopes(ctx context.Context, ticketID uint64) ([]model.T
 	return scopes, nil
 }
 
-func (r *TicketRepo) List(ctx context.Context, submitterID *uint64, status *model.TicketStatus, limit, offset int) ([]model.Ticket, error) {
-	query := `SELECT * FROM tickets WHERE 1=1`
+func (r *TicketRepo) List(ctx context.Context, filter TicketListFilter, limit, offset int) ([]model.Ticket, int64, error) {
+	where := ` WHERE 1=1`
 	args := []any{}
-	if submitterID != nil {
-		query += ` AND submitter_id = ?`
-		args = append(args, *submitterID)
+
+	if filter.SubmitterID != nil {
+		where += ` AND t.submitter_id = ?`
+		args = append(args, *filter.SubmitterID)
 	}
-	if status != nil {
-		query += ` AND status = ?`
-		args = append(args, *status)
+	if filter.Status != nil {
+		where += ` AND t.status = ?`
+		args = append(args, *filter.Status)
 	}
-	query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
-	args = append(args, limit, offset)
+	if filter.Type != nil {
+		where += ` AND t.ticket_type = ?`
+		args = append(args, *filter.Type)
+	}
+	if filter.Keyword != nil && strings.TrimSpace(*filter.Keyword) != "" {
+		keyword := "%" + strings.TrimSpace(*filter.Keyword) + "%"
+		where += ` AND (t.ticket_no LIKE ? OR t.title LIKE ? OR u.username LIKE ?)`
+		args = append(args, keyword, keyword, keyword)
+	}
+	if filter.From != nil {
+		where += ` AND t.created_at >= ?`
+		args = append(args, *filter.From)
+	}
+	if filter.To != nil {
+		where += ` AND t.created_at <= ?`
+		args = append(args, *filter.To)
+	}
+
+	countQuery := `SELECT COUNT(*) FROM tickets t LEFT JOIN users u ON u.id = t.submitter_id` + where
+	var total int64
+	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count tickets: %w", err)
+	}
+
+	query := `SELECT t.* FROM tickets t
+		LEFT JOIN users u ON u.id = t.submitter_id` + where + ` ORDER BY t.created_at DESC LIMIT ? OFFSET ?`
+	listArgs := append(args, limit, offset)
 
 	var tickets []model.Ticket
-	err := r.db.SelectContext(ctx, &tickets, query, args...)
-	return tickets, err
+	err := r.db.SelectContext(ctx, &tickets, query, listArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	return tickets, total, nil
 }
 
 func (r *TicketRepo) UpdateStatus(ctx context.Context, id uint64, fromStatus, toStatus model.TicketStatus, reviewerID *uint64, comment *string, rejectionReason *string) (bool, error) {
