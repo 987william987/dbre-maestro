@@ -32,6 +32,7 @@ services:
       DBRE_ENCRYPTION_KEY: ${DBRE_ENCRYPTION_KEY:-}
       JWT_SECRET: ${JWT_SECRET:-}
       PORT: "8080"
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
       AWS_PROFILE: ${AWS_PROFILE:-default}
       AWS_SDK_LOAD_CONFIG: "1"
       DB_POOL_QUERY_MAX_OPEN: ${DB_POOL_QUERY_MAX_OPEN:-10}
