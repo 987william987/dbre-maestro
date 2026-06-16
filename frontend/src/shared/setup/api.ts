@@ -10,7 +10,7 @@ export async function getSetupStatus(): Promise<SetupStatusResponse> {
   })
 
   if (!response.ok) {
-    throw new Error('讀取 setup 狀態失敗')
+    throw new Error('Failed to load setup status')
   }
 
   const data = await response.json() as Partial<SetupStatusResponse>

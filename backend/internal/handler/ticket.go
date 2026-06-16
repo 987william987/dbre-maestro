@@ -72,9 +72,9 @@ const (
 type ticketRecipientRole string
 
 const (
-	ticketRoleSubmitter      ticketRecipientRole = "submitter"
-	ticketRoleReviewer       ticketRecipientRole = "reviewer"
-	ticketRoleExecutorPool   ticketRecipientRole = "executor_pool"
+	ticketRoleSubmitter        ticketRecipientRole = "submitter"
+	ticketRoleReviewer         ticketRecipientRole = "reviewer"
+	ticketRoleExecutorPool     ticketRecipientRole = "executor_pool"
 	ticketRoleAssignedExecutor ticketRecipientRole = "assigned_executor"
 )
 
@@ -556,24 +556,40 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var statusFilter *model.TicketStatus
+	filter := repository.TicketListFilter{}
 	if s := r.URL.Query().Get("status"); s != "" {
 		ts := model.TicketStatus(s)
-		statusFilter = &ts
+		filter.Status = &ts
+	}
+	if s := strings.TrimSpace(r.URL.Query().Get("type")); s != "" {
+		tt := model.TicketType(s)
+		filter.Type = &tt
+	}
+	if s := strings.TrimSpace(r.URL.Query().Get("q")); s != "" {
+		filter.Keyword = &s
+	}
+	if s := r.URL.Query().Get("from"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			filter.From = &t
+		}
+	}
+	if s := r.URL.Query().Get("to"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			filter.To = &t
+		}
 	}
 
 	// T5: IDOR — only reviewers/executors can see the full queue.
-	var submitterFilter *uint64
 	canViewAll, err := h.canViewAllTickets(r.Context(), userID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "ticket access check failed")
 		return
 	}
 	if !canViewAll {
-		submitterFilter = &userID
+		filter.SubmitterID = &userID
 	}
 
-	tickets, err := h.tickets.List(r.Context(), submitterFilter, statusFilter, limit, offset)
+	tickets, total, err := h.tickets.List(r.Context(), filter, limit, offset)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "list tickets failed")
 		return
@@ -592,7 +608,7 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 		responseTickets = append(responseTickets, enriched)
 	}
 
-	jsonOK(w, map[string]any{"tickets": responseTickets, "limit": limit, "offset": offset})
+	jsonOK(w, map[string]any{"tickets": responseTickets, "total": total, "limit": limit, "offset": offset})
 }
 
 // GET /tickets/{id}

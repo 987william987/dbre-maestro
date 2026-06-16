@@ -4,6 +4,7 @@ import type { Ticket, TicketDetail, TicketReviewResult, TicketStatus, TicketType
 
 type TicketsResponse = {
   tickets: Ticket[]
+  total: number
   limit: number
   offset: number
 }
@@ -39,16 +40,38 @@ type ReviewTicketResponse = {
   results: TicketReviewResult[]
 }
 
-export async function listTickets(status?: TicketStatus, limit?: number, offset?: number) {
+type ListTicketsParams = {
+  status?: TicketStatus
+  type?: TicketType
+  keyword?: string
+  from?: string
+  to?: string
+  limit?: number
+  offset?: number
+}
+
+export async function listTickets(params: ListTicketsParams = {}) {
   const query = new URLSearchParams()
-  if (status) {
-    query.set('status', status)
+  if (params.status) {
+    query.set('status', params.status)
   }
-  if (limit != null) {
-    query.set('limit', String(limit))
+  if (params.type) {
+    query.set('type', params.type)
   }
-  if (offset != null) {
-    query.set('offset', String(offset))
+  if (params.keyword?.trim()) {
+    query.set('q', params.keyword.trim())
+  }
+  if (params.from) {
+    query.set('from', params.from)
+  }
+  if (params.to) {
+    query.set('to', params.to)
+  }
+  if (params.limit != null) {
+    query.set('limit', String(params.limit))
+  }
+  if (params.offset != null) {
+    query.set('offset', String(params.offset))
   }
 
   const path = query.size > 0 ? `/tickets?${query.toString()}` : '/tickets'
@@ -57,6 +80,7 @@ export async function listTickets(status?: TicketStatus, limit?: number, offset?
   return {
     ...response,
     tickets: Array.isArray(response.tickets) ? response.tickets : [],
+    total: typeof response.total === 'number' ? response.total : 0,
   }
 }
 

@@ -213,3 +213,13 @@ func TestBuildDisplayColumnsUsesOriginColumnName(t *testing.T) {
 		}
 	}
 }
+
+func TestQueryHandlerTicketLinkUsesAppBaseURL(t *testing.T) {
+	handler := &QueryHandler{appBaseURL: "https://maestro.example.com"}
+
+	got := handler.ticketLink(42)
+	want := "https://maestro.example.com/tickets/42"
+	if got != want {
+		t.Fatalf("ticketLink() = %q, want %q", got, want)
+	}
+}

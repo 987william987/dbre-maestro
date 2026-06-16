@@ -746,13 +746,13 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           <span className="group relative inline-flex">
                             <span
                               className="inline-flex h-4 w-4 items-center justify-center rounded-full text-faint transition hover:text-muted"
-                              aria-label="Lark Open ID 說明"
+                              aria-label="Lark Open ID help"
                               tabIndex={0}
                             >
                               <Info className="h-3.5 w-3.5" />
                             </span>
                             <span className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-20 hidden w-64 rounded-md border border-border bg-white px-3 py-2 text-[11px] font-medium normal-case tracking-normal text-muted shadow-soft group-hover:block group-focus-within:block">
-                              新用戶開通後，請由管理員手動綁定可投遞的 Lark Open ID，否則不會收到工單通知。
+                              After a new user is activated, an admin must manually bind a deliverable Lark Open ID or ticket notifications will not be delivered.
                             </span>
                           </span>
                         </span>
@@ -761,7 +761,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           value={userDraft.larkRecipient}
                           onChange={(event) => setUserDraft((current) => ({ ...current, larkRecipient: event.target.value }))}
                           disabled={saving || selectedUserIsProtected}
-                          placeholder="輸入 open_id，例如 ou_xxxxxxxxxxxxx"
+                          placeholder="Enter an open_id, for example ou_xxxxxxxxxxxxx"
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>

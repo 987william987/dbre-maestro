@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,7 +30,8 @@ type ExportHandler struct {
 	masking             *maskingRuntime
 	notifRepo           *repository.NotificationRepo
 	lark                *notification.Dispatcher
-	downloadRateLimiter *exportDownloadRateLimiter
+	downloadRateLimiter *requestRateLimiter
+	appBaseURL          string
 }
 
 func NewExportHandler(
@@ -43,6 +45,7 @@ func NewExportHandler(
 	engine *masking.Engine,
 	notifRepo *repository.NotificationRepo,
 	lark *notification.Dispatcher,
+	appBaseURL string,
 ) *ExportHandler {
 	return &ExportHandler{
 		exports:             exports,
@@ -53,26 +56,27 @@ func NewExportHandler(
 		masking:             newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:           notifRepo,
 		lark:                lark,
-		downloadRateLimiter: newExportDownloadRateLimiter(3, time.Minute),
+		downloadRateLimiter: newRequestRateLimiter(3, time.Minute),
+		appBaseURL:          strings.TrimRight(appBaseURL, "/"),
 	}
 }
 
-type exportDownloadRateLimiter struct {
+type requestRateLimiter struct {
 	mu      sync.Mutex
 	limit   int
 	window  time.Duration
 	history map[string][]time.Time
 }
 
-func newExportDownloadRateLimiter(limit int, window time.Duration) *exportDownloadRateLimiter {
-	return &exportDownloadRateLimiter{
+func newRequestRateLimiter(limit int, window time.Duration) *requestRateLimiter {
+	return &requestRateLimiter{
 		limit:   limit,
 		window:  window,
 		history: make(map[string][]time.Time),
 	}
 }
 
-func (l *exportDownloadRateLimiter) Allow(key string, now time.Time) bool {
+func (l *requestRateLimiter) Allow(key string, now time.Time) bool {
 	if l == nil || key == "" || l.limit <= 0 || l.window <= 0 {
 		return true
 	}
@@ -98,11 +102,81 @@ func (l *exportDownloadRateLimiter) Allow(key string, now time.Time) bool {
 	return true
 }
 
-func (h *ExportHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body string) {
+func buildTicketNotificationBody(ticket *model.Ticket, connName *string, currentStatus, nextAction, detail, link string) string {
+	parts := []string{
+		fmt.Sprintf("目前狀態：%s", currentStatus),
+	}
+	if nextAction != "" {
+		parts = append(parts, fmt.Sprintf("待執行操作：%s", nextAction))
+	}
+	if connName != nil && strings.TrimSpace(*connName) != "" {
+		parts = append(parts, fmt.Sprintf("資料來源：%s", strings.TrimSpace(*connName)))
+	}
+	if ticket.DatabaseName != nil && strings.TrimSpace(*ticket.DatabaseName) != "" {
+		parts = append(parts, fmt.Sprintf("資料庫：%s", strings.TrimSpace(*ticket.DatabaseName)))
+	}
+	if strings.TrimSpace(detail) != "" {
+		parts = append(parts, fmt.Sprintf("說明：%s", strings.TrimSpace(detail)))
+	}
+	if strings.TrimSpace(link) != "" {
+		parts = append(parts, fmt.Sprintf("工單連結：%s", strings.TrimSpace(link)))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func exportTicketStateLabel(status model.TicketStatus) string {
+	switch status {
+	case model.TicketStatusPendingReview:
+		return "待審核"
+	case model.TicketStatusApproved:
+		return "已核准"
+	case model.TicketStatusRejected:
+		return "已駁回"
+	case model.TicketStatusPendingExecution:
+		return "待執行"
+	case model.TicketStatusExecuting:
+		return "執行中"
+	case model.TicketStatusCompleted:
+		return "已完成"
+	case model.TicketStatusFailed:
+		return "執行失敗"
+	case model.TicketStatusStopped:
+		return "已停止"
+	case model.TicketStatusInterrupted:
+		return "已中斷"
+	default:
+		return string(status)
+	}
+}
+
+func (h *ExportHandler) ticketLink(ticketID uint64) string {
+	path := fmt.Sprintf("/tickets/%d", ticketID)
+	if h.appBaseURL == "" {
+		return path
+	}
+	return h.appBaseURL + path
+}
+
+func exportPendingReviewTitle() string {
+	return "工單待審核"
+}
+
+func (h *ExportHandler) loadTicketNotificationContext(ctx context.Context, ticket *model.Ticket) *string {
+	if ticket == nil || ticket.DBConnectionID == nil || h.dbConns == nil {
+		return nil
+	}
+	conn, err := h.dbConns.GetByID(ctx, *ticket.DBConnectionID)
+	if err != nil || conn == nil {
+		return nil
+	}
+	return &conn.Name
+}
+
+func (h *ExportHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body, ticketNo string) {
 	if h.lark == nil || len(userIDs) == 0 {
 		return
 	}
-	result := h.lark.NotifyUsers(ctx, userIDs, notification.Message{Title: title, Body: body})
+	result := h.lark.NotifyUsers(ctx, userIDs, notification.Message{Title: title, Body: body, TicketNo: ticketNo})
 	if result.Err != nil {
 		h.audit.Log(ctx, repository.AuditEntry{
 			ActionType: "notification_failure",
@@ -118,7 +192,7 @@ func (h *ExportHandler) sendInApp(ctx context.Context, userID uint64, notifType,
 	_ = h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
 }
 
-func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body string) {
+func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body, ticketNo string) {
 	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorExportReview})
 	if err != nil {
 		return
@@ -128,7 +202,7 @@ func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitter
 			continue
 		}
 		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticketID)
-		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body)
+		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body, ticketNo)
 	}
 }
 
@@ -185,6 +259,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		SQLContent:     req.SQLContent,
 		TicketType:     model.TicketTypeSQLExport,
 		DBConnectionID: &req.DBConnectionID,
+		DatabaseName:   nullableTrimmedString(req.DatabaseName),
 		SubmitterID:    userID,
 	}, analysis.Scopes)
 	if err != nil {
@@ -201,9 +276,17 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Details:      map[string]any{"ticket_type": ticket.TicketType, "contains_sensitive": analysis.ContainsSensitive},
 		IPAddress:    clientIP(r),
 	})
-	body := fmt.Sprintf("工單 %s 已提交，等待匯出審核", ticket.TicketNo)
-	h.sendInApp(r.Context(), userID, "ticket_submitted", "匯出工單已建立", body, "ticket", ticket.ID)
-	h.notifyReviewers(r.Context(), ticket.ID, userID, "新的匯出工單待審核", body)
+	connName := h.loadTicketNotificationContext(r.Context(), ticket)
+	body := buildTicketNotificationBody(
+		ticket,
+		connName,
+		exportTicketStateLabel(ticket.Status),
+		"請審核是否通過此工單",
+		"提交人已送出工單，等待 reviewer 處理。",
+		h.ticketLink(ticket.ID),
+	)
+	h.sendInApp(r.Context(), userID, "ticket_submitted", fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
+	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":          ticket.ID,
@@ -268,8 +351,8 @@ func (h *ExportHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	approveBody := fmt.Sprintf("導出申請 #%d 已審批通過，請在有效期內下載", id)
-	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已通過", approveBody)
+	approveBody := fmt.Sprintf("Export request #%d was approved. Please download it before it expires.", id)
+	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已通過", approveBody, "")
 	h.sendInApp(r.Context(), req.RequesterID, "export_approved", "導出申請已通過", approveBody, "export", id)
 
 	jsonOK(w, map[string]any{
@@ -313,8 +396,8 @@ func (h *ExportHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	rejectBody := fmt.Sprintf("導出申請 #%d 已被拒絕", id)
-	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已拒絕", rejectBody)
+	rejectBody := fmt.Sprintf("Export request #%d was rejected.", id)
+	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已拒絕", rejectBody, "")
 	h.sendInApp(r.Context(), req.RequesterID, "export_rejected", "導出申請已拒絕", rejectBody, "export", id)
 
 	w.WriteHeader(http.StatusNoContent)
@@ -341,7 +424,7 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.downloadRateLimiter.Allow(token, time.Now()) {
-		http.Error(w, "一分鐘內最多只能下載三次，請稍後再試", http.StatusTooManyRequests)
+		http.Error(w, "At most three downloads are allowed per minute. Please try again later.", http.StatusTooManyRequests)
 		return
 	}
 
@@ -432,6 +515,14 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		ResourceID:   &reqID,
 		IPAddress:    clientIP(r),
 	})
+}
+
+func nullableTrimmedString(value string) *string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 func (h *ExportHandler) exportQueryExecutionContext(ctx context.Context, req *model.ExportRequest, conn *model.DBConnection) (queryExecutionContext, error) {

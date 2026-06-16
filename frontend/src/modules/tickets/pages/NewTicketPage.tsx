@@ -150,7 +150,7 @@ export function NewTicketPage() {
       setReviewResults(response.results)
       setReviewPassed(response.passed)
       if (!response.passed) {
-        setError('SQL 檢測未通過，請先修正錯誤後再提交。')
+        setError('SQL review did not pass. Fix the issues before submitting.')
       }
     } catch (reviewError) {
       setReviewResults([])
