@@ -29,7 +29,7 @@ type ProfileConfig struct {
 	ConnMaxIdleTime time.Duration
 }
 
-var profileConfigs = map[Profile]ProfileConfig{
+var defaultProfileConfigs = map[Profile]ProfileConfig{
 	ProfileQuery: {
 		MaxOpenConns:    10,
 		MaxIdleConns:    5,
@@ -56,12 +56,42 @@ var profileConfigs = map[Profile]ProfileConfig{
 	},
 }
 
+var profileConfigs = cloneProfileConfigs(defaultProfileConfigs)
+
+func cloneProfileConfigs(source map[Profile]ProfileConfig) map[Profile]ProfileConfig {
+	cloned := make(map[Profile]ProfileConfig, len(source))
+	for profile, config := range source {
+		cloned[profile] = config
+	}
+	return cloned
+}
+
+func DefaultConfigForProfile(profile Profile) ProfileConfig {
+	config, ok := defaultProfileConfigs[profile]
+	if !ok {
+		return defaultProfileConfigs[ProfileQuery]
+	}
+	return config
+}
+
 func ConfigForProfile(profile Profile) ProfileConfig {
 	config, ok := profileConfigs[profile]
 	if !ok {
 		return profileConfigs[ProfileQuery]
 	}
 	return config
+}
+
+func SetProfileConfigs(configs map[Profile]ProfileConfig) {
+	if len(configs) == 0 {
+		profileConfigs = cloneProfileConfigs(defaultProfileConfigs)
+		return
+	}
+	next := cloneProfileConfigs(defaultProfileConfigs)
+	for profile, config := range configs {
+		next[profile] = config
+	}
+	profileConfigs = next
 }
 
 // InstancePools holds two separate connection pools per target DB instance.

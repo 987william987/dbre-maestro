@@ -19,6 +19,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/masking"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/notification"
+	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -70,6 +71,8 @@ func main() {
 		slog.Error("db ping failed", "err", err)
 		os.Exit(1)
 	}
+
+	pool.SetProfileConfigs(cfg.PoolProfiles)
 
 	// Crash recovery: mark any executing tickets as interrupted
 	ticketRepo := repository.NewTicketRepo(metaDB)
