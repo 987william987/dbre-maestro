@@ -12,6 +12,9 @@ import { Switch } from '@/shared/ui/Switch'
 import { useToast } from '@/shared/ui/ToastContext'
 
 type SettingsForm = {
+  sqlEditorAppTimeoutSeconds: string
+  sqlEditorMySQLMaxExecutionTimeMs: string
+  sqlEditorPostgresStatementTimeoutMs: string
   inventoryEnabled: boolean
   inventoryRegions: string
   inventoryEngines: string
@@ -89,7 +92,7 @@ export function SettingsPage() {
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
       <PageIntro
         title="Platform Settings"
-        description="This page currently focuses on DB metadata scan settings. AWS access still relies on the runtime IAM role, and database credentials are still managed in DB Connections."
+        description="Manage SQL Editor timeout policy and DB metadata scan settings. AWS access still relies on the runtime IAM role, and database credentials are still managed in DB Connections."
       />
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
@@ -98,6 +101,30 @@ export function SettingsPage() {
         <LoadingBlock message="Loading platform settings..." className="min-h-[320px] rounded-xl border-border bg-panel" />
       ) : (
         <form onSubmit={handleSubmit} className="grid gap-3">
+          <section className="rounded-xl border border-border bg-panel shadow-soft">
+            <div className="border-b border-border/80 px-4 py-3">
+              <p className="text-[14px] font-semibold text-ink">SQL Editor Timeout</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">These values apply only to SQL Editor `/api/query`. The app timeout caps the request lifetime, while MySQL and PostgreSQL values are applied at the session level before each query.</p>
+            </div>
+            <div className="grid gap-4 px-4 py-4 md:grid-cols-3">
+              <Field
+                label="App timeout (seconds)"
+                value={form.sqlEditorAppTimeoutSeconds}
+                onChange={(value) => setForm((current) => current ? { ...current, sqlEditorAppTimeoutSeconds: value } : current)}
+              />
+              <Field
+                label="MySQL max_execution_time (ms)"
+                value={form.sqlEditorMySQLMaxExecutionTimeMs}
+                onChange={(value) => setForm((current) => current ? { ...current, sqlEditorMySQLMaxExecutionTimeMs: value } : current)}
+              />
+              <Field
+                label="PostgreSQL statement_timeout (ms)"
+                value={form.sqlEditorPostgresStatementTimeoutMs}
+                onChange={(value) => setForm((current) => current ? { ...current, sqlEditorPostgresStatementTimeoutMs: value } : current)}
+              />
+            </div>
+          </section>
+
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Inventory Scan</p>
@@ -254,6 +281,9 @@ function Field({
 
 function toForm(settings: PlatformSettings): SettingsForm {
   return {
+    sqlEditorAppTimeoutSeconds: String(settings.sql_editor_app_timeout_seconds),
+    sqlEditorMySQLMaxExecutionTimeMs: String(settings.sql_editor_mysql_max_execution_time_ms),
+    sqlEditorPostgresStatementTimeoutMs: String(settings.sql_editor_postgres_statement_timeout_ms),
     inventoryEnabled: settings.db_metadata_inventory_enabled,
     inventoryRegions: settings.db_metadata_inventory_regions.join(', '),
     inventoryEngines: settings.db_metadata_inventory_engines.join(', '),
@@ -268,6 +298,9 @@ function toPayload(current: PlatformSettings | null, form: SettingsForm): Platfo
   return {
     sensitive_export_reviewer_user_ids: current?.sensitive_export_reviewer_user_ids ?? [],
     sensitive_query_access_reviewer_user_ids: current?.sensitive_query_access_reviewer_user_ids ?? [],
+    sql_editor_app_timeout_seconds: parsePositiveInt(form.sqlEditorAppTimeoutSeconds, 30),
+    sql_editor_mysql_max_execution_time_ms: parsePositiveInt(form.sqlEditorMySQLMaxExecutionTimeMs, 25000),
+    sql_editor_postgres_statement_timeout_ms: parsePositiveInt(form.sqlEditorPostgresStatementTimeoutMs, 25000),
     db_metadata_inventory_enabled: form.inventoryEnabled,
     db_metadata_inventory_regions: splitCSV(form.inventoryRegions),
     db_metadata_inventory_engines: splitCSV(form.inventoryEngines),

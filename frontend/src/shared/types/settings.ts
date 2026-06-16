@@ -1,6 +1,9 @@
 export type PlatformSettings = {
   sensitive_export_reviewer_user_ids: number[]
   sensitive_query_access_reviewer_user_ids: number[]
+  sql_editor_app_timeout_seconds: number
+  sql_editor_mysql_max_execution_time_ms: number
+  sql_editor_postgres_statement_timeout_ms: number
   db_metadata_inventory_enabled: boolean
   db_metadata_inventory_regions: string[]
   db_metadata_inventory_engines: string[]

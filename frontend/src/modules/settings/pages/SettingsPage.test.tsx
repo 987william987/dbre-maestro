@@ -24,6 +24,9 @@ describe('SettingsPage', () => {
     mockedGetSettings.mockResolvedValue({
       sensitive_export_reviewer_user_ids: [],
       sensitive_query_access_reviewer_user_ids: [],
+      sql_editor_app_timeout_seconds: 30,
+      sql_editor_mysql_max_execution_time_ms: 25000,
+      sql_editor_postgres_statement_timeout_ms: 25000,
       db_metadata_inventory_enabled: true,
       db_metadata_inventory_regions: ['ap-northeast-1'],
       db_metadata_inventory_engines: ['aurora-mysql', 'aurora-postgresql', 'redis'],

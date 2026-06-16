@@ -10,6 +10,12 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     sensitive_query_access_reviewer_user_ids: Array.isArray(settings.sensitive_query_access_reviewer_user_ids)
       ? settings.sensitive_query_access_reviewer_user_ids
       : [],
+    sql_editor_app_timeout_seconds:
+      typeof settings.sql_editor_app_timeout_seconds === 'number' ? settings.sql_editor_app_timeout_seconds : 30,
+    sql_editor_mysql_max_execution_time_ms:
+      typeof settings.sql_editor_mysql_max_execution_time_ms === 'number' ? settings.sql_editor_mysql_max_execution_time_ms : 25000,
+    sql_editor_postgres_statement_timeout_ms:
+      typeof settings.sql_editor_postgres_statement_timeout_ms === 'number' ? settings.sql_editor_postgres_statement_timeout_ms : 25000,
     db_metadata_inventory_enabled: typeof settings.db_metadata_inventory_enabled === 'boolean' ? settings.db_metadata_inventory_enabled : true,
     db_metadata_inventory_regions: Array.isArray(settings.db_metadata_inventory_regions) ? settings.db_metadata_inventory_regions : [],
     db_metadata_inventory_engines: Array.isArray(settings.db_metadata_inventory_engines) ? settings.db_metadata_inventory_engines : ['aurora-mysql', 'aurora-postgresql', 'redis'],

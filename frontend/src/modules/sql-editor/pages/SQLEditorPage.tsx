@@ -606,10 +606,10 @@ export function SQLEditorPage() {
   const [activeTabId, setActiveTabId] = useState<string>(() => createTab().id)
   const [history, setHistory] = useState<QueryHistoryEntry[]>([])
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
-  const [runningTabId, setRunningTabId] = useState<string | null>(null)
-  const [exportingTabId, setExportingTabId] = useState<string | null>(null)
+  const [runningTabIDs, setRunningTabIDs] = useState<string[]>([])
+  const [exportingTabIDs, setExportingTabIDs] = useState<string[]>([])
   const [savedQueryToDelete, setSavedQueryToDelete] = useState<SavedQuery | null>(null)
-  const [editorHeight, setEditorHeight] = useState(`${EDITOR_MIN_HEIGHT}px`)
+  const [editorHeights, setEditorHeights] = useState<Record<string, string>>({})
 
   useEffect(() => {
     let active = true
@@ -731,6 +731,9 @@ export function SQLEditorPage() {
       (connection.database_name ?? '').toLowerCase().includes(keyword),
     )
   }, [accessibleConnections, activeAssetPickerSearch])
+  const activeTabRunning = activeTab ? runningTabIDs.includes(activeTab.id) : false
+  const activeTabExporting = activeTab ? exportingTabIDs.includes(activeTab.id) : false
+  const activeEditorHeight = activeTab ? (editorHeights[activeTab.id] ?? `${EDITOR_MIN_HEIGHT}px`) : `${EDITOR_MIN_HEIGHT}px`
 
   useEffect(() => {
     if (accessibleConnections.length === 0) {
@@ -1101,14 +1104,18 @@ export function SQLEditorPage() {
       return
     }
 
-    setRunningTabId(activeTab.id)
-    updateActiveTab({ error: '' })
+    const tabID = activeTab.id
+    const tabSnapshot = activeTab
+    const connectionSnapshot = activeConnection
+
+    setRunningTabIDs((current) => (current.includes(tabID) ? current : [...current, tabID]))
+    updateTabByID(tabID, { error: '' })
 
     try {
       const finalSQL = mode === 'explain' ? buildExplainSQL(sqlToExecute) : sqlToExecute
-      const result = await executeQuery(buildQueryPayload(activeTab, finalSQL, activeConnection ?? null))
+      const result = await executeQuery(buildQueryPayload(tabSnapshot, finalSQL, connectionSnapshot ?? null))
 
-      updateActiveTab({
+      updateTabByID(tabID, {
         result,
         error: '',
         lastRunAt: new Date().toISOString(),
@@ -1118,12 +1125,12 @@ export function SQLEditorPage() {
       pushToast(mode === 'explain' ? 'Explain completed.' : 'Query completed.', 'success')
     } catch (error) {
       const message = error instanceof ApiError || error instanceof Error ? error.message : 'Query execution failed.'
-      updateActiveTab({
+      updateTabByID(tabID, {
         error: message,
         result: null,
       })
     } finally {
-      setRunningTabId(null)
+      setRunningTabIDs((current) => current.filter((id) => id !== tabID))
     }
   }
 
@@ -1207,7 +1214,8 @@ export function SQLEditorPage() {
       return
     }
 
-    setExportingTabId(activeTab.id)
+    const tabID = activeTab.id
+    setExportingTabIDs((current) => (current.includes(tabID) ? current : [...current, tabID]))
     try {
       const response = await createExportRequest({
         db_connection_id: activeTab.connectionId,
@@ -1219,7 +1227,7 @@ export function SQLEditorPage() {
     } catch (error) {
       pushToast(error instanceof ApiError ? error.message : 'Failed to create export request.', 'error')
     } finally {
-      setExportingTabId(null)
+      setExportingTabIDs((current) => current.filter((id) => id !== tabID))
     }
   }
 
@@ -1525,7 +1533,12 @@ export function SQLEditorPage() {
     const updateHeight = (stage: 'layout' | 'raf') => {
       const measureStartedAt = performance.now()
       const nextHeight = measureEditorHeight(editorContainerRef.current, activeTab?.sql ?? DEFAULT_SQL)
-      setEditorHeight(`${nextHeight}px`)
+      if (activeTab?.id) {
+        setEditorHeights((current) => {
+          const nextValue = `${nextHeight}px`
+          return current[activeTab.id] === nextValue ? current : { ...current, [activeTab.id]: nextValue }
+        })
+      }
       const measureMs = performance.now() - measureStartedAt
 
       if (profile && isPendingFormatProfile) {
@@ -1764,19 +1777,19 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={handleExplainQuery}
-                      disabled={runningTabId === activeTab.id || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
+                      disabled={activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
                       className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {runningTabId === activeTab.id ? 'Running...' : 'Explain'}
+                      {activeTabRunning ? 'Running...' : 'Explain'}
                     </button>
                     <button
                       type="button"
                       onClick={handleRunQuery}
-                      disabled={runningTabId === activeTab.id || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
+                      disabled={activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
                       className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Play className="h-4 w-4" />
-                      {runningTabId === activeTab.id ? 'Running...' : 'Run Query'}
+                      {activeTabRunning ? 'Running...' : 'Run Query'}
                     </button>
                   </div>
                 </div>
@@ -1786,7 +1799,7 @@ export function SQLEditorPage() {
                   <CodeMirror
                     key={activeTab.id}
                     value={activeTab.sql}
-                    height={editorHeight}
+                    height={activeEditorHeight}
                     extensions={editorExtensions}
                     onChange={handleEditorChange}
                     onStatistics={handleEditorStatistics}
@@ -1932,11 +1945,11 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={() => void handleExport()}
-                      disabled={exportingTabId === activeTab.id || !activeTab.connectionId || !activeExecutionSQL}
+                      disabled={activeTabExporting || !activeTab.connectionId || !activeExecutionSQL}
                       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Download className="h-4 w-4" />
-                      {exportingTabId === activeTab.id ? 'Exporting...' : 'EXPORT'}
+                      {activeTabExporting ? 'Exporting...' : 'EXPORT'}
                     </button>
                   </div>
                 </div>
