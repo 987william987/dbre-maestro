@@ -669,14 +669,10 @@ func (h *MetadataHandler) openQueryDB(
 
 		dbName := targetDatabase
 		dsn := pool.BuildPostgresDSN(conn.Host, conn.Port, conn.Username, password, &dbName, conn.SSLMode)
-		db, err := sql.Open("pgx", dsn)
+		db, err := pool.Open("pgx", dsn, pool.ProfileScopedPGQuery)
 		if err != nil {
 			return nil, nil, fmt.Errorf("cannot connect: %w", err)
 		}
-		db.SetMaxOpenConns(2)
-		db.SetMaxIdleConns(1)
-		db.SetConnMaxLifetime(2 * time.Minute)
-		db.SetConnMaxIdleTime(1 * time.Minute)
 		return db, func() { _ = db.Close() }, nil
 	case "redis":
 		return nil, nil, fmt.Errorf("redis does not support sql metadata pools")

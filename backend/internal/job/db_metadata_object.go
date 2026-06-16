@@ -2,7 +2,6 @@ package job
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -238,16 +237,11 @@ func (j *DBMetadataObjectJob) collectMySQLObjects(
 	nodeName *string,
 ) ([]model.DBObjectSnapshot, error) {
 	driver, dsn := pool.BuildDSN(conn, password)
-	db, err := sql.Open(driver, dsn)
+	db, err := pool.Open(driver, dsn, pool.ProfileMetadata)
 	if err != nil {
 		return nil, fmt.Errorf("open mysql metadata connection %d: %w", conn.ID, err)
 	}
 	defer db.Close()
-
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(2 * time.Minute)
-	db.SetConnMaxIdleTime(time.Minute)
 
 	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -305,16 +299,11 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 	nodeName *string,
 ) ([]model.DBObjectSnapshot, error) {
 	driver, baseDSN := pool.BuildDSN(conn, password)
-	baseDB, err := sql.Open(driver, baseDSN)
+	baseDB, err := pool.Open(driver, baseDSN, pool.ProfileMetadata)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres metadata base connection %d: %w", conn.ID, err)
 	}
 	defer baseDB.Close()
-
-	baseDB.SetMaxOpenConns(1)
-	baseDB.SetMaxIdleConns(1)
-	baseDB.SetConnMaxLifetime(2 * time.Minute)
-	baseDB.SetConnMaxIdleTime(time.Minute)
 
 	dbListCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -348,15 +337,10 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 	for _, databaseName := range databaseNames {
 		dbName := databaseName
 		targetDSN := pool.BuildPostgresDSN(conn.Host, conn.Port, conn.Username, password, &dbName, conn.SSLMode)
-		targetDB, err := sql.Open("pgx", targetDSN)
+		targetDB, err := pool.Open("pgx", targetDSN, pool.ProfileMetadata)
 		if err != nil {
 			return nil, fmt.Errorf("open postgres database %s for connection %d: %w", databaseName, conn.ID, err)
 		}
-
-		targetDB.SetMaxOpenConns(1)
-		targetDB.SetMaxIdleConns(1)
-		targetDB.SetConnMaxLifetime(2 * time.Minute)
-		targetDB.SetConnMaxIdleTime(time.Minute)
 
 		queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		rows, err := targetDB.QueryContext(queryCtx, `SELECT

@@ -1,6 +1,59 @@
 package pool
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestConfigForProfile(t *testing.T) {
+	tests := []struct {
+		profile Profile
+		want    ProfileConfig
+	}{
+		{
+			profile: ProfileQuery,
+			want: ProfileConfig{
+				MaxOpenConns:    10,
+				MaxIdleConns:    5,
+				ConnMaxLifetime: 5 * time.Minute,
+				ConnMaxIdleTime: 2 * time.Minute,
+			},
+		},
+		{
+			profile: ProfileExec,
+			want: ProfileConfig{
+				MaxOpenConns:    3,
+				MaxIdleConns:    1,
+				ConnMaxLifetime: 5 * time.Minute,
+				ConnMaxIdleTime: 2 * time.Minute,
+			},
+		},
+		{
+			profile: ProfileMetadata,
+			want: ProfileConfig{
+				MaxOpenConns:    1,
+				MaxIdleConns:    1,
+				ConnMaxLifetime: 2 * time.Minute,
+				ConnMaxIdleTime: time.Minute,
+			},
+		},
+		{
+			profile: ProfileScopedPGQuery,
+			want: ProfileConfig{
+				MaxOpenConns:    2,
+				MaxIdleConns:    1,
+				ConnMaxLifetime: 2 * time.Minute,
+				ConnMaxIdleTime: time.Minute,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		if got := ConfigForProfile(tt.profile); got != tt.want {
+			t.Fatalf("ConfigForProfile(%q) = %#v, want %#v", tt.profile, got, tt.want)
+		}
+	}
+}
 
 func TestBuildMySQLDSNAllowsEmptyDatabaseName(t *testing.T) {
 	got := BuildMySQLDSN("db.internal", 3306, "readonly", "secret", "")

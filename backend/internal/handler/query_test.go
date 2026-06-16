@@ -2,12 +2,51 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/dbre-maestro/maestro/internal/masking"
 	"github.com/dbre-maestro/maestro/internal/model"
 )
+
+func TestWriteQueryExecutionErrorTimeout(t *testing.T) {
+	recorder := httptest.NewRecorder()
+
+	writeQueryExecutionError(recorder, context.DeadlineExceeded, "query")
+
+	if recorder.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusGatewayTimeout)
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["error"] != "query timed out after 30s" {
+		t.Fatalf("error = %q, want %q", body["error"], "query timed out after 30s")
+	}
+}
+
+func TestWriteQueryExecutionErrorCanceled(t *testing.T) {
+	recorder := httptest.NewRecorder()
+
+	writeQueryExecutionError(recorder, context.Canceled, "query")
+
+	if recorder.Code != http.StatusRequestTimeout {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusRequestTimeout)
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["error"] != "query was cancelled" {
+		t.Fatalf("error = %q, want %q", body["error"], "query was cancelled")
+	}
+}
 
 func TestInjectLimitStripsTrailingSemicolon(t *testing.T) {
 	got := injectLimit("SELECT * FROM t_user;   ", 200, "mysql")

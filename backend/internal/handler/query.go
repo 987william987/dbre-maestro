@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -28,6 +29,18 @@ const (
 	maxQueryLimit       = 1000
 	defaultQueryTimeout = 30 * time.Second
 )
+
+func writeQueryExecutionError(w http.ResponseWriter, err error, operation string) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		jsonErr(w, http.StatusGatewayTimeout, fmt.Sprintf("%s timed out after %s", operation, defaultQueryTimeout))
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		jsonErr(w, http.StatusRequestTimeout, fmt.Sprintf("%s was cancelled", operation))
+		return
+	}
+	jsonErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("%s failed: %s", operation, err.Error()))
+}
 
 type QueryHandler struct {
 	dbConns      *repository.DBConnectionRepo
@@ -190,7 +203,7 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx)
 	if err != nil {
-		jsonErr(w, http.StatusUnprocessableEntity, "query failed: "+err.Error())
+		writeQueryExecutionError(w, err, "query")
 		return
 	}
 	durationMs := time.Since(start).Milliseconds()
@@ -946,7 +959,7 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 	}, append([]interface{}{cmd}, ifaces...)...)
 	durationMs := time.Since(start).Milliseconds()
 	if err != nil && err != redis.Nil {
-		jsonErr(w, http.StatusUnprocessableEntity, "redis command failed: "+err.Error())
+		writeQueryExecutionError(w, err, "redis command")
 		return
 	}
 
@@ -988,14 +1001,10 @@ func openScopedQueryDB(
 			targetDatabase = connectionDatabaseName(conn)
 		}
 		dsn := pool.BuildPostgresDSN(conn.Host, conn.Port, conn.Username, password, &targetDatabase, conn.SSLMode)
-		db, err := sql.Open("pgx", dsn)
+		db, err := pool.Open("pgx", dsn, pool.ProfileScopedPGQuery)
 		if err != nil {
 			return nil, nil, err
 		}
-		db.SetMaxOpenConns(2)
-		db.SetMaxIdleConns(1)
-		db.SetConnMaxLifetime(2 * time.Minute)
-		db.SetConnMaxIdleTime(1 * time.Minute)
 		return db, func() { _ = db.Close() }, nil
 	default:
 		return nil, nil, fmt.Errorf("scoped mysql pool is not supported")

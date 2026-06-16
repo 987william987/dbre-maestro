@@ -1268,14 +1268,10 @@ func (h *TicketHandler) openTicketSQLDBWithConnection(
 	}
 
 	driver, dsn := pool.BuildDSN(resolvedConn, password)
-	db, err := sql.Open(driver, dsn)
+	db, err := pool.Open(driver, dsn, pool.ProfileExec)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	db.SetMaxOpenConns(2)
-	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(5 * time.Minute)
-	db.SetConnMaxIdleTime(2 * time.Minute)
 
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

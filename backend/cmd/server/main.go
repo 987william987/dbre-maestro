@@ -24,6 +24,11 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
+const (
+	requestTimeout = 45 * time.Second
+	writeTimeout   = 45 * time.Second
+)
+
 func main() {
 	migrateOnly := flag.Bool("migrate-only", false, "run migrations and exit")
 	flag.Parse()
@@ -134,7 +139,7 @@ func main() {
 	r.Use(chimw.RealIP)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
-	r.Use(chimw.Timeout(30 * time.Second))
+	r.Use(chimw.Timeout(requestTimeout))
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", healthH.ServeHTTP)
@@ -324,7 +329,7 @@ func main() {
 		Addr:         fmt.Sprintf(":%s", cfg.Port),
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: writeTimeout,
 		IdleTimeout:  60 * time.Second,
 	}
 

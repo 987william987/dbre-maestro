@@ -13,9 +13,59 @@ import (
 	"github.com/dbre-maestro/maestro/internal/model"
 )
 
+type Profile string
+
+const (
+	ProfileQuery         Profile = "query"
+	ProfileExec          Profile = "exec"
+	ProfileMetadata      Profile = "metadata"
+	ProfileScopedPGQuery Profile = "scoped_pg_query"
+)
+
+type ProfileConfig struct {
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	ConnMaxIdleTime time.Duration
+}
+
+var profileConfigs = map[Profile]ProfileConfig{
+	ProfileQuery: {
+		MaxOpenConns:    10,
+		MaxIdleConns:    5,
+		ConnMaxLifetime: 5 * time.Minute,
+		ConnMaxIdleTime: 2 * time.Minute,
+	},
+	ProfileExec: {
+		MaxOpenConns:    3,
+		MaxIdleConns:    1,
+		ConnMaxLifetime: 5 * time.Minute,
+		ConnMaxIdleTime: 2 * time.Minute,
+	},
+	ProfileMetadata: {
+		MaxOpenConns:    1,
+		MaxIdleConns:    1,
+		ConnMaxLifetime: 2 * time.Minute,
+		ConnMaxIdleTime: 1 * time.Minute,
+	},
+	ProfileScopedPGQuery: {
+		MaxOpenConns:    2,
+		MaxIdleConns:    1,
+		ConnMaxLifetime: 2 * time.Minute,
+		ConnMaxIdleTime: 1 * time.Minute,
+	},
+}
+
+func ConfigForProfile(profile Profile) ProfileConfig {
+	config, ok := profileConfigs[profile]
+	if !ok {
+		return profileConfigs[ProfileQuery]
+	}
+	return config
+}
+
 // InstancePools holds two separate connection pools per target DB instance.
-// T7: exec_pool (MaxOpenConns=3) is reserved for ticket execution;
-// query_pool (MaxOpenConns=10) is used by the SQL Editor.
+// exec_pool is reserved for ticket execution; query_pool is used by interactive read paths.
 type InstancePools struct {
 	ExecPool  *sql.DB
 	QueryPool *sql.DB
@@ -46,11 +96,11 @@ func (m *Manager) GetOrCreate(connID uint64, driver, dsn string) (*InstancePools
 		return p, nil
 	}
 
-	exec, err := openPool(driver, dsn, 3)
+	exec, err := Open(driver, dsn, ProfileExec)
 	if err != nil {
 		return nil, fmt.Errorf("exec_pool open: %w", err)
 	}
-	query, err := openPool(driver, dsn, 10)
+	query, err := Open(driver, dsn, ProfileQuery)
 	if err != nil {
 		exec.Close()
 		return nil, fmt.Errorf("query_pool open: %w", err)
@@ -72,16 +122,21 @@ func (m *Manager) Invalidate(connID uint64) {
 	}
 }
 
-func openPool(driver, dsn string, maxOpen int) (*sql.DB, error) {
+func Open(driver, dsn string, profile Profile) (*sql.DB, error) {
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(maxOpen)
-	db.SetMaxIdleConns(max(1, maxOpen/2))
-	db.SetConnMaxLifetime(5 * time.Minute)
-	db.SetConnMaxIdleTime(2 * time.Minute)
+	ApplyProfile(db, profile)
 	return db, nil
+}
+
+func ApplyProfile(db *sql.DB, profile Profile) {
+	config := ConfigForProfile(profile)
+	db.SetMaxOpenConns(config.MaxOpenConns)
+	db.SetMaxIdleConns(config.MaxIdleConns)
+	db.SetConnMaxLifetime(config.ConnMaxLifetime)
+	db.SetConnMaxIdleTime(config.ConnMaxIdleTime)
 }
 
 // BuildDSN returns the driver name and DSN for a connection.
@@ -129,11 +184,4 @@ func BuildPostgresDSN(host string, port uint16, user, password string, dbName *s
 	}
 	u.RawQuery = q.Encode()
 	return u.String()
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
