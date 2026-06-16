@@ -31,6 +31,7 @@ type ExportHandler struct {
 	notifRepo           *repository.NotificationRepo
 	lark                *notification.Dispatcher
 	downloadRateLimiter *requestRateLimiter
+	appBaseURL          string
 }
 
 func NewExportHandler(
@@ -44,6 +45,7 @@ func NewExportHandler(
 	engine *masking.Engine,
 	notifRepo *repository.NotificationRepo,
 	lark *notification.Dispatcher,
+	appBaseURL string,
 ) *ExportHandler {
 	return &ExportHandler{
 		exports:             exports,
@@ -55,6 +57,7 @@ func NewExportHandler(
 		notifRepo:           notifRepo,
 		lark:                lark,
 		downloadRateLimiter: newRequestRateLimiter(3, time.Minute),
+		appBaseURL:          strings.TrimRight(appBaseURL, "/"),
 	}
 }
 
@@ -147,7 +150,19 @@ func exportTicketStateLabel(status model.TicketStatus) string {
 }
 
 func (h *ExportHandler) ticketLink(ticketID uint64) string {
-	return fmt.Sprintf("/tickets/%d", ticketID)
+	path := fmt.Sprintf("/tickets/%d", ticketID)
+	if h.appBaseURL == "" {
+		return path
+	}
+	return h.appBaseURL + path
+}
+
+func exportPendingReviewTitle(ticketNo string) string {
+	trimmed := strings.TrimSpace(ticketNo)
+	if trimmed == "" {
+		return "[工單待審核]"
+	}
+	return fmt.Sprintf("[工單待審核] 工單 %s", trimmed)
 }
 
 func (h *ExportHandler) loadTicketNotificationContext(ctx context.Context, ticket *model.Ticket) *string {
@@ -274,8 +289,8 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"提交人已送出工單，等待 reviewer 處理。",
 		h.ticketLink(ticket.ID),
 	)
-	h.sendInApp(r.Context(), userID, "ticket_submitted", "匯出工單已建立", body, "ticket", ticket.ID)
-	h.notifyReviewers(r.Context(), ticket.ID, userID, "新的匯出工單待審核", body)
+	h.sendInApp(r.Context(), userID, "ticket_submitted", fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
+	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(ticket.TicketNo), body)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":          ticket.ID,
