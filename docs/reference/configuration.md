@@ -139,6 +139,7 @@ Lark 通知目前有兩種來源，優先順序如下：
 
 - 正式環境優先使用 `Settings` 頁的 App 模式，才能定向通知 submitter、reviewer、executor
 - `LARK_WEBHOOK_URL` 保留作相容或過渡用途；它只能做 webhook 廣播，無法依使用者定向送達
+- 定向通知會優先使用使用者資料上的 `lark_recipient`；若未填，才 fallback 到 `email`
 
 ## 範例
 

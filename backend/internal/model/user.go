@@ -15,6 +15,7 @@ type User struct {
 	ID          uint64    `db:"id"`
 	Username    string    `db:"username"`
 	Email       string    `db:"email"`
+	LarkRecipient string  `db:"lark_recipient"`
 	Password    string    `db:"password"`
 	IsSetup     bool      `db:"is_setup"`
 	IsProtected bool      `db:"is_protected"`

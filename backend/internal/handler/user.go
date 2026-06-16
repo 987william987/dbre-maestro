@@ -55,6 +55,7 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 		ID              uint64            `json:"id"`
 		Username        string            `json:"username"`
 		Email           string            `json:"email"`
+		LarkRecipient   string            `json:"lark_recipient"`
 		AuthGroups      []model.AuthGroup `json:"auth_groups"`
 		Permissions     []string          `json:"permissions"`
 		DBConnectionIDs []uint64          `json:"db_connection_ids"`
@@ -94,6 +95,7 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 			ID:              u.ID,
 			Username:        u.Username,
 			Email:           u.Email,
+			LarkRecipient:   u.LarkRecipient,
 			AuthGroups:      groups,
 			Permissions:     permissionKeys,
 			DBConnectionIDs: dbConnectionIDs,
@@ -109,9 +111,10 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 // POST /users — Admin only
 func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Username string `json:"username"`
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Username      string `json:"username"`
+		Email         string `json:"email"`
+		LarkRecipient string `json:"lark_recipient"`
+		Password      string `json:"password"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -132,7 +135,7 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.users.Create(r.Context(), req.Username, req.Email, string(hash), false)
+	user, err := h.users.Create(r.Context(), req.Username, req.Email, strings.TrimSpace(req.LarkRecipient), string(hash), false)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "create user failed")
 		return
@@ -145,11 +148,11 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "user_create",
 		ResourceType: "user",
 		ResourceID:   &user.ID,
-		Details:      map[string]string{"username": user.Username, "email": user.Email},
+		Details:      map[string]string{"username": user.Username, "email": user.Email, "lark_recipient": user.LarkRecipient},
 		IPAddress:    clientIP(r),
 	})
 
-	jsonCreated(w, map[string]any{"id": user.ID, "username": user.Username, "email": user.Email})
+	jsonCreated(w, map[string]any{"id": user.ID, "username": user.Username, "email": user.Email, "lark_recipient": user.LarkRecipient})
 }
 
 // GET /users/{id} — Admin only
@@ -210,6 +213,7 @@ func (h *UserHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"id":                       user.ID,
 		"username":                 user.Username,
 		"email":                    user.Email,
+		"lark_recipient":           user.LarkRecipient,
 		"protected":                user.IsProtected,
 		"is_active":                user.IsActive,
 		"created_at":               user.CreatedAt,
@@ -311,6 +315,7 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username              *string   `json:"username"`
 		Email                 *string   `json:"email"`
+		LarkRecipient         *string   `json:"lark_recipient"`
 		Password              *string   `json:"password"`
 		IsActive              *bool     `json:"is_active"`
 		AuthGroups            *[]string `json:"auth_groups"`
@@ -323,7 +328,7 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 	if user.IsProtected {
 		onlyPasswordChange := req.Password != nil && strings.TrimSpace(*req.Password) != "" &&
-			req.Username == nil && req.Email == nil && req.IsActive == nil &&
+			req.Username == nil && req.Email == nil && req.LarkRecipient == nil && req.IsActive == nil &&
 			req.AuthGroups == nil && req.DirectPermissions == nil && req.DirectDBConnectionIDs == nil
 		if !onlyPasswordChange {
 			jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
@@ -339,8 +344,12 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	if req.Email != nil && *req.Email != "" {
 		email = *req.Email
 	}
+	larkRecipient := user.LarkRecipient
+	if req.LarkRecipient != nil {
+		larkRecipient = strings.TrimSpace(*req.LarkRecipient)
+	}
 
-	if err := h.users.Update(r.Context(), id, username, email); err != nil {
+	if err := h.users.Update(r.Context(), id, username, email, larkRecipient); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "update user failed")
 		return
 	}
@@ -447,11 +456,11 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "user_update",
 		ResourceType: "user",
 		ResourceID:   &id,
-		Details:      map[string]string{"username": username, "email": email, "is_active": strconv.FormatBool(isActive)},
+		Details:      map[string]string{"username": username, "email": email, "lark_recipient": larkRecipient, "is_active": strconv.FormatBool(isActive)},
 		IPAddress:    clientIP(r),
 	})
 
-	jsonOK(w, map[string]any{"id": id, "username": username, "email": email, "is_active": isActive})
+	jsonOK(w, map[string]any{"id": id, "username": username, "email": email, "lark_recipient": larkRecipient, "is_active": isActive})
 }
 
 // DELETE /users/{id} — Admin only

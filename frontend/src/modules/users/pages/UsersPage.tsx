@@ -67,6 +67,7 @@ type DrawerState =
 type UserDraft = {
   username: string
   email: string
+  larkRecipient: string
   password: string
   isActive: boolean
   authGroups: AuthGroup[]
@@ -87,6 +88,7 @@ type AuthGroupDraft = {
 const EMPTY_USER_DRAFT: UserDraft = {
   username: '',
   email: '',
+  larkRecipient: '',
   password: '',
   isActive: true,
   authGroups: [],
@@ -231,6 +233,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       setUserDraft({
         username: detail.username,
         email: detail.email,
+        larkRecipient: detail.lark_recipient,
         password: '',
         isActive: detail.is_active,
         authGroups: detail.memberships.map((membership) => membership.auth_group),
@@ -294,6 +297,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       const createSummary = [
         `Username: ${userDraft.username}`,
         `Email: ${userDraft.email}`,
+        `Lark Recipient: ${userDraft.larkRecipient || 'Fallback to email'}`,
         `Auth Groups: ${formatAuthGroupList(userDraft.authGroups, authGroupLabelMap)}`,
         `Direct Permissions: ${userDraft.directPermissions.join(', ') || 'None'}`,
         `Direct DB Scope: ${formatConnectionIDs(userDraft.directDBConnectionIDs, connections)}`,
@@ -308,6 +312,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         const created = await createUser({
           username: userDraft.username,
           email: userDraft.email,
+          lark_recipient: userDraft.larkRecipient.trim(),
           password: userDraft.password,
         })
         if (userDraft.authGroups.length > 0 || userDraft.directPermissions.length > 0 || userDraft.directDBConnectionIDs.length > 0) {
@@ -355,6 +360,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       const payload: {
         username?: string
         email?: string
+        lark_recipient?: string
         password?: string
         is_active?: boolean
         auth_groups?: string[]
@@ -369,6 +375,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       } else {
         payload.username = userDraft.username
         payload.email = userDraft.email
+        payload.lark_recipient = userDraft.larkRecipient.trim()
         payload.is_active = userDraft.isActive
         payload.auth_groups = userDraft.authGroups
         payload.direct_permissions = userDraft.directPermissions
@@ -570,6 +577,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                             <div>
                               <p className="font-semibold">{user.username}</p>
                               <p className="mt-0.5 text-[11px] text-muted">{user.email}</p>
+                              {user.lark_recipient ? <p className="mt-0.5 text-[11px] text-faint">Lark: {user.lark_recipient}</p> : null}
                             </div>
                             {user.protected ? <Tag label="protected" tone="danger" /> : null}
                           </div>
@@ -729,6 +737,17 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           value={userDraft.email}
                           onChange={(event) => setUserDraft((current) => ({ ...current, email: event.target.value }))}
                           disabled={saving || selectedUserIsProtected}
+                          className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
+                        />
+                      </label>
+                      <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                        Lark Recipient
+                        <input
+                          aria-label="Lark Recipient"
+                          value={userDraft.larkRecipient}
+                          onChange={(event) => setUserDraft((current) => ({ ...current, larkRecipient: event.target.value }))}
+                          disabled={saving || selectedUserIsProtected}
+                          placeholder="留空則 fallback 到 Email"
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
@@ -1173,6 +1192,9 @@ function summarizeUserChanges(
   }
   if (draft.email !== original.email) {
     lines.push(`Email: ${original.email} -> ${draft.email}`)
+  }
+  if (draft.larkRecipient !== original.lark_recipient) {
+    lines.push(`Lark Recipient: ${original.lark_recipient || 'Fallback to email'} -> ${draft.larkRecipient || 'Fallback to email'}`)
   }
   if (draft.password.trim()) {
     lines.push('Password: updated')

@@ -46,16 +46,19 @@ func (d *Dispatcher) NotifyUsers(ctx context.Context, userIDs []uint64, msg Mess
 	emails := make([]string, 0, len(users))
 	seen := make(map[string]struct{}, len(users))
 	for _, user := range users {
-		email := strings.TrimSpace(user.Email)
-		if email == "" {
+		recipient := strings.TrimSpace(user.LarkRecipient)
+		if recipient == "" {
+			recipient = strings.TrimSpace(user.Email)
+		}
+		if recipient == "" {
 			continue
 		}
-		key := strings.ToLower(email)
+		key := strings.ToLower(recipient)
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
-		emails = append(emails, email)
+		emails = append(emails, recipient)
 	}
 	if len(emails) == 0 {
 		return SendResult{}

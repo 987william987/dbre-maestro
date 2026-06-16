@@ -10,6 +10,7 @@ type ListUsersResponse = {
 type CreateUserPayload = {
   username: string
   email: string
+  lark_recipient?: string
   password: string
 }
 
@@ -17,11 +18,13 @@ type CreateUserResponse = {
   id: number
   username: string
   email: string
+  lark_recipient?: string
 }
 
 type PatchUserPayload = {
   username?: string
   email?: string
+  lark_recipient?: string
   password?: string
   is_active?: boolean
   auth_groups?: string[]
@@ -51,6 +54,7 @@ export function listUsers() {
     users: Array.isArray(response.users)
       ? response.users.map((user) => ({
           ...user,
+          lark_recipient: typeof user.lark_recipient === 'string' ? user.lark_recipient : '',
           auth_groups: Array.isArray(user.auth_groups) ? user.auth_groups : [],
           permissions: Array.isArray(user.permissions) ? user.permissions : [],
           db_connection_ids: Array.isArray(user.db_connection_ids) ? user.db_connection_ids : [],
@@ -62,6 +66,7 @@ export function listUsers() {
 export function getUser(id: number) {
   return apiClient.get<UserDetail>(`/users/${id}`).then((user): UserDetail => ({
     ...user,
+    lark_recipient: typeof user.lark_recipient === 'string' ? user.lark_recipient : '',
     memberships: Array.isArray(user.memberships) ? user.memberships : [],
     permissions: Array.isArray(user.permissions) ? user.permissions : [],
     db_connection_ids: Array.isArray(user.db_connection_ids) ? user.db_connection_ids : [],

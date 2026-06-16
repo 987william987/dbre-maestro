@@ -27,10 +27,10 @@ func NewUserRepo(db *sqlx.DB) *UserRepo {
 	return &UserRepo{db: db}
 }
 
-func (r *UserRepo) Create(ctx context.Context, username, email, passwordHash string, isProtected bool) (*model.User, error) {
+func (r *UserRepo) Create(ctx context.Context, username, email, larkRecipient, passwordHash string, isProtected bool) (*model.User, error) {
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO users (username, email, password, is_protected, is_active) VALUES (?, ?, ?, ?, 1)`,
-		username, email, passwordHash, isProtected,
+		`INSERT INTO users (username, email, lark_recipient, password, is_protected, is_active) VALUES (?, ?, ?, ?, ?, 1)`,
+		username, email, larkRecipient, passwordHash, isProtected,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
@@ -396,11 +396,11 @@ func (r *UserRepo) ListDirectDBConnectionIDs(ctx context.Context, userID uint64)
 	return ids, err
 }
 
-// Update patches username and/or email. Call separately to update password hash.
-func (r *UserRepo) Update(ctx context.Context, id uint64, username, email string) error {
+// Update patches username, email, and lark recipient. Call separately to update password hash.
+func (r *UserRepo) Update(ctx context.Context, id uint64, username, email, larkRecipient string) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE users SET username=?, email=?, updated_at=NOW() WHERE id=?`,
-		username, email, id,
+		`UPDATE users SET username=?, email=?, lark_recipient=?, updated_at=NOW() WHERE id=?`,
+		username, email, larkRecipient, id,
 	)
 	return err
 }

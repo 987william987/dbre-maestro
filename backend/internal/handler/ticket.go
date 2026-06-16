@@ -57,6 +57,95 @@ type ticketDatabaseOption struct {
 	Name string `json:"name"`
 }
 
+type ticketNotificationEvent string
+
+const (
+	ticketEventPendingReview    ticketNotificationEvent = "pending_review"
+	ticketEventApproved         ticketNotificationEvent = "approved"
+	ticketEventRejected         ticketNotificationEvent = "rejected"
+	ticketEventPendingExecution ticketNotificationEvent = "pending_execution"
+	ticketEventCompleted        ticketNotificationEvent = "completed"
+	ticketEventExecutionFailed  ticketNotificationEvent = "execution_failed"
+	ticketEventRevoked          ticketNotificationEvent = "revoked"
+)
+
+type ticketRecipientRole string
+
+const (
+	ticketRoleSubmitter      ticketRecipientRole = "submitter"
+	ticketRoleReviewer       ticketRecipientRole = "reviewer"
+	ticketRoleExecutorPool   ticketRecipientRole = "executor_pool"
+	ticketRoleAssignedExecutor ticketRecipientRole = "assigned_executor"
+)
+
+type ticketNotificationPolicy struct {
+	Title       string
+	NotifType   string
+	Roles       []ticketRecipientRole
+	NotifyActor bool
+	Status      model.TicketStatus
+	NextAction  string
+}
+
+var ticketNotificationPolicies = map[ticketNotificationEvent]ticketNotificationPolicy{
+	ticketEventPendingReview: {
+		Title:       "工單待審核",
+		NotifType:   "ticket_pending_review",
+		Roles:       []ticketRecipientRole{ticketRoleReviewer},
+		NotifyActor: false,
+		Status:      model.TicketStatusPendingReview,
+		NextAction:  "請審核是否通過此工單",
+	},
+	ticketEventApproved: {
+		Title:       "工單已核准",
+		NotifType:   "ticket_approved",
+		Roles:       []ticketRecipientRole{ticketRoleSubmitter},
+		NotifyActor: false,
+		Status:      model.TicketStatusApproved,
+		NextAction:  "請查看工單詳情",
+	},
+	ticketEventRejected: {
+		Title:       "工單已駁回",
+		NotifType:   "ticket_rejected",
+		Roles:       []ticketRecipientRole{ticketRoleSubmitter},
+		NotifyActor: false,
+		Status:      model.TicketStatusRejected,
+		NextAction:  "請依駁回原因修正後重新提交",
+	},
+	ticketEventPendingExecution: {
+		Title:       "工單待執行",
+		NotifType:   "ticket_pending_execution",
+		Roles:       []ticketRecipientRole{ticketRoleExecutorPool},
+		NotifyActor: false,
+		Status:      model.TicketStatusPendingExecution,
+		NextAction:  "請執行此工單",
+	},
+	ticketEventCompleted: {
+		Title:       "工單已完成",
+		NotifType:   "ticket_executed",
+		Roles:       []ticketRecipientRole{ticketRoleSubmitter},
+		NotifyActor: false,
+		Status:      model.TicketStatusCompleted,
+		NextAction:  "請查看執行結果",
+	},
+	ticketEventExecutionFailed: {
+		Title:       "工單執行失敗",
+		NotifType:   "ticket_executed",
+		Roles:       []ticketRecipientRole{ticketRoleSubmitter, ticketRoleAssignedExecutor},
+		NotifyActor: true,
+		Status:      model.TicketStatusFailed,
+		NextAction:  "請查看錯誤並重新處理",
+	},
+	ticketEventRevoked: {
+		Title:       "工單已撤銷",
+		NotifType:   "ticket_revoked",
+		Roles:       []ticketRecipientRole{ticketRoleSubmitter},
+		NotifyActor: false,
+		Status:      model.TicketStatusApproved,
+		NextAction:  "請查看工單詳情",
+	},
+}
+
 func NewTicketHandler(
 	tickets *repository.TicketRepo,
 	exports *repository.ExportRepo,
@@ -155,6 +244,80 @@ func (h *TicketHandler) buildTicketNotificationBody(ticket *model.Ticket, curren
 	}
 	parts = append(parts, fmt.Sprintf("工單連結：%s", h.ticketLink(ticket.ID)))
 	return strings.Join(parts, "\n")
+}
+
+func (h *TicketHandler) dispatchTicketNotification(
+	ctx context.Context,
+	ticket *model.Ticket,
+	event ticketNotificationEvent,
+	actorID *uint64,
+	detail string,
+) {
+	policy, ok := ticketNotificationPolicies[event]
+	if !ok {
+		return
+	}
+	recipientIDs, err := h.resolveTicketNotificationRecipients(ctx, ticket, policy, actorID)
+	if err != nil || len(recipientIDs) == 0 {
+		return
+	}
+	body := h.buildTicketNotificationBody(ticket, policy.Status, policy.NextAction, detail)
+	for _, recipientID := range recipientIDs {
+		h.sendInApp(ctx, recipientID, policy.NotifType, policy.Title, body, "ticket", ticket.ID)
+	}
+	h.notifyLarkUsers(ctx, recipientIDs, policy.Title, body, ticket.TicketNo)
+}
+
+func (h *TicketHandler) resolveTicketNotificationRecipients(
+	ctx context.Context,
+	ticket *model.Ticket,
+	policy ticketNotificationPolicy,
+	actorID *uint64,
+) ([]uint64, error) {
+	seen := make(map[uint64]struct{})
+	recipients := make([]uint64, 0, 4)
+	addRecipient := func(userID uint64) {
+		if userID == 0 {
+			return
+		}
+		if actorID != nil && !policy.NotifyActor && *actorID == userID {
+			return
+		}
+		if _, ok := seen[userID]; ok {
+			return
+		}
+		seen[userID] = struct{}{}
+		recipients = append(recipients, userID)
+	}
+
+	for _, role := range policy.Roles {
+		switch role {
+		case ticketRoleSubmitter:
+			addRecipient(ticket.SubmitterID)
+		case ticketRoleReviewer:
+			reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, reviewPermissionsForTicket(ticket.TicketType))
+			if err != nil {
+				return nil, err
+			}
+			for _, reviewerID := range reviewerIDs {
+				addRecipient(reviewerID)
+			}
+		case ticketRoleExecutorPool:
+			executorIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionTicketExecute})
+			if err != nil {
+				return nil, err
+			}
+			for _, executorID := range executorIDs {
+				addRecipient(executorID)
+			}
+		case ticketRoleAssignedExecutor:
+			if ticket.ExecutorID != nil {
+				addRecipient(*ticket.ExecutorID)
+			}
+		}
+	}
+
+	return recipients, nil
 }
 
 func (h *TicketHandler) sendInApp(ctx context.Context, userID uint64, notifType, title, body, resType string, resID uint64) {
@@ -372,12 +535,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	h.notifyTicketReviewers(
-		r.Context(),
-		created,
-		"工單待審核",
-		h.buildTicketNotificationBody(created, model.TicketStatusPendingReview, "請審核是否通過此工單", "提交人已送出工單，等待 reviewer 處理。"),
-	)
+	h.dispatchTicketNotification(r.Context(), created, ticketEventPendingReview, &userID, "提交人已送出工單，等待 reviewer 處理。")
 	jsonCreated(w, created)
 }
 
@@ -686,12 +844,9 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		if updated != nil {
 			ticket = updated
 		}
-		executorBody := h.buildTicketNotificationBody(ticket, model.TicketStatusPendingExecution, "請執行此工單", "reviewer 已通過審核，工單已進入待執行隊列。")
-		h.notifyExecutors(r.Context(), ticket, "工單待執行", executorBody)
+		h.dispatchTicketNotification(r.Context(), ticket, ticketEventPendingExecution, &userID, "reviewer 已通過審核，工單已進入待執行隊列。")
 	} else {
-		approveBody := h.buildTicketNotificationBody(ticket, model.TicketStatusApproved, "請查看工單詳情", body)
-		h.notifyLarkUsers(r.Context(), []uint64{ticket.SubmitterID}, "工單已核准", approveBody, ticket.TicketNo)
-		h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_approved", "工單已核准", approveBody, "ticket", id)
+		h.dispatchTicketNotification(r.Context(), ticket, ticketEventApproved, &userID, body)
 	}
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
@@ -757,13 +912,11 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	rejectAction := "請依駁回原因修正後重新提交"
+	rejectDetail := req.Reason
 	if ticket.Status == model.TicketStatusApproved || ticket.Status == model.TicketStatusPendingExecution {
-		rejectAction = "請確認執行前置條件或修正 SQL 後重新提交"
+		rejectDetail = "執行階段駁回：" + req.Reason
 	}
-	rejectBody := h.buildTicketNotificationBody(ticket, model.TicketStatusRejected, rejectAction, req.Reason)
-	h.notifyLarkUsers(r.Context(), []uint64{ticket.SubmitterID}, "工單已駁回", rejectBody, ticket.TicketNo)
-	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_rejected", "工單已駁回", rejectBody, "ticket", id)
+	h.dispatchTicketNotification(r.Context(), ticket, ticketEventRejected, &userID, rejectDetail)
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
@@ -806,12 +959,7 @@ func (h *TicketHandler) RequestExecution(w http.ResponseWriter, r *http.Request)
 	}
 
 	_ = userID
-	h.notifyExecutors(
-		r.Context(),
-		ticket,
-		"工單待執行",
-		h.buildTicketNotificationBody(ticket, model.TicketStatusPendingExecution, "請執行此工單", "工單已進入待執行隊列。"),
-	)
+	h.dispatchTicketNotification(r.Context(), ticket, ticketEventPendingExecution, &userID, "工單已進入待執行隊列。")
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
 }
@@ -923,6 +1071,7 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 
 	// Run SQL asynchronously so the HTTP response returns immediately.
 	// Status is persisted to DB; the client polls GET /tickets/{id} for progress.
+	ticket.ExecutorID = &userID
 	go h.runTicketSQL(ticket, userID)
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
@@ -1001,20 +1150,9 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 	})
 
 	if finalStatus == model.TicketStatusCompleted {
-		body := h.buildTicketNotificationBody(ticket, model.TicketStatusCompleted, "請查看執行結果", "工單已執行完成。")
-		h.notifyLarkUsers(ctx, []uint64{ticket.SubmitterID}, "工單已完成", body, ticket.TicketNo)
-		h.sendInApp(ctx, ticket.SubmitterID, "ticket_executed", "工單已完成", body, "ticket", ticket.ID)
+		h.dispatchTicketNotification(ctx, ticket, ticketEventCompleted, &executorID, "工單已執行完成。")
 	} else {
-		body := h.buildTicketNotificationBody(ticket, model.TicketStatusFailed, "請查看錯誤並重新處理", "工單執行失敗，請查看 execution log。")
-		recipients := []uint64{ticket.SubmitterID}
-		if executorID != 0 {
-			recipients = append(recipients, executorID)
-		}
-		h.notifyLarkUsers(ctx, recipients, "工單執行失敗", body, ticket.TicketNo)
-		h.sendInApp(ctx, ticket.SubmitterID, "ticket_executed", "工單執行失敗", body, "ticket", ticket.ID)
-		if executorID != 0 && executorID != ticket.SubmitterID {
-			h.sendInApp(ctx, executorID, "ticket_executed", "工單執行失敗", body, "ticket", ticket.ID)
-		}
+		h.dispatchTicketNotification(ctx, ticket, ticketEventExecutionFailed, &executorID, "工單執行失敗，請查看 execution log。")
 	}
 }
 
@@ -1073,9 +1211,7 @@ func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	body := fmt.Sprintf("Ticket %s has been revoked early and will be invalidated from the next query onwards", ticket.TicketNo)
-	h.notifyLarkUsers(r.Context(), []uint64{ticket.SubmitterID}, "Ticket Revoked", body, ticket.TicketNo)
-	h.sendInApp(r.Context(), ticket.SubmitterID, "ticket_revoked", "Ticket Revoked", body, "ticket", id)
+	h.dispatchTicketNotification(r.Context(), ticket, ticketEventRevoked, &userID, "敏感權限已提前撤銷，後續查詢起即失效。")
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
 }
@@ -1148,40 +1284,6 @@ func (h *TicketHandler) ensureReadyExportRequest(ctx context.Context, ticket *mo
 		req.DownloadToken = token
 	}
 	return req, nil
-}
-
-func (h *TicketHandler) notifyTicketReviewers(ctx context.Context, ticket *model.Ticket, title, body string) {
-	if h.notifRepo == nil {
-		return
-	}
-	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, reviewPermissionsForTicket(ticket.TicketType))
-	if err != nil {
-		return
-	}
-	for _, reviewerID := range reviewerIDs {
-		if reviewerID == ticket.SubmitterID {
-			continue
-		}
-		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticket.ID)
-		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body, ticket.TicketNo)
-	}
-}
-
-func (h *TicketHandler) notifyExecutors(ctx context.Context, ticket *model.Ticket, title, body string) {
-	if h.notifRepo == nil {
-		return
-	}
-	executorIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionTicketExecute})
-	if err != nil {
-		return
-	}
-	for _, executorID := range executorIDs {
-		if executorID == ticket.SubmitterID {
-			continue
-		}
-		h.sendInApp(ctx, executorID, "ticket_pending_execution", title, body, "ticket", ticket.ID)
-		h.notifyLarkUsers(ctx, []uint64{executorID}, title, body, ticket.TicketNo)
-	}
 }
 
 // runTicketSQLReview runs static + EXPLAIN-based checks against each SQL statement.

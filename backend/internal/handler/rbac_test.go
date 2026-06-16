@@ -34,14 +34,14 @@ func withURLParam(req *http.Request, key, value string) *http.Request {
 
 func userRows() *sqlmock.Rows {
 	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
-	return sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
-		AddRow(7, "alice", "alice@example.com", "hash", 0, 0, 1, now, now)
+	return sqlmock.NewRows([]string{"id", "username", "email", "lark_recipient", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+		AddRow(7, "alice", "alice@example.com", "", "hash", 0, 0, 1, now, now)
 }
 
 func protectedUserRows() *sqlmock.Rows {
 	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
-	return sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
-		AddRow(1, "admin", "admin@example.com", "hash", 1, 1, 1, now, now)
+	return sqlmock.NewRows([]string{"id", "username", "email", "lark_recipient", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+		AddRow(1, "admin", "admin@example.com", "", "hash", 1, 1, 1, now, now)
 }
 
 func authGroupRows() *sqlmock.Rows {
@@ -191,8 +191,8 @@ func TestUserHandlerPatchDisableUserRevokesSessions(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
 		WithArgs(uint64(7)).
 		WillReturnRows(userRows())
-	mock.ExpectExec(`UPDATE users SET username=\?, email=\?, updated_at=NOW\(\) WHERE id=\?`).
-		WithArgs("alice", "alice@example.com", uint64(7)).
+	mock.ExpectExec(`UPDATE users SET username=\?, email=\?, lark_recipient=\?, updated_at=NOW\(\) WHERE id=\?`).
+		WithArgs("alice", "alice@example.com", "", uint64(7)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`UPDATE users SET is_active=\?, updated_at=NOW\(\) WHERE id=\?`).
 		WithArgs(false, uint64(7)).

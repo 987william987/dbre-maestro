@@ -76,7 +76,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.users.Create(r.Context(), req.Username, req.Email, string(hash), true)
+	user, err := h.users.Create(r.Context(), req.Username, req.Email, "", string(hash), true)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "create user failed")
 		return

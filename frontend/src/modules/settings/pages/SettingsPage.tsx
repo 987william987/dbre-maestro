@@ -107,7 +107,7 @@ export function SettingsPage() {
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Lark Notifications</p>
-              <p className="mt-1 text-[12px] leading-5 text-muted">Configure Lark app credentials for ticket notifications. The platform uses the user email as the Lark recipient identifier. Leave App Secret blank to keep the existing secret.</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Configure Lark app credentials for ticket notifications. The platform uses each user&apos;s Lark Recipient first, then falls back to Email if that field is empty. Leave App Secret blank to keep the existing secret.</p>
             </div>
             <div className="grid gap-4 px-4 py-4 md:grid-cols-2">
               <Field

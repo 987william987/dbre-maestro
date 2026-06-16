@@ -4,6 +4,7 @@ export type UserSummary = {
   id: number
   username: string
   email: string
+  lark_recipient: string
   auth_groups: AuthGroup[]
   permissions?: string[]
   db_connection_ids?: number[]
@@ -26,6 +27,7 @@ export type UserDetail = {
   id: number
   username: string
   email: string
+  lark_recipient: string
   protected: boolean
   is_active: boolean
   created_at: string
