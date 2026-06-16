@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -101,5 +102,59 @@ func TestMaskingRuntimeApplyResultSkipsWhitelistMatch(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestDecideMaskRuleForResultColumnFallsBackToFullMaskOnMixedModes(t *testing.T) {
+	partialConfig, _ := json.Marshal(map[string]any{"keep_prefix": 1, "keep_suffix": 1})
+	rule, ok := decideMaskRuleForResultColumn("profile", []matchedMaskRule{
+		{
+			Origin: masking.ColumnOrigin{Database: "analytics", Table: "users", Column: "user_name"},
+			Rule: model.MaskingRule{
+				MaskMode:   "partial",
+				MaskConfig: partialConfig,
+			},
+		},
+		{
+			Origin: masking.ColumnOrigin{Database: "analytics", Table: "users", Column: "email"},
+			Rule: model.MaskingRule{
+				MaskMode: "email",
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("expected rule, got none")
+	}
+	if rule.Mode != masking.MaskModeFull {
+		t.Fatalf("rule.Mode = %s, want %s", rule.Mode, masking.MaskModeFull)
+	}
+}
+
+func TestDecideMaskRuleForResultColumnKeepsModeWhenAllDependenciesAgree(t *testing.T) {
+	partialConfig, _ := json.Marshal(map[string]any{"keep_prefix": 1, "keep_suffix": 1})
+	rule, ok := decideMaskRuleForResultColumn("profile", []matchedMaskRule{
+		{
+			Origin: masking.ColumnOrigin{Database: "analytics", Table: "users", Column: "first_name"},
+			Rule: model.MaskingRule{
+				MaskMode:   "partial",
+				MaskConfig: partialConfig,
+			},
+		},
+		{
+			Origin: masking.ColumnOrigin{Database: "analytics", Table: "users", Column: "last_name"},
+			Rule: model.MaskingRule{
+				MaskMode:   "partial",
+				MaskConfig: partialConfig,
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("expected rule, got none")
+	}
+	if rule.Mode != masking.MaskModePartial {
+		t.Fatalf("rule.Mode = %s, want %s", rule.Mode, masking.MaskModePartial)
+	}
+	if string(rule.Config) != string(partialConfig) {
+		t.Fatalf("rule.Config = %s, want %s", string(rule.Config), string(partialConfig))
 	}
 }

@@ -16,6 +16,8 @@ import (
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
+	"github.com/dbre-maestro/maestro/internal/sqlparse"
+	"github.com/dbre-maestro/maestro/internal/sqlpolicy"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
 	ticketsm "github.com/dbre-maestro/maestro/internal/ticket"
 	"github.com/go-chi/chi/v5"
@@ -177,7 +179,7 @@ func (h *TicketHandler) ReviewSQL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := h.runTicketSQLReview(r.Context(), *req.DBConnectionID, req.SQLContent, req.DatabaseName)
+	results := h.runTicketSQLReviewWithType(r.Context(), *req.DBConnectionID, req.TicketType, req.SQLContent, req.DatabaseName)
 	blocked := false
 	for _, result := range results {
 		if result.Status == "error" {
@@ -239,7 +241,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// SQL Review: run static + EXPLAIN-based checks if a target DB is specified
 	var reviewResults []ticketReviewItem
 	if req.DBConnectionID != nil && (req.TicketType == model.TicketTypeDDL || req.TicketType == model.TicketTypeDML) {
-		reviewResults = h.runTicketSQLReview(r.Context(), *req.DBConnectionID, req.SQLContent, req.DatabaseName)
+		reviewResults = h.runTicketSQLReviewWithType(r.Context(), *req.DBConnectionID, req.TicketType, req.SQLContent, req.DatabaseName)
 		issues := make([]string, 0)
 		for _, result := range reviewResults {
 			if result.Status == "error" && result.Message != nil && strings.TrimSpace(*result.Message) != "" {
@@ -841,14 +843,15 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 	}
 	defer cleanup()
 
-	stmts := splitSQLStatements(ticket.SQLContent)
 	finalStatus := model.TicketStatusCompleted
+	parsedStatements, _, err := h.parseTicketStatements(ctx, *ticket.DBConnectionID, ticket.SQLContent)
+	if err != nil {
+		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "parse SQL failed: "+err.Error())
+		return
+	}
 
-	for seq, stmt := range stmts {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
+	for _, parsedStatement := range parsedStatements {
+		stmt := strings.TrimSpace(parsedStatement.RawSQL)
 
 		// Check if ticket was stopped between statements
 		current, err := h.tickets.GetByID(ctx, ticket.ID)
@@ -858,7 +861,7 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 
 		execRow := &model.TicketExecution{
 			TicketID: ticket.ID,
-			Seq:      seq + 1,
+			Seq:      parsedStatement.Seq,
 			SQLStmt:  stmt,
 		}
 		execID, err := h.tickets.CreateExecution(ctx, execRow)
@@ -1062,9 +1065,24 @@ func (h *TicketHandler) notifyExecutors(ctx context.Context, ticket *model.Ticke
 // runTicketSQLReview runs static + EXPLAIN-based checks against each SQL statement.
 // Returns a list of blocking issue messages.
 func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64, sqlContent string, databaseName *string) []ticketReviewItem {
+	return h.runTicketSQLReviewWithType(ctx, dbConnID, model.TicketTypeDDL, sqlContent, databaseName)
+}
+
+// runTicketSQLReview runs static + EXPLAIN-based checks against each SQL statement.
+func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID uint64, ticketType model.TicketType, sqlContent string, databaseName *string) []ticketReviewItem {
+	parsedStatements, dialect, err := h.parseTicketStatements(ctx, dbConnID, sqlContent)
+	if err != nil {
+		return buildSyntaxErrorReviewItems(err, sqlContent)
+	}
+	if ticketType == model.TicketTypeDDL || ticketType == model.TicketTypeDML {
+		if err := sqlpolicy.CheckTicketStatementKinds(ticketType, parsedStatements); err != nil {
+			return buildTicketKindReviewItems(parsedStatements, err)
+		}
+	}
+
 	rules, err := h.sqlReviewRules.List(ctx)
 	if err != nil {
-		return buildPassThroughReviewItems(sqlContent)
+		return buildPassThroughReviewItems(parsedStatements)
 	}
 
 	ruleMap := make(map[string]bool, len(rules))
@@ -1078,8 +1096,7 @@ func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64,
 		}
 	}
 
-	results := make([]ticketReviewItem, 0)
-	statements := splitSQLStatements(sqlContent)
+	results := make([]ticketReviewItem, 0, len(parsedStatements))
 
 	// Static checks (no DB connection required)
 	staticNames := []string{"dml_no_where", "ddl_no_comment", "require_utf8mb4"}
@@ -1091,29 +1108,13 @@ func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64,
 		}
 	}
 	if hasStatic {
-		for index, stmt := range statements {
-			stmt = strings.TrimSpace(stmt)
-			if stmt == "" {
-				continue
-			}
-			issues := make([]string, 0)
-			if err := sqlreview.CheckLikelyMissingStatementDelimiter(stmt); err != nil {
-				issues = append(issues, err.Error())
-			}
-			issues = append(issues, sqlreview.RunStaticChecks(stmt, ruleMap)...)
-			results = append(results, buildTicketReviewItem(index+1, stmt, 0, issues))
+		for _, stmt := range parsedStatements {
+			issues := sqlreview.RunStaticChecksParsed(stmt, ruleMap)
+			results = append(results, buildTicketReviewItem(stmt.Seq, stmt.RawSQL, 0, issues))
 		}
 	} else {
-		for index, stmt := range statements {
-			stmt = strings.TrimSpace(stmt)
-			if stmt == "" {
-				continue
-			}
-			issues := make([]string, 0)
-			if err := sqlreview.CheckLikelyMissingStatementDelimiter(stmt); err != nil {
-				issues = append(issues, err.Error())
-			}
-			results = append(results, buildTicketReviewItem(index+1, stmt, 0, issues))
+		for _, stmt := range parsedStatements {
+			results = append(results, buildTicketReviewItem(stmt.Seq, stmt.RawSQL, 0, nil))
 		}
 	}
 
@@ -1128,12 +1129,14 @@ func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64,
 	}
 	defer cleanup()
 
-	for index, stmt := range statements {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
+	for index, stmt := range parsedStatements {
+		if dialect == sqlparse.DialectMySQL && stmt.Kind != sqlparse.StatementKindSelect {
 			continue
 		}
-		issues, err := sqlreview.CheckExplain(ctx, queryDB, stmt, rowThreshold)
+		if dialect != sqlparse.DialectMySQL && stmt.Kind != sqlparse.StatementKindSelect {
+			continue
+		}
+		issues, err := sqlreview.CheckExplain(ctx, queryDB, stmt.RawSQL, rowThreshold)
 		if err != nil {
 			continue
 		}
@@ -1152,10 +1155,26 @@ func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64,
 			continue
 		}
 		if len(explainMessages) > 0 {
-			results[index] = buildTicketReviewItem(index+1, stmt, maxRows, explainMessages)
+			results[index] = buildTicketReviewItem(stmt.Seq, stmt.RawSQL, maxRows, explainMessages)
 		}
 	}
 	return results
+}
+
+func (h *TicketHandler) parseTicketStatements(ctx context.Context, dbConnID uint64, sqlContent string) ([]sqlparse.ParsedStatement, sqlparse.Dialect, error) {
+	conn, err := h.dbConns.GetByID(ctx, dbConnID)
+	if err != nil {
+		return nil, sqlparse.DialectGeneric, err
+	}
+	if conn == nil {
+		return nil, sqlparse.DialectGeneric, fmt.Errorf("db connection not found")
+	}
+	dialect := sqlparse.DialectFromDBType(conn.DBType)
+	parsed, err := sqlparse.ParseSQL(dialect, sqlContent)
+	if err != nil {
+		return nil, dialect, err
+	}
+	return parsed.Statements, dialect, nil
 }
 
 func (h *TicketHandler) listTicketDatabases(ctx context.Context, connID uint64) ([]ticketDatabaseOption, error) {
@@ -1268,14 +1287,39 @@ func (h *TicketHandler) openTicketSQLDBWithConnection(
 	return db, func() { _ = db.Close() }, resolvedConn, nil
 }
 
-func buildPassThroughReviewItems(sqlContent string) []ticketReviewItem {
+func buildPassThroughReviewItems(statements []sqlparse.ParsedStatement) []ticketReviewItem {
 	items := make([]ticketReviewItem, 0)
-	for index, stmt := range splitSQLStatements(sqlContent) {
-		trimmed := strings.TrimSpace(stmt)
-		if trimmed == "" {
+	for _, stmt := range statements {
+		items = append(items, buildTicketReviewItem(stmt.Seq, stmt.RawSQL, 0, nil))
+	}
+	return items
+}
+
+func buildSyntaxErrorReviewItems(parseErr error, sqlContent string) []ticketReviewItem {
+	message := parseErr.Error()
+	if syntaxErr, ok := parseErr.(*sqlparse.SyntaxError); ok {
+		seq := syntaxErr.StatementSeq
+		if seq <= 0 {
+			seq = 1
+		}
+		return []ticketReviewItem{buildTicketReviewItem(seq, strings.TrimSpace(sqlContent), 0, []string{message})}
+	}
+	return []ticketReviewItem{buildTicketReviewItem(1, strings.TrimSpace(sqlContent), 0, []string{message})}
+}
+
+func buildTicketKindReviewItems(statements []sqlparse.ParsedStatement, kindErr error) []ticketReviewItem {
+	items := make([]ticketReviewItem, 0, len(statements))
+	targetSeq := 0
+	message := kindErr.Error()
+	if typed, ok := kindErr.(*sqlpolicy.ErrTicketStatementKind); ok {
+		targetSeq = typed.StatementSeq
+	}
+	for _, stmt := range statements {
+		if stmt.Seq == targetSeq {
+			items = append(items, buildTicketReviewItem(stmt.Seq, stmt.RawSQL, 0, []string{message}))
 			continue
 		}
-		items = append(items, buildTicketReviewItem(index+1, trimmed, 0, nil))
+		items = append(items, buildTicketReviewItem(stmt.Seq, stmt.RawSQL, 0, nil))
 	}
 	return items
 }
@@ -1300,37 +1344,6 @@ func buildTicketReviewItem(seq int, stmt string, scanRows int64, issues []string
 }
 
 // splitSQLStatements splits a multi-statement SQL string by semicolons.
-func splitSQLStatements(sql string) []string {
-	var stmts []string
-	var cur strings.Builder
-	depth := 0
-	for _, ch := range sql {
-		switch ch {
-		case '(':
-			depth++
-			cur.WriteRune(ch)
-		case ')':
-			depth--
-			cur.WriteRune(ch)
-		case ';':
-			if depth == 0 {
-				if s := strings.TrimSpace(cur.String()); s != "" {
-					stmts = append(stmts, s)
-				}
-				cur.Reset()
-			} else {
-				cur.WriteRune(ch)
-			}
-		default:
-			cur.WriteRune(ch)
-		}
-	}
-	if s := strings.TrimSpace(cur.String()); s != "" {
-		stmts = append(stmts, s)
-	}
-	return stmts
-}
-
 func parseTicketID(w http.ResponseWriter, r *http.Request) uint64 {
 	s := chi.URLParam(r, "id")
 	id, err := strconv.ParseUint(s, 10, 64)

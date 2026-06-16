@@ -14,6 +14,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
+	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -158,7 +159,7 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Whitelist check: only SELECT/SHOW/EXPLAIN/DESC/WITH
-	if err := sqlreview.CheckReadOnly(req.SQL); err != nil {
+	if err := sqlreview.CheckReadOnly(sqlparse.DialectFromDBType(conn.DBType), req.SQL); err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "only read-only SQL is allowed: "+err.Error())
 		return
 	}
@@ -273,7 +274,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		jsonErr(w, http.StatusUnprocessableEntity, "sensitive query access only supports mysql connections")
 		return
 	}
-	if err := sqlreview.CheckReadOnly(req.SQLContent); err != nil {
+	if err := sqlreview.CheckReadOnly(sqlparse.DialectFromDBType(conn.DBType), req.SQLContent); err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "only read-only SQL is allowed: "+err.Error())
 		return
 	}
@@ -602,11 +603,24 @@ func executeSingleSQLStatement(
 	}
 
 	origins := inferColumnOriginsFromLabels(cols, effectiveQueryDatabaseName(conn, queryCtx))
+	dependencies := dependenciesFromOrigins(origins)
+	if shouldResolveMySQLOrigins(cols) {
+		resolvedColumns, err := resolveMySQLLineageForStatement(ctx, conn, pinnedConn, statement, cols, queryCtx)
+		if err == nil && len(resolvedColumns) == len(cols) {
+			origins = make([]masking.ColumnOrigin, len(resolvedColumns))
+			dependencies = make([][]masking.ColumnOrigin, len(resolvedColumns))
+			for i, column := range resolvedColumns {
+				origins[i] = column.Origin
+				dependencies[i] = append([]masking.ColumnOrigin(nil), column.Dependencies...)
+			}
+		}
+	}
 	result := &masking.QueryResult{
-		Columns:    buildDisplayColumns(cols, origins),
-		RawColumns: cols,
-		Origins:    origins,
-		Rows:       make([][]any, 0),
+		Columns:      buildDisplayColumns(cols, origins),
+		RawColumns:   cols,
+		Origins:      origins,
+		Dependencies: dependencies,
+		Rows:         make([][]any, 0),
 	}
 	for rows.Next() {
 		vals := make([]any, len(cols))
@@ -652,10 +666,11 @@ func executeSinglePostgresStatement(
 	}
 
 	queryResult := &masking.QueryResult{
-		Columns:    buildDisplayColumns(columns, origins),
-		RawColumns: columns,
-		Origins:    origins,
-		Rows:       make([][]any, 0),
+		Columns:      buildDisplayColumns(columns, origins),
+		RawColumns:   columns,
+		Origins:      origins,
+		Dependencies: dependenciesFromOrigins(origins),
+		Rows:         make([][]any, 0),
 	}
 	for rows.Next() {
 		values, err := rows.Values()
@@ -774,6 +789,17 @@ func inferColumnOriginsFromLabels(columns []string, databaseName string) []maski
 	return origins
 }
 
+func dependenciesFromOrigins(origins []masking.ColumnOrigin) [][]masking.ColumnOrigin {
+	dependencies := make([][]masking.ColumnOrigin, len(origins))
+	for i, origin := range origins {
+		if strings.TrimSpace(origin.Column) == "" {
+			continue
+		}
+		dependencies[i] = []masking.ColumnOrigin{origin}
+	}
+	return dependencies
+}
+
 func buildDisplayColumns(rawColumns []string, origins []masking.ColumnOrigin) []string {
 	displayColumns := make([]string, len(rawColumns))
 	for i, rawColumn := range rawColumns {
@@ -820,184 +846,15 @@ func injectLimit(sqlStr string, limit int, dbType string) string {
 		return sqlStr
 	}
 
-	statements := splitSQLStatementsForLimit(sqlStr)
-	if len(statements) == 0 {
+	dialect := sqlparse.DialectFromDBType(dbType)
+	rewritten, _, err := sqlparse.RewriteSelectLimit(dialect, sqlStr, limit)
+	if err != nil {
 		return sqlStr
 	}
-
-	transformed := make([]string, 0, len(statements))
-	for _, statement := range statements {
-		trimmed := strings.TrimSpace(statement)
-		if trimmed == "" {
-			continue
-		}
-		withoutTrailingSemicolon := strings.TrimSpace(strings.TrimSuffix(trimmed, ";"))
-		rewritten, changed := injectLimitIntoStatement(withoutTrailingSemicolon, limit)
-		if changed {
-			transformed = append(transformed, rewritten)
-			continue
-		}
-		transformed = append(transformed, withoutTrailingSemicolon)
-	}
-
-	if len(transformed) == 0 {
+	if strings.TrimSpace(rewritten) == "" {
 		return sqlStr
 	}
-	return strings.Join(transformed, "; ")
-}
-
-func injectLimitIntoStatement(statement string, limit int) (string, bool) {
-	upper := strings.ToUpper(statement)
-	if strings.HasPrefix(upper, "SELECT") {
-		if hasTopLevelLimitClause(statement, 0) {
-			return statement, false
-		}
-		return statement + " LIMIT " + strconv.Itoa(limit), true
-	}
-
-	if !strings.HasPrefix(upper, "WITH") {
-		return statement, false
-	}
-
-	mainQueryStart, ok := withMainQueryStart(statement)
-	if !ok {
-		return statement, false
-	}
-	mainQuery := strings.TrimSpace(statement[mainQueryStart:])
-	if !strings.HasPrefix(strings.ToUpper(mainQuery), "SELECT") {
-		return statement, false
-	}
-	if hasTopLevelLimitClause(statement, mainQueryStart) {
-		return statement, false
-	}
-	return statement + " LIMIT " + strconv.Itoa(limit), true
-}
-
-func withMainQueryStart(statement string) (int, bool) {
-	upper := strings.ToUpper(statement)
-	pos := limitSkipToken(upper, 0)
-	pos = limitSkipWhitespace(upper, pos)
-	if strings.HasPrefix(upper[pos:], "RECURSIVE") {
-		pos = limitSkipToken(upper, pos)
-		pos = limitSkipWhitespace(upper, pos)
-	}
-
-	for pos < len(upper) {
-		pos = limitSkipToken(upper, pos)
-		pos = limitSkipWhitespace(upper, pos)
-		if pos >= len(upper) {
-			return 0, false
-		}
-		if strings.HasPrefix(upper[pos:], "AS") {
-			pos = limitSkipToken(upper, pos)
-			pos = limitSkipWhitespace(upper, pos)
-		}
-		if pos < len(upper) && upper[pos] == '(' {
-			pos = limitSkipBalancedParen(upper, pos)
-			pos = limitSkipWhitespace(upper, pos)
-		}
-		if pos < len(upper) && upper[pos] == ',' {
-			pos++
-			pos = limitSkipWhitespace(upper, pos)
-			continue
-		}
-		break
-	}
-
-	return pos, pos < len(upper)
-}
-
-func hasTopLevelLimitClause(statement string, start int) bool {
-	upper := strings.ToUpper(statement)
-	depth := 0
-	var quote rune
-
-	for i := start; i < len(upper); i++ {
-		ch := rune(upper[i])
-		switch {
-		case quote != 0:
-			if ch == quote {
-				quote = 0
-			}
-		case ch == '\'' || ch == '"' || ch == '`':
-			quote = ch
-		case ch == '(':
-			depth++
-		case ch == ')':
-			if depth > 0 {
-				depth--
-			}
-		case depth == 0 && isLimitTokenAt(upper, i):
-			return true
-		}
-	}
-
-	return false
-}
-
-func isLimitTokenAt(statement string, index int) bool {
-	if !strings.HasPrefix(statement[index:], "LIMIT") {
-		return false
-	}
-	if index > 0 {
-		prev := rune(statement[index-1])
-		if prev == '_' || prev == '.' || ('A' <= prev && prev <= 'Z') || ('0' <= prev && prev <= '9') {
-			return false
-		}
-	}
-	end := index + len("LIMIT")
-	if end < len(statement) {
-		next := rune(statement[end])
-		if next == '_' || ('A' <= next && next <= 'Z') || ('0' <= next && next <= '9') {
-			return false
-		}
-	}
-	return true
-}
-
-func limitSkipWhitespace(s string, pos int) int {
-	for pos < len(s) && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\n' || s[pos] == '\r') {
-		pos++
-	}
-	return pos
-}
-
-func limitSkipToken(s string, pos int) int {
-	pos = limitSkipWhitespace(s, pos)
-	for pos < len(s) && ((s[pos] >= 'A' && s[pos] <= 'Z') || (s[pos] >= '0' && s[pos] <= '9') || s[pos] == '_') {
-		pos++
-	}
-	return pos
-}
-
-func limitSkipBalancedParen(s string, pos int) int {
-	if pos >= len(s) || s[pos] != '(' {
-		return pos
-	}
-
-	depth := 0
-	var quote rune
-	for pos < len(s) {
-		ch := rune(s[pos])
-		switch {
-		case quote != 0:
-			if ch == quote {
-				quote = 0
-			}
-		case ch == '\'' || ch == '"' || ch == '`':
-			quote = ch
-		case ch == '(':
-			depth++
-		case ch == ')':
-			depth--
-			if depth == 0 {
-				return pos + 1
-			}
-		}
-		pos++
-	}
-
-	return pos
+	return rewritten
 }
 
 func splitSQLStatementsForLimit(sql string) []string {
@@ -1063,7 +920,11 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 	ctx, cancel := context.WithTimeout(r.Context(), defaultQueryTimeout)
 	defer cancel()
 
-	cmd, args := sqlreview.ParseRedisCommand(cmdLine)
+	cmd, args, err := sqlreview.ParseRedisCommand(cmdLine)
+	if err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "invalid redis command: "+err.Error())
+		return
+	}
 	ifaces := make([]interface{}, len(args))
 	for i, a := range args {
 		ifaces[i] = a

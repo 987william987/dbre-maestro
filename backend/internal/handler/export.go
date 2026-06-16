@@ -15,6 +15,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
+	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
 	"github.com/go-chi/chi/v5"
 )
@@ -155,7 +156,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := sqlreview.CheckReadOnly(req.SQLContent); err != nil {
+	if err := sqlreview.CheckReadOnly(sqlparse.DialectFromDBType(conn.DBType), req.SQLContent); err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}

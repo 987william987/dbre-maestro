@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dbre-maestro/maestro/internal/masking"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
@@ -41,22 +42,19 @@ func analyzeSQLScopes(
 		return nil, err
 	}
 
-	_, sensitiveIndexes, err := maskingRuntime.applyResult(ctx, resolvedConn, 0, result)
+	decisions, _, err := maskingRuntime.analyzeSensitiveColumns(ctx, resolvedConn, result)
 	if err != nil {
 		return nil, err
 	}
-	sensitiveIndexSet := make(map[int]bool, len(sensitiveIndexes))
-	for _, idx := range sensitiveIndexes {
-		sensitiveIndexSet[idx] = true
+	scopeOrigins := make([]masking.ColumnOrigin, 0, len(decisions))
+	for _, decision := range decisions {
+		scopeOrigins = append(scopeOrigins, decision.SensitiveOrigins...)
 	}
 
-	scopes := make([]model.TicketScope, 0, len(result.Origins))
-	seen := make(map[string]struct{}, len(result.Origins))
-	for idx, origin := range result.Origins {
+	scopes := make([]model.TicketScope, 0, len(scopeOrigins))
+	seen := make(map[string]struct{}, len(scopeOrigins))
+	for _, origin := range scopeOrigins {
 		columnName := strings.TrimSpace(origin.Column)
-		if columnName == "" {
-			columnName = strings.TrimSpace(result.Columns[idx])
-		}
 		if columnName == "" {
 			continue
 		}
@@ -70,7 +68,7 @@ func analyzeSQLScopes(
 			nullableStringValue(schemaName),
 			nullableStringValue(tableName),
 			columnName,
-			sensitiveIndexSet[idx],
+			true,
 		)
 		if _, ok := seen[key]; ok {
 			continue
@@ -83,14 +81,14 @@ func analyzeSQLScopes(
 			SchemaName:   schemaName,
 			TableName:    tableName,
 			ColumnName:   columnName,
-			IsSensitive:  sensitiveIndexSet[idx],
+			IsSensitive:  true,
 			SourceKind:   "query_column",
 		})
 	}
 
 	return &sqlScopeAnalysis{
 		Scopes:            scopes,
-		ContainsSensitive: len(sensitiveIndexes) > 0,
+		ContainsSensitive: len(decisions) > 0,
 	}, nil
 }
 

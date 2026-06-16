@@ -36,7 +36,7 @@ type ColumnsResponse = {
   columns: MetadataColumn[]
 }
 
-export async function listMaskingRules() {
+export async function listMaskingRules(): Promise<MaskingRulesResponse> {
   const response = await apiClient.get<MaskingRulesResponse>('/masking-rules')
   return {
     ...response,

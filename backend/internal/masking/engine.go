@@ -23,10 +23,11 @@ func NewEngine(encryptionKey []byte, cache *RuleCache) (*Engine, error) {
 
 // QueryResult holds the columns and rows returned by a SQL Editor query.
 type QueryResult struct {
-	Columns    []string
-	RawColumns []string
-	Origins    []ColumnOrigin
-	Rows       [][]any
+	Columns      []string
+	RawColumns   []string
+	Origins      []ColumnOrigin
+	Dependencies [][]ColumnOrigin
+	Rows         [][]any
 }
 
 type ColumnOrigin struct {
@@ -58,6 +59,39 @@ func (e *Engine) MaskResult(result *QueryResult, rules []Rule) error {
 			masked, err := rule.Apply(strVal, e.pepper)
 			if err != nil {
 				// T4: Fail Closed — return 422-worthy error, never silently pass
+				return fmt.Errorf("mask column %q row %d: %w", colName, rowIdx, err)
+			}
+			result.Rows[rowIdx][colIdx] = masked
+		}
+	}
+	return nil
+}
+
+// MaskColumns applies pre-resolved masking rules to explicit column indexes.
+// This is used when semantic analysis has already determined which result
+// columns are sensitive, including computed columns whose lineage spans
+// multiple base columns.
+func (e *Engine) MaskColumns(result *QueryResult, indexRules map[int]Rule) error {
+	if len(indexRules) == 0 {
+		return nil
+	}
+
+	columnLabels := result.columnLabelsForMatching()
+	for rowIdx, row := range result.Rows {
+		for colIdx, rule := range indexRules {
+			if colIdx < 0 || colIdx >= len(row) {
+				continue
+			}
+			if row[colIdx] == nil {
+				continue
+			}
+			strVal := fmt.Sprintf("%v", row[colIdx])
+			masked, err := rule.Apply(strVal, e.pepper)
+			if err != nil {
+				colName := ""
+				if colIdx < len(columnLabels) {
+					colName = columnLabels[colIdx]
+				}
 				return fmt.Errorf("mask column %q row %d: %w", colName, rowIdx, err)
 			}
 			result.Rows[rowIdx][colIdx] = masked

@@ -11,7 +11,7 @@ import (
 
 func TestInjectLimitStripsTrailingSemicolon(t *testing.T) {
 	got := injectLimit("SELECT * FROM t_user;   ", 200, "mysql")
-	want := "SELECT * FROM t_user LIMIT 200"
+	want := "SELECT * FROM `t_user` LIMIT 200"
 	if got != want {
 		t.Fatalf("injectLimit() = %q, want %q", got, want)
 	}
@@ -19,7 +19,7 @@ func TestInjectLimitStripsTrailingSemicolon(t *testing.T) {
 
 func TestInjectLimitPreservesExistingLimit(t *testing.T) {
 	got := injectLimit("SELECT * FROM t_user LIMIT 10;", 200, "mysql")
-	want := "SELECT * FROM t_user LIMIT 10"
+	want := "SELECT * FROM `t_user` LIMIT 10"
 	if got != want {
 		t.Fatalf("injectLimit() = %q, want %q", got, want)
 	}
@@ -41,17 +41,9 @@ func TestInjectLimitSkipsShowStatements(t *testing.T) {
 	}
 }
 
-func TestInjectLimitOnlyTouchesSelectInMultiStatementSQL(t *testing.T) {
+func TestInjectLimitLeavesMultiStatementSQLUntouched(t *testing.T) {
 	got := injectLimit("SELECT 1;\nSHOW GRANTS FOR dev;", 200, "mysql")
-	want := "SELECT 1 LIMIT 200; SHOW GRANTS FOR dev"
-	if got != want {
-		t.Fatalf("injectLimit() = %q, want %q", got, want)
-	}
-}
-
-func TestInjectLimitPreservesExistingLimitInMultiStatementSQL(t *testing.T) {
-	got := injectLimit("SELECT 1 LIMIT 10;\nSHOW GRANTS FOR dev;", 200, "mysql")
-	want := "SELECT 1 LIMIT 10; SHOW GRANTS FOR dev"
+	want := "SELECT 1;\nSHOW GRANTS FOR dev;"
 	if got != want {
 		t.Fatalf("injectLimit() = %q, want %q", got, want)
 	}
@@ -59,7 +51,7 @@ func TestInjectLimitPreservesExistingLimitInMultiStatementSQL(t *testing.T) {
 
 func TestInjectLimitSupportsCTESelect(t *testing.T) {
 	got := injectLimit("WITH cte AS (SELECT id FROM users) SELECT * FROM cte;", 200, "mysql")
-	want := "WITH cte AS (SELECT id FROM users) SELECT * FROM cte LIMIT 200"
+	want := "WITH `cte` AS (SELECT `id` FROM `users`) SELECT * FROM `cte` LIMIT 200"
 	if got != want {
 		t.Fatalf("injectLimit() = %q, want %q", got, want)
 	}
@@ -67,15 +59,15 @@ func TestInjectLimitSupportsCTESelect(t *testing.T) {
 
 func TestInjectLimitPreservesTopLevelLimitForCTESelect(t *testing.T) {
 	got := injectLimit("WITH cte AS (SELECT id FROM users LIMIT 5) SELECT * FROM cte LIMIT 10;", 200, "mysql")
-	want := "WITH cte AS (SELECT id FROM users LIMIT 5) SELECT * FROM cte LIMIT 10"
+	want := "WITH `cte` AS (SELECT `id` FROM `users` LIMIT 5) SELECT * FROM `cte` LIMIT 10"
 	if got != want {
 		t.Fatalf("injectLimit() = %q, want %q", got, want)
 	}
 }
 
-func TestInjectLimitSupportsCTEInsideMultiStatementSQL(t *testing.T) {
+func TestInjectLimitLeavesCTEMultiStatementSQLUntouched(t *testing.T) {
 	got := injectLimit("WITH cte AS (SELECT 1) SELECT * FROM cte;\nSHOW GRANTS FOR dev;", 200, "mysql")
-	want := "WITH cte AS (SELECT 1) SELECT * FROM cte LIMIT 200; SHOW GRANTS FOR dev"
+	want := "WITH cte AS (SELECT 1) SELECT * FROM cte;\nSHOW GRANTS FOR dev;"
 	if got != want {
 		t.Fatalf("injectLimit() = %q, want %q", got, want)
 	}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import CodeMirror from '@uiw/react-codemirror'
 import { javascript } from '@codemirror/lang-javascript'
 import { sql } from '@codemirror/lang-sql'
-import { format as formatSQL, type Dialect } from 'sql-formatter'
+import { format as formatSQL, type SqlLanguage } from 'sql-formatter'
 import {
   Check,
   ChevronDown,
@@ -170,7 +170,7 @@ function buildExplainSQL(sqlText: string) {
   return `EXPLAIN ${trimmed};`
 }
 
-function getSQLFormatterDialect(connection: DBConnection | null): Dialect {
+function getSQLFormatterDialect(connection: DBConnection | null): SqlLanguage {
   if (connection?.db_type === 'postgres') {
     return 'postgresql'
   }
@@ -713,21 +713,9 @@ export function SQLEditorPage() {
   const activeColumnFilterOpen = activeTab?.columnFilterOpen ?? false
   const activeVisibleColumnIndexes = activeTab?.visibleColumnIndexes ?? null
   const activeSelectedSQL = activeTab?.selectedSQL ?? ''
+  const activeExecutionSQL = activeSelectedSQL.trim() || activeTab?.sql.trim() || ''
   const activeSensitiveAccessDuration = activeTab?.sensitiveAccessDuration ?? 10
   const activeResultPage = activeTab?.resultPage ?? 1
-  const activePathLabel = useMemo(() => {
-    const parts = [activeConnection?.name].filter(Boolean) as string[]
-    if (activeDatabase) {
-      parts.push(activeDatabase)
-    }
-    if (activeSchema && activeConnection?.db_type === 'postgres') {
-      parts.push(activeSchema)
-    }
-    if (activeSelectedTable) {
-      parts.push(activeSelectedTable.name)
-    }
-    return parts
-  }, [activeConnection?.db_type, activeConnection?.name, activeDatabase, activeSchema, activeSelectedTable])
   const filteredExplorerNodes = useMemo(
     () => (activeExplorerSearch.trim() ? activeSearchTreeNodes : filterAssetTree(activeExplorerNodes, activeExplorerSearch)),
     [activeExplorerNodes, activeExplorerSearch, activeSearchTreeNodes],
@@ -1107,7 +1095,7 @@ export function SQLEditorPage() {
   }
 
   async function executeEditorSQL(mode: 'run' | 'explain') {
-    const sqlToExecute = activeSelectedSQL.trim() || activeTab?.sql.trim() || ''
+    const sqlToExecute = activeExecutionSQL
     if (!activeTab?.connectionId || !sqlToExecute) {
       updateActiveTab({ error: 'Select a database connection and enter a query first.' })
       return
@@ -1215,7 +1203,7 @@ export function SQLEditorPage() {
   }
 
   async function handleExport() {
-    if (!activeTab?.connectionId || !activeTab.sql.trim()) {
+    if (!activeTab?.connectionId || !activeExecutionSQL) {
       return
     }
 
@@ -1223,7 +1211,7 @@ export function SQLEditorPage() {
     try {
       const response = await createExportRequest({
         db_connection_id: activeTab.connectionId,
-        sql_content: activeTab.sql,
+        sql_content: activeExecutionSQL,
         database_name: activeDatabase || undefined,
         schema_name: activeConnection?.db_type === 'postgres' ? activeSchema || undefined : undefined,
       })
@@ -1236,7 +1224,7 @@ export function SQLEditorPage() {
   }
 
   async function handleCreateSensitiveAccess() {
-    if (!activeTab?.connectionId || !activeTab.sql.trim()) {
+    if (!activeTab?.connectionId || !activeExecutionSQL) {
       return
     }
     if (activeConnection?.db_type !== 'mysql') {
@@ -1247,7 +1235,7 @@ export function SQLEditorPage() {
     try {
       const response = await createSensitiveAccessTicket({
         db_connection_id: activeTab.connectionId,
-        sql_content: activeTab.sql,
+        sql_content: activeExecutionSQL,
         database_name: activeDatabase || undefined,
         schema_name: activeSchema || undefined,
         approved_duration_minutes: activeSensitiveAccessDuration,
@@ -1895,7 +1883,7 @@ export function SQLEditorPage() {
                       <button
                         type="button"
                         onClick={() => void handleCreateSensitiveAccess()}
-                        disabled={!canApplySensitiveAccess || !activeTab.connectionId || !activeTab.sql.trim()}
+                        disabled={!canApplySensitiveAccess || !activeTab.connectionId || !activeExecutionSQL}
                         className="inline-flex h-9 items-center gap-2 px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Sensitive Access
@@ -1944,7 +1932,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={() => void handleExport()}
-                      disabled={exportingTabId === activeTab.id || !activeTab.connectionId || !activeTab.sql.trim()}
+                      disabled={exportingTabId === activeTab.id || !activeTab.connectionId || !activeExecutionSQL}
                       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Download className="h-4 w-4" />

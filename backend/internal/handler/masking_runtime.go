@@ -18,6 +18,17 @@ type maskingRuntime struct {
 	engine    *masking.Engine
 }
 
+type sensitiveColumnDecision struct {
+	ColumnIndex      int
+	Rule             masking.Rule
+	SensitiveOrigins []masking.ColumnOrigin
+}
+
+type matchedMaskRule struct {
+	Origin masking.ColumnOrigin
+	Rule   model.MaskingRule
+}
+
 func newMaskingRuntime(
 	users *repository.UserRepo,
 	rules *repository.MaskingRuleRepo,
@@ -62,11 +73,11 @@ func (m *maskingRuntime) hasSensitiveOverride(ctx context.Context, userID uint64
 }
 
 func (m *maskingRuntime) applyResult(ctx context.Context, conn *model.DBConnection, userID uint64, result *masking.QueryResult) (bool, []int, error) {
-	preciseRules, sensitiveIndexes, err := m.analyzeSensitiveColumns(ctx, conn, result)
+	decisions, sensitiveIndexes, err := m.analyzeSensitiveColumns(ctx, conn, result)
 	if err != nil {
 		return false, nil, err
 	}
-	if len(preciseRules) == 0 || m.engine == nil {
+	if len(decisions) == 0 || m.engine == nil {
 		return false, nil, nil
 	}
 
@@ -78,28 +89,27 @@ func (m *maskingRuntime) applyResult(ctx context.Context, conn *model.DBConnecti
 		return true, sensitiveIndexes, nil
 	}
 
-	grantedIndexes, err := m.activeSensitiveAccessIndexes(ctx, conn, userID, result, sensitiveIndexes)
+	grantedIndexes, err := m.activeSensitiveAccessIndexes(ctx, conn, userID, decisions)
 	if err != nil {
 		return false, nil, err
 	}
-	filteredRules := make([]masking.Rule, 0, len(preciseRules))
-	for idx, rule := range preciseRules {
-		columnIndex := sensitiveIndexes[idx]
-		if grantedIndexes[columnIndex] {
+	filteredRules := make(map[int]masking.Rule, len(decisions))
+	for _, decision := range decisions {
+		if grantedIndexes[decision.ColumnIndex] {
 			continue
 		}
-		filteredRules = append(filteredRules, rule)
+		filteredRules[decision.ColumnIndex] = decision.Rule
 	}
 	if len(filteredRules) == 0 {
 		return false, sensitiveIndexes, nil
 	}
-	if err := m.engine.MaskResult(result, filteredRules); err != nil {
+	if err := m.engine.MaskColumns(result, filteredRules); err != nil {
 		return false, nil, err
 	}
 	return false, sensitiveIndexes, nil
 }
 
-func (m *maskingRuntime) analyzeSensitiveColumns(ctx context.Context, conn *model.DBConnection, result *masking.QueryResult) ([]masking.Rule, []int, error) {
+func (m *maskingRuntime) analyzeSensitiveColumns(ctx context.Context, conn *model.DBConnection, result *masking.QueryResult) ([]sensitiveColumnDecision, []int, error) {
 	if !supportsMySQLMasking(conn) || result == nil {
 		return nil, nil, nil
 	}
@@ -112,60 +122,86 @@ func (m *maskingRuntime) analyzeSensitiveColumns(ctx context.Context, conn *mode
 		return nil, nil, nil
 	}
 
-	preciseRules := make([]masking.Rule, 0, len(result.Columns))
+	decisions := make([]sensitiveColumnDecision, 0, len(result.Columns))
 	sensitiveIndexes := make([]int, 0, len(result.Columns))
 	for idx, columnLabel := range result.Columns {
-		origin := masking.ColumnOrigin{}
-		if idx < len(result.Origins) {
-			origin = result.Origins[idx]
-		}
-		actualColumnName := originColumnName(origin, columnLabel)
-		if actualColumnName == "" {
+		dependencies := resultColumnDependencies(result, idx, conn, columnLabel)
+		if len(dependencies) == 0 {
 			continue
 		}
 
-		ruleMatch, ok, err := findMaskRule(dbRules, actualColumnName)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !ok {
-			continue
-		}
+		sensitiveOrigins := make([]masking.ColumnOrigin, 0, len(dependencies))
+		matchedRules := make([]matchedMaskRule, 0, len(dependencies))
+		seenOrigins := make(map[string]struct{}, len(dependencies))
+		for _, dependency := range dependencies {
+			actualColumnName := originColumnName(dependency, columnLabel)
+			if actualColumnName == "" {
+				continue
+			}
 
-		databaseName := originDatabaseName(conn, origin)
-		tableName := originTableName(origin, columnLabel)
-		if tableName != "" && databaseName != "" && m.whitelist != nil {
-			exempt, err := m.whitelist.Match(ctx, conn.ID, databaseName, tableName, actualColumnName)
+			ruleMatch, ok, err := findMaskRule(dbRules, actualColumnName)
 			if err != nil {
 				return nil, nil, err
 			}
-			if exempt {
+			if !ok {
 				continue
 			}
+
+			databaseName := originDatabaseName(conn, dependency)
+			tableName := originTableName(dependency, columnLabel)
+			if tableName != "" && databaseName != "" && m.whitelist != nil {
+				exempt, err := m.whitelist.Match(ctx, conn.ID, databaseName, tableName, actualColumnName)
+				if err != nil {
+					return nil, nil, err
+				}
+				if exempt {
+					continue
+				}
+			}
+
+			origin := masking.ColumnOrigin{
+				Database: databaseName,
+				Schema:   dependency.Schema,
+				Table:    tableName,
+				Column:   actualColumnName,
+			}
+			key := strings.ToLower(strings.TrimSpace(origin.Database)) + "|" +
+				strings.ToLower(strings.TrimSpace(origin.Schema)) + "|" +
+				strings.ToLower(strings.TrimSpace(origin.Table)) + "|" +
+				strings.ToLower(strings.TrimSpace(origin.Column))
+			if _, ok := seenOrigins[key]; ok {
+				continue
+			}
+			seenOrigins[key] = struct{}{}
+			sensitiveOrigins = append(sensitiveOrigins, origin)
+			matchedRules = append(matchedRules, matchedMaskRule{
+				Origin: origin,
+				Rule:   ruleMatch,
+			})
+		}
+		finalRule, ok := decideMaskRuleForResultColumn(columnLabel, matchedRules)
+		if !ok || len(sensitiveOrigins) == 0 {
+			continue
 		}
 
 		sensitiveIndexes = append(sensitiveIndexes, idx)
-		preciseRules = append(preciseRules, masking.Rule{
-			Database: databaseName,
-			Table:    tableName,
-			Column:   actualColumnName,
-			Match:    masking.MatchTypeExact,
-			Mode:     masking.MaskMode(ruleMatch.MaskMode),
-			Config:   ruleMatch.MaskConfig,
+		decisions = append(decisions, sensitiveColumnDecision{
+			ColumnIndex:      idx,
+			Rule:             finalRule,
+			SensitiveOrigins: sensitiveOrigins,
 		})
 	}
-	return preciseRules, sensitiveIndexes, nil
+	return decisions, sensitiveIndexes, nil
 }
 
 func (m *maskingRuntime) activeSensitiveAccessIndexes(
 	ctx context.Context,
 	conn *model.DBConnection,
 	userID uint64,
-	result *masking.QueryResult,
-	sensitiveIndexes []int,
+	decisions []sensitiveColumnDecision,
 ) (map[int]bool, error) {
 	grantedIndexes := make(map[int]bool)
-	if userID == 0 || m.tickets == nil || len(sensitiveIndexes) == 0 || conn == nil {
+	if userID == 0 || m.tickets == nil || len(decisions) == 0 || conn == nil {
 		return grantedIndexes, nil
 	}
 
@@ -177,16 +213,23 @@ func (m *maskingRuntime) activeSensitiveAccessIndexes(
 		return grantedIndexes, nil
 	}
 
-	for _, idx := range sensitiveIndexes {
-		if idx >= len(result.Origins) {
-			continue
-		}
-		origin := result.Origins[idx]
-		for _, scope := range scopes {
-			if scopeMatchesOrigin(scope, origin) {
-				grantedIndexes[idx] = true
+	for _, decision := range decisions {
+		allGranted := true
+		for _, origin := range decision.SensitiveOrigins {
+			matched := false
+			for _, scope := range scopes {
+				if scopeMatchesOrigin(scope, origin) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				allGranted = false
 				break
 			}
+		}
+		if allGranted {
+			grantedIndexes[decision.ColumnIndex] = true
 		}
 	}
 	return grantedIndexes, nil
@@ -194,6 +237,36 @@ func (m *maskingRuntime) activeSensitiveAccessIndexes(
 
 func supportsMySQLMasking(conn *model.DBConnection) bool {
 	return conn != nil && conn.DBType == "mysql"
+}
+
+func decideMaskRuleForResultColumn(columnLabel string, matches []matchedMaskRule) (masking.Rule, bool) {
+	if len(matches) == 0 {
+		return masking.Rule{}, false
+	}
+
+	selected := masking.Rule{
+		Column: columnLabel,
+		Match:  masking.MatchTypeExact,
+		Mode:   masking.MaskMode(matches[0].Rule.MaskMode),
+		Config: matches[0].Rule.MaskConfig,
+	}
+
+	if len(matches) == 1 {
+		return selected, true
+	}
+
+	firstMode := masking.MaskMode(matches[0].Rule.MaskMode)
+	for _, match := range matches[1:] {
+		if masking.MaskMode(match.Rule.MaskMode) != firstMode {
+			return masking.Rule{
+				Column: columnLabel,
+				Match:  masking.MatchTypeExact,
+				Mode:   masking.MaskModeFull,
+			}, true
+		}
+	}
+
+	return selected, true
 }
 
 func findMaskRule(rules []model.MaskingRule, columnName string) (model.MaskingRule, bool, error) {
@@ -236,6 +309,28 @@ func originDatabaseName(conn *model.DBConnection, origin masking.ColumnOrigin) s
 		return strings.TrimSpace(origin.Database)
 	}
 	return connectionDatabaseName(conn)
+}
+
+func resultColumnDependencies(result *masking.QueryResult, idx int, conn *model.DBConnection, columnLabel string) []masking.ColumnOrigin {
+	if result != nil && idx < len(result.Dependencies) && len(result.Dependencies[idx]) > 0 {
+		return result.Dependencies[idx]
+	}
+
+	origin := masking.ColumnOrigin{}
+	if result != nil && idx < len(result.Origins) {
+		origin = result.Origins[idx]
+	}
+	actualColumnName := originColumnName(origin, columnLabel)
+	if actualColumnName == "" {
+		return nil
+	}
+
+	return []masking.ColumnOrigin{{
+		Database: originDatabaseName(conn, origin),
+		Schema:   origin.Schema,
+		Table:    originTableName(origin, columnLabel),
+		Column:   actualColumnName,
+	}}
 }
 
 func scopeMatchesOrigin(scope model.TicketScope, origin masking.ColumnOrigin) bool {
