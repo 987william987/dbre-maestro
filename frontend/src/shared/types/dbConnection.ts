@@ -20,6 +20,9 @@ export type DBConnection = {
   encryption_key_version: number
   ssl_mode: string
   extra_params?: string | null
+  last_test_status?: 'passed' | 'failed' | string | null
+  last_test_error?: string | null
+  last_tested_at?: string | null
   created_by: number
   created_at: string
   updated_at: string

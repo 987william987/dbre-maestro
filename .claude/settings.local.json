@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Skill(browse)",
-      "Bash(/Users/william_yeh/.claude/skills/gstack/browse/dist/browse goto *)",
-      "Bash(/Users/william_yeh/.claude/skills/gstack/browse/dist/browse screenshot *)"
-    ]
-  }
-}

@@ -29,11 +29,14 @@ func dbConnectionRows(databaseName any) *sqlmock.Rows {
 		"encryption_key_version",
 		"ssl_mode",
 		"extra_params",
+		"last_test_status",
+		"last_test_error",
+		"last_tested_at",
 		"created_by",
 		"created_at",
 		"updated_at",
 	}).
-		AddRow(5, "analytics", "mysql", "db.internal", 3306, databaseName, "readonly", []byte("cipher"), 1, "prefer", nil, 1, now, now)
+		AddRow(5, "analytics", "mysql", "db.internal", 3306, databaseName, "readonly", []byte("cipher"), 1, "prefer", nil, nil, nil, nil, 1, now, now)
 }
 
 func TestDBConnectionHandlerPatchAllowsClearingDatabaseName(t *testing.T) {
@@ -50,9 +53,28 @@ func TestDBConnectionHandlerPatchAllowsClearingDatabaseName(t *testing.T) {
 		repository.NewAuditRepo(sqlxDB),
 	)
 
+	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(`SELECT \* FROM db_connections WHERE id = \?`).
 		WithArgs(uint64(5)).
-		WillReturnRows(dbConnectionRows("analytics"))
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id",
+			"name",
+			"db_type",
+			"host",
+			"port",
+			"database_name",
+			"username",
+			"password_encrypted",
+			"encryption_key_version",
+			"ssl_mode",
+			"extra_params",
+			"last_test_status",
+			"last_test_error",
+			"last_tested_at",
+			"created_by",
+			"created_at",
+			"updated_at",
+		}).AddRow(5, "analytics", "mysql", "db.internal", 3306, "analytics", "readonly", []byte(nil), 1, "prefer", nil, nil, nil, nil, 1, now, now))
 	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
 		WithArgs(uint64(5)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
@@ -129,10 +151,13 @@ func TestDBConnectionHandlerCreateRedisAllowsEmptyUsername(t *testing.T) {
 			"encryption_key_version",
 			"ssl_mode",
 			"extra_params",
+			"last_test_status",
+			"last_test_error",
+			"last_tested_at",
 			"created_by",
 			"created_at",
 			"updated_at",
-		}).AddRow(7, "cache-redis", "redis", "redis.internal", 6379, nil, "", []byte("cipher"), 1, "prefer", nil, 99, time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)))
+		}).AddRow(7, "cache-redis", "redis", "redis.internal", 6379, nil, "", []byte("cipher"), 1, "prefer", nil, nil, nil, nil, 99, time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
 		WithArgs(uint64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
@@ -201,10 +226,13 @@ func TestDBConnectionHandlerCreatePostgresDefaultsDatabaseNameToPostgres(t *test
 			"encryption_key_version",
 			"ssl_mode",
 			"extra_params",
+			"last_test_status",
+			"last_test_error",
+			"last_tested_at",
 			"created_by",
 			"created_at",
 			"updated_at",
-		}).AddRow(8, "analytics-pg", "postgres", "pg.internal", 5432, "postgres", "postgres", []byte("cipher"), 1, "prefer", nil, 99, time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)))
+		}).AddRow(8, "analytics-pg", "postgres", "pg.internal", 5432, "postgres", "postgres", []byte("cipher"), 1, "prefer", nil, nil, nil, nil, 99, time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
 		WithArgs(uint64(8)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))

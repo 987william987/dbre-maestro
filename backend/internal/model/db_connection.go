@@ -14,6 +14,9 @@ type DBConnection struct {
 	EncryptionKeyVersion uint                     `db:"encryption_key_version" json:"encryption_key_version"`
 	SSLMode              string                   `db:"ssl_mode"               json:"ssl_mode"`
 	ExtraParams          *string                  `db:"extra_params"           json:"extra_params,omitempty"`
+	LastTestStatus       *string                  `db:"last_test_status"       json:"last_test_status,omitempty"`
+	LastTestError        *string                  `db:"last_test_error"        json:"last_test_error,omitempty"`
+	LastTestedAt         *time.Time               `db:"last_tested_at"         json:"last_tested_at,omitempty"`
 	CreatedBy            uint64                   `db:"created_by"             json:"created_by"`
 	CreatedAt            time.Time                `db:"created_at"             json:"created_at"`
 	UpdatedAt            time.Time                `db:"updated_at"             json:"updated_at"`

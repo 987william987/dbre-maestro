@@ -14,11 +14,6 @@ import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
 
-type TestState = {
-  ok: boolean
-  message: string
-} | null
-
 type DrawerState =
   | { mode: 'create' }
   | { mode: 'edit'; connectionId: number }
@@ -83,7 +78,6 @@ export function DBConnectionsPage() {
   const [testingId, setTestingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
-  const [testState, setTestState] = useState<Record<number, TestState>>({})
 
   useEffect(() => {
     void loadConnections()
@@ -171,12 +165,16 @@ export function DBConnectionsPage() {
     const connectionName = targetConnection?.name ?? `#${id}`
     try {
       const result = await testDBConnection(id)
-      setTestState((current) => ({
-        ...current,
-        [id]: result.ok
-          ? { ok: true, message: 'Connection test succeeded' }
-          : { ok: false, message: result.error ?? 'Connection test failed' },
-      }))
+      setConnections((current) => current.map((connection) => (
+        connection.id === id
+          ? {
+            ...connection,
+            last_test_status: result.last_test_status,
+            last_test_error: result.last_test_error ?? null,
+            last_tested_at: result.last_tested_at ?? new Date().toISOString(),
+          }
+          : connection
+      )))
       if (result.ok) {
         pushToast(`${connectionName} connection test succeeded`, 'success', { placement: 'center' })
       } else {
@@ -184,10 +182,6 @@ export function DBConnectionsPage() {
       }
     } catch (testError) {
       const message = testError instanceof ApiError ? testError.message : 'Connection test failed'
-      setTestState((current) => ({
-        ...current,
-        [id]: { ok: false, message },
-      }))
       pushToast(`${connectionName} connection test failed: ${message}`, 'error', { placement: 'center', durationMs: 3600 })
     } finally {
       setTestingId(null)
@@ -214,14 +208,14 @@ export function DBConnectionsPage() {
 
   const sortedConnections = useMemo(() => {
     return [...connections].sort((left, right) => {
-      const leftFailed = testState[left.id]?.ok === false ? 1 : 0
-      const rightFailed = testState[right.id]?.ok === false ? 1 : 0
+      const leftFailed = left.last_test_status === 'failed' ? 1 : 0
+      const rightFailed = right.last_test_status === 'failed' ? 1 : 0
       if (leftFailed !== rightFailed) {
         return rightFailed - leftFailed
       }
       return right.created_at.localeCompare(left.created_at)
     })
-  }, [connections, testState])
+  }, [connections])
   const pagedConnections = useMemo(() => sortedConnections.slice(offset, offset + PAGE_SIZE), [offset, sortedConnections])
 
   useEffect(() => {
@@ -277,8 +271,7 @@ export function DBConnectionsPage() {
                   </thead>
                   <tbody>
                     {pagedConnections.map((connection) => {
-                      const result = testState[connection.id]
-                      const isFailed = result?.ok === false
+                      const isFailed = connection.last_test_status === 'failed'
                       return (
                         <tr
                           key={connection.id}
