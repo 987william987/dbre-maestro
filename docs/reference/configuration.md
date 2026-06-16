@@ -32,6 +32,7 @@
 | 變數 | 用途 | 預設 |
 |---|---|---|
 | `PORT` | App 服務 port | `8080` |
+| `APP_BASE_URL` | 前端站台 base URL，供通知內工單連結使用 | `http://localhost:5173` |
 | `MIGRATION_DSN` | migration 專用 DSN | 若未指定，跟 app DSN 同邏輯 |
 | `LARK_WEBHOOK_URL` | Lark webhook fallback | 僅在未配置 Settings 內的 Lark App 時使用 |
 | `AWS_PROFILE` | DB metadata inventory 使用的 AWS profile | `default` |
