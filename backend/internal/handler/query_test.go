@@ -15,7 +15,7 @@ import (
 func TestWriteQueryExecutionErrorTimeout(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
-	writeQueryExecutionError(recorder, context.DeadlineExceeded, "query")
+	writeQueryExecutionError(recorder, context.DeadlineExceeded, "query", defaultQueryTimeout)
 
 	if recorder.Code != http.StatusGatewayTimeout {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusGatewayTimeout)
@@ -33,7 +33,7 @@ func TestWriteQueryExecutionErrorTimeout(t *testing.T) {
 func TestWriteQueryExecutionErrorCanceled(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
-	writeQueryExecutionError(recorder, context.Canceled, "query")
+	writeQueryExecutionError(recorder, context.Canceled, "query", defaultQueryTimeout)
 
 	if recorder.Code != http.StatusRequestTimeout {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusRequestTimeout)
@@ -120,6 +120,7 @@ func TestExecuteSQLQueryUsesDatabaseOnPinnedConnection(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectExec("USE `analytics`").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("SET SESSION max_execution_time = 25000").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("SELECT \\* FROM t_user LIMIT 200").
 		WillReturnRows(sqlmock.NewRows([]string{"t_user.id"}).AddRow(1))
 
@@ -129,6 +130,7 @@ func TestExecuteSQLQueryUsesDatabaseOnPinnedConnection(t *testing.T) {
 		db,
 		"SELECT * FROM t_user LIMIT 200",
 		queryExecutionContext{DatabaseName: "analytics"},
+		defaultSQLEditorTimeoutSettings(),
 	)
 	if err != nil {
 		t.Fatalf("executeSQLQuery() error = %v", err)
@@ -158,6 +160,7 @@ func TestExecuteSQLQueryRunsMultiStatementsSequentially(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectExec("USE `analytics`").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("SET SESSION max_execution_time = 25000").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("SELECT 1 LIMIT 200").
 		WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
 	mock.ExpectQuery("SELECT \\* FROM t_user LIMIT 200").
@@ -169,6 +172,7 @@ func TestExecuteSQLQueryRunsMultiStatementsSequentially(t *testing.T) {
 		db,
 		"SELECT 1 LIMIT 200; SELECT * FROM t_user LIMIT 200",
 		queryExecutionContext{DatabaseName: "analytics"},
+		defaultSQLEditorTimeoutSettings(),
 	)
 	if err != nil {
 		t.Fatalf("executeSQLQuery() error = %v", err)

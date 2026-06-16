@@ -37,7 +37,7 @@ func analyzeSQLScopes(
 	}
 
 	execSQL := injectLimit(sqlContent, 200, conn.DBType)
-	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx)
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx, defaultSQLEditorTimeoutSettings())
 	if err != nil {
 		return nil, err
 	}

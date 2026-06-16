@@ -90,6 +90,18 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.SQLEditorAppTimeoutSeconds <= 0 {
+		jsonErr(w, http.StatusUnprocessableEntity, "sql_editor_app_timeout_seconds must be greater than 0")
+		return
+	}
+	if req.SQLEditorMySQLMaxExecutionTimeMs <= 0 {
+		jsonErr(w, http.StatusUnprocessableEntity, "sql_editor_mysql_max_execution_time_ms must be greater than 0")
+		return
+	}
+	if req.SQLEditorPostgresStatementTimeoutMs <= 0 {
+		jsonErr(w, http.StatusUnprocessableEntity, "sql_editor_postgres_statement_timeout_ms must be greater than 0")
+		return
+	}
 	if req.DBMetadataInventorySyncIntervalMins <= 0 {
 		jsonErr(w, http.StatusUnprocessableEntity, "db_metadata_inventory_sync_interval_minutes must be greater than 0")
 		return
@@ -113,6 +125,9 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		Details: map[string]any{
 			"sensitive_export_reviewer_user_ids":          req.SensitiveExportReviewerUserIDs,
 			"sensitive_query_access_reviewer_user_ids":    req.SensitiveQueryAccessReviewerUserIDs,
+			"sql_editor_app_timeout_seconds":              req.SQLEditorAppTimeoutSeconds,
+			"sql_editor_mysql_max_execution_time_ms":      req.SQLEditorMySQLMaxExecutionTimeMs,
+			"sql_editor_postgres_statement_timeout_ms":    req.SQLEditorPostgresStatementTimeoutMs,
 			"db_metadata_inventory_enabled":               req.DBMetadataInventoryEnabled,
 			"db_metadata_inventory_regions":               req.DBMetadataInventoryRegions,
 			"db_metadata_inventory_engines":               req.DBMetadataInventoryEngines,

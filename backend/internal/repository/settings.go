@@ -14,6 +14,9 @@ import (
 const (
 	settingSensitiveExportReviewers      = "sensitive_export_reviewer_user_ids"
 	settingSensitiveQueryAccessReviewers = "sensitive_query_access_reviewer_user_ids"
+	settingSQLEditorAppTimeoutSeconds    = "sql_editor_app_timeout_seconds"
+	settingSQLEditorMySQLMaxExecTimeMs   = "sql_editor_mysql_max_execution_time_ms"
+	settingSQLEditorPGStatementTimeoutMs = "sql_editor_postgres_statement_timeout_ms"
 	settingDBMetadataInventoryEnabled    = "db_metadata_inventory_enabled"
 	settingDBMetadataInventoryRegions    = "db_metadata_inventory_regions"
 	settingDBMetadataInventoryEngines    = "db_metadata_inventory_engines"
@@ -33,6 +36,9 @@ func NewSettingsRepo(db *sqlx.DB) *SettingsRepo {
 
 func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error) {
 	settings := &model.PlatformSettings{
+		SQLEditorAppTimeoutSeconds:           30,
+		SQLEditorMySQLMaxExecutionTimeMs:     25000,
+		SQLEditorPostgresStatementTimeoutMs:  25000,
 		DBMetadataInventoryEnabled:           true,
 		DBMetadataInventoryRegions:           []string{},
 		DBMetadataInventoryEngines:           []string{"aurora-mysql", "aurora-postgresql", "redis"},
@@ -51,6 +57,27 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	}
 	settings.SensitiveExportReviewerUserIDs = exportReviewerIDs
 	settings.SensitiveQueryAccessReviewerUserIDs = sensitiveReviewerIDs
+	sqlEditorAppTimeoutSeconds, err := r.getInt(ctx, settingSQLEditorAppTimeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
+	if sqlEditorAppTimeoutSeconds != nil {
+		settings.SQLEditorAppTimeoutSeconds = *sqlEditorAppTimeoutSeconds
+	}
+	sqlEditorMySQLMaxExecTimeMs, err := r.getInt(ctx, settingSQLEditorMySQLMaxExecTimeMs)
+	if err != nil {
+		return nil, err
+	}
+	if sqlEditorMySQLMaxExecTimeMs != nil {
+		settings.SQLEditorMySQLMaxExecutionTimeMs = *sqlEditorMySQLMaxExecTimeMs
+	}
+	sqlEditorPGStatementTimeoutMs, err := r.getInt(ctx, settingSQLEditorPGStatementTimeoutMs)
+	if err != nil {
+		return nil, err
+	}
+	if sqlEditorPGStatementTimeoutMs != nil {
+		settings.SQLEditorPostgresStatementTimeoutMs = *sqlEditorPGStatementTimeoutMs
+	}
 
 	inventoryEnabled, err := r.getBool(ctx, settingDBMetadataInventoryEnabled)
 	if err != nil {
@@ -123,6 +150,15 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 		return err
 	}
 	if err := upsertUint64List(ctx, tx, settingSensitiveQueryAccessReviewers, settings.SensitiveQueryAccessReviewerUserIDs); err != nil {
+		return err
+	}
+	if err := upsertInt(ctx, tx, settingSQLEditorAppTimeoutSeconds, settings.SQLEditorAppTimeoutSeconds); err != nil {
+		return err
+	}
+	if err := upsertInt(ctx, tx, settingSQLEditorMySQLMaxExecTimeMs, settings.SQLEditorMySQLMaxExecutionTimeMs); err != nil {
+		return err
+	}
+	if err := upsertInt(ctx, tx, settingSQLEditorPGStatementTimeoutMs, settings.SQLEditorPostgresStatementTimeoutMs); err != nil {
 		return err
 	}
 	if err := upsertBool(ctx, tx, settingDBMetadataInventoryEnabled, settings.DBMetadataInventoryEnabled); err != nil {

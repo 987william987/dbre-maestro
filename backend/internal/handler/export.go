@@ -372,7 +372,7 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, req.SQLContent, queryCtx)
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, req.SQLContent, queryCtx, defaultSQLEditorTimeoutSettings())
 	if err != nil {
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return

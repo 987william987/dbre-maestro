@@ -30,9 +30,23 @@ const (
 	defaultQueryTimeout = 30 * time.Second
 )
 
-func writeQueryExecutionError(w http.ResponseWriter, err error, operation string) {
+type sqlEditorTimeoutSettings struct {
+	AppTimeout                 time.Duration
+	MySQLMaxExecutionTimeMs    int
+	PostgresStatementTimeoutMs int
+}
+
+func defaultSQLEditorTimeoutSettings() sqlEditorTimeoutSettings {
+	return sqlEditorTimeoutSettings{
+		AppTimeout:                 defaultQueryTimeout,
+		MySQLMaxExecutionTimeMs:    25000,
+		PostgresStatementTimeoutMs: 25000,
+	}
+}
+
+func writeQueryExecutionError(w http.ResponseWriter, err error, operation string, timeout time.Duration) {
 	if errors.Is(err, context.DeadlineExceeded) {
-		jsonErr(w, http.StatusGatewayTimeout, fmt.Sprintf("%s timed out after %s", operation, defaultQueryTimeout))
+		jsonErr(w, http.StatusGatewayTimeout, fmt.Sprintf("%s timed out after %s", operation, timeout))
 		return
 	}
 	if errors.Is(err, context.Canceled) {
@@ -49,6 +63,7 @@ type QueryHandler struct {
 	audit        *repository.AuditRepo
 	artifacts    *repository.QueryArtifactRepo
 	tickets      *repository.TicketRepo
+	settings     *repository.SettingsRepo
 	masking      *maskingRuntime
 	notifRepo    *repository.NotificationRepo
 }
@@ -66,6 +81,7 @@ func NewQueryHandler(
 	audit *repository.AuditRepo,
 	artifacts *repository.QueryArtifactRepo,
 	tickets *repository.TicketRepo,
+	settings *repository.SettingsRepo,
 	engine *masking.Engine,
 	whitelist *repository.MaskingWhitelistRepo,
 	notifRepo *repository.NotificationRepo,
@@ -77,9 +93,32 @@ func NewQueryHandler(
 		audit:        audit,
 		artifacts:    artifacts,
 		tickets:      tickets,
+		settings:     settings,
 		masking:      newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:    notifRepo,
 	}
+}
+
+func (h *QueryHandler) loadSQLEditorTimeoutSettings(ctx context.Context) sqlEditorTimeoutSettings {
+	settings := defaultSQLEditorTimeoutSettings()
+	if h.settings == nil {
+		return settings
+	}
+
+	platformSettings, err := h.settings.Get(ctx)
+	if err != nil || platformSettings == nil {
+		return settings
+	}
+	if platformSettings.SQLEditorAppTimeoutSeconds > 0 {
+		settings.AppTimeout = time.Duration(platformSettings.SQLEditorAppTimeoutSeconds) * time.Second
+	}
+	if platformSettings.SQLEditorMySQLMaxExecutionTimeMs > 0 {
+		settings.MySQLMaxExecutionTimeMs = platformSettings.SQLEditorMySQLMaxExecutionTimeMs
+	}
+	if platformSettings.SQLEditorPostgresStatementTimeoutMs > 0 {
+		settings.PostgresStatementTimeoutMs = platformSettings.SQLEditorPostgresStatementTimeoutMs
+	}
+	return settings
 }
 
 func (h *QueryHandler) sendInApp(ctx context.Context, userID uint64, notifType, title, body, resType string, resID uint64) {
@@ -190,7 +229,8 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), defaultQueryTimeout)
+	timeoutSettings := h.loadSQLEditorTimeoutSettings(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), timeoutSettings.AppTimeout)
 	defer cancel()
 
 	// Inject LIMIT if not present (simple heuristic for SELECT statements)
@@ -201,9 +241,9 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx)
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx, timeoutSettings)
 	if err != nil {
-		writeQueryExecutionError(w, err, "query")
+		writeQueryExecutionError(w, err, "query", timeoutSettings.AppTimeout)
 		return
 	}
 	durationMs := time.Since(start).Milliseconds()
@@ -495,11 +535,12 @@ func executeQueryForConnection(
 	db *sql.DB,
 	sqlStr string,
 	queryCtx queryExecutionContext,
+	timeoutSettings sqlEditorTimeoutSettings,
 ) (*masking.QueryResult, error) {
 	if conn.DBType == "postgres" || conn.DBType == "postgresql" {
-		return executePostgresQuery(ctx, conn, password, db, sqlStr, queryCtx)
+		return executePostgresQuery(ctx, conn, password, db, sqlStr, queryCtx, timeoutSettings)
 	}
-	return executeSQLQuery(ctx, conn, db, sqlStr, queryCtx)
+	return executeSQLQuery(ctx, conn, db, sqlStr, queryCtx, timeoutSettings)
 }
 
 func executeSQLQuery(
@@ -508,6 +549,7 @@ func executeSQLQuery(
 	db *sql.DB,
 	sqlStr string,
 	queryCtx queryExecutionContext,
+	timeoutSettings sqlEditorTimeoutSettings,
 ) (*masking.QueryResult, error) {
 	pinnedConn, err := db.Conn(ctx)
 	if err != nil {
@@ -519,6 +561,9 @@ func executeSQLQuery(
 		if _, err := pinnedConn.ExecContext(ctx, fmt.Sprintf("USE %s", quoteMySQLIdentifier(queryCtx.DatabaseName))); err != nil {
 			return nil, err
 		}
+	}
+	if _, err := pinnedConn.ExecContext(ctx, fmt.Sprintf("SET SESSION max_execution_time = %d", timeoutSettings.MySQLMaxExecutionTimeMs)); err != nil {
+		return nil, err
 	}
 
 	statements := splitSQLStatementsForLimit(sqlStr)
@@ -548,6 +593,7 @@ func executePostgresQuery(
 	db *sql.DB,
 	sqlStr string,
 	queryCtx queryExecutionContext,
+	timeoutSettings sqlEditorTimeoutSettings,
 ) (*masking.QueryResult, error) {
 	if queryCtx.DatabaseName != "" && !strings.EqualFold(queryCtx.DatabaseName, connectionDatabaseName(connModel)) {
 		scopedDB, cleanup, err := openScopedQueryDB(connModel, password, queryCtx)
@@ -564,6 +610,9 @@ func executePostgresQuery(
 	}
 	defer conn.Close()
 
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("SET statement_timeout = %d", timeoutSettings.PostgresStatementTimeoutMs)); err != nil {
+		return nil, err
+	}
 	if queryCtx.SchemaName != "" {
 		if _, err := conn.ExecContext(ctx, fmt.Sprintf(`SET search_path TO "%s"`, strings.ReplaceAll(queryCtx.SchemaName, `"`, `""`))); err != nil {
 			return nil, err
@@ -930,7 +979,8 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), defaultQueryTimeout)
+	timeoutSettings := h.loadSQLEditorTimeoutSettings(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), timeoutSettings.AppTimeout)
 	defer cancel()
 
 	cmd, args, err := sqlreview.ParseRedisCommand(cmdLine)
@@ -959,7 +1009,7 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 	}, append([]interface{}{cmd}, ifaces...)...)
 	durationMs := time.Since(start).Milliseconds()
 	if err != nil && err != redis.Nil {
-		writeQueryExecutionError(w, err, "redis command")
+		writeQueryExecutionError(w, err, "redis command", timeoutSettings.AppTimeout)
 		return
 	}
 
