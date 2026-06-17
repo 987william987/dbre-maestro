@@ -11,6 +11,23 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: { '@': '/src' },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (
+              id.includes('/node_modules/@uiw/react-codemirror/') ||
+              id.includes('/node_modules/@codemirror/') ||
+              id.includes('/node_modules/@lezer/') ||
+              id.includes('/node_modules/codemirror/')
+            ) {
+              return 'codemirror-vendor'
+            }
+            return undefined
+          },
+        },
+      },
+    },
     server: {
       host: '0.0.0.0',
       port: 5173,
