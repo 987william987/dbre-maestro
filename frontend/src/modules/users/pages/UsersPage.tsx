@@ -717,9 +717,9 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
               {drawerLoading ? (
                 <LoadingBlock message="Loading details..." className="min-h-[240px] rounded-xl border-border bg-panel" />
               ) : drawerState.mode === 'create-user' || (drawerState.mode === 'edit-user' && selectedUser) ? (
-                <div className="grid gap-4">
+                <form className="grid gap-4" onSubmit={handleSaveUser}>
                   <CardSection title="User Profile" icon={<UsersIcon className="h-4 w-4 text-accent" />}>
-                    <form className="grid gap-3" onSubmit={handleSaveUser}>
+                    <div className="grid gap-3">
                       <label className="grid gap-1.5 text-[12px] font-medium text-muted">
                         Username
                         <input
@@ -790,20 +790,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         </div>
                       ) : null}
 
-                      <button
-                        type="submit"
-                        disabled={
-                          saving ||
-                          !userDraft.username.trim() ||
-                          !userDraft.email.trim() ||
-                          (drawerState.mode === 'create-user' && !userDraft.password.trim())
-                        }
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
-                      >
-                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        {drawerState.mode === 'create-user' ? 'Confirm Create' : userDraft.pendingDelete ? 'Confirm Delete' : 'Save Changes'}
-                      </button>
-                    </form>
+                    </div>
                   </CardSection>
 
                   {drawerState.mode === 'edit-user' && selectedUser ? (
@@ -989,12 +976,28 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     </CardSection>
                   ) : null}
 
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={
+                        saving ||
+                        !userDraft.username.trim() ||
+                        !userDraft.email.trim() ||
+                        (drawerState.mode === 'create-user' && !userDraft.password.trim())
+                      }
+                      className="inline-flex h-10 min-w-[180px] items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      {drawerState.mode === 'create-user' ? 'Confirm Create' : userDraft.pendingDelete ? 'Confirm Delete' : 'Save Changes'}
+                    </button>
+                  </div>
+
                   {drawerError ? <InlineAlert>{drawerError}</InlineAlert> : null}
-                </div>
+                </form>
               ) : drawerState.mode === 'create-auth-group' || (drawerState.mode === 'edit-auth-group' && selectedAuthGroup) ? (
-                <div className="grid gap-4">
+                <form className="grid gap-4" onSubmit={handleSaveAuthGroup}>
                   <CardSection title="Auth Group Profile" icon={<Shield className="h-4 w-4 text-accent" />}>
-                    <form className="grid gap-3" onSubmit={handleSaveAuthGroup}>
+                    <div className="grid gap-3">
                       <label className="grid gap-1.5 text-[12px] font-medium text-muted">
                         Name
                         <input
@@ -1021,15 +1024,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           <InfoBox label="Updated" value={formatDateTime(selectedAuthGroup.updated_at ?? '')} />
                         </div>
                       ) : null}
-                      <button
-                        type="submit"
-                        disabled={saving || !authGroupDraft.name.trim()}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
-                      >
-                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        {drawerState.mode === 'create-auth-group' ? 'Create Auth Group' : authGroupDraft.pendingDelete ? 'Confirm Delete' : 'Save Auth Group'}
-                      </button>
-                    </form>
+                    </div>
                   </CardSection>
 
                   <CardSection title="Bound Users" icon={<UsersIcon className="h-4 w-4 text-accent" />}>
@@ -1175,8 +1170,19 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     </CardSection>
                   ) : null}
 
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={saving || !authGroupDraft.name.trim()}
+                      className="inline-flex h-10 min-w-[180px] items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      {drawerState.mode === 'create-auth-group' ? 'Create Auth Group' : authGroupDraft.pendingDelete ? 'Confirm Delete' : 'Save Auth Group'}
+                    </button>
+                  </div>
+
                   {drawerError ? <InlineAlert>{drawerError}</InlineAlert> : null}
-                </div>
+                </form>
               ) : null}
             </div>
           </div>
