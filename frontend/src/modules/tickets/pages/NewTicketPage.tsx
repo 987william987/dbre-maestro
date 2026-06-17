@@ -35,6 +35,15 @@ export function NewTicketPage() {
     () => connections.find((connection) => String(connection.id) === dbConnectionId) ?? null,
     [connections, dbConnectionId],
   )
+  const filteredConnections = useMemo(() => {
+    if (ticketType === 'redis_command') {
+      return connections.filter((connection) => connection.db_type === 'redis')
+    }
+    return connections.filter((connection) => connection.db_type !== 'redis')
+  }, [connections, ticketType])
+  const parserResults = useMemo(() => reviewResults.filter((result) => result.phase === 'parser'), [reviewResults])
+  const validationResults = useMemo(() => reviewResults.filter((result) => !result.phase || result.phase === 'validation'), [reviewResults])
+  const requiresDatabaseSelection = true
 
   useEffect(() => {
     let active = true
@@ -71,7 +80,23 @@ export function NewTicketPage() {
   }, [dbConnectionId, databaseName, sqlContent, ticketType])
 
   useEffect(() => {
+    if (selectedConnection && ticketType === 'redis_command' && selectedConnection.db_type !== 'redis') {
+      setDbConnectionId('')
+      setDatabaseName('')
+    }
+    if (selectedConnection && ticketType !== 'redis_command' && selectedConnection.db_type === 'redis') {
+      setDbConnectionId('')
+      setDatabaseName('')
+    }
+  }, [selectedConnection, ticketType])
+
+  useEffect(() => {
     if (!dbConnectionId) {
+      setDatabases([])
+      setDatabaseName('')
+      return
+    }
+    if (!requiresDatabaseSelection) {
       setDatabases([])
       setDatabaseName('')
       return
@@ -116,10 +141,13 @@ export function NewTicketPage() {
     return () => {
       active = false
     }
-  }, [dbConnectionId, selectedConnection?.database_name])
+  }, [dbConnectionId, requiresDatabaseSelection, selectedConnection?.database_name])
 
   function handleFormatSQL() {
     if (!sqlContent.trim()) {
+      return
+    }
+    if (ticketType === 'redis_command') {
       return
     }
     try {
@@ -135,7 +163,7 @@ export function NewTicketPage() {
   }
 
   async function handleReviewSQL() {
-    if (sqlContent.trim() === '' || dbConnectionId === '' || databaseName.trim() === '') {
+    if (sqlContent.trim() === '' || dbConnectionId === '' || (requiresDatabaseSelection && databaseName.trim() === '')) {
       return
     }
     setReviewing(true)
@@ -145,7 +173,7 @@ export function NewTicketPage() {
         sql_content: sqlContent,
         ticket_type: ticketType,
         db_connection_id: Number(dbConnectionId),
-        database_name: databaseName.trim(),
+        database_name: requiresDatabaseSelection ? databaseName.trim() : '',
       })
       setReviewResults(response.results)
       setReviewPassed(response.passed)
@@ -163,7 +191,7 @@ export function NewTicketPage() {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (title.trim() === '' || sqlContent.trim() === '' || dbConnectionId === '' || databaseName.trim() === '' || !reviewPassed) {
+    if (title.trim() === '' || sqlContent.trim() === '' || dbConnectionId === '' || (requiresDatabaseSelection && databaseName.trim() === '') || !reviewPassed) {
       return
     }
     setError('')
@@ -176,7 +204,7 @@ export function NewTicketPage() {
         sql_content: sqlContent,
         ticket_type: ticketType,
         db_connection_id: dbConnectionId ? Number(dbConnectionId) : null,
-        database_name: databaseName.trim(),
+        database_name: requiresDatabaseSelection ? databaseName.trim() : null,
       })
       navigate(`/tickets/${created.id}`, { replace: true })
     } catch (submitError) {
@@ -247,6 +275,7 @@ export function NewTicketPage() {
                   options={[
                     { value: 'ddl', label: 'DDL' },
                     { value: 'dml', label: 'DML' },
+                    { value: 'redis_command', label: 'Redis' },
                   ]}
                 />
               </label>
@@ -262,7 +291,7 @@ export function NewTicketPage() {
                   disabled={submitting || loadingConnections}
                   options={[
                     { value: '', label: 'Not Selected' },
-                    ...connections.map((connection) => ({
+                    ...filteredConnections.map((connection) => ({
                       value: String(connection.id),
                       label: formatConnectionOptionLabel(connection),
                     })),
@@ -271,31 +300,41 @@ export function NewTicketPage() {
               </label>
             </div>
 
-            <label className="flex flex-col gap-1.5">
-              <span className="text-[12px] font-semibold text-ink">
-                Target Database <span className="text-danger">*</span>
-              </span>
-              <DropdownSelect
-                ariaLabel="Target Database"
-                value={databaseName}
-                onChange={setDatabaseName}
-                disabled={submitting || reviewing || loadingDatabases || dbConnectionId === '' || databases.length === 0}
-                placeholder={loadingDatabases ? 'Loading databases...' : dbConnectionId === '' ? 'Select instance first' : 'Select database'}
-                options={[
-                  { value: '', label: 'Not Selected' },
-                  ...databases.map((name) => ({ value: name, label: name })),
-                ]}
-              />
-            </label>
+            {requiresDatabaseSelection ? (
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[12px] font-semibold text-ink">
+                  {ticketType === 'redis_command' ? 'Target Database Index' : 'Target Database'} <span className="text-danger">*</span>
+                </span>
+                <DropdownSelect
+                  ariaLabel={ticketType === 'redis_command' ? 'Target Database Index' : 'Target Database'}
+                  value={databaseName}
+                  onChange={setDatabaseName}
+                  disabled={submitting || reviewing || loadingDatabases || dbConnectionId === '' || databases.length === 0}
+                  placeholder={
+                    loadingDatabases
+                      ? 'Loading databases...'
+                      : dbConnectionId === ''
+                        ? 'Select instance first'
+                        : ticketType === 'redis_command'
+                          ? 'Select database index'
+                          : 'Select database'
+                  }
+                  options={[
+                    { value: '', label: 'Not Selected' },
+                    ...databases.map((name) => ({ value: name, label: name })),
+                  ]}
+                />
+              </label>
+            ) : null}
           </div>
         </section>
 
-        <section className="flex flex-col rounded-xl border border-border bg-panel shadow-soft">
+        <section className="flex h-full flex-col rounded-xl border border-border bg-panel shadow-soft">
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center gap-2">
               <ScrollText className="h-4 w-4 text-muted" />
               <p className="text-[13px] font-semibold text-ink">
-                SQL Content <span className="text-danger">*</span>
+                {ticketType === 'redis_command' ? 'Command Content' : 'SQL Content'} <span className="text-danger">*</span>
               </p>
             </div>
           </div>
@@ -305,18 +344,18 @@ export function NewTicketPage() {
             <textarea
               value={sqlContent}
               onChange={(event) => setSqlContent(event.target.value)}
-              className="block min-h-[360px] w-full resize-y rounded-xl border border-border bg-panel-soft px-4 py-4 font-mono text-[13px] leading-7 text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 lg:min-h-[420px]"
-              placeholder={'ALTER TABLE ...;\nUPDATE ...;'}
+              className="block min-h-[280px] w-full resize-y rounded-xl border border-border bg-panel-soft px-4 py-4 font-mono text-[13px] leading-7 text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 lg:min-h-[320px]"
+              placeholder={ticketType === 'redis_command' ? 'SET my:key "value"\nEXPIRE my:key 60' : 'ALTER TABLE ...;\nUPDATE ...;'}
               disabled={submitting}
             />
           </label>
 
-          <div className="border-t border-border/80 px-4 py-3">
+          <div className="px-4 pb-4">
             <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={handleFormatSQL}
-                disabled={submitting || reviewing || sqlContent.trim() === ''}
+                disabled={submitting || reviewing || sqlContent.trim() === '' || ticketType === 'redis_command'}
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Wand2 className="h-4 w-4" />
@@ -325,7 +364,7 @@ export function NewTicketPage() {
               <button
                 type="button"
                 onClick={() => void handleReviewSQL()}
-                disabled={submitting || reviewing || sqlContent.trim() === '' || dbConnectionId === '' || databaseName.trim() === ''}
+                disabled={submitting || reviewing || sqlContent.trim() === '' || dbConnectionId === '' || (requiresDatabaseSelection && databaseName.trim() === '')}
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {reviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -346,7 +385,7 @@ export function NewTicketPage() {
             <section className="mb-4 overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
               <div className="border-b border-border/80 px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-[13px] font-semibold text-ink">SQL Review Results</p>
+                  <p className="text-[13px] font-semibold text-ink">Review Results</p>
                   <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                     reviewPassed ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
                   }`}>
@@ -355,40 +394,91 @@ export function NewTicketPage() {
                   </span>
                 </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full border-collapse">
-                  <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
-                    <tr>
-                      <th className="px-4 py-3">ID</th>
-                      <th className="px-4 py-3">SQL</th>
-                      <th className="px-4 py-3">Scan / Impact Rows</th>
-                      <th className="px-4 py-3">Review Status</th>
-                      <th className="px-4 py-3">Review Message</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border text-[13px] text-ink">
-                    {reviewResults.map((result) => (
-                      <tr key={`${result.seq}-${result.sql_stmt}`}>
-                        <td className="px-4 py-3 align-top">{result.seq}</td>
-                        <td className="px-4 py-3 align-top font-mono text-[12px]">{result.sql_stmt}</td>
-                        <td className="px-4 py-3 align-top">{result.scan_rows}</td>
-                        <td className="px-4 py-3 align-top">
-                          <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
-                            result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
-                          }`}>
-                            {result.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 align-top text-muted">{result.message || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {parserResults.length > 0 ? (
+                <div className="px-4 pt-4">
+                  <p className="text-[12px] font-semibold text-ink">Parser Results</p>
+                  <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+                    <table className="min-w-full border-collapse">
+                      <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
+                        <tr>
+                          <th className="px-4 py-3">ID</th>
+                          <th className="px-4 py-3">{ticketType === 'redis_command' ? 'Command' : 'SQL'}</th>
+                          <th className="px-4 py-3">Statement Kind</th>
+                          <th className="px-4 py-3">Object Type</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Message</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border text-[13px] text-ink">
+                        {parserResults.map((result, index) => (
+                          <tr key={`parser-${result.seq}-${index}`}>
+                            <td className="px-4 py-3 align-top">{result.seq}</td>
+                            <td className="px-4 py-3 align-top font-mono text-[12px]">{result.sql_stmt}</td>
+                            <td className="px-4 py-3 align-top">{result.statement_kind || '—'}</td>
+                            <td className="px-4 py-3 align-top">{result.object_type || '—'}</td>
+                            <td className="px-4 py-3 align-top">
+                              <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
+                                result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
+                              }`}>
+                                {result.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 align-top text-muted">{result.message || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {validationResults.length > 0 ? (
+                <div className="px-4 py-4">
+                  <p className="text-[12px] font-semibold text-ink">Validation Results</p>
+                  <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+                    <table className="min-w-full border-collapse">
+                      <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
+                        <tr>
+                          <th className="px-4 py-3">ID</th>
+                          <th className="px-4 py-3">{ticketType === 'redis_command' ? 'Command' : 'SQL'}</th>
+                          <th className="px-4 py-3">Method</th>
+                          <th className="px-4 py-3">Stage</th>
+                          <th className="px-4 py-3">Kind</th>
+                          <th className="px-4 py-3">Object</th>
+                          <th className="px-4 py-3">Scan / Impact Rows</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Message</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border text-[13px] text-ink">
+                        {validationResults.map((result, index) => (
+                          <tr key={`validation-${result.seq}-${index}`}>
+                            <td className="px-4 py-3 align-top">{result.seq}</td>
+                            <td className="px-4 py-3 align-top font-mono text-[12px]">{result.sql_stmt}</td>
+                            <td className="px-4 py-3 align-top">{result.validation_method || '—'}</td>
+                            <td className="px-4 py-3 align-top">{result.validation_stage || '—'}</td>
+                            <td className="px-4 py-3 align-top">{result.statement_kind || '—'}</td>
+                            <td className="px-4 py-3 align-top">{result.object_type || '—'}</td>
+                            <td className="px-4 py-3 align-top">{result.scan_rows}</td>
+                            <td className="px-4 py-3 align-top">
+                              <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
+                                result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
+                              }`}>
+                                {result.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 align-top text-muted">{result.message || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
             </section>
           ) : null}
 
-          <div className="flex flex-wrap items-center justify-end gap-2.5 rounded-xl border border-border bg-panel px-4 py-3 shadow-soft">
+          <div className="flex flex-wrap items-center justify-end gap-2.5 px-1 py-1">
             <Link
               to="/tickets"
               className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
@@ -397,7 +487,7 @@ export function NewTicketPage() {
             </Link>
             <button
               type="submit"
-              disabled={submitting || reviewing || title.trim() === '' || sqlContent.trim() === '' || dbConnectionId === '' || databaseName.trim() === '' || !reviewPassed}
+              disabled={submitting || reviewing || title.trim() === '' || sqlContent.trim() === '' || dbConnectionId === '' || (requiresDatabaseSelection && databaseName.trim() === '') || !reviewPassed}
               className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-5 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

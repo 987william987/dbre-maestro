@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -82,9 +83,9 @@ func (r *AuthGroupRepo) ListDBConnectionIDs(ctx context.Context, authGroupID uin
 
 func (r *AuthGroupRepo) Create(ctx context.Context, groupKey, name, description string, isSystem, isProtected bool) (*AuthGroupEntity, error) {
 	res, err := r.db.ExecContext(ctx, `
-		INSERT INTO auth_groups (group_key, name, description, is_system, is_protected)
-		VALUES (?, ?, ?, ?, ?)
-	`, groupKey, name, description, isSystem, isProtected)
+		INSERT INTO auth_groups (group_key, name, description, is_system, is_protected, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, groupKey, name, description, isSystem, isProtected, timeutil.NowUTC(), timeutil.NowUTC())
 	if err != nil {
 		return nil, err
 	}
@@ -105,9 +106,9 @@ func (r *AuthGroupRepo) Create(ctx context.Context, groupKey, name, description 
 func (r *AuthGroupRepo) Update(ctx context.Context, id uint64, groupKey, name, description string) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE auth_groups
-		SET group_key = ?, name = ?, description = ?, updated_at = NOW()
+		SET group_key = ?, name = ?, description = ?, updated_at = ?
 		WHERE id = ?
-	`, groupKey, name, description, id)
+	`, groupKey, name, description, timeutil.NowUTC(), id)
 	return err
 }
 
@@ -133,12 +134,13 @@ func (r *AuthGroupRepo) Delete(ctx context.Context, id uint64) error {
 }
 
 func (r *AuthGroupRepo) AddPermission(ctx context.Context, authGroupID uint64, permissionKey string) error {
+	now := timeutil.NowUTC()
 	res, err := r.db.ExecContext(ctx, `
-		INSERT IGNORE INTO auth_group_permissions (auth_group_id, permission_id)
-		SELECT ?, p.id
+		INSERT IGNORE INTO auth_group_permissions (auth_group_id, permission_id, created_at)
+		SELECT ?, p.id, ?
 		FROM permissions p
 		WHERE p.permission_key = ?
-	`, authGroupID, permissionKey)
+	`, authGroupID, now, permissionKey)
 	if err != nil {
 		return err
 	}
@@ -165,10 +167,11 @@ func (r *AuthGroupRepo) RemovePermission(ctx context.Context, authGroupID uint64
 }
 
 func (r *AuthGroupRepo) AddDBConnection(ctx context.Context, authGroupID, dbConnectionID uint64) error {
+	now := timeutil.NowUTC()
 	_, err := r.db.ExecContext(ctx, `
-		INSERT IGNORE INTO auth_group_db_connections (auth_group_id, db_connection_id)
-		VALUES (?, ?)
-	`, authGroupID, dbConnectionID)
+		INSERT IGNORE INTO auth_group_db_connections (auth_group_id, db_connection_id, created_at)
+		VALUES (?, ?, ?)
+	`, authGroupID, dbConnectionID, now)
 	return err
 }
 
@@ -191,12 +194,13 @@ func (r *AuthGroupRepo) ReplacePermissionKeys(ctx context.Context, authGroupID u
 		return err
 	}
 	for _, permissionKey := range permissionKeys {
+		now := timeutil.NowUTC()
 		res, err := tx.ExecContext(ctx, `
-			INSERT INTO auth_group_permissions (auth_group_id, permission_id)
-			SELECT ?, p.id
+			INSERT INTO auth_group_permissions (auth_group_id, permission_id, created_at)
+			SELECT ?, p.id, ?
 			FROM permissions p
 			WHERE p.permission_key = ?
-		`, authGroupID, permissionKey)
+		`, authGroupID, now, permissionKey)
 		if err != nil {
 			return err
 		}
@@ -219,10 +223,11 @@ func (r *AuthGroupRepo) ReplaceDBConnectionIDs(ctx context.Context, authGroupID 
 		return err
 	}
 	for _, connectionID := range dbConnectionIDs {
+		now := timeutil.NowUTC()
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO auth_group_db_connections (auth_group_id, db_connection_id)
-			VALUES (?, ?)
-		`, authGroupID, connectionID); err != nil {
+			INSERT INTO auth_group_db_connections (auth_group_id, db_connection_id, created_at)
+			VALUES (?, ?, ?)
+		`, authGroupID, connectionID, now); err != nil {
 			return err
 		}
 	}

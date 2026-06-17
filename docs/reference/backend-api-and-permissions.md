@@ -70,7 +70,8 @@
 | `POST /api/tickets/review` | `requireTicketsApply` | SQL review / parser / policy 檢測 |
 | `POST /api/tickets` | `requireTicketsApply` | 建立 DDL / DML 工單 |
 | `POST /api/tickets/{id}/approve` | `requireTicketWorkflowReview` | 依 ticket type 二次檢查 reviewer 權限 |
-| `POST /api/tickets/{id}/reject` | `requireTicketWorkflowReview` | 同上 |
+| `POST /api/tickets/{id}/reject` | `requireTicketWorkflowReject` | reviewer 可拒絕；DDL / DML 的 DBA 也可於 `approved` / `pending_execution` 階段拒絕 |
+| `POST /api/tickets/{id}/withdraw` | `requireTicketsApply` | 僅 submitter 可於 `pending_review` 收回 |
 | `POST /api/tickets/{id}/request-execution` | `requireTicketsExecute` | 只適用 DDL / DML |
 | `POST /api/tickets/{id}/execute` | `requireTicketsExecute` | 只適用 DDL / DML |
 | `POST /api/tickets/{id}/stop` | `requireTicketsExecute` | 停止執行中 ticket |
@@ -185,6 +186,24 @@
 | `dml` | `tickets.review` | `tickets.execute` |
 | `sql_export` | `sql_editor.export_review` | 無獨立 execute，approve 後可下載 |
 | `sensitive_query_access` | `sql_editor.sensitive_review` | 無獨立 execute，approve 後 scope 生效 |
+
+## Ticket 通知與角色對照
+
+| 事件 | 提交人 | 審批人 | 執行人 |
+|---|---|---|---|
+| submit | 否 | 是 | 否 |
+| withdraw | 否 | 是 | 否 |
+| review reject | 是 | 否 | 否 |
+| review approve: `ddl` / `dml` | 否 | 否 | 是 |
+| review approve: `sql_export` / `sensitive_query_access` | 是 | 否 | 否 |
+| execution reject | 是 | 否 | 否 |
+| execution success | 是 | 否 | 否 |
+| execution failed | 是 | 否 | 是 |
+
+補充：
+
+- `submitter = executor` 時，仍需滿足上述規則
+- 例如執行成功時，即使執行者本人同時也是提交人，也應收到成功通知
 
 ## 與兩條 RBAC 原則的對齊
 

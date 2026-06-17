@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/jmoiron/sqlx"
 )
 
 const (
@@ -74,6 +76,14 @@ func main() {
 
 	pool.SetProfileConfigs(cfg.PoolProfiles)
 
+	shadowValidationRawDB, err := pool.Open("mysql", cfg.DBDSN, pool.ProfileShadowValidation)
+	if err != nil {
+		slog.Error("shadow validation db open failed", "err", err)
+		os.Exit(1)
+	}
+	defer shadowValidationRawDB.Close()
+	shadowValidationDB := dbxFromStdlib(shadowValidationRawDB)
+
 	// Crash recovery: mark any executing tickets as interrupted
 	ticketRepo := repository.NewTicketRepo(metaDB)
 	n, err := ticketRepo.MarkInterruptedAll(context.Background())
@@ -111,7 +121,7 @@ func main() {
 
 	healthH := handler.NewHealthHandler(metaDB)
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret)
-	ticketH := handler.NewTicketHandler(ticketRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, larkDispatcher, notifRepo, cfg.AppBaseURL)
+	ticketH := handler.NewTicketHandler(ticketRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, cfg.AppBaseURL)
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, auditRepo)
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, larkDispatcher, cfg.AppBaseURL)
 	auditH := handler.NewAuditHandler(auditRepo)
@@ -275,6 +285,7 @@ func main() {
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSQLEditorQuery).Get("/connections", queryH.ListConnections)
+			r.With(requireSQLEditorQuery).Get("/constraints", queryH.Constraints)
 			r.With(requireSQLEditorQuery).Post("/", queryH.Execute)
 			r.With(requireSQLEditorSensitiveApply).Post("/sensitive-access", queryH.CreateSensitiveAccessTicket)
 			r.With(requireSQLEditorQuery).Get("/history", queryH.ListHistory)
@@ -306,7 +317,8 @@ func main() {
 			r.Route("/{id}", func(r chi.Router) {
 				r.With(requireTicketsWorkspaceRead).Get("/", ticketH.Get)
 				r.With(requireTicketWorkflowReview).Post("/approve", ticketH.Approve)
-				r.With(requireTicketWorkflowReview).Post("/reject", ticketH.Reject)
+				r.With(requireTicketWorkflowReject).Post("/reject", ticketH.Reject)
+				r.With(requireTicketsApply).Post("/withdraw", ticketH.Withdraw)
 				r.With(requireSensitiveReview).Post("/revoke", ticketH.Revoke)
 				r.With(requireTicketsExecute).Post("/request-execution", ticketH.RequestExecution)
 				r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)
@@ -348,6 +360,10 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(ctx)
+}
+
+func dbxFromStdlib(raw *sql.DB) *sqlx.DB {
+	return sqlx.NewDb(raw, "mysql")
 }
 
 // runScheduler polls every 30 seconds for scheduled tickets whose scheduled_at has passed,
@@ -442,6 +458,9 @@ func requireTicketsWorkspaceRead(next http.Handler) http.Handler {
 }
 func requireTicketWorkflowReview(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.review", "sql_editor.export_review", "sql_editor.sensitive_review")(next)
+}
+func requireTicketWorkflowReject(next http.Handler) http.Handler {
+	return middleware.RequirePermission("tickets.review", "tickets.execute", "sql_editor.export_review", "sql_editor.sensitive_review")(next)
 }
 func requireSettingsRead(next http.Handler) http.Handler {
 	return middleware.RequirePermission("settings.read", "settings.write")(next)

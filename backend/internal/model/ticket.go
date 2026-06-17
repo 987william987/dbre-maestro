@@ -8,6 +8,7 @@ const (
 	TicketStatusPendingReview    TicketStatus = "pending_review"
 	TicketStatusApproved         TicketStatus = "approved"
 	TicketStatusRejected         TicketStatus = "rejected"
+	TicketStatusWithdrawn        TicketStatus = "withdrawn"
 	TicketStatusPendingExecution TicketStatus = "pending_execution"
 	TicketStatusExecuting        TicketStatus = "executing"
 	TicketStatusCompleted        TicketStatus = "completed"
@@ -21,6 +22,7 @@ type TicketType string
 const (
 	TicketTypeDDL                  TicketType = "ddl"
 	TicketTypeDML                  TicketType = "dml"
+	TicketTypeRedisCommand         TicketType = "redis_command"
 	TicketTypeSQLExport            TicketType = "sql_export"
 	TicketTypeSensitiveQueryAccess TicketType = "sensitive_query_access"
 )
@@ -74,15 +76,21 @@ type TicketExecution struct {
 	ErrorMsg     *string    `db:"error_msg"     json:"error_msg,omitempty"`
 	StartedAt    *time.Time `db:"started_at"    json:"started_at,omitempty"`
 	CompletedAt  *time.Time `db:"completed_at"  json:"completed_at,omitempty"`
+	DurationMs   *int64     `db:"duration_ms"   json:"duration_ms,omitempty"`
 }
 
 type TicketReviewResult struct {
-	ID        uint64    `db:"id"            json:"id"`
-	TicketID  uint64    `db:"ticket_id"     json:"ticket_id"`
-	Seq       int       `db:"seq"           json:"seq"`
-	SQLStmt   string    `db:"sql_stmt"      json:"sql_stmt"`
-	ScanRows  int64     `db:"scan_rows"     json:"scan_rows"`
-	Status    string    `db:"status"        json:"status"`
-	Message   *string   `db:"message"       json:"message,omitempty"`
-	CreatedAt time.Time `db:"created_at"    json:"created_at"`
+	ID               uint64    `db:"id"                json:"id"`
+	TicketID         uint64    `db:"ticket_id"         json:"ticket_id"`
+	Seq              int       `db:"seq"               json:"seq"`
+	SQLStmt          string    `db:"sql_stmt"          json:"sql_stmt"`
+	Phase            string    `db:"phase"             json:"phase"`
+	ValidationStage  *string   `db:"validation_stage"  json:"validation_stage,omitempty"`
+	StatementKind    *string   `db:"statement_kind"    json:"statement_kind,omitempty"`
+	ObjectType       *string   `db:"object_type"       json:"object_type,omitempty"`
+	ValidationMethod *string   `db:"validation_method" json:"validation_method,omitempty"`
+	ScanRows         int64     `db:"scan_rows"         json:"scan_rows"`
+	Status           string    `db:"status"            json:"status"`
+	Message          *string   `db:"message"           json:"message,omitempty"`
+	CreatedAt        time.Time `db:"created_at"        json:"created_at"`
 }

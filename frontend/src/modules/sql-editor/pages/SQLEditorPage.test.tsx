@@ -46,6 +46,7 @@ vi.mock('@/shared/auth/AuthContext', () => ({
 
 vi.mock('@/modules/sql-editor/api', () => ({
   listQueryConnections: vi.fn(),
+  getQueryConstraints: vi.fn(),
   executeQuery: vi.fn(),
   listMetadata: vi.fn(),
   listMetadataColumns: vi.fn(),
@@ -62,10 +63,11 @@ vi.mock('@/modules/exports/api', () => ({
 }))
 
 import { createExportRequest } from '@/modules/exports/api'
-import { createSavedQuery, createSensitiveAccessTicket, deleteSavedQuery, executeQuery, listMetadata, listMetadataColumns, listMetadataDefinition, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
+import { createSavedQuery, createSensitiveAccessTicket, deleteSavedQuery, executeQuery, getQueryConstraints, listMetadata, listMetadataColumns, listMetadataDefinition, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 
 const mockedListQueryConnections = vi.mocked(listQueryConnections)
+const mockedGetQueryConstraints = vi.mocked(getQueryConstraints)
 const mockedExecuteQuery = vi.mocked(executeQuery)
 const mockedListMetadata = vi.mocked(listMetadata)
 const mockedListMetadataColumns = vi.mocked(listMetadataColumns)
@@ -136,6 +138,13 @@ describe('SQLEditorPage', () => {
           updated_at: '2026-01-01T00:00:00Z',
         },
       ],
+    })
+    mockedGetQueryConstraints.mockResolvedValue({
+      default_limit: 200,
+      max_limit: 1000,
+      app_timeout_seconds: 30,
+      mysql_max_execution_time_ms: 25000,
+      postgres_statement_timeout_ms: 25000,
     })
 
     mockedListMetadata.mockResolvedValue({
@@ -395,6 +404,43 @@ describe('SQLEditorPage', () => {
       expect(mockedExecuteQuery).toHaveBeenCalledWith({
         db_connection_id: 1,
         sql: 'SELECT * FROM tickets;',
+        database: undefined,
+        schema: undefined,
+        redis_db_index: undefined,
+      })
+    })
+  })
+
+  it('支援 Cmd/Ctrl + Enter 執行目前 editor SQL', async () => {
+    mockedExecuteQuery.mockResolvedValue({
+      columns: ['id'],
+      raw_columns: ['id'],
+      sensitive_column_indexes: [],
+      rows: [[1]],
+      row_count: 1,
+      duration_ms: 12,
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+
+    const editor = screen.getByLabelText('CodeMirror') as HTMLTextAreaElement
+    editor.focus()
+    fireEvent.keyDown(document, { key: 'Enter', metaKey: true })
+
+    await waitFor(() => {
+      expect(mockedExecuteQuery).toHaveBeenCalledWith({
+        db_connection_id: 1,
+        sql: 'SELECT 1;',
         database: undefined,
         schema: undefined,
         redis_db_index: undefined,

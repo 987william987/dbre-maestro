@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Loader2, ShieldCheck } from 'lucide-react'
+import { useParams } from 'react-router-dom'
 import { ApiError } from '@/shared/api/client'
+import { useAuth } from '@/shared/auth/AuthContext'
 import type { SQLReviewRule } from '@/shared/types/sqlReviewRule'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
+import { PageTabs } from '@/shared/ui/PageTabs'
 import { Switch } from '@/shared/ui/Switch'
 import { useToast } from '@/shared/ui/ToastContext'
 import { listSQLReviewRules, patchSQLReviewRule } from '@/modules/sql-review-rules/api'
@@ -36,8 +39,15 @@ const RULE_METADATA: Record<string, { description: string; thresholdEditable: bo
 }
 
 const PAGE_SIZE = 20
+const ENGINE_TABS = [
+  { key: 'mysql', label: 'MySQL' },
+  { key: 'postgresql', label: 'PostgreSQL' },
+  { key: 'redis', label: 'Redis' },
+] as const
 
 export function SQLReviewRulesPage() {
+  const { engine } = useParams()
+  const { user } = useAuth()
   const { pushToast } = useToast()
   const [rules, setRules] = useState<SQLReviewRule[]>([])
   const [offset, setOffset] = useState(0)
@@ -118,6 +128,8 @@ export function SQLReviewRulesPage() {
   }
 
   const pagedRules = useMemo(() => rules.slice(offset, offset + PAGE_SIZE), [offset, rules])
+  const currentEngine = engine === 'postgresql' || engine === 'redis' ? engine : 'mysql'
+  const canWrite = user?.permissions.includes('sql_review.write') ?? false
 
   useEffect(() => {
     if (offset > 0 && offset >= rules.length) {
@@ -129,9 +141,24 @@ export function SQLReviewRulesPage() {
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
       <PageIntro
         title="SQL Review Rules"
-        description="Manage SQL checks that run when DDL or DML tickets are submitted. Only `high_row_count` uses a configurable threshold; other rules are simple on/off checks."
+        description="Manage parser and validation rules by engine. The current MySQL page contains the implemented review rules; PostgreSQL and Redis are reserved for follow-up expansion."
       />
 
+      <PageTabs
+        items={ENGINE_TABS.map((tab) => ({
+          key: tab.key,
+          label: tab.label,
+          to: `/sql-review-rules/${tab.key}`,
+        }))}
+      />
+
+      {currentEngine !== 'mysql' ? (
+        <div className="flex min-h-[220px] items-center justify-center rounded-xl border border-border bg-panel shadow-soft text-[13px] text-muted">
+          {currentEngine === 'postgresql'
+            ? 'PostgreSQL review rules will be added in a later phase.'
+            : 'Redis review rules will be added after Redis ticket rules are finalized.'}
+        </div>
+      ) : (
       <div className="overflow-hidden overflow-x-auto rounded-xl border border-border bg-panel shadow-soft">
           {loading ? (
             <LoadingBlock message="Loading SQL review rules..." className="m-4 min-h-[220px] rounded-xl border-border bg-panel" />
@@ -160,6 +187,7 @@ export function SQLReviewRulesPage() {
                           <Switch
                             ariaLabel={`${rule.rule_name} enabled`}
                             checked={draft?.enabled ?? false}
+                            disabled={!canWrite || savingRuleName === rule.rule_name}
                             onChange={(checked) =>
                               setDrafts((current) => ({
                                 ...current,
@@ -177,6 +205,7 @@ export function SQLReviewRulesPage() {
                         {isThresholdEditable(rule.rule_name) ? (
                           <input
                             value={draft?.threshold ?? ''}
+                            disabled={!canWrite}
                             onChange={(event) =>
                               setDrafts((current) => ({
                                 ...current,
@@ -203,7 +232,7 @@ export function SQLReviewRulesPage() {
                         <button
                           type="button"
                           onClick={() => void handleSave(rule)}
-                          disabled={savingRuleName === rule.rule_name}
+                          disabled={!canWrite || savingRuleName === rule.rule_name}
                           className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                         >
                           {savingRuleName === rule.rule_name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
@@ -217,6 +246,7 @@ export function SQLReviewRulesPage() {
             </table>
           )}
       </div>
+      )}
 
       <Pagination
         offset={offset}
@@ -226,6 +256,7 @@ export function SQLReviewRulesPage() {
         onChange={setOffset}
       />
 
+      {!canWrite ? <InlineAlert>This page is in read-only mode. `sql_review.write` is required to update rules.</InlineAlert> : null}
       {error ? <InlineAlert>{error}</InlineAlert> : null}
     </div>
   )

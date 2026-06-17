@@ -191,11 +191,11 @@ func TestUserHandlerPatchDisableUserRevokesSessions(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
 		WithArgs(uint64(7)).
 		WillReturnRows(userRows())
-	mock.ExpectExec(`UPDATE users SET username=\?, email=\?, lark_recipient=\?, updated_at=NOW\(\) WHERE id=\?`).
-		WithArgs("alice", "alice@example.com", "", uint64(7)).
+	mock.ExpectExec(`UPDATE users SET username=\?, email=\?, lark_recipient=\?, updated_at=\? WHERE id=\?`).
+		WithArgs("alice", "alice@example.com", "", sqlmock.AnyArg(), uint64(7)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`UPDATE users SET is_active=\?, updated_at=NOW\(\) WHERE id=\?`).
-		WithArgs(false, uint64(7)).
+	mock.ExpectExec(`UPDATE users SET is_active=\?, updated_at=\? WHERE id=\?`).
+		WithArgs(false, sqlmock.AnyArg(), uint64(7)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`UPDATE sessions SET revoked_at = \? WHERE user_id = \? AND revoked_at IS NULL`).
 		WithArgs(sqlmock.AnyArg(), uint64(7)).
@@ -319,7 +319,7 @@ func TestAuthGroupHandlerCreate(t *testing.T) {
 	)
 
 	mock.ExpectExec(`INSERT INTO auth_groups`).
-		WithArgs("ops", "Ops", "operations", false, false).
+		WithArgs("ops", "Ops", "operations", false, false, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(9, 1))
 	mock.ExpectQuery(`SELECT id, group_key, name, description, is_system, is_protected`).
 		WithArgs(int64(9)).

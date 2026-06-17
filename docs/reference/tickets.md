@@ -100,13 +100,20 @@ DDL / DML 工單在提交前，應先經過 `POST /api/tickets/review`。
 pending_review
   -> approved
   -> rejected
+  -> withdrawn
 
 approved
   -> pending_execution
+  -> rejected
 
 pending_execution
+  -> rejected
   -> executing
-  -> interrupted / failed / completed
+
+executing
+  -> interrupted
+  -> failed
+  -> completed
 ```
 
 ### SQL Export
@@ -115,6 +122,7 @@ pending_execution
 pending_review
   -> approved (export ready)
   -> rejected
+  -> withdrawn
 ```
 
 ### Sensitive Query Access
@@ -123,8 +131,45 @@ pending_review
 pending_review
   -> approved (scope 生效直到 approved_until)
   -> rejected
+  -> withdrawn
   -> revoked
 ```
+
+## 通知規則
+
+目前 Ticket 通知同時會走站內通知與 Lark；是否派送給自己，依事件策略決定。
+
+### 提交與收回
+
+- 提交人送出工單後：
+  - 不通知提交人自己
+  - 通知對應審批人
+- 提交人收回工單後：
+  - 通知對應審批人
+
+### 審批階段
+
+- 審批人拒絕後：
+  - 通知提交人
+- 審批人同意後：
+  - `ddl` / `dml`：通知執行人
+  - `sql_export` / `sensitive_query_access`：通知提交人
+
+### 執行階段
+
+- 執行人於 `approved` / `pending_execution` 階段拒絕後：
+  - 通知提交人
+- 執行成功後：
+  - 通知提交人
+- 執行失敗後：
+  - 通知提交人
+  - 額外通知執行人
+
+### 邊界規則
+
+- 若提交人與執行人是同一人：
+  - 仍需符合上述通知規則
+  - 例如執行成功時，提交人本人仍應收到成功通知
 
 ## Ticket Detail
 

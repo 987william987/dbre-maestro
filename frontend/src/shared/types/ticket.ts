@@ -1,7 +1,10 @@
+import type { AuditLog } from '@/shared/types/audit'
+
 export type TicketStatus =
   | 'pending_review'
   | 'approved'
   | 'rejected'
+  | 'withdrawn'
   | 'pending_execution'
   | 'executing'
   | 'completed'
@@ -10,6 +13,7 @@ export type TicketStatus =
   | 'interrupted'
 
 export type TicketType = 'ddl' | 'dml'
+  | 'redis_command'
   | 'sql_export'
   | 'sensitive_query_access'
 
@@ -67,6 +71,7 @@ export type TicketExecution = {
   error_msg?: string | null
   started_at?: string | null
   completed_at?: string | null
+  duration_ms?: number | null
 }
 
 export type TicketReviewResult = {
@@ -74,6 +79,11 @@ export type TicketReviewResult = {
   ticket_id: number
   seq: number
   sql_stmt: string
+  phase: string
+  validation_stage?: string | null
+  statement_kind?: string | null
+  object_type?: string | null
+  validation_method?: string | null
   scan_rows: number
   status: 'pass' | 'error' | string
   message?: string | null
@@ -81,21 +91,30 @@ export type TicketReviewResult = {
 
 export type TicketCapabilities = {
   can_review: boolean
+  can_reject: boolean
+  can_withdraw: boolean
   can_revoke: boolean
   can_request_execution: boolean
   can_execute: boolean
   can_download_export: boolean
 }
 
+export type TicketWorkflowParticipants = {
+  reviewers: string[]
+  executors: string[]
+}
+
 export type TicketDetail = {
   ticket: Ticket
   executions: TicketExecution[]
   review_results: TicketReviewResult[]
+  activity_logs: AuditLog[]
   scopes: TicketScope[]
   export_request: {
     status: string
     expires_at: string
     download_url?: string | null
   } | null
+  workflow_participants: TicketWorkflowParticipants
   capabilities: TicketCapabilities
 }

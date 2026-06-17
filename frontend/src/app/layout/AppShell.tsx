@@ -83,7 +83,12 @@ const NAV_ITEMS: NavItem[] = [
     label: 'SQL Review',
     icon: ShieldCheck,
     allowed: (permissions) => permissions.includes('sql_review.read') || permissions.includes('sql_review.write'),
-    to: '/sql-review-rules',
+    to: '/sql-review-rules/mysql',
+    children: [
+      { to: '/sql-review-rules/mysql', label: 'MySQL', icon: ShieldCheck },
+      { to: '/sql-review-rules/postgresql', label: 'PostgreSQL', icon: ShieldCheck },
+      { to: '/sql-review-rules/redis', label: 'Redis', icon: ShieldCheck },
+    ],
   },
   {
     key: 'audit-logs',
@@ -108,7 +113,7 @@ const NAV_GROUPS = [
   },
   {
     title: 'Governance',
-    items: ['/users', '/db-connections', '/db-metadata/inventory', '/db-metadata/objects', '/masking-rules', '/sql-review-rules', '/audit-logs', '/settings'],
+    items: ['/users', '/db-connections', '/db-metadata/inventory', '/db-metadata/objects', '/masking-rules', '/sql-review-rules/mysql', '/audit-logs', '/settings'],
   },
 ]
 

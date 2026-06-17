@@ -236,7 +236,7 @@ func (c *Client) buildPayload(msg Message) []byte {
 func (c *Client) buildText(msg Message) string {
 	text := fmt.Sprintf("【%s】%s", msg.Title, msg.Body)
 	if msg.TicketNo != "" {
-		text = fmt.Sprintf("【%s】工單 %s — %s", msg.Title, msg.TicketNo, msg.Body)
+		text = fmt.Sprintf("【%s】工單 %s\n%s", msg.Title, msg.TicketNo, msg.Body)
 	}
 	return text
 }

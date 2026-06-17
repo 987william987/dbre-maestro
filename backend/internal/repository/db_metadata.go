@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -140,9 +141,9 @@ func (r *DBMetadataRepo) ReplaceInventorySnapshots(ctx context.Context, snapshot
 	for _, item := range items {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO cloud_db_inventory_snapshots
-			 (snapshot_at, provider, engine, region, az, account_id, db_identifier, cluster_identifier, instance_identifier, role, engine_version, instance_class, storage_type, cluster_endpoint, cluster_reader_endpoint, instance_endpoint, raw_payload_json)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			snapshotAt,
+			 (snapshot_at, provider, engine, region, az, account_id, db_identifier, cluster_identifier, instance_identifier, role, engine_version, instance_class, storage_type, cluster_endpoint, cluster_reader_endpoint, instance_endpoint, raw_payload_json, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			snapshotAt.UTC(),
 			item.Provider,
 			item.Engine,
 			item.Region,
@@ -159,6 +160,7 @@ func (r *DBMetadataRepo) ReplaceInventorySnapshots(ctx context.Context, snapshot
 			item.ClusterReaderEndpoint,
 			item.InstanceEndpoint,
 			item.RawPayloadJSON,
+			timeutil.NowUTC(),
 		); err != nil {
 			return fmt.Errorf("insert inventory snapshot %s: %w", item.DBIdentifier, err)
 		}
@@ -189,9 +191,9 @@ func (r *DBMetadataRepo) ReplaceObjectSnapshotsForConnection(ctx context.Context
 	for _, item := range items {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO db_object_snapshots
-			 (snapshot_at, db_connection_id, connection_name_snapshot, engine, cluster_name, node_name, database_name, schema_name, table_name, data_size_bytes, index_size_bytes)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			snapshotAt,
+			 (snapshot_at, db_connection_id, connection_name_snapshot, engine, cluster_name, node_name, database_name, schema_name, table_name, data_size_bytes, index_size_bytes, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			snapshotAt.UTC(),
 			dbConnectionID,
 			item.ConnectionName,
 			item.Engine,
@@ -202,6 +204,7 @@ func (r *DBMetadataRepo) ReplaceObjectSnapshotsForConnection(ctx context.Context
 			item.TableName,
 			item.DataSizeBytes,
 			item.IndexSizeBytes,
+			timeutil.NowUTC(),
 		); err != nil {
 			return fmt.Errorf("insert object snapshot %s.%s.%s: %w", item.DatabaseName, item.SchemaName, item.TableName, err)
 		}

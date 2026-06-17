@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { CalendarDays, ChevronLeft, ChevronRight, Download, Search, X } from 'lucide-react'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
+import { getBrowserTimeZone } from '@/shared/lib/format'
 import type { AuditLog } from '@/shared/types/audit'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
@@ -700,6 +701,7 @@ function formatAuditDateTime(value?: string | null, withSeconds = false) {
     minute: '2-digit',
     second: withSeconds ? '2-digit' : undefined,
     hour12: false,
+    timeZone: getBrowserTimeZone(),
   }).format(date).replace(',', '')
 }
 

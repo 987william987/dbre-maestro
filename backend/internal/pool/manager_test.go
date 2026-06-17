@@ -46,6 +46,15 @@ func TestConfigForProfile(t *testing.T) {
 				ConnMaxIdleTime: time.Minute,
 			},
 		},
+		{
+			profile: ProfileShadowValidation,
+			want: ProfileConfig{
+				MaxOpenConns:    1,
+				MaxIdleConns:    1,
+				ConnMaxLifetime: 2 * time.Minute,
+				ConnMaxIdleTime: time.Minute,
+			},
+		},
 	}
 
 	for _, tt := range tests {

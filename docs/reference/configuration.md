@@ -99,6 +99,18 @@
 
 這是 API 層的 timeout，不等同於 SQL Editor 查詢 timeout，也不直接等同 ticket execute timeout。
 
+## 時間與時區
+
+平台的時間處理規則如下：
+
+- DB schema 新欄位一律使用 `DATETIME(6)`
+- App 寫入 DB 時顯式傳入 UTC 時間，不依賴 session timezone
+- 前端讀取後，預設依 browser timezone 顯示
+
+詳細規範與盤點請參考：
+
+- [時間欄位與時區規範](time-handling.md)
+
 ## 平台 Settings 控制的項目
 
 以下值不是從 `.env` 直接給 UI，而是寫在 Meta DB 的 `platform_settings`：

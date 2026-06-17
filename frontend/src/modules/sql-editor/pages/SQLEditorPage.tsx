@@ -28,6 +28,7 @@ import {
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
+import { formatDateTime } from '@/shared/lib/format'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataColumn, MetadataDefinition, MetadataItem, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
@@ -43,6 +44,7 @@ import {
   createSensitiveAccessTicket,
   deleteSavedQuery,
   executeQuery,
+  getQueryConstraints,
   listQueryConnections,
   listMetadata,
   listMetadataColumns,
@@ -117,6 +119,21 @@ const HISTORY_LIMIT = 20
 const SAVED_QUERY_LIMIT = 10
 const EDITOR_BASE_VISIBLE_LINES = 12
 const EDITOR_MAX_HEIGHT = 840
+type QueryConstraints = {
+  default_limit: number
+  max_limit: number
+  app_timeout_seconds: number
+  mysql_max_execution_time_ms: number
+  postgres_statement_timeout_ms: number
+}
+
+const DEFAULT_QUERY_CONSTRAINTS = {
+  default_limit: 200,
+  max_limit: 1000,
+  app_timeout_seconds: 30,
+  mysql_max_execution_time_ms: 25000,
+  postgres_statement_timeout_ms: 25000,
+} satisfies QueryConstraints
 const EDITOR_LINE_HEIGHT = 24
 const EDITOR_VERTICAL_PADDING = 24
 const EDITOR_MIN_HEIGHT = EDITOR_VERTICAL_PADDING + EDITOR_BASE_VISIBLE_LINES * EDITOR_LINE_HEIGHT
@@ -619,6 +636,7 @@ export function SQLEditorPage() {
   const [activeTabId, setActiveTabId] = useState<string>(() => createTab().id)
   const [history, setHistory] = useState<QueryHistoryEntry[]>([])
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
+  const [queryConstraints, setQueryConstraints] = useState(DEFAULT_QUERY_CONSTRAINTS)
   const [runningTabIDs, setRunningTabIDs] = useState<string[]>([])
   const [exportingTabIDs, setExportingTabIDs] = useState<string[]>([])
   const [sensitiveAccessTabIDs, setSensitiveAccessTabIDs] = useState<string[]>([])
@@ -651,6 +669,29 @@ export function SQLEditorPage() {
     }
 
     void loadConnections()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    async function loadQueryConstraints() {
+      try {
+        const response = await getQueryConstraints()
+        if (active) {
+          setQueryConstraints(response)
+        }
+      } catch {
+        if (active) {
+          setQueryConstraints(DEFAULT_QUERY_CONSTRAINTS)
+        }
+      }
+    }
+
+    void loadQueryConstraints()
 
     return () => {
       active = false
@@ -750,6 +791,17 @@ export function SQLEditorPage() {
   const activeTabExporting = activeTab ? exportingTabIDs.includes(activeTab.id) : false
   const activeTabCreatingSensitiveAccess = activeTab ? sensitiveAccessTabIDs.includes(activeTab.id) : false
   const activeEditorHeight = activeTab ? (editorHeights[activeTab.id] ?? `${EDITOR_MIN_HEIGHT}px`) : `${EDITOR_MIN_HEIGHT}px`
+  const queryConstraintBadges = useMemo(() => {
+    const effectiveTimeoutSeconds = Math.min(
+      queryConstraints.app_timeout_seconds,
+      Math.floor(queryConstraints.mysql_max_execution_time_ms / 1000),
+      Math.floor(queryConstraints.postgres_statement_timeout_ms / 1000),
+    )
+    return {
+      limit: queryConstraints.default_limit,
+      timeoutSeconds: effectiveTimeoutSeconds,
+    }
+  }, [queryConstraints])
   const requestConfirmLoading = requestConfirmState
     ? requestConfirmState.kind === 'export'
       ? exportingTabIDs.includes(requestConfirmState.tabID)
@@ -1230,6 +1282,32 @@ export function SQLEditorPage() {
     }
   }
 
+  useEffect(() => {
+    function handleEditorShortcut(event: KeyboardEvent) {
+      const isRunShortcut = (event.metaKey || event.ctrlKey) && event.key === 'Enter'
+      if (!isRunShortcut || event.altKey) {
+        return
+      }
+      if (!editorContainerRef.current) {
+        return
+      }
+      const activeElement = document.activeElement
+      if (!(activeElement instanceof Node) || !editorContainerRef.current.contains(activeElement)) {
+        return
+      }
+      if (activeTabRunning || !activeTab?.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())) {
+        return
+      }
+      event.preventDefault()
+      void handleRunQuery()
+    }
+
+    document.addEventListener('keydown', handleEditorShortcut)
+    return () => {
+      document.removeEventListener('keydown', handleEditorShortcut)
+    }
+  }, [activeSelectedSQL, activeTab, activeTabRunning])
+
   function buildRequestConfirmState(kind: QueryRequestConfirmState['kind']): QueryRequestConfirmState | null {
     if (!activeTab?.connectionId || !activeExecutionSQL || !activeConnection) {
       return null
@@ -1545,9 +1623,15 @@ export function SQLEditorPage() {
       return
     }
 
-    updateActiveTabExplorerNodes((current) =>
-      updateAssetTreeNode(current, node.id, (target) => ({ ...target, expanded: !target.expanded })),
-    )
+    const toggleNode = (current: AssetTreeNode[]) =>
+      updateAssetTreeNode(current, node.id, (target) => ({ ...target, expanded: !target.expanded }))
+
+    if (activeExplorerSearch.trim()) {
+      updateActiveTabSearchTreeNodes(toggleNode)
+      return
+    }
+
+    updateActiveTabExplorerNodes(toggleNode)
   }
 
   function metadataHint(dbType: string | undefined, schema: string) {
@@ -1833,7 +1917,12 @@ export function SQLEditorPage() {
               <LoadingBlock message="Loading editor..." className="m-4 min-h-[320px] rounded-xl border-border bg-panel" />
             ) : (
               <div className="flex min-h-0 flex-1 flex-col">
-                <div className="flex justify-end px-4 pt-3 pb-2">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pt-3 pb-2">
+                  <div className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-muted">
+                    <span>Limit {queryConstraintBadges.limit}</span>
+                    <span className="text-faint">·</span>
+                    <span>Timeout {queryConstraintBadges.timeoutSeconds}s</span>
+                  </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
@@ -2030,7 +2119,7 @@ export function SQLEditorPage() {
                     </span>
                   ) : null}
                   {activeTab.lastRunAt ? (
-                    <span>{new Date(activeTab.lastRunAt).toLocaleString()}</span>
+                    <span>{formatDateTime(activeTab.lastRunAt, true)}</span>
                   ) : null}
                   <span>{resultMetaLine}</span>
                 </div>
@@ -2061,7 +2150,7 @@ export function SQLEditorPage() {
                           >
                             <p className="truncate text-[12px] font-semibold text-ink">{entry.sql_content}</p>
                             <p className="mt-1 text-[11px] text-muted">
-                              {entry.db_connection_name} / {entry.duration_ms} ms / {new Date(entry.created_at).toLocaleString()}
+                              {entry.db_connection_name} / {entry.duration_ms} ms / {formatDateTime(entry.created_at, true)}
                             </p>
                           </button>
                         ))}

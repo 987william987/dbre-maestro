@@ -47,6 +47,7 @@
 
    - 通過：`Approve`
    - 不通過：`Reject`
+   - 若提交人改變需求且尚未開始審核：`Withdraw`
 
 8. 若是 DDL / DML，Executor / DBA 再進行執行。
 
@@ -54,6 +55,21 @@
 
    - `Request Execution`
    - `Execute`
+   - 若在待執行階段發現問題：可於 `approved` 或 `pending_execution` 階段 `Reject`
+
+## 通知行為
+
+Ticket 流程中的通知規則如下：
+
+- 提交後通知審批人，不通知提交人自己
+- 收回後通知審批人
+- 審批拒絕後通知提交人
+- 審批通過後：
+  - `DDL / DML` 通知執行人
+  - `SQL Export / Sensitive Query Access` 通知提交人
+- 執行階段拒絕後通知提交人
+- 執行成功後通知提交人
+- 執行失敗後通知提交人與執行人
 
 ## Verification
 

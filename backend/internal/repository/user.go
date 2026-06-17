@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -29,8 +30,8 @@ func NewUserRepo(db *sqlx.DB) *UserRepo {
 
 func (r *UserRepo) Create(ctx context.Context, username, email, larkRecipient, passwordHash string, isProtected bool) (*model.User, error) {
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO users (username, email, lark_recipient, password, is_protected, is_active) VALUES (?, ?, ?, ?, ?, 1)`,
-		username, email, larkRecipient, passwordHash, isProtected,
+		`INSERT INTO users (username, email, lark_recipient, password, is_protected, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+		username, email, larkRecipient, passwordHash, isProtected, timeutil.NowUTC(), timeutil.NowUTC(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
@@ -104,7 +105,7 @@ func (r *UserRepo) GetAuthGroups(ctx context.Context, userID uint64) ([]model.Au
 			WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
 		) AS membership_groups
 		ORDER BY auth_group
-	`, userID, time.Now(), userID, time.Now())
+	`, userID, timeutil.NowUTC(), userID, timeutil.NowUTC())
 	return groups, err
 }
 
@@ -116,7 +117,7 @@ func (r *UserRepo) GetAuthGroupRecords(ctx context.Context, userID uint64) ([]Au
 		INNER JOIN user_auth_groups uag ON uag.auth_group_id = ag.id
 		WHERE uag.user_id = ? AND (uag.expires_at IS NULL OR uag.expires_at > ?)
 		ORDER BY ag.id
-	`, userID, time.Now())
+	`, userID, timeutil.NowUTC())
 	if err == nil && len(groups) > 0 {
 		return groups, nil
 	}
@@ -127,7 +128,7 @@ func (r *UserRepo) GetAuthGroupRecords(ctx context.Context, userID uint64) ([]Au
 		INNER JOIN auth_group_memberships agm ON agm.auth_group = ag.group_key
 		WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
 		ORDER BY ag.id
-	`, userID, time.Now())
+	`, userID, timeutil.NowUTC())
 	return groups, err
 }
 
@@ -193,7 +194,7 @@ func (r *UserRepo) GetEffectivePermissionKeys(ctx context.Context, userID uint64
 			WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
 		) AS effective_permissions
 		ORDER BY permission_key
-	`, userID, userID, time.Now(), userID, time.Now())
+	`, userID, userID, timeutil.NowUTC(), userID, timeutil.NowUTC())
 	return permissionKeys, err
 }
 
@@ -202,7 +203,7 @@ func (r *UserRepo) ListActiveUserIDsByPermissionKeys(ctx context.Context, permis
 		return []uint64{}, nil
 	}
 
-	now := time.Now()
+	now := timeutil.NowUTC()
 	query, args, err := sqlx.In(`
 		SELECT DISTINCT u.id
 		FROM users u
@@ -292,15 +293,20 @@ func (r *UserRepo) GetEffectiveDBConnectionIDs(ctx context.Context, userID uint6
 			WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
 		) AS effective_db_connections
 		ORDER BY db_connection_id
-	`, userID, userID, time.Now(), userID, time.Now())
+	`, userID, userID, timeutil.NowUTC(), userID, timeutil.NowUTC())
 	return ids, err
 }
 
 func (r *UserRepo) AddMembership(ctx context.Context, userID uint64, group model.AuthGroup, grantedBy *uint64, expiresAt *time.Time) error {
+	now := timeutil.NowUTC()
+	var expiry any
+	if expiresAt != nil {
+		expiry = expiresAt.UTC()
+	}
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO auth_group_memberships (user_id, auth_group, granted_by, expires_at) VALUES (?, ?, ?, ?)
+		`INSERT INTO auth_group_memberships (user_id, auth_group, granted_by, expires_at, created_at) VALUES (?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at), granted_by = VALUES(granted_by)`,
-		userID, group, grantedBy, expiresAt,
+		userID, group, grantedBy, expiry, now,
 	)
 	return err
 }
@@ -326,12 +332,13 @@ func (r *UserRepo) RemoveMembership(ctx context.Context, userID uint64, group mo
 }
 
 func (r *UserRepo) AddDirectPermission(ctx context.Context, userID uint64, permissionKey string, grantedBy *uint64) error {
+	now := timeutil.NowUTC()
 	res, err := r.db.ExecContext(ctx, `
-		INSERT IGNORE INTO user_permissions (user_id, permission_id, granted_by)
-		SELECT ?, p.id, ?
+		INSERT IGNORE INTO user_permissions (user_id, permission_id, granted_by, created_at)
+		SELECT ?, p.id, ?, ?
 		FROM permissions p
 		WHERE p.permission_key = ?
-	`, userID, grantedBy, permissionKey)
+	`, userID, grantedBy, now, permissionKey)
 	if err != nil {
 		return err
 	}
@@ -358,10 +365,11 @@ func (r *UserRepo) RemoveDirectPermission(ctx context.Context, userID uint64, pe
 }
 
 func (r *UserRepo) AddDirectDBConnection(ctx context.Context, userID, dbConnectionID uint64, grantedBy *uint64) error {
+	now := timeutil.NowUTC()
 	_, err := r.db.ExecContext(ctx, `
-		INSERT IGNORE INTO user_db_connections (user_id, db_connection_id, granted_by)
-		VALUES (?, ?, ?)
-	`, userID, dbConnectionID, grantedBy)
+		INSERT IGNORE INTO user_db_connections (user_id, db_connection_id, granted_by, created_at)
+		VALUES (?, ?, ?, ?)
+	`, userID, dbConnectionID, grantedBy, now)
 	return err
 }
 
@@ -399,24 +407,24 @@ func (r *UserRepo) ListDirectDBConnectionIDs(ctx context.Context, userID uint64)
 // Update patches username, email, and lark recipient. Call separately to update password hash.
 func (r *UserRepo) Update(ctx context.Context, id uint64, username, email, larkRecipient string) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE users SET username=?, email=?, lark_recipient=?, updated_at=NOW() WHERE id=?`,
-		username, email, larkRecipient, id,
+		`UPDATE users SET username=?, email=?, lark_recipient=?, updated_at=? WHERE id=?`,
+		username, email, larkRecipient, timeutil.NowUTC(), id,
 	)
 	return err
 }
 
 func (r *UserRepo) UpdateActive(ctx context.Context, id uint64, isActive bool) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE users SET is_active=?, updated_at=NOW() WHERE id=?`,
-		isActive, id,
+		`UPDATE users SET is_active=?, updated_at=? WHERE id=?`,
+		isActive, timeutil.NowUTC(), id,
 	)
 	return err
 }
 
 func (r *UserRepo) UpdatePassword(ctx context.Context, id uint64, passwordHash string) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE users SET password=?, updated_at=NOW() WHERE id=?`,
-		passwordHash, id,
+		`UPDATE users SET password=?, updated_at=? WHERE id=?`,
+		passwordHash, timeutil.NowUTC(), id,
 	)
 	return err
 }
@@ -454,7 +462,7 @@ func (r *UserRepo) ListMemberships(ctx context.Context, userID uint64) ([]model.
 			WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
 		) AS memberships
 		ORDER BY created_at DESC
-	`, userID, time.Now(), userID, time.Now())
+	`, userID, timeutil.NowUTC(), userID, timeutil.NowUTC())
 	return memberships, err
 }
 
@@ -512,7 +520,7 @@ func (r *UserRepo) ListUsersByAuthGroup(ctx context.Context, group model.AuthGro
 			WHERE agm.auth_group = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
 		)
 		ORDER BY u.username
-	`, group, time.Now(), group, time.Now())
+	`, group, timeutil.NowUTC(), group, timeutil.NowUTC())
 	return users, err
 }
 
@@ -531,9 +539,9 @@ func (r *UserRepo) ReplaceMemberships(ctx context.Context, userID uint64, groups
 	}
 	for _, group := range groups {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO auth_group_memberships (user_id, auth_group, granted_by, expires_at)
-			VALUES (?, ?, ?, NULL)
-		`, userID, group, grantedBy); err != nil {
+			INSERT INTO auth_group_memberships (user_id, auth_group, granted_by, expires_at, created_at)
+			VALUES (?, ?, ?, NULL, ?)
+		`, userID, group, grantedBy, timeutil.NowUTC()); err != nil {
 			return err
 		}
 	}
@@ -552,11 +560,11 @@ func (r *UserRepo) ReplaceDirectPermissionKeys(ctx context.Context, userID uint6
 	}
 	for _, permissionKey := range permissionKeys {
 		res, err := tx.ExecContext(ctx, `
-			INSERT INTO user_permissions (user_id, permission_id, granted_by)
-			SELECT ?, p.id, ?
+			INSERT INTO user_permissions (user_id, permission_id, granted_by, created_at)
+			SELECT ?, p.id, ?, ?
 			FROM permissions p
 			WHERE p.permission_key = ?
-		`, userID, grantedBy, permissionKey)
+		`, userID, grantedBy, timeutil.NowUTC(), permissionKey)
 		if err != nil {
 			return err
 		}
@@ -580,9 +588,9 @@ func (r *UserRepo) ReplaceDirectDBConnectionIDs(ctx context.Context, userID uint
 	}
 	for _, connectionID := range dbConnectionIDs {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO user_db_connections (user_id, db_connection_id, granted_by)
-			VALUES (?, ?, ?)
-		`, userID, connectionID, grantedBy); err != nil {
+			INSERT INTO user_db_connections (user_id, db_connection_id, granted_by, created_at)
+			VALUES (?, ?, ?, ?)
+		`, userID, connectionID, grantedBy, timeutil.NowUTC()); err != nil {
 			return err
 		}
 	}

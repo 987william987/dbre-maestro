@@ -12,9 +12,11 @@ vi.mock('@/modules/tickets/api', () => ({
   getTicket: vi.fn(),
   approveTicket: vi.fn(),
   rejectTicket: vi.fn(),
+  withdrawTicket: vi.fn(),
   requestExecution: vi.fn(),
   executeTicket: vi.fn(),
   downloadTicketExport: vi.fn(),
+  revokeTicket: vi.fn(),
 }))
 
 vi.mock('@/shared/ui/ToastContext', () => ({
@@ -63,10 +65,17 @@ function buildDetail(ticket: Ticket, overrides?: Partial<TicketDetail>): TicketD
     ticket,
     executions: [],
     review_results: [],
+    activity_logs: [],
     scopes: [],
     export_request: null,
+    workflow_participants: {
+      reviewers: [],
+      executors: [],
+    },
     capabilities: {
       can_review: false,
+      can_reject: false,
+      can_withdraw: false,
       can_revoke: false,
       can_request_execution: false,
       can_execute: false,
@@ -104,8 +113,14 @@ describe('TicketDetailPage role visibility', () => {
       clearAuth: vi.fn(),
     })
     mockedGetTicket.mockResolvedValue(buildDetail({ ...baseTicket, status: 'pending_review' }, {
+      workflow_participants: {
+        reviewers: ['reviewer.bob'],
+        executors: ['dba.cindy'],
+      },
       capabilities: {
         can_review: true,
+        can_reject: true,
+        can_withdraw: false,
         can_revoke: false,
         can_request_execution: false,
         can_execute: false,
@@ -116,6 +131,10 @@ describe('TicketDetailPage role visibility', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByText('Approve')).toBeInTheDocument())
+    expect(screen.getByText('Approval Flow')).toBeInTheDocument()
+    expect(screen.getByText('reviewer.bob')).toBeInTheDocument()
+    expect(screen.getByText('dba.cindy')).toBeInTheDocument()
+    expect(screen.getByText('Waiting for review')).toBeInTheDocument()
     expect(screen.getByText('Reject')).toBeInTheDocument()
     expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
   })
@@ -131,8 +150,14 @@ describe('TicketDetailPage role visibility', () => {
       clearAuth: vi.fn(),
     })
     mockedGetTicket.mockResolvedValue(buildDetail({ ...baseTicket, status: 'approved' }, {
+      workflow_participants: {
+        reviewers: ['reviewer.bob'],
+        executors: ['dba.cindy', 'dba.edgar'],
+      },
       capabilities: {
         can_review: false,
+        can_reject: true,
+        can_withdraw: false,
         can_revoke: false,
         can_request_execution: true,
         can_execute: true,
@@ -143,7 +168,66 @@ describe('TicketDetailPage role visibility', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByText('Request Execution')).toBeInTheDocument())
-    expect(screen.getByText('Execute')).toBeInTheDocument()
+    expect(screen.getByText('Review completed')).toBeInTheDocument()
+    expect(screen.getByText('dba.cindy, dba.edgar')).toBeInTheDocument()
+    expect(screen.getByText('Waiting for DBA execution')).toBeInTheDocument()
+    expect(screen.queryByText('Execute')).not.toBeInTheDocument()
+  })
+
+  it('dba 在 pending_execution 狀態不顯示 request execution，但可見 execution reject', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 3, username: 'dba', authGroups: ['dba'], authGroupDetails: [], permissions: ['tickets.execute'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({ ...baseTicket, status: 'pending_execution' }, {
+      capabilities: {
+        can_review: false,
+        can_reject: true,
+        can_withdraw: false,
+        can_revoke: false,
+        can_request_execution: true,
+        can_execute: true,
+        can_download_export: false,
+      },
+    }))
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Execute')).toBeInTheDocument())
+    expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
+    expect(screen.getByText('Reject at Execution Stage')).toBeInTheDocument()
+  })
+
+  it('submitter 在 pending_review 狀態可見 withdraw', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'alice', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({ ...baseTicket, status: 'pending_review' }, {
+      capabilities: {
+        can_review: false,
+        can_reject: false,
+        can_withdraw: true,
+        can_revoke: false,
+        can_request_execution: false,
+        can_execute: false,
+        can_download_export: false,
+      },
+    }))
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Withdraw Ticket')).toBeInTheDocument())
   })
 
   it('developer 不會看到審核或 DBA 操作面板', async () => {
@@ -188,6 +272,8 @@ describe('TicketDetailPage role visibility', () => {
       },
       capabilities: {
         can_review: false,
+        can_reject: false,
+        can_withdraw: false,
         can_revoke: false,
         can_request_execution: false,
         can_execute: false,
@@ -226,10 +312,10 @@ describe('TicketDetailPage role visibility', () => {
 
     expect(await screen.findByText('analytics-primary')).toBeInTheDocument()
     expect(screen.getByText('analytics_app')).toBeInTheDocument()
-    expect(screen.getByText('alice')).toBeInTheDocument()
-    expect(screen.getByText('reviewer.bob')).toBeInTheDocument()
-    expect(screen.getByText('dba.cindy')).toBeInTheDocument()
-    expect(screen.getByText('ops.dan')).toBeInTheDocument()
+    expect(screen.getAllByText('alice').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('reviewer.bob').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('dba.cindy').length).toBeGreaterThan(0)
+    expect(screen.queryByText('ops.dan')).not.toBeInTheDocument()
     expect(screen.queryByText(/^3$/)).not.toBeInTheDocument()
   })
 
@@ -250,6 +336,7 @@ describe('TicketDetailPage role visibility', () => {
           ticket_id: 12,
           seq: 1,
           sql_stmt: 'UPDATE users SET flagged = 1 WHERE id < 10',
+          phase: 'validation',
           scan_rows: 10,
           status: 'pass',
           message: null,
@@ -259,9 +346,53 @@ describe('TicketDetailPage role visibility', () => {
 
     renderPage()
 
-    expect(await screen.findByText('Review Results')).toBeInTheDocument()
+    expect(await screen.findByText('Statement Results')).toBeInTheDocument()
     expect(screen.getByText('UPDATE users SET flagged = 1 WHERE id < 10')).toBeInTheDocument()
     expect(screen.getByText('10')).toBeInTheDocument()
     expect(screen.getByText('pass')).toBeInTheDocument()
+  })
+
+  it('顯示關鍵工單資訊與逐句 SQL 執行結果', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      status: 'completed',
+      reviewer_id: 2,
+      reviewer_name: 'reviewer.bob',
+      executor_id: 3,
+      executor_name: 'dba.cindy',
+    }, {
+      executions: [
+        {
+          id: 21,
+          ticket_id: 12,
+          seq: 1,
+          sql_stmt: 'UPDATE users SET flagged = 1 WHERE id < 10;',
+          status: 'completed',
+          rows_affected: 9,
+          error_msg: null,
+          started_at: '2026-06-09T10:00:00.000Z',
+          completed_at: '2026-06-09T10:00:01.250Z',
+        },
+      ],
+    }))
+
+    renderPage()
+
+    expect(await screen.findByText('Overview')).toBeInTheDocument()
+    expect(screen.getByText('analytics-primary')).toBeInTheDocument()
+    expect(screen.getByText('analytics_app')).toBeInTheDocument()
+    expect(screen.getAllByText('dba.cindy').length).toBeGreaterThan(0)
+    expect(screen.getByText('Statement Results')).toBeInTheDocument()
+    expect(screen.getByText('Execute Successfully')).toBeInTheDocument()
+    expect(screen.getByText('1.250s')).toBeInTheDocument()
   })
 })

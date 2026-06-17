@@ -27,6 +27,7 @@
 - [Masking 與 DSL](reference/masking-and-dsl.md)
 - [DB Metadata](reference/db-metadata.md)
 - [平台 Settings](reference/settings.md)
+- [時間欄位與時區規範](reference/time-handling.md)
 
 ## Explanation
 
