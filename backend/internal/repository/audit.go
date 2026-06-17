@@ -86,7 +86,7 @@ func (r *AuditRepo) List(ctx context.Context, f AuditListFilter, limit, offset i
 
 	listArgs := append(args, limit, offset)
 	q := "SELECT id, actor_id, actor_name, action_type, resource_type, resource_id, details, ip_address, created_at FROM audit_logs" +
-		where + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+		where + " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
 
 	rows, err := r.db.QueryxContext(ctx, q, listArgs...)
 	if err != nil {

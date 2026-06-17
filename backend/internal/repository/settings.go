@@ -366,7 +366,7 @@ func upsertUint64List(ctx context.Context, tx *sqlx.Tx, key string, items []uint
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO platform_settings (key_name, value) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`,
+		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)`,
 		key, string(raw),
 	); err != nil {
 		return fmt.Errorf("upsert setting %s: %w", key, err)
@@ -381,7 +381,7 @@ func upsertStringList(ctx context.Context, tx *sqlx.Tx, key string, items []stri
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO platform_settings (key_name, value) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`,
+		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)`,
 		key, string(raw),
 	); err != nil {
 		return fmt.Errorf("upsert setting %s: %w", key, err)
@@ -396,7 +396,7 @@ func upsertBool(ctx context.Context, tx *sqlx.Tx, key string, value bool) error 
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO platform_settings (key_name, value) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`,
+		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)`,
 		key, string(raw),
 	); err != nil {
 		return fmt.Errorf("upsert setting %s: %w", key, err)
@@ -411,7 +411,7 @@ func upsertString(ctx context.Context, tx *sqlx.Tx, key, value string) error {
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO platform_settings (key_name, value) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`,
+		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)`,
 		key, string(raw),
 	); err != nil {
 		return fmt.Errorf("upsert setting %s: %w", key, err)
@@ -430,7 +430,7 @@ func (r *SettingsRepo) upsertEncryptedString(ctx context.Context, tx *sqlx.Tx, k
 	encoded := base64.StdEncoding.EncodeToString(ciphertext)
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO platform_settings (key_name, value) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`,
+		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)`,
 		key, encoded,
 	); err != nil {
 		return fmt.Errorf("upsert encrypted setting %s: %w", key, err)
@@ -445,7 +445,7 @@ func upsertInt(ctx context.Context, tx *sqlx.Tx, key string, value int) error {
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO platform_settings (key_name, value) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP`,
+		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)`,
 		key, string(raw),
 	); err != nil {
 		return fmt.Errorf("upsert setting %s: %w", key, err)
