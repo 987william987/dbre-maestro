@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -29,8 +30,8 @@ func (r *SessionRepo) Create(ctx context.Context, userID uint64, tokenHash, user
 	}
 
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		userID, tokenHash, ua, ip, expiresAt,
+		`INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		userID, tokenHash, ua, ip, expiresAt.UTC(), timeutil.NowUTC(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
@@ -54,7 +55,7 @@ func (r *SessionRepo) GetByTokenHash(ctx context.Context, hash string) (*model.S
 func (r *SessionRepo) Revoke(ctx context.Context, tokenHash string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL`,
-		time.Now(), tokenHash,
+		timeutil.NowUTC(), tokenHash,
 	)
 	return err
 }
@@ -62,7 +63,7 @@ func (r *SessionRepo) Revoke(ctx context.Context, tokenHash string) error {
 func (r *SessionRepo) RevokeAllForUser(ctx context.Context, userID uint64) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`,
-		time.Now(), userID,
+		timeutil.NowUTC(), userID,
 	)
 	return err
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -52,10 +53,10 @@ func (r *TicketRepo) CreateWithScopes(ctx context.Context, t *model.Ticket, scop
 	}
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO tickets (ticket_no, title, description, sql_content, ticket_type, db_connection_id, database_name, status, submitter_id, approved_duration_minutes, approved_until, revoked_at, revoked_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_review', ?, ?, ?, ?, ?)`,
+		`INSERT INTO tickets (ticket_no, title, description, sql_content, ticket_type, db_connection_id, database_name, status, submitter_id, approved_duration_minutes, approved_until, revoked_at, revoked_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_review', ?, ?, ?, ?, ?, ?, ?)`,
 		ticketNo, t.Title, t.Description, t.SQLContent, t.TicketType, t.DBConnectionID, t.DatabaseName, t.SubmitterID,
-		t.ApprovedDurationMinutes, t.ApprovedUntil, t.RevokedAt, t.RevokedBy,
+		t.ApprovedDurationMinutes, t.ApprovedUntil, t.RevokedAt, t.RevokedBy, timeutil.NowUTC(), timeutil.NowUTC(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create ticket: %w", err)
@@ -67,9 +68,9 @@ func (r *TicketRepo) CreateWithScopes(ctx context.Context, t *model.Ticket, scop
 				continue
 			}
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO ticket_scopes (ticket_id, connection_id, database_name, schema_name, table_name, column_name, is_sensitive, source_kind)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-				id, scope.ConnectionID, scope.DatabaseName, scope.SchemaName, scope.TableName, scope.ColumnName, scope.IsSensitive, scope.SourceKind,
+				`INSERT INTO ticket_scopes (ticket_id, connection_id, database_name, schema_name, table_name, column_name, is_sensitive, source_kind, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				id, scope.ConnectionID, scope.DatabaseName, scope.SchemaName, scope.TableName, scope.ColumnName, scope.IsSensitive, scope.SourceKind, timeutil.NowUTC(),
 			); err != nil {
 				return nil, fmt.Errorf("create ticket scope: %w", err)
 			}
@@ -88,7 +89,7 @@ func generateTicketNo() (string, error) {
 		return "", err
 	}
 
-	timestamp := time.Now().UTC().Format("20060102-150405000")
+	timestamp := timeutil.NowUTC().Format("20060102-150405000")
 	return fmt.Sprintf("TK-%s-%s", timestamp, strings.ToUpper(hex.EncodeToString(suffix[:]))), nil
 }
 
@@ -165,7 +166,7 @@ func (r *TicketRepo) List(ctx context.Context, filter TicketListFilter, limit, o
 
 func (r *TicketRepo) UpdateStatus(ctx context.Context, id uint64, fromStatus, toStatus model.TicketStatus, reviewerID *uint64, comment *string, rejectionReason *string) (bool, error) {
 	query := `UPDATE tickets SET status = ?, updated_at = ?`
-	args := []any{toStatus, time.Now()}
+	args := []any{toStatus, timeutil.NowUTC()}
 
 	if reviewerID != nil {
 		query += `, reviewer_id = ?`
@@ -196,7 +197,7 @@ func (r *TicketRepo) ApproveSensitiveAccess(ctx context.Context, id uint64, from
 		`UPDATE tickets
 		 SET status = ?, reviewer_id = ?, approved_until = ?, updated_at = ?
 		 WHERE id = ? AND status = ? AND ticket_type = ?`,
-		model.TicketStatusApproved, reviewerID, approvedUntil, time.Now(), id, fromStatus, model.TicketTypeSensitiveQueryAccess,
+		model.TicketStatusApproved, reviewerID, approvedUntil.UTC(), timeutil.NowUTC(), id, fromStatus, model.TicketTypeSensitiveQueryAccess,
 	)
 	if err != nil {
 		return false, fmt.Errorf("approve sensitive access: %w", err)
@@ -210,7 +211,7 @@ func (r *TicketRepo) RevokeSensitiveAccess(ctx context.Context, id uint64, actor
 		`UPDATE tickets
 		 SET status = ?, revoked_at = ?, revoked_by = ?, updated_at = ?
 		 WHERE id = ? AND ticket_type = ? AND status = ? AND revoked_at IS NULL`,
-		model.TicketStatusStopped, time.Now(), actorID, time.Now(), id, model.TicketTypeSensitiveQueryAccess, model.TicketStatusApproved,
+		model.TicketStatusStopped, timeutil.NowUTC(), actorID, timeutil.NowUTC(), id, model.TicketTypeSensitiveQueryAccess, model.TicketStatusApproved,
 	)
 	if err != nil {
 		return false, fmt.Errorf("revoke sensitive access: %w", err)
@@ -233,7 +234,7 @@ func (r *TicketRepo) ListActiveSensitiveAccessScopes(ctx context.Context, userID
 		   AND t.revoked_at IS NULL
 		   AND ts.connection_id = ?
 		 ORDER BY ts.id ASC`,
-		userID, model.TicketTypeSensitiveQueryAccess, model.TicketStatusApproved, time.Now(), connectionID,
+		userID, model.TicketTypeSensitiveQueryAccess, model.TicketStatusApproved, timeutil.NowUTC(), connectionID,
 	); err != nil {
 		return nil, fmt.Errorf("list active sensitive access scopes: %w", err)
 	}
@@ -245,7 +246,7 @@ func (r *TicketRepo) StartExecution(ctx context.Context, id, executorID uint64) 
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE tickets SET status = 'executing', executor_id = ?, started_at = ?, updated_at = ?
          WHERE id = ? AND status = 'pending_execution'`,
-		executorID, time.Now(), time.Now(), id,
+		executorID, timeutil.NowUTC(), timeutil.NowUTC(), id,
 	)
 	if err != nil {
 		return false, fmt.Errorf("start execution OCC: %w", err)
@@ -257,14 +258,14 @@ func (r *TicketRepo) StartExecution(ctx context.Context, id, executorID uint64) 
 func (r *TicketRepo) MarkCompleted(ctx context.Context, id uint64, status model.TicketStatus) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
-		status, time.Now(), time.Now(), id,
+		status, timeutil.NowUTC(), timeutil.NowUTC(), id,
 	)
 	return err
 }
 
 func (r *TicketRepo) CreateExecution(ctx context.Context, e *model.TicketExecution) (uint64, error) {
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO ticket_executions (ticket_id, seq, sql_stmt, status) VALUES (?, ?, ?, 'pending')`,
+		`INSERT INTO ticket_executions (ticket_id, seq, sql_stmt, status, started_at) VALUES (?, ?, ?, 'pending', NULL)`,
 		e.TicketID, e.Seq, e.SQLStmt,
 	)
 	if err != nil {
@@ -277,7 +278,7 @@ func (r *TicketRepo) CreateExecution(ctx context.Context, e *model.TicketExecuti
 func (r *TicketRepo) MarkExecutionRunning(ctx context.Context, id uint64) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE ticket_executions SET status = 'running', started_at = ? WHERE id = ?`,
-		time.Now(), id,
+		timeutil.NowUTC(), id,
 	)
 	return err
 }
@@ -289,7 +290,7 @@ func (r *TicketRepo) MarkExecutionDone(ctx context.Context, id uint64, rowsAffec
 	}
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE ticket_executions SET status = ?, rows_affected = ?, error_msg = ?, completed_at = ?, duration_ms = ? WHERE id = ?`,
-		status, rowsAffected, errMsg, time.Now(), durationMs, id,
+		status, rowsAffected, errMsg, timeutil.NowUTC(), durationMs, id,
 	)
 	return err
 }
@@ -320,9 +321,9 @@ func (r *TicketRepo) ReplaceReviewResults(ctx context.Context, ticketID uint64, 
 	}
 	for _, result := range results {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO ticket_review_results (ticket_id, seq, sql_stmt, scan_rows, status, message)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
-			ticketID, result.Seq, result.SQLStmt, result.ScanRows, result.Status, result.Message,
+			`INSERT INTO ticket_review_results (ticket_id, seq, sql_stmt, scan_rows, status, message, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			ticketID, result.Seq, result.SQLStmt, result.ScanRows, result.Status, result.Message, timeutil.NowUTC(),
 		); err != nil {
 			return fmt.Errorf("insert ticket review result: %w", err)
 		}
@@ -354,7 +355,7 @@ func (r *TicketRepo) ListReviewResults(ctx context.Context, ticketID uint64) ([]
 func (r *TicketRepo) MarkStopped(ctx context.Context, id uint64) (bool, error) {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE tickets SET status = 'stopped', updated_at = ? WHERE id = ? AND status = 'executing'`,
-		time.Now(), id,
+		timeutil.NowUTC(), id,
 	)
 	if err != nil {
 		return false, err
@@ -368,7 +369,7 @@ func (r *TicketRepo) MarkStopped(ctx context.Context, id uint64) (bool, error) {
 func (r *TicketRepo) SetScheduled(ctx context.Context, id, executorID uint64, scheduledAt time.Time) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE tickets SET executor_id = ?, scheduled_at = ?, updated_at = ? WHERE id = ? AND status = 'pending_execution'`,
-		executorID, scheduledAt, time.Now(), id,
+		executorID, scheduledAt.UTC(), timeutil.NowUTC(), id,
 	)
 	return err
 }
@@ -378,7 +379,7 @@ func (r *TicketRepo) GetDueScheduled(ctx context.Context) ([]model.Ticket, error
 	var tickets []model.Ticket
 	err := r.db.SelectContext(ctx, &tickets,
 		`SELECT * FROM tickets WHERE status = 'pending_execution' AND scheduled_at IS NOT NULL AND scheduled_at <= ?`,
-		time.Now(),
+		timeutil.NowUTC(),
 	)
 	return tickets, err
 }
@@ -387,7 +388,7 @@ func (r *TicketRepo) GetDueScheduled(ctx context.Context) ([]model.Ticket, error
 func (r *TicketRepo) MarkInterruptedAll(ctx context.Context) (int64, error) {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE tickets SET status = 'interrupted', updated_at = ? WHERE status = 'executing'`,
-		time.Now(),
+		timeutil.NowUTC(),
 	)
 	if err != nil {
 		return 0, err

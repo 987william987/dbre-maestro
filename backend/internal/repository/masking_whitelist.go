@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -39,9 +40,9 @@ func (r *MaskingWhitelistRepo) Create(ctx context.Context, entry *model.MaskingW
 	}
 
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO masking_whitelist (db_connection_id, database_name, table_name, column_name, created_by)
-         VALUES (?, ?, ?, ?, ?)`,
-		entry.DBConnectionID, entry.DatabaseName, entry.TableName, entry.ColumnName, entry.CreatedBy,
+		`INSERT INTO masking_whitelist (db_connection_id, database_name, table_name, column_name, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+		entry.DBConnectionID, entry.DatabaseName, entry.TableName, entry.ColumnName, entry.CreatedBy, timeutil.NowUTC(),
 	)
 	if err != nil {
 		return nil, err

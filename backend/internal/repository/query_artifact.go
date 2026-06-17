@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -23,9 +24,9 @@ func NewQueryArtifactRepo(db *sqlx.DB) *QueryArtifactRepo {
 func (r *QueryArtifactRepo) AddHistory(ctx context.Context, entry *model.QueryHistoryEntry) (uint64, error) {
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO query_history
-		 (user_id, db_connection_id, db_connection_name, database_name, schema_name, redis_db_index, sql_content, duration_ms)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		entry.UserID, entry.DBConnectionID, entry.DBConnectionName, entry.DatabaseName, entry.SchemaName, entry.RedisDBIndex, entry.SQLContent, entry.DurationMs,
+		 (user_id, db_connection_id, db_connection_name, database_name, schema_name, redis_db_index, sql_content, duration_ms, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.UserID, entry.DBConnectionID, entry.DBConnectionName, entry.DatabaseName, entry.SchemaName, entry.RedisDBIndex, entry.SQLContent, entry.DurationMs, timeutil.NowUTC(),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("create query_history: %w", err)
@@ -60,9 +61,9 @@ func (r *QueryArtifactRepo) CountSavedQueries(ctx context.Context, userID uint64
 func (r *QueryArtifactRepo) CreateSavedQuery(ctx context.Context, query *model.SavedQuery) (uint64, error) {
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO saved_queries
-		 (user_id, label, db_connection_id, db_connection_name, database_name, schema_name, redis_db_index, sql_content)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		query.UserID, query.Label, query.DBConnectionID, query.DBConnectionName, query.DatabaseName, query.SchemaName, query.RedisDBIndex, query.SQLContent,
+		 (user_id, label, db_connection_id, db_connection_name, database_name, schema_name, redis_db_index, sql_content, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		query.UserID, query.Label, query.DBConnectionID, query.DBConnectionName, query.DatabaseName, query.SchemaName, query.RedisDBIndex, query.SQLContent, timeutil.NowUTC(), timeutil.NowUTC(),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("create saved_query: %w", err)

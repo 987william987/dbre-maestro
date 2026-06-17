@@ -79,7 +79,7 @@ func TestDBConnectionHandlerPatchAllowsClearingDatabaseName(t *testing.T) {
 		WithArgs(uint64(5)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
 	mock.ExpectExec(`UPDATE db_connections`).
-		WithArgs("analytics", "mysql", "db.internal", uint16(3306), nil, "readonly", "prefer", uint64(5)).
+		WithArgs("analytics", "mysql", "db.internal", uint16(3306), nil, "readonly", "prefer", sqlmock.AnyArg(), uint64(5)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`INSERT INTO audit_logs`).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -128,7 +128,7 @@ func TestDBConnectionHandlerCreateRedisAllowsEmptyUsername(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO db_connections`).
-		WithArgs("cache-redis", "redis", "redis.internal", uint16(6379), nil, "", sqlmock.AnyArg(), "prefer", uint64(99)).
+		WithArgs("cache-redis", "redis", "redis.internal", uint16(6379), nil, "", sqlmock.AnyArg(), "prefer", uint64(99), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(7, 1))
 	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
 		WithArgs(uint64(7)).
@@ -203,7 +203,7 @@ func TestDBConnectionHandlerCreatePostgresDefaultsDatabaseNameToPostgres(t *test
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO db_connections`).
-		WithArgs("analytics-pg", "postgres", "pg.internal", uint16(5432), "postgres", "postgres", sqlmock.AnyArg(), "prefer", uint64(99)).
+		WithArgs("analytics-pg", "postgres", "pg.internal", uint16(5432), "postgres", "postgres", sqlmock.AnyArg(), "prefer", uint64(99), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(8, 1))
 	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
 		WithArgs(uint64(8)).

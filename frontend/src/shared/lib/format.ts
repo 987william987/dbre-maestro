@@ -1,3 +1,7 @@
+export function getBrowserTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
 export function formatDateTime(value?: string | null, withSeconds = false) {
   if (!value) {
     return '—'
@@ -16,5 +20,6 @@ export function formatDateTime(value?: string | null, withSeconds = false) {
     minute: '2-digit',
     second: withSeconds ? '2-digit' : undefined,
     hour12: false,
+    timeZone: getBrowserTimeZone(),
   }).format(date)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -19,8 +20,8 @@ func NewNotificationRepo(db *sqlx.DB) *NotificationRepo {
 // Create inserts a notification for a user.
 func (r *NotificationRepo) Create(ctx context.Context, userID uint64, notifType, title, body string, resourceType *string, resourceID *uint64) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO notifications (user_id, type, title, body, resource_type, resource_id) VALUES (?, ?, ?, ?, ?, ?)`,
-		userID, notifType, title, body, resourceType, resourceID,
+		`INSERT INTO notifications (user_id, type, title, body, resource_type, resource_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		userID, notifType, title, body, resourceType, resourceID, timeutil.NowUTC(),
 	)
 	if err != nil {
 		return fmt.Errorf("create notification: %w", err)

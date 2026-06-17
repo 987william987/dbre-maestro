@@ -10,6 +10,7 @@ import (
 
 	"github.com/dbre-maestro/maestro/internal/crypto"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -40,10 +41,10 @@ func (r *DBConnectionRepo) Create(ctx context.Context, c *model.DBConnection, pl
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO db_connections
-         (name, db_type, host, port, database_name, username, password_encrypted, encryption_key_version, ssl_mode, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+         (name, db_type, host, port, database_name, username, password_encrypted, encryption_key_version, ssl_mode, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
 		c.Name, c.DBType, c.Host, c.Port, c.DatabaseName,
-		c.Username, legacyEnc, c.SSLMode, c.CreatedBy,
+		c.Username, legacyEnc, c.SSLMode, c.CreatedBy, timeutil.NowUTC(), timeutil.NowUTC(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create db_connection: %w", err)
@@ -138,8 +139,8 @@ func (r *DBConnectionRepo) UpdatePassword(ctx context.Context, id uint64, plainP
 		return fmt.Errorf("encrypt password: %w", err)
 	}
 	_, err = r.db.ExecContext(ctx,
-		`UPDATE db_connections SET password_encrypted = ?, encryption_key_version = 1, updated_at = NOW() WHERE id = ?`,
-		enc, id,
+		`UPDATE db_connections SET password_encrypted = ?, encryption_key_version = 1, updated_at = ? WHERE id = ?`,
+		enc, timeutil.NowUTC(), id,
 	)
 	return err
 }
@@ -148,9 +149,9 @@ func (r *DBConnectionRepo) UpdatePassword(ctx context.Context, id uint64, plainP
 func (r *DBConnectionRepo) Update(ctx context.Context, id uint64, name, dbType, host string, port uint16, databaseName *string, username, sslMode string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE db_connections
-         SET name=?, db_type=?, host=?, port=?, database_name=?, username=?, ssl_mode=?, updated_at=NOW()
+         SET name=?, db_type=?, host=?, port=?, database_name=?, username=?, ssl_mode=?, updated_at=?
          WHERE id=?`,
-		name, dbType, host, port, databaseName, username, sslMode, id,
+		name, dbType, host, port, databaseName, username, sslMode, timeutil.NowUTC(), id,
 	)
 	return err
 }
@@ -183,12 +184,12 @@ func (r *DBConnectionRepo) RecordTestResult(ctx context.Context, id uint64, ok b
 		status = "failed"
 		errMsg = strings.TrimSpace(message)
 	}
-	testedAt := time.Now().UTC()
+	testedAt := timeutil.NowUTC()
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE db_connections
-		 SET last_test_status = ?, last_test_error = ?, last_tested_at = ?, updated_at = NOW()
+		 SET last_test_status = ?, last_test_error = ?, last_tested_at = ?, updated_at = ?
 		 WHERE id = ?`,
-		status, errMsg, testedAt, id,
+		status, errMsg, testedAt, testedAt, id,
 	)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("record db_connection test result: %w", err)
@@ -235,9 +236,9 @@ func (r *DBConnectionRepo) replaceCredentialsTx(ctx context.Context, tx *sqlx.Tx
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO db_connection_credentials
-			 (db_connection_id, credential_role, username, password_encrypted, encryption_key_version)
-			 VALUES (?, ?, ?, ?, 1)`,
-			dbConnectionID, credential.CredentialRole, credential.Username, enc,
+			 (db_connection_id, credential_role, username, password_encrypted, encryption_key_version, created_at)
+			 VALUES (?, ?, ?, ?, 1, ?)`,
+			dbConnectionID, credential.CredentialRole, credential.Username, enc, timeutil.NowUTC(),
 		); err != nil {
 			return fmt.Errorf("insert %s credential: %w", credential.CredentialRole, err)
 		}

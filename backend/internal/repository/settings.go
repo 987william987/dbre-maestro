@@ -10,6 +10,7 @@ import (
 
 	"github.com/dbre-maestro/maestro/internal/crypto"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -364,10 +365,11 @@ func upsertUint64List(ctx context.Context, tx *sqlx.Tx, key string, items []uint
 	if err != nil {
 		return fmt.Errorf("encode setting %s: %w", key, err)
 	}
+	now := timeutil.NowUTC()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO platform_settings (key_name, value) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)`,
-		key, string(raw),
+		`INSERT INTO platform_settings (key_name, value, created_at, updated_at) VALUES (?, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)`,
+		key, string(raw), now, now,
 	); err != nil {
 		return fmt.Errorf("upsert setting %s: %w", key, err)
 	}
@@ -379,10 +381,11 @@ func upsertStringList(ctx context.Context, tx *sqlx.Tx, key string, items []stri
 	if err != nil {
 		return fmt.Errorf("encode setting %s: %w", key, err)
 	}
+	now := timeutil.NowUTC()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO platform_settings (key_name, value) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)`,
-		key, string(raw),
+		`INSERT INTO platform_settings (key_name, value, created_at, updated_at) VALUES (?, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)`,
+		key, string(raw), now, now,
 	); err != nil {
 		return fmt.Errorf("upsert setting %s: %w", key, err)
 	}
@@ -394,10 +397,11 @@ func upsertBool(ctx context.Context, tx *sqlx.Tx, key string, value bool) error 
 	if err != nil {
 		return fmt.Errorf("encode setting %s: %w", key, err)
 	}
+	now := timeutil.NowUTC()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO platform_settings (key_name, value) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)`,
-		key, string(raw),
+		`INSERT INTO platform_settings (key_name, value, created_at, updated_at) VALUES (?, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)`,
+		key, string(raw), now, now,
 	); err != nil {
 		return fmt.Errorf("upsert setting %s: %w", key, err)
 	}
@@ -409,10 +413,11 @@ func upsertString(ctx context.Context, tx *sqlx.Tx, key, value string) error {
 	if err != nil {
 		return fmt.Errorf("encode setting %s: %w", key, err)
 	}
+	now := timeutil.NowUTC()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO platform_settings (key_name, value) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)`,
-		key, string(raw),
+		`INSERT INTO platform_settings (key_name, value, created_at, updated_at) VALUES (?, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)`,
+		key, string(raw), now, now,
 	); err != nil {
 		return fmt.Errorf("upsert setting %s: %w", key, err)
 	}
@@ -428,10 +433,11 @@ func (r *SettingsRepo) upsertEncryptedString(ctx context.Context, tx *sqlx.Tx, k
 		return fmt.Errorf("encrypt setting %s: %w", key, err)
 	}
 	encoded := base64.StdEncoding.EncodeToString(ciphertext)
+	now := timeutil.NowUTC()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO platform_settings (key_name, value) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)`,
-		key, encoded,
+		`INSERT INTO platform_settings (key_name, value, created_at, updated_at) VALUES (?, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)`,
+		key, encoded, now, now,
 	); err != nil {
 		return fmt.Errorf("upsert encrypted setting %s: %w", key, err)
 	}
@@ -443,10 +449,11 @@ func upsertInt(ctx context.Context, tx *sqlx.Tx, key string, value int) error {
 	if err != nil {
 		return fmt.Errorf("encode setting %s: %w", key, err)
 	}
+	now := timeutil.NowUTC()
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO platform_settings (key_name, value) VALUES (?, ?)
-		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)`,
-		key, string(raw),
+		`INSERT INTO platform_settings (key_name, value, created_at, updated_at) VALUES (?, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)`,
+		key, string(raw), now, now,
 	); err != nil {
 		return fmt.Errorf("upsert setting %s: %w", key, err)
 	}

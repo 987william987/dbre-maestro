@@ -9,6 +9,7 @@ import (
 
 	"github.com/dbre-maestro/maestro/internal/export"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -28,12 +29,12 @@ func (r *ExportRepo) Create(ctx context.Context, req *model.ExportRequest, statu
 		return 0, "", fmt.Errorf("generate token: %w", err)
 	}
 
-	expiresAt := time.Now().Add(24 * time.Hour)
+	expiresAt := timeutil.NowUTC().Add(24 * time.Hour)
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO export_requests
-         (ticket_id, requester_id, download_token, sql_content, db_connection_id, status, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		req.TicketID, req.RequesterID, token, req.SQLContent, req.DBConnectionID, string(status), expiresAt,
+         (ticket_id, requester_id, download_token, sql_content, db_connection_id, status, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.TicketID, req.RequesterID, token, req.SQLContent, req.DBConnectionID, string(status), expiresAt, timeutil.NowUTC(),
 	)
 	if err != nil {
 		return 0, "", fmt.Errorf("create export_request: %w", err)
@@ -101,7 +102,7 @@ func (r *ExportRepo) UpdateStatus(ctx context.Context, id uint64, status model.E
 func (r *ExportRepo) MarkDownloaded(ctx context.Context, token string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE export_requests SET downloaded_at = ? WHERE download_token = ? AND downloaded_at IS NULL`,
-		time.Now(), token,
+		timeutil.NowUTC(), token,
 	)
 	return err
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -162,9 +163,9 @@ func (r *AuditRepo) Log(ctx context.Context, e AuditEntry) error {
 	}
 
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO audit_logs (actor_id, actor_name, action_type, resource_type, resource_id, details, ip_address)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		e.ActorID, e.ActorName, e.ActionType, resType, e.ResourceID, detailsJSON, ip,
+		`INSERT INTO audit_logs (actor_id, actor_name, action_type, resource_type, resource_id, details, ip_address, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ActorID, e.ActorName, e.ActionType, resType, e.ResourceID, detailsJSON, ip, timeutil.NowUTC(),
 	)
 	return err
 }

@@ -28,6 +28,7 @@ import {
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
+import { formatDateTime } from '@/shared/lib/format'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataColumn, MetadataDefinition, MetadataItem, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
@@ -2036,7 +2037,7 @@ export function SQLEditorPage() {
                     </span>
                   ) : null}
                   {activeTab.lastRunAt ? (
-                    <span>{new Date(activeTab.lastRunAt).toLocaleString()}</span>
+                    <span>{formatDateTime(activeTab.lastRunAt, true)}</span>
                   ) : null}
                   <span>{resultMetaLine}</span>
                 </div>
@@ -2067,7 +2068,7 @@ export function SQLEditorPage() {
                           >
                             <p className="truncate text-[12px] font-semibold text-ink">{entry.sql_content}</p>
                             <p className="mt-1 text-[11px] text-muted">
-                              {entry.db_connection_name} / {entry.duration_ms} ms / {new Date(entry.created_at).toLocaleString()}
+                              {entry.db_connection_name} / {entry.duration_ms} ms / {formatDateTime(entry.created_at, true)}
                             </p>
                           </button>
                         ))}

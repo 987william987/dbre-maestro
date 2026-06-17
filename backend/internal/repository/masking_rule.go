@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -42,9 +43,9 @@ func (r *MaskingRuleRepo) Create(ctx context.Context, rule *model.MaskingRule) (
 	}
 
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO masking_rules (db_connection_id, database_name, schema_name, table_name, column_name, match_type, mask_mode, mask_config, created_by)
-		 VALUES (NULL, '', '', '', ?, ?, ?, ?, ?)`,
-		rule.ColumnName, rule.MatchType, rule.MaskMode, nullableJSON(rule.MaskConfig), rule.CreatedBy,
+		`INSERT INTO masking_rules (db_connection_id, database_name, schema_name, table_name, column_name, match_type, mask_mode, mask_config, created_by, created_at)
+		 VALUES (NULL, '', '', '', ?, ?, ?, ?, ?, ?)`,
+		rule.ColumnName, rule.MatchType, rule.MaskMode, nullableJSON(rule.MaskConfig), rule.CreatedBy, timeutil.NowUTC(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create masking rule: %w", err)
