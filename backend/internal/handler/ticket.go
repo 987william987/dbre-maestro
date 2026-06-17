@@ -1258,6 +1258,10 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 // against the target DB, recording results in ticket_executions.
 func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 	ctx := context.Background()
+	executorName, err := h.lookupUsername(ctx, executorID)
+	if err != nil {
+		executorName = ""
+	}
 
 	execDB, cleanup, err := h.openTicketSQLDB(ctx, *ticket.DBConnectionID, model.DBCredentialRoleReadwrite, ticket.DatabaseName)
 	if err != nil {
@@ -1319,7 +1323,7 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 	}
 	h.audit.Log(ctx, repository.AuditEntry{
 		ActorID:      &executorID,
-		ActorName:    "",
+		ActorName:    executorName,
 		ActionType:   actionType,
 		ResourceType: "ticket",
 		ResourceID:   &ticket.ID,
