@@ -1545,9 +1545,15 @@ export function SQLEditorPage() {
       return
     }
 
-    updateActiveTabExplorerNodes((current) =>
-      updateAssetTreeNode(current, node.id, (target) => ({ ...target, expanded: !target.expanded })),
-    )
+    const toggleNode = (current: AssetTreeNode[]) =>
+      updateAssetTreeNode(current, node.id, (target) => ({ ...target, expanded: !target.expanded }))
+
+    if (activeExplorerSearch.trim()) {
+      updateActiveTabSearchTreeNodes(toggleNode)
+      return
+    }
+
+    updateActiveTabExplorerNodes(toggleNode)
   }
 
   function metadataHint(dbType: string | undefined, schema: string) {
