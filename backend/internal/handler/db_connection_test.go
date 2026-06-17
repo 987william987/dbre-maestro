@@ -275,6 +275,7 @@ func TestTicketHandlerCreateRejectsConnectionOutsideScope(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		"",
 	)
 

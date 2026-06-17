@@ -30,10 +30,11 @@ func Load() (*Config, error) {
 		MigrationDSN: os.Getenv("MIGRATION_DSN"),
 		AppBaseURL:   strings.TrimRight(os.Getenv("APP_BASE_URL"), "/"),
 		PoolProfiles: map[pool.Profile]pool.ProfileConfig{
-			pool.ProfileQuery:         pool.DefaultConfigForProfile(pool.ProfileQuery),
-			pool.ProfileExec:          pool.DefaultConfigForProfile(pool.ProfileExec),
-			pool.ProfileMetadata:      pool.DefaultConfigForProfile(pool.ProfileMetadata),
-			pool.ProfileScopedPGQuery: pool.DefaultConfigForProfile(pool.ProfileScopedPGQuery),
+			pool.ProfileQuery:            pool.DefaultConfigForProfile(pool.ProfileQuery),
+			pool.ProfileExec:             pool.DefaultConfigForProfile(pool.ProfileExec),
+			pool.ProfileMetadata:         pool.DefaultConfigForProfile(pool.ProfileMetadata),
+			pool.ProfileScopedPGQuery:    pool.DefaultConfigForProfile(pool.ProfileScopedPGQuery),
+			pool.ProfileShadowValidation: pool.DefaultConfigForProfile(pool.ProfileShadowValidation),
 		},
 	}
 
@@ -86,6 +87,7 @@ func loadPoolProfileConfig(c *Config) error {
 		pool.ProfileExec,
 		pool.ProfileMetadata,
 		pool.ProfileScopedPGQuery,
+		pool.ProfileShadowValidation,
 	}
 
 	for _, profile := range profiles {

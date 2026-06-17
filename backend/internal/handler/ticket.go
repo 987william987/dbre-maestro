@@ -20,19 +20,21 @@ import (
 	"github.com/dbre-maestro/maestro/internal/sqlpolicy"
 	ticketsm "github.com/dbre-maestro/maestro/internal/ticket"
 	"github.com/go-chi/chi/v5"
+	"github.com/jmoiron/sqlx"
 )
 
 type TicketHandler struct {
-	tickets        *repository.TicketRepo
-	exports        *repository.ExportRepo
-	audit          *repository.AuditRepo
-	dbConns        *repository.DBConnectionRepo
-	users          *repository.UserRepo
-	masking        *maskingRuntime
-	sqlReviewRules *repository.SQLReviewRuleRepo
-	notifRepo      *repository.NotificationRepo
-	lark           *notification.Dispatcher
-	appBaseURL     string
+	tickets            *repository.TicketRepo
+	exports            *repository.ExportRepo
+	audit              *repository.AuditRepo
+	dbConns            *repository.DBConnectionRepo
+	users              *repository.UserRepo
+	masking            *maskingRuntime
+	sqlReviewRules     *repository.SQLReviewRuleRepo
+	shadowValidationDB *sqlx.DB
+	notifRepo          *repository.NotificationRepo
+	lark               *notification.Dispatcher
+	appBaseURL         string
 }
 
 type ticketResponse struct {
@@ -174,21 +176,23 @@ func NewTicketHandler(
 	whitelist *repository.MaskingWhitelistRepo,
 	engine *masking.Engine,
 	sqlReviewRules *repository.SQLReviewRuleRepo,
+	shadowValidationDB *sqlx.DB,
 	lark *notification.Dispatcher,
 	notifRepo *repository.NotificationRepo,
 	appBaseURL string,
 ) *TicketHandler {
 	return &TicketHandler{
-		tickets:        tickets,
-		exports:        exports,
-		audit:          audit,
-		dbConns:        dbConns,
-		users:          users,
-		masking:        newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
-		sqlReviewRules: sqlReviewRules,
-		notifRepo:      notifRepo,
-		lark:           lark,
-		appBaseURL:     strings.TrimRight(appBaseURL, "/"),
+		tickets:            tickets,
+		exports:            exports,
+		audit:              audit,
+		dbConns:            dbConns,
+		users:              users,
+		masking:            newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
+		sqlReviewRules:     sqlReviewRules,
+		shadowValidationDB: shadowValidationDB,
+		notifRepo:          notifRepo,
+		lark:               lark,
+		appBaseURL:         strings.TrimRight(appBaseURL, "/"),
 	}
 }
 

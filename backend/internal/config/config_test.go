@@ -29,6 +29,9 @@ func TestLoadUsesDefaultPoolProfiles(t *testing.T) {
 	if got := cfg.PoolProfiles[pool.ProfileScopedPGQuery]; got != pool.DefaultConfigForProfile(pool.ProfileScopedPGQuery) {
 		t.Fatalf("scoped pg query config = %#v, want %#v", got, pool.DefaultConfigForProfile(pool.ProfileScopedPGQuery))
 	}
+	if got := cfg.PoolProfiles[pool.ProfileShadowValidation]; got != pool.DefaultConfigForProfile(pool.ProfileShadowValidation) {
+		t.Fatalf("shadow validation pool config = %#v, want %#v", got, pool.DefaultConfigForProfile(pool.ProfileShadowValidation))
+	}
 }
 
 func TestLoadOverridesPoolProfilesFromEnv(t *testing.T) {

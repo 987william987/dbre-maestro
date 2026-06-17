@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/jmoiron/sqlx"
 )
 
 const (
@@ -74,6 +76,14 @@ func main() {
 
 	pool.SetProfileConfigs(cfg.PoolProfiles)
 
+	shadowValidationRawDB, err := pool.Open("mysql", cfg.DBDSN, pool.ProfileShadowValidation)
+	if err != nil {
+		slog.Error("shadow validation db open failed", "err", err)
+		os.Exit(1)
+	}
+	defer shadowValidationRawDB.Close()
+	shadowValidationDB := dbxFromStdlib(shadowValidationRawDB)
+
 	// Crash recovery: mark any executing tickets as interrupted
 	ticketRepo := repository.NewTicketRepo(metaDB)
 	n, err := ticketRepo.MarkInterruptedAll(context.Background())
@@ -111,7 +121,7 @@ func main() {
 
 	healthH := handler.NewHealthHandler(metaDB)
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret)
-	ticketH := handler.NewTicketHandler(ticketRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, larkDispatcher, notifRepo, cfg.AppBaseURL)
+	ticketH := handler.NewTicketHandler(ticketRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, cfg.AppBaseURL)
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, auditRepo)
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, larkDispatcher, cfg.AppBaseURL)
 	auditH := handler.NewAuditHandler(auditRepo)
@@ -349,6 +359,10 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(ctx)
+}
+
+func dbxFromStdlib(raw *sql.DB) *sqlx.DB {
+	return sqlx.NewDb(raw, "mysql")
 }
 
 // runScheduler polls every 30 seconds for scheduled tickets whose scheduled_at has passed,

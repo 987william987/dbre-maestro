@@ -177,7 +177,10 @@ func (h *TicketHandler) runMySQLDDLShadowValidation(
 	}
 	defer cleanup()
 
-	metaDB := h.tickets.DB()
+	metaDB := h.shadowValidationDB
+	if metaDB == nil {
+		metaDB = h.tickets.DB()
+	}
 	items := make([]ticketReviewItem, 0, len(statements)*2)
 
 	var tableShadowDB string
@@ -349,6 +352,18 @@ func executeShadowDDL(ctx context.Context, metaDB *sqlx.DB, shadowDatabase, sqlT
 		return err
 	}
 	defer conn.Close()
+
+	var originalDatabase sql.NullString
+	if err := conn.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&originalDatabase); err != nil {
+		return err
+	}
+	defer func() {
+		_, _ = conn.ExecContext(context.Background(), "SET foreign_key_checks = 1")
+		if originalDatabase.Valid && strings.TrimSpace(originalDatabase.String) != "" {
+			_, _ = conn.ExecContext(context.Background(), "USE "+quoteMySQLIdentifier(originalDatabase.String))
+		}
+	}()
+
 	if _, err := conn.ExecContext(ctx, "USE "+quoteMySQLIdentifier(shadowDatabase)); err != nil {
 		return err
 	}
