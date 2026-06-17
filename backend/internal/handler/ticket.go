@@ -45,6 +45,11 @@ type ticketResponse struct {
 	RevokedByName    *string `json:"revoked_by_name,omitempty"`
 }
 
+type ticketWorkflowParticipants struct {
+	Reviewers []string `json:"reviewers"`
+	Executors []string `json:"executors"`
+}
+
 type ticketReviewItem struct {
 	Seq      int     `json:"seq"`
 	SQLStmt  string  `json:"sql_stmt"`
@@ -688,13 +693,19 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "get ticket failed")
 		return
 	}
+	workflowParticipants, err := h.loadWorkflowParticipants(r.Context(), ticket)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "get ticket workflow failed")
+		return
+	}
 
 	jsonOK(w, map[string]any{
-		"ticket":         enrichedTicket,
-		"executions":     executions,
-		"review_results": reviewResults,
-		"scopes":         scopes,
-		"export_request": exportDetail,
+		"ticket":                enrichedTicket,
+		"executions":            executions,
+		"review_results":        reviewResults,
+		"scopes":                scopes,
+		"export_request":        exportDetail,
+		"workflow_participants": workflowParticipants,
 		"capabilities": map[string]any{
 			"can_review":            canReview,
 			"can_revoke":            canRevoke,
@@ -703,6 +714,38 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"can_download_export":   ticket.TicketType == model.TicketTypeSQLExport && ticket.Status == model.TicketStatusApproved && ticket.SubmitterID == userID,
 		},
 	})
+}
+
+func (h *TicketHandler) loadWorkflowParticipants(ctx context.Context, ticket *model.Ticket) (ticketWorkflowParticipants, error) {
+	participants := ticketWorkflowParticipants{
+		Reviewers: []string{},
+		Executors: []string{},
+	}
+	if ticket == nil || h.users == nil {
+		return participants, nil
+	}
+
+	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, reviewPermissionsForTicket(ticket.TicketType))
+	if err != nil {
+		return participants, err
+	}
+	participants.Reviewers, err = h.lookupUsernamesByIDs(ctx, reviewerIDs)
+	if err != nil {
+		return participants, err
+	}
+
+	if ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML {
+		executorIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionTicketExecute})
+		if err != nil {
+			return participants, err
+		}
+		participants.Executors, err = h.lookupUsernamesByIDs(ctx, executorIDs)
+		if err != nil {
+			return participants, err
+		}
+	}
+
+	return participants, nil
 }
 
 func (h *TicketHandler) buildTicketResponse(ctx context.Context, ticket *model.Ticket) (ticketResponse, error) {
@@ -760,6 +803,24 @@ func (h *TicketHandler) lookupUsername(ctx context.Context, userID uint64) (stri
 		return strconv.FormatUint(userID, 10), nil
 	}
 	return user.Username, nil
+}
+
+func (h *TicketHandler) lookupUsernamesByIDs(ctx context.Context, userIDs []uint64) ([]string, error) {
+	if len(userIDs) == 0 || h.users == nil {
+		return []string{}, nil
+	}
+	users, err := h.users.ListByIDs(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	usernames := make([]string, 0, len(users))
+	for _, user := range users {
+		if user.Username == "" {
+			continue
+		}
+		usernames = append(usernames, user.Username)
+	}
+	return usernames, nil
 }
 
 // POST /tickets/{id}/approve

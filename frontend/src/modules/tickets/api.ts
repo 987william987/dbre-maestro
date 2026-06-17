@@ -91,6 +91,10 @@ export async function getTicket(id: string) {
     review_results: Array.isArray(response.review_results) ? response.review_results : [],
     scopes: Array.isArray(response.scopes) ? response.scopes : [],
     export_request: response.export_request ?? null,
+    workflow_participants: {
+      reviewers: Array.isArray(response.workflow_participants?.reviewers) ? response.workflow_participants.reviewers : [],
+      executors: Array.isArray(response.workflow_participants?.executors) ? response.workflow_participants.executors : [],
+    },
   }))
 }
 

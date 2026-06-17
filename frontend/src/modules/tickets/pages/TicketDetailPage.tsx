@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, Download, Loader2, Play, Send, ShieldCheck, ShieldX } from 'lucide-react'
+import { ArrowLeft, Check, Download, Loader2, Play, Send, ShieldCheck, ShieldX, X } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
-import type { Ticket, TicketDetail, TicketScope } from '@/shared/types/ticket'
+import type { Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants } from '@/shared/types/ticket'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
@@ -30,6 +30,170 @@ function formatTicketActor(name: string | null | undefined, id: number | null | 
     return String(id)
   }
   return '—'
+}
+
+type WorkflowStepTone = 'done' | 'current' | 'upcoming' | 'failed'
+
+type WorkflowStep = {
+  key: string
+  title: string
+  actor: string
+  tone: WorkflowStepTone
+  detail: string
+}
+
+function joinParticipantNames(names: string[], fallback: string) {
+  const normalized = names.map((item) => item.trim()).filter(Boolean)
+  if (normalized.length === 0) {
+    return fallback
+  }
+  return normalized.join(', ')
+}
+
+function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflowParticipants): WorkflowStep[] {
+  const submitter = formatTicketActor(ticket.submitter_name, ticket.submitter_id)
+  const reviewer = ticket.reviewer_id != null || ticket.reviewer_name
+    ? formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null)
+    : joinParticipantNames(workflowParticipants.reviewers, 'Pending reviewer assignment')
+  const executor = ticket.executor_id != null || ticket.executor_name
+    ? formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)
+    : joinParticipantNames(workflowParticipants.executors, 'Pending executor assignment')
+  const usesExecutor = ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml'
+
+  const reviewerTone: WorkflowStepTone =
+    ticket.status === 'pending_review' ? 'current'
+      : ticket.status === 'rejected' ? 'failed'
+      : 'done'
+  const reviewerDetail =
+    reviewerTone === 'current' ? 'Waiting for review'
+      : reviewerTone === 'failed' ? 'Rejected at review stage'
+      : 'Review completed'
+
+  const executorTone: WorkflowStepTone = !usesExecutor
+    ? 'upcoming'
+    : ticket.status === 'rejected' ? 'upcoming'
+      : ticket.status === 'approved' || ticket.status === 'pending_execution' || ticket.status === 'executing' ? 'current'
+        : ticket.status === 'completed' ? 'done'
+          : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' ? 'failed'
+            : 'upcoming'
+  const executorDetail = !usesExecutor
+    ? 'No execution stage for this ticket type'
+    : executorTone === 'current' ? 'Waiting for DBA execution'
+      : executorTone === 'done' ? 'Execution completed'
+        : executorTone === 'failed' ? 'Execution ended with an exception'
+          : 'Will enter execution after approval'
+
+  const completionTone: WorkflowStepTone = usesExecutor
+    ? ticket.status === 'completed' ? 'done'
+      : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' || ticket.status === 'rejected' ? 'failed'
+        : 'upcoming'
+    : ticket.status === 'approved' || ticket.status === 'completed' ? 'done'
+      : ticket.status === 'rejected' ? 'failed'
+        : 'upcoming'
+  const completionDetail = usesExecutor
+    ? completionTone === 'done' ? 'Ticket closed successfully'
+      : completionTone === 'failed' ? 'Ticket closed unsuccessfully'
+        : 'Waiting for execution to finish'
+    : completionTone === 'done' ? 'Ticket completed after approval'
+      : completionTone === 'failed' ? 'Ticket closed unsuccessfully'
+        : 'Waiting for approval to complete the request'
+
+  const steps: WorkflowStep[] = [
+    {
+      key: 'submitter',
+      title: 'Submitted',
+      actor: submitter,
+      tone: 'done',
+      detail: 'Ticket has been created',
+    },
+    {
+      key: 'reviewer',
+      title: 'Review',
+      actor: reviewer,
+      tone: reviewerTone,
+      detail: reviewerDetail,
+    },
+  ]
+
+  if (usesExecutor) {
+    steps.push({
+      key: 'executor',
+      title: 'Execution',
+      actor: executor,
+      tone: executorTone,
+      detail: executorDetail,
+    })
+  }
+
+  steps.push({
+    key: 'complete',
+    title: 'Complete',
+    actor: usesExecutor ? 'System status update' : 'Approval outcome',
+    tone: completionTone,
+    detail: completionDetail,
+  })
+
+  return steps
+}
+
+function WorkflowStepIcon({ tone }: { tone: WorkflowStepTone }) {
+  if (tone === 'done') {
+    return (
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-white">
+        <Check className="h-5 w-5" />
+      </span>
+    )
+  }
+  if (tone === 'current') {
+    return (
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border-[6px] border-accent bg-white text-accent" />
+    )
+  }
+  if (tone === 'failed') {
+    return (
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-500 text-white">
+        <X className="h-5 w-5" />
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-300 text-white text-sm font-bold">
+      •
+    </span>
+  )
+}
+
+function WorkflowTimeline({ ticket, workflowParticipants }: { ticket: Ticket; workflowParticipants: TicketWorkflowParticipants }) {
+  const steps = buildWorkflowSteps(ticket, workflowParticipants)
+
+  return (
+    <section className="rounded-xl border border-border bg-panel shadow-soft">
+      <div className="border-b border-border/80 px-4 py-3">
+        <p className="text-[13px] font-semibold text-ink">Approval Flow</p>
+        <p className="mt-1 text-[12px] text-muted">Show the full path up front so the requester can anticipate who will review and execute this ticket.</p>
+      </div>
+
+      <div className="overflow-x-auto px-4 py-4">
+        <div className="grid min-w-[720px] gap-4" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
+          {steps.map((step, index) => (
+            <div key={step.key} className="relative pr-4 last:pr-0">
+              {index < steps.length - 1 ? (
+                <span className="absolute left-[44px] right-0 top-[18px] h-px bg-border" aria-hidden="true" />
+              ) : null}
+              <div className="relative">
+                <WorkflowStepIcon tone={step.tone} />
+                <div className="mt-3">
+                  <p className="text-[13px] font-semibold text-ink">{step.title}</p>
+                  <p className="mt-1 text-[12px] font-medium text-ink">{step.actor}</p>
+                  <p className="mt-1 text-[11px] text-muted">{step.detail}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
 }
 
 export function TicketDetailPage() {
@@ -175,7 +339,9 @@ export function TicketDetailPage() {
       ) : !ticket || !detail ? (
         <div className="rounded-xl border border-border bg-panel p-6 text-sm text-muted shadow-soft">Ticket not found.</div>
       ) : (
-        <div className="grid gap-3 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="space-y-3">
+          <WorkflowTimeline ticket={ticket} workflowParticipants={detail.workflow_participants} />
+          <div className="grid gap-3 xl:grid-cols-[1.15fr_0.85fr]">
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
               <span className="font-mono text-sm font-semibold text-accent">{ticket.ticket_no}</span>
@@ -379,6 +545,7 @@ export function TicketDetailPage() {
               </div>
             ) : null}
           </section>
+          </div>
         </div>
       )}
 

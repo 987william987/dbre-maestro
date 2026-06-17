@@ -87,6 +87,11 @@ export type TicketCapabilities = {
   can_download_export: boolean
 }
 
+export type TicketWorkflowParticipants = {
+  reviewers: string[]
+  executors: string[]
+}
+
 export type TicketDetail = {
   ticket: Ticket
   executions: TicketExecution[]
@@ -97,5 +102,6 @@ export type TicketDetail = {
     expires_at: string
     download_url?: string | null
   } | null
+  workflow_participants: TicketWorkflowParticipants
   capabilities: TicketCapabilities
 }

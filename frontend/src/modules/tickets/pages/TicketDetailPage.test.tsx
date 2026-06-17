@@ -65,6 +65,10 @@ function buildDetail(ticket: Ticket, overrides?: Partial<TicketDetail>): TicketD
     review_results: [],
     scopes: [],
     export_request: null,
+    workflow_participants: {
+      reviewers: [],
+      executors: [],
+    },
     capabilities: {
       can_review: false,
       can_revoke: false,
@@ -104,6 +108,10 @@ describe('TicketDetailPage role visibility', () => {
       clearAuth: vi.fn(),
     })
     mockedGetTicket.mockResolvedValue(buildDetail({ ...baseTicket, status: 'pending_review' }, {
+      workflow_participants: {
+        reviewers: ['reviewer.bob'],
+        executors: ['dba.cindy'],
+      },
       capabilities: {
         can_review: true,
         can_revoke: false,
@@ -116,6 +124,10 @@ describe('TicketDetailPage role visibility', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByText('Approve')).toBeInTheDocument())
+    expect(screen.getByText('Approval Flow')).toBeInTheDocument()
+    expect(screen.getByText('reviewer.bob')).toBeInTheDocument()
+    expect(screen.getByText('dba.cindy')).toBeInTheDocument()
+    expect(screen.getByText('Waiting for review')).toBeInTheDocument()
     expect(screen.getByText('Reject')).toBeInTheDocument()
     expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
   })
@@ -131,6 +143,10 @@ describe('TicketDetailPage role visibility', () => {
       clearAuth: vi.fn(),
     })
     mockedGetTicket.mockResolvedValue(buildDetail({ ...baseTicket, status: 'approved' }, {
+      workflow_participants: {
+        reviewers: ['reviewer.bob'],
+        executors: ['dba.cindy', 'dba.edgar'],
+      },
       capabilities: {
         can_review: false,
         can_revoke: false,
@@ -143,6 +159,9 @@ describe('TicketDetailPage role visibility', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByText('Request Execution')).toBeInTheDocument())
+    expect(screen.getByText('Review completed')).toBeInTheDocument()
+    expect(screen.getByText('dba.cindy, dba.edgar')).toBeInTheDocument()
+    expect(screen.getByText('Waiting for DBA execution')).toBeInTheDocument()
     expect(screen.getByText('Execute')).toBeInTheDocument()
   })
 
@@ -226,9 +245,9 @@ describe('TicketDetailPage role visibility', () => {
 
     expect(await screen.findByText('analytics-primary')).toBeInTheDocument()
     expect(screen.getByText('analytics_app')).toBeInTheDocument()
-    expect(screen.getByText('alice')).toBeInTheDocument()
-    expect(screen.getByText('reviewer.bob')).toBeInTheDocument()
-    expect(screen.getByText('dba.cindy')).toBeInTheDocument()
+    expect(screen.getAllByText('alice').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('reviewer.bob').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('dba.cindy').length).toBeGreaterThan(0)
     expect(screen.getByText('ops.dan')).toBeInTheDocument()
     expect(screen.queryByText(/^3$/)).not.toBeInTheDocument()
   })
