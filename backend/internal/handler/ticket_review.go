@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -187,12 +188,12 @@ func (h *TicketHandler) runMySQLDDLShadowValidation(
 		statementKind := string(stmt.Kind)
 		target, rewriteSQL, prepErr, execErr := h.prepareMySQLShadowValidation(ctx, readonlyDB, metaDB, stmt, nullableStringValue(databaseName), &tableShadowDB, &tableCleanup, &tableShadowPrepared)
 		if prepErr != nil {
-			items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodMySQLShadow, stringPtr(validationStagePrepare), statementKind, target.objectType, 0, []string{prepErr.Error()}))
+			items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodMySQLShadow, stringPtr(validationStagePrepare), statementKind, target.objectType, 0, []string{sanitizeMySQLShadowValidationError(prepErr)}))
 			continue
 		}
 		items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodMySQLShadow, stringPtr(validationStagePrepare), statementKind, target.objectType, 0, nil))
 		if execErr != nil {
-			items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodMySQLShadow, stringPtr(validationStageExecute), statementKind, target.objectType, 0, []string{execErr.Error()}))
+			items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodMySQLShadow, stringPtr(validationStageExecute), statementKind, target.objectType, 0, []string{sanitizeMySQLShadowValidationError(execErr)}))
 			continue
 		}
 		items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodMySQLShadow, stringPtr(validationStageExecute), statementKind, target.objectType, 0, nil))
@@ -327,6 +328,19 @@ func cloneMySQLDatabaseToShadow(ctx context.Context, readonlyDB *sql.DB, metaDB 
 		}
 	}
 	return shadowName, cleanup, nil
+}
+
+func sanitizeMySQLShadowValidationError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, "create shadow database failed:") && strings.Contains(lower, "access denied") {
+		slog.Warn("mysql shadow validation unavailable: create shadow database permission denied", "err", message)
+		return "shadow validation is not available because the platform validation database privilege is not configured"
+	}
+	return message
 }
 
 func executeShadowDDL(ctx context.Context, metaDB *sqlx.DB, shadowDatabase, sqlText string) error {
