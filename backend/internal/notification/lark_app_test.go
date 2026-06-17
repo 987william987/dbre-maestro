@@ -63,6 +63,21 @@ func TestSendToRecipientUsesOpenID(t *testing.T) {
 	}
 }
 
+func TestBuildTextWithTicketNoUsesNewLineLayout(t *testing.T) {
+	client := NewClient(Config{Mode: ModeWebhook, WebhookURL: "https://example.invalid"})
+
+	got := client.buildText(Message{
+		Title:    "工單待審核",
+		TicketNo: "TK-001",
+		Body:     "工單類型：DDL\n目前狀態：待審核",
+	})
+
+	want := "【工單待審核】工單 TK-001\n工單類型：DDL\n目前狀態：待審核"
+	if got != want {
+		t.Fatalf("buildText() = %q, want %q", got, want)
+	}
+}
+
 func jsonResponse(status int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status,

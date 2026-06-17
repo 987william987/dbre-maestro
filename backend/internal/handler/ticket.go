@@ -239,8 +239,24 @@ func (h *TicketHandler) ticketStateLabel(status model.TicketStatus) string {
 	}
 }
 
+func (h *TicketHandler) ticketTypeLabel(ticketType model.TicketType) string {
+	switch ticketType {
+	case model.TicketTypeDDL:
+		return "DDL"
+	case model.TicketTypeDML:
+		return "DML"
+	case model.TicketTypeSQLExport:
+		return "SQL_EXPORT"
+	case model.TicketTypeSensitiveQueryAccess:
+		return "SENSITIVE_QUERY_ACCESS"
+	default:
+		return strings.ToUpper(string(ticketType))
+	}
+}
+
 func (h *TicketHandler) buildTicketNotificationBody(ticket *model.Ticket, currentStatus model.TicketStatus, nextAction string, detail string) string {
 	parts := []string{
+		fmt.Sprintf("工單類型：%s", h.ticketTypeLabel(ticket.TicketType)),
 		fmt.Sprintf("目前狀態：%s", h.ticketStateLabel(currentStatus)),
 	}
 	if nextAction != "" {
@@ -249,11 +265,11 @@ func (h *TicketHandler) buildTicketNotificationBody(ticket *model.Ticket, curren
 	if ticket.DBConnectionID != nil && h.dbConns != nil {
 		conn, err := h.dbConns.GetByID(context.Background(), *ticket.DBConnectionID)
 		if err == nil && conn != nil {
-			parts = append(parts, fmt.Sprintf("資料來源：%s", conn.Name))
+			parts = append(parts, fmt.Sprintf("數據庫實例：%s", conn.Name))
 		}
 	}
 	if ticket.DatabaseName != nil && strings.TrimSpace(*ticket.DatabaseName) != "" {
-		parts = append(parts, fmt.Sprintf("資料庫：%s", strings.TrimSpace(*ticket.DatabaseName)))
+		parts = append(parts, fmt.Sprintf("數據庫：%s", strings.TrimSpace(*ticket.DatabaseName)))
 	}
 	if strings.TrimSpace(detail) != "" {
 		parts = append(parts, fmt.Sprintf("說明：%s", strings.TrimSpace(detail)))
