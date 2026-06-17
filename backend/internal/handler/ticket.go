@@ -138,7 +138,7 @@ var ticketNotificationPolicies = map[ticketNotificationEvent]ticketNotificationP
 		Title:       "工單已完成",
 		NotifType:   "ticket_executed",
 		Roles:       []ticketRecipientRole{ticketRoleSubmitter},
-		NotifyActor: false,
+		NotifyActor: true,
 		Status:      model.TicketStatusCompleted,
 		NextAction:  "請查看執行結果",
 	},
