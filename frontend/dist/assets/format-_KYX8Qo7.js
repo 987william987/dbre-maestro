@@ -1,1 +1,0 @@
-function n(){return Intl.DateTimeFormat().resolvedOptions().timeZone}function r(e,i=!1){if(!e)return"—";const t=new Date(e);return Number.isNaN(t.getTime())?e:new Intl.DateTimeFormat("zh-TW",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:i?"2-digit":void 0,hour12:!1,timeZone:n()}).format(t)}export{r as f,n as g};

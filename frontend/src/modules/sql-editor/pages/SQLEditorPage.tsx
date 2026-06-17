@@ -1282,6 +1282,32 @@ export function SQLEditorPage() {
     }
   }
 
+  useEffect(() => {
+    function handleEditorShortcut(event: KeyboardEvent) {
+      const isRunShortcut = (event.metaKey || event.ctrlKey) && event.key === 'Enter'
+      if (!isRunShortcut || event.altKey) {
+        return
+      }
+      if (!editorContainerRef.current) {
+        return
+      }
+      const activeElement = document.activeElement
+      if (!(activeElement instanceof Node) || !editorContainerRef.current.contains(activeElement)) {
+        return
+      }
+      if (activeTabRunning || !activeTab?.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())) {
+        return
+      }
+      event.preventDefault()
+      void handleRunQuery()
+    }
+
+    document.addEventListener('keydown', handleEditorShortcut)
+    return () => {
+      document.removeEventListener('keydown', handleEditorShortcut)
+    }
+  }, [activeSelectedSQL, activeTab, activeTabRunning])
+
   function buildRequestConfirmState(kind: QueryRequestConfirmState['kind']): QueryRequestConfirmState | null {
     if (!activeTab?.connectionId || !activeExecutionSQL || !activeConnection) {
       return null
