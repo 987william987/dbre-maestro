@@ -8,6 +8,7 @@ const (
 	TicketStatusPendingReview    TicketStatus = "pending_review"
 	TicketStatusApproved         TicketStatus = "approved"
 	TicketStatusRejected         TicketStatus = "rejected"
+	TicketStatusWithdrawn        TicketStatus = "withdrawn"
 	TicketStatusPendingExecution TicketStatus = "pending_execution"
 	TicketStatusExecuting        TicketStatus = "executing"
 	TicketStatusCompleted        TicketStatus = "completed"

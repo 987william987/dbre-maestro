@@ -68,6 +68,7 @@ const (
 	ticketEventPendingReview    ticketNotificationEvent = "pending_review"
 	ticketEventApproved         ticketNotificationEvent = "approved"
 	ticketEventRejected         ticketNotificationEvent = "rejected"
+	ticketEventWithdrawn        ticketNotificationEvent = "withdrawn"
 	ticketEventPendingExecution ticketNotificationEvent = "pending_execution"
 	ticketEventCompleted        ticketNotificationEvent = "completed"
 	ticketEventExecutionFailed  ticketNotificationEvent = "execution_failed"
@@ -116,6 +117,14 @@ var ticketNotificationPolicies = map[ticketNotificationEvent]ticketNotificationP
 		NotifyActor: false,
 		Status:      model.TicketStatusRejected,
 		NextAction:  "請依駁回原因修正後重新提交",
+	},
+	ticketEventWithdrawn: {
+		Title:       "工單已收回",
+		NotifType:   "ticket_withdrawn",
+		Roles:       []ticketRecipientRole{ticketRoleReviewer},
+		NotifyActor: false,
+		Status:      model.TicketStatusWithdrawn,
+		NextAction:  "無需再處理此工單",
 	},
 	ticketEventPendingExecution: {
 		Title:       "工單待執行",
@@ -211,6 +220,8 @@ func (h *TicketHandler) ticketStateLabel(status model.TicketStatus) string {
 		return "已核准"
 	case model.TicketStatusRejected:
 		return "已駁回"
+	case model.TicketStatusWithdrawn:
+		return "已收回"
 	case model.TicketStatusPendingExecution:
 		return "待執行"
 	case model.TicketStatusExecuting:
@@ -664,6 +675,16 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "ticket capability check failed")
 		return
 	}
+	canReject, err := h.canRejectTicket(r.Context(), ticket, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket capability check failed")
+		return
+	}
+	canWithdraw, err := h.canWithdrawTicket(r.Context(), ticket, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket capability check failed")
+		return
+	}
 	canRevoke, err := h.canRevokeSensitiveTicket(r.Context(), ticket, userID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "ticket capability check failed")
@@ -708,9 +729,17 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"workflow_participants": workflowParticipants,
 		"capabilities": map[string]any{
 			"can_review":            canReview,
+			"can_reject":            canReject,
+			"can_withdraw":          canWithdraw,
 			"can_revoke":            canRevoke,
-			"can_request_execution": middleware.HasPermission(r.Context(), "tickets.execute") && ticket.TicketType != model.TicketTypeSQLExport && ticket.TicketType != model.TicketTypeSensitiveQueryAccess,
-			"can_execute":           middleware.HasPermission(r.Context(), "tickets.execute") && ticket.TicketType != model.TicketTypeSQLExport && ticket.TicketType != model.TicketTypeSensitiveQueryAccess,
+			"can_request_execution": middleware.HasPermission(r.Context(), "tickets.execute") &&
+				ticket.TicketType != model.TicketTypeSQLExport &&
+				ticket.TicketType != model.TicketTypeSensitiveQueryAccess &&
+				ticket.Status == model.TicketStatusApproved,
+			"can_execute": middleware.HasPermission(r.Context(), "tickets.execute") &&
+				ticket.TicketType != model.TicketTypeSQLExport &&
+				ticket.TicketType != model.TicketTypeSensitiveQueryAccess &&
+				ticket.Status == model.TicketStatusPendingExecution,
 			"can_download_export":   ticket.TicketType == model.TicketTypeSQLExport && ticket.Status == model.TicketStatusApproved && ticket.SubmitterID == userID,
 		},
 	})
@@ -951,7 +980,7 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := middleware.UserIDFromCtx(r.Context())
-	allowed, err := h.canReviewTicket(r.Context(), ticket, userID)
+	allowed, err := h.canRejectTicket(r.Context(), ticket, userID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "ticket review check failed")
 		return
@@ -994,6 +1023,60 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		rejectDetail = "執行階段駁回：" + req.Reason
 	}
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventRejected, &userID, rejectDetail)
+
+	updated, _ := h.tickets.GetByID(r.Context(), id)
+	jsonOK(w, updated)
+}
+
+// POST /tickets/{id}/withdraw
+func (h *TicketHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
+	id := parseTicketID(w, r)
+	if id == 0 {
+		return
+	}
+
+	ticket, err := h.tickets.GetByID(r.Context(), id)
+	if err != nil || ticket == nil {
+		jsonErr(w, http.StatusNotFound, "ticket not found")
+		return
+	}
+	userID := middleware.UserIDFromCtx(r.Context())
+	allowed, err := h.canWithdrawTicket(r.Context(), ticket, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket withdraw check failed")
+		return
+	}
+	if !allowed {
+		jsonErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
+	if err := ticketsm.ValidateTransition(ticket.Status, model.TicketStatusWithdrawn); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	ok, err := h.tickets.UpdateStatus(r.Context(), id, ticket.Status, model.TicketStatusWithdrawn, nil, nil, nil)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "withdraw failed")
+		return
+	}
+	if !ok {
+		jsonErr(w, http.StatusConflict, "ticket status changed concurrently")
+		return
+	}
+
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "ticket_withdraw",
+		ResourceType: "ticket",
+		ResourceID:   &id,
+		Details:      map[string]string{"status": string(model.TicketStatusWithdrawn)},
+		IPAddress:    clientIP(r),
+	})
+
+	h.dispatchTicketNotification(r.Context(), ticket, ticketEventWithdrawn, &userID, "submitter 已收回此工單。")
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
@@ -1321,6 +1404,16 @@ func (h *TicketHandler) canRejectTicket(ctx context.Context, ticket *model.Ticke
 		}
 	}
 	return false, nil
+}
+
+func (h *TicketHandler) canWithdrawTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
+	if ticket == nil {
+		return false, nil
+	}
+	if !middleware.HasPermission(ctx, "tickets.apply") {
+		return false, nil
+	}
+	return ticket.SubmitterID == userID && ticket.Status == model.TicketStatusPendingReview, nil
 }
 
 func (h *TicketHandler) canRevokeSensitiveTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {

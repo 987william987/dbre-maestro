@@ -12,9 +12,11 @@ vi.mock('@/modules/tickets/api', () => ({
   getTicket: vi.fn(),
   approveTicket: vi.fn(),
   rejectTicket: vi.fn(),
+  withdrawTicket: vi.fn(),
   requestExecution: vi.fn(),
   executeTicket: vi.fn(),
   downloadTicketExport: vi.fn(),
+  revokeTicket: vi.fn(),
 }))
 
 vi.mock('@/shared/ui/ToastContext', () => ({
@@ -71,6 +73,8 @@ function buildDetail(ticket: Ticket, overrides?: Partial<TicketDetail>): TicketD
     },
     capabilities: {
       can_review: false,
+      can_reject: false,
+      can_withdraw: false,
       can_revoke: false,
       can_request_execution: false,
       can_execute: false,
@@ -114,6 +118,8 @@ describe('TicketDetailPage role visibility', () => {
       },
       capabilities: {
         can_review: true,
+        can_reject: true,
+        can_withdraw: false,
         can_revoke: false,
         can_request_execution: false,
         can_execute: false,
@@ -149,6 +155,8 @@ describe('TicketDetailPage role visibility', () => {
       },
       capabilities: {
         can_review: false,
+        can_reject: true,
+        can_withdraw: false,
         can_revoke: false,
         can_request_execution: true,
         can_execute: true,
@@ -163,6 +171,62 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('dba.cindy, dba.edgar')).toBeInTheDocument()
     expect(screen.getByText('Waiting for DBA execution')).toBeInTheDocument()
     expect(screen.getByText('Execute')).toBeInTheDocument()
+  })
+
+  it('dba 在 pending_execution 狀態不顯示 request execution，但可見 execution reject', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 3, username: 'dba', authGroups: ['dba'], authGroupDetails: [], permissions: ['tickets.execute'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({ ...baseTicket, status: 'pending_execution' }, {
+      capabilities: {
+        can_review: false,
+        can_reject: true,
+        can_withdraw: false,
+        can_revoke: false,
+        can_request_execution: true,
+        can_execute: true,
+        can_download_export: false,
+      },
+    }))
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Execute')).toBeInTheDocument())
+    expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
+    expect(screen.getByText('Reject at Execution Stage')).toBeInTheDocument()
+  })
+
+  it('submitter 在 pending_review 狀態可見 withdraw', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'alice', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({ ...baseTicket, status: 'pending_review' }, {
+      capabilities: {
+        can_review: false,
+        can_reject: false,
+        can_withdraw: true,
+        can_revoke: false,
+        can_request_execution: false,
+        can_execute: false,
+        can_download_export: false,
+      },
+    }))
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Withdraw Ticket')).toBeInTheDocument())
   })
 
   it('developer 不會看到審核或 DBA 操作面板', async () => {
@@ -207,6 +271,8 @@ describe('TicketDetailPage role visibility', () => {
       },
       capabilities: {
         can_review: false,
+        can_reject: false,
+        can_withdraw: false,
         can_revoke: false,
         can_request_execution: false,
         can_execute: false,

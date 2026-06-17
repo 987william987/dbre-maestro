@@ -2,6 +2,7 @@ export type TicketStatus =
   | 'pending_review'
   | 'approved'
   | 'rejected'
+  | 'withdrawn'
   | 'pending_execution'
   | 'executing'
   | 'completed'
@@ -81,6 +82,8 @@ export type TicketReviewResult = {
 
 export type TicketCapabilities = {
   can_review: boolean
+  can_reject: boolean
+  can_withdraw: boolean
   can_revoke: boolean
   can_request_execution: boolean
   can_execute: boolean

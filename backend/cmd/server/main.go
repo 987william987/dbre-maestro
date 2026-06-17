@@ -306,7 +306,8 @@ func main() {
 			r.Route("/{id}", func(r chi.Router) {
 				r.With(requireTicketsWorkspaceRead).Get("/", ticketH.Get)
 				r.With(requireTicketWorkflowReview).Post("/approve", ticketH.Approve)
-				r.With(requireTicketWorkflowReview).Post("/reject", ticketH.Reject)
+				r.With(requireTicketWorkflowReject).Post("/reject", ticketH.Reject)
+				r.With(requireTicketsApply).Post("/withdraw", ticketH.Withdraw)
 				r.With(requireSensitiveReview).Post("/revoke", ticketH.Revoke)
 				r.With(requireTicketsExecute).Post("/request-execution", ticketH.RequestExecution)
 				r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)
@@ -442,6 +443,9 @@ func requireTicketsWorkspaceRead(next http.Handler) http.Handler {
 }
 func requireTicketWorkflowReview(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.review", "sql_editor.export_review", "sql_editor.sensitive_review")(next)
+}
+func requireTicketWorkflowReject(next http.Handler) http.Handler {
+	return middleware.RequirePermission("tickets.review", "tickets.execute", "sql_editor.export_review", "sql_editor.sensitive_review")(next)
 }
 func requireSettingsRead(next http.Handler) http.Handler {
 	return middleware.RequirePermission("settings.read", "settings.write")(next)

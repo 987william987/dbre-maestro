@@ -12,12 +12,14 @@ var allowedTransitions = map[model.TicketStatus][]model.TicketStatus{
 	model.TicketStatusPendingReview: {
 		model.TicketStatusApproved,
 		model.TicketStatusRejected,
+		model.TicketStatusWithdrawn,
 	},
 	model.TicketStatusApproved: {
 		model.TicketStatusPendingExecution,
 		model.TicketStatusRejected,
 	},
 	model.TicketStatusPendingExecution: {
+		model.TicketStatusRejected,
 		model.TicketStatusExecuting,
 		model.TicketStatusStopped,
 	},
@@ -29,6 +31,7 @@ var allowedTransitions = map[model.TicketStatus][]model.TicketStatus{
 	},
 	// Terminal states — no outgoing transitions
 	model.TicketStatusRejected:    {},
+	model.TicketStatusWithdrawn:   {},
 	model.TicketStatusCompleted:   {},
 	model.TicketStatusFailed:      {},
 	model.TicketStatusStopped:     {},

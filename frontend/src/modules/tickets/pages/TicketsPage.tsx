@@ -22,6 +22,7 @@ const STATUS_OPTIONS: Array<{ value: '' | TicketStatus; label: string }> = [
   { value: 'pending_review', label: 'Pending Review' },
   { value: 'approved', label: 'Approved' },
   { value: 'rejected', label: 'Rejected' },
+  { value: 'withdrawn', label: 'Withdrawn' },
   { value: 'pending_execution', label: 'Pending Execution' },
   { value: 'executing', label: 'Executing' },
   { value: 'completed', label: 'Completed' },

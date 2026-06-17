@@ -15,7 +15,9 @@ func TestAllowedTransitions(t *testing.T) {
 	}{
 		{model.TicketStatusPendingReview, model.TicketStatusApproved, true},
 		{model.TicketStatusPendingReview, model.TicketStatusRejected, true},
+		{model.TicketStatusPendingReview, model.TicketStatusWithdrawn, true},
 		{model.TicketStatusApproved, model.TicketStatusPendingExecution, true},
+		{model.TicketStatusPendingExecution, model.TicketStatusRejected, true},
 		{model.TicketStatusPendingExecution, model.TicketStatusExecuting, true},
 		{model.TicketStatusExecuting, model.TicketStatusCompleted, true},
 		{model.TicketStatusExecuting, model.TicketStatusFailed, true},
@@ -36,6 +38,7 @@ func TestBlockedTransitions(t *testing.T) {
 		to   model.TicketStatus
 	}{
 		{model.TicketStatusRejected, model.TicketStatusExecuting},
+		{model.TicketStatusWithdrawn, model.TicketStatusApproved},
 		{model.TicketStatusCompleted, model.TicketStatusPendingReview},
 		{model.TicketStatusInterrupted, model.TicketStatusExecuting},
 		{model.TicketStatusPendingReview, model.TicketStatusExecuting},

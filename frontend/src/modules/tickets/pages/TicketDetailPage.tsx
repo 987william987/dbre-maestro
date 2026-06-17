@@ -11,7 +11,7 @@ import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useToast } from '@/shared/ui/ToastContext'
-import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, requestExecution, revokeTicket } from '@/modules/tickets/api'
+import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, requestExecution, revokeTicket, withdrawTicket } from '@/modules/tickets/api'
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -62,16 +62,17 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
 
   const reviewerTone: WorkflowStepTone =
     ticket.status === 'pending_review' ? 'current'
-      : ticket.status === 'rejected' ? 'failed'
+      : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
       : 'done'
   const reviewerDetail =
     reviewerTone === 'current' ? 'Waiting for review'
+      : ticket.status === 'withdrawn' ? 'Withdrawn by submitter'
       : reviewerTone === 'failed' ? 'Rejected at review stage'
       : 'Review completed'
 
   const executorTone: WorkflowStepTone = !usesExecutor
     ? 'upcoming'
-    : ticket.status === 'rejected' ? 'upcoming'
+    : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'upcoming'
       : ticket.status === 'approved' || ticket.status === 'pending_execution' || ticket.status === 'executing' ? 'current'
         : ticket.status === 'completed' ? 'done'
           : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' ? 'failed'
@@ -85,10 +86,10 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
 
   const completionTone: WorkflowStepTone = usesExecutor
     ? ticket.status === 'completed' ? 'done'
-      : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' || ticket.status === 'rejected' ? 'failed'
+      : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' || ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
         : 'upcoming'
     : ticket.status === 'approved' || ticket.status === 'completed' ? 'done'
-      : ticket.status === 'rejected' ? 'failed'
+      : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
         : 'upcoming'
   const completionDetail = usesExecutor
     ? completionTone === 'done' ? 'Ticket closed successfully'
@@ -170,7 +171,6 @@ function WorkflowTimeline({ ticket, workflowParticipants }: { ticket: Ticket; wo
     <section className="rounded-xl border border-border bg-panel shadow-soft">
       <div className="border-b border-border/80 px-4 py-3">
         <p className="text-[13px] font-semibold text-ink">Approval Flow</p>
-        <p className="mt-1 text-[12px] text-muted">Show the full path up front so the requester can anticipate who will review and execute this ticket.</p>
       </div>
 
       <div className="overflow-x-auto px-4 py-4">
@@ -205,8 +205,8 @@ export function TicketDetailPage() {
   const [error, setError] = useState('')
   const [comment, setComment] = useState('')
   const [reason, setReason] = useState('')
-  const [acting, setActing] = useState<'approve' | 'reject' | 'request-execution' | 'execute' | 'revoke' | null>(null)
-  const [confirmAction, setConfirmAction] = useState<'request-execution' | 'execute' | 'revoke' | null>(null)
+  const [acting, setActing] = useState<'approve' | 'reject' | 'withdraw' | 'request-execution' | 'execute' | 'revoke' | null>(null)
+  const [confirmAction, setConfirmAction] = useState<'withdraw' | 'request-execution' | 'execute' | 'revoke' | null>(null)
   const [downloadingExport, setDownloadingExport] = useState(false)
 
   useEffect(() => {
@@ -251,6 +251,8 @@ export function TicketDetailPage() {
 
   const ticket = detail?.ticket ?? null
   const canReview = detail?.capabilities?.can_review ?? false
+  const canReject = detail?.capabilities?.can_reject ?? false
+  const canWithdraw = detail?.capabilities?.can_withdraw ?? false
   const canOperateDBA = detail?.capabilities?.can_request_execution ?? false
   const canExecute = detail?.capabilities?.can_execute ?? false
   const canRevoke = detail?.capabilities?.can_revoke ?? false
@@ -265,7 +267,7 @@ export function TicketDetailPage() {
   }
 
   async function runAction(
-    type: 'approve' | 'reject' | 'request-execution' | 'execute' | 'revoke',
+    type: 'approve' | 'reject' | 'withdraw' | 'request-execution' | 'execute' | 'revoke',
     action: () => Promise<Ticket | void>,
   ) {
     setActing(type)
@@ -312,11 +314,7 @@ export function TicketDetailPage() {
         }
         description={
           ticket ? (
-            <>
-              <span className="font-mono font-semibold text-ink">{ticket.ticket_no}</span>
-              <span className="mx-2 text-faint">·</span>
-              Created {formatDateTime(ticket.created_at, true)}
-            </>
+            <span className="font-mono font-semibold text-ink">{ticket.ticket_no}</span>
           ) : (
             'View ticket details, status, and available actions based on your role.'
           )
@@ -343,16 +341,13 @@ export function TicketDetailPage() {
           <WorkflowTimeline ticket={ticket} workflowParticipants={detail.workflow_participants} />
           <div className="grid gap-3 xl:grid-cols-[1.15fr_0.85fr]">
           <section className="rounded-xl border border-border bg-panel shadow-soft">
-            <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
+            <div className="border-b border-border px-4 py-3">
               <span className="font-mono text-sm font-semibold text-accent">{ticket.ticket_no}</span>
-              <StatusBadge status={ticket.status} />
-              <span className="rounded-full border border-border bg-panel-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">
-                {ticket.ticket_type}
-              </span>
             </div>
 
             <dl className="px-4 py-2">
               <InfoRow label="Description" value={ticket.description || '—'} />
+              <InfoRow label="Ticket Type" value={ticket.ticket_type.toUpperCase()} />
               <InfoRow label="DB Connection" value={ticket.db_connection_name || ticket.db_connection_id || 'Not specified'} />
               <InfoRow label="Database" value={ticket.database_name || '—'} />
               <InfoRow label="Submitter" value={formatTicketActor(ticket.submitter_name, ticket.submitter_id)} />
@@ -474,26 +469,52 @@ export function TicketDetailPage() {
               </div>
             ) : null}
 
-            {canOperateDBA || canExecute || canRevoke ? (
+            {canWithdraw && ticket.status === 'pending_review' ? (
+              <div className="rounded-xl border border-border bg-panel shadow-soft">
+                <div className="border-b border-border/80 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Send className="h-4 w-4 text-accent" />
+                    <p className="text-[13px] font-semibold text-ink">Submission</p>
+                  </div>
+                  <p className="mt-1 text-[12px] text-muted">Withdraw this ticket before review starts.</p>
+                </div>
+
+                <div className="px-4 py-4">
+                  <button
+                    type="button"
+                    disabled={acting !== null}
+                    onClick={() => setConfirmAction('withdraw')}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {acting === 'withdraw' ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                    Withdraw Ticket
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {canOperateDBA || canExecute || canReject || canRevoke ? (
               <div className="rounded-xl border border-border bg-panel shadow-soft">
                 <div className="border-b border-border/80 px-4 py-3">
                   <div className="flex items-center gap-2">
                     <Play className="h-4 w-4 text-accent" />
                     <p className="text-[13px] font-semibold text-ink">Execution</p>
                   </div>
-                  <p className="mt-1 text-[12px] text-muted">Execute an approved ticket or revoke an active sensitive query access.</p>
+                  <p className="mt-1 text-[12px] text-muted">Request execution, reject at execution stage, execute the ticket, or revoke active sensitive access.</p>
                 </div>
 
                 <div className="flex flex-col gap-3 px-4 py-4">
-                  <button
-                    type="button"
-                    disabled={acting !== null || !canOperateDBA || ticket.status !== 'approved'}
-                    onClick={() => setConfirmAction('request-execution')}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-panel-soft px-4 text-[13px] font-bold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {acting === 'request-execution' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    Request Execution
-                  </button>
+                  {ticket.status === 'approved' ? (
+                    <button
+                      type="button"
+                      disabled={acting !== null || !canOperateDBA}
+                      onClick={() => setConfirmAction('request-execution')}
+                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-panel-soft px-4 text-[13px] font-bold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {acting === 'request-execution' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      Request Execution
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     disabled={acting !== null || !canExecute || ticket.status !== 'pending_execution'}
@@ -503,6 +524,29 @@ export function TicketDetailPage() {
                     {acting === 'execute' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                     Execute
                   </button>
+                  {canReject && (ticket.status === 'approved' || ticket.status === 'pending_execution') ? (
+                    <>
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-[12px] font-semibold text-ink">Execution rejection reason (required)</span>
+                        <textarea
+                          value={reason}
+                          onChange={(event) => setReason(event.target.value)}
+                          className="min-h-24 rounded-lg border border-border bg-panel-soft px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                          disabled={acting !== null}
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        disabled={acting !== null || reason.trim() === ''}
+                        onClick={() => void runAction('reject', () => rejectTicket(ticket.id, reason.trim()))}
+                        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
+                        Reject at Execution Stage
+                      </button>
+                    </>
+                  ) : null}
                   {canRevoke ? (
                     <button
                       type="button"
@@ -551,19 +595,40 @@ export function TicketDetailPage() {
 
       <ConfirmDialog
         open={confirmAction !== null}
-        title={confirmAction === 'request-execution' ? 'Request Execution' : confirmAction === 'execute' ? 'Execute Ticket' : 'Revoke Sensitive Access'}
+        title={
+          confirmAction === 'withdraw'
+            ? 'Withdraw Ticket'
+            : confirmAction === 'request-execution'
+              ? 'Request Execution'
+              : confirmAction === 'execute'
+                ? 'Execute Ticket'
+                : 'Revoke Sensitive Access'
+        }
         description={
-          confirmAction === 'request-execution'
+          confirmAction === 'withdraw'
+            ? 'Withdraw this ticket now? Reviewers will no longer process it.'
+            : confirmAction === 'request-execution'
             ? 'Submit this ticket to the execution queue? A DBA can trigger execution from the pending_execution state.'
             : confirmAction === 'execute'
               ? 'Trigger execution for this ticket? This will call the backend execute API.'
               : 'Revoke this sensitive access ticket early? Access will be invalidated from the next query onwards.'
         }
-        confirmLabel={confirmAction === 'request-execution' ? 'Confirm' : confirmAction === 'execute' ? 'Execute' : 'Revoke'}
+        confirmLabel={
+          confirmAction === 'withdraw'
+            ? 'Withdraw'
+            : confirmAction === 'request-execution'
+              ? 'Confirm'
+              : confirmAction === 'execute'
+                ? 'Execute'
+                : 'Revoke'
+        }
         loading={confirmAction !== null && acting === confirmAction}
         onCancel={() => setConfirmAction(null)}
         onConfirm={() => {
           if (!ticket) return
+          if (confirmAction === 'withdraw') {
+            void runAction('withdraw', () => withdrawTicket(ticket.id)).finally(() => setConfirmAction(null))
+          }
           if (confirmAction === 'request-execution') {
             void runAction('request-execution', () => requestExecution(ticket.id)).finally(() => setConfirmAction(null))
           }
