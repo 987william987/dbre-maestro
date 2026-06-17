@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import CodeMirror from '@uiw/react-codemirror'
 import { javascript } from '@codemirror/lang-javascript'
 import { sql } from '@codemirror/lang-sql'
+import { Prec } from '@codemirror/state'
+import { keymap } from '@codemirror/view'
 import { format as formatSQL, type SqlLanguage } from 'sql-formatter'
 import {
   Check,
@@ -1282,32 +1284,6 @@ export function SQLEditorPage() {
     }
   }
 
-  useEffect(() => {
-    function handleEditorShortcut(event: KeyboardEvent) {
-      const isRunShortcut = (event.metaKey || event.ctrlKey) && event.key === 'Enter'
-      if (!isRunShortcut || event.altKey) {
-        return
-      }
-      if (!editorContainerRef.current) {
-        return
-      }
-      const activeElement = document.activeElement
-      if (!(activeElement instanceof Node) || !editorContainerRef.current.contains(activeElement)) {
-        return
-      }
-      if (activeTabRunning || !activeTab?.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())) {
-        return
-      }
-      event.preventDefault()
-      void handleRunQuery()
-    }
-
-    document.addEventListener('keydown', handleEditorShortcut)
-    return () => {
-      document.removeEventListener('keydown', handleEditorShortcut)
-    }
-  }, [activeSelectedSQL, activeTab, activeTabRunning])
-
   function buildRequestConfirmState(kind: QueryRequestConfirmState['kind']): QueryRequestConfirmState | null {
     if (!activeTab?.connectionId || !activeExecutionSQL || !activeConnection) {
       return null
@@ -1477,8 +1453,24 @@ export function SQLEditorPage() {
     (item.redis_db_index ?? null) === (activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : null),
   ))
   const editorExtensions = useMemo(
-    () => (activeConnection?.db_type === 'redis' ? REDIS_EDITOR_EXTENSIONS : SQL_EDITOR_EXTENSIONS),
-    [activeConnection?.db_type],
+    () => [
+      ...(activeConnection?.db_type === 'redis' ? REDIS_EDITOR_EXTENSIONS : SQL_EDITOR_EXTENSIONS),
+      Prec.highest(
+        keymap.of([
+          {
+            key: 'Mod-Enter',
+            run: () => {
+              if (activeTabRunning || !activeTab?.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())) {
+                return true
+              }
+              void handleRunQuery()
+              return true
+            },
+          },
+        ]),
+      ),
+    ],
+    [activeConnection?.db_type, activeSelectedSQL, activeTab, activeTabRunning],
   )
   const handleEditorChange = useCallback((value: string) => {
     updateActiveTab({ sql: value })

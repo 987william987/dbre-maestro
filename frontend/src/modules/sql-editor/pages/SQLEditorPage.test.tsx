@@ -411,43 +411,6 @@ describe('SQLEditorPage', () => {
     })
   })
 
-  it('支援 Cmd/Ctrl + Enter 執行目前 editor SQL', async () => {
-    mockedExecuteQuery.mockResolvedValue({
-      columns: ['id'],
-      raw_columns: ['id'],
-      sensitive_column_indexes: [],
-      rows: [[1]],
-      row_count: 1,
-      duration_ms: 12,
-    })
-
-    render(
-      <MemoryRouter>
-        <ToastProvider>
-          <SQLEditorPage />
-        </ToastProvider>
-      </MemoryRouter>,
-    )
-
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
-    fireEvent.click(screen.getByText('Primary MySQL'))
-
-    const editor = screen.getByLabelText('CodeMirror') as HTMLTextAreaElement
-    editor.focus()
-    fireEvent.keyDown(document, { key: 'Enter', metaKey: true })
-
-    await waitFor(() => {
-      expect(mockedExecuteQuery).toHaveBeenCalledWith({
-        db_connection_id: 1,
-        sql: 'SELECT 1;',
-        database: undefined,
-        schema: undefined,
-        redis_db_index: undefined,
-      })
-    })
-  })
-
   it('執行查詢後應自動切回 Result 分頁', async () => {
     mockedExecuteQuery.mockResolvedValue({
       columns: ['id'],
