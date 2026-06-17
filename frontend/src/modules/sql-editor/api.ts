@@ -34,6 +34,14 @@ type QueryConnectionsResponse = {
   connections: DBConnection[]
 }
 
+type QueryConstraintsResponse = {
+  default_limit: number
+  max_limit: number
+  app_timeout_seconds: number
+  mysql_max_execution_time_ms: number
+  postgres_statement_timeout_ms: number
+}
+
 export function executeQuery(payload: QueryPayload) {
   return apiClient.post<QueryResult>('/query', payload).then((response) => ({
     ...response,
@@ -50,6 +58,18 @@ export function listQueryConnections() {
   return apiClient.get<QueryConnectionsResponse>('/query/connections').then((response) => ({
     ...response,
     connections: Array.isArray(response.connections) ? response.connections : [],
+  }))
+}
+
+export function getQueryConstraints() {
+  return apiClient.get<QueryConstraintsResponse>('/query/constraints').then((response) => ({
+    default_limit: typeof response.default_limit === 'number' ? response.default_limit : 200,
+    max_limit: typeof response.max_limit === 'number' ? response.max_limit : 1000,
+    app_timeout_seconds: typeof response.app_timeout_seconds === 'number' ? response.app_timeout_seconds : 30,
+    mysql_max_execution_time_ms:
+      typeof response.mysql_max_execution_time_ms === 'number' ? response.mysql_max_execution_time_ms : 25000,
+    postgres_statement_timeout_ms:
+      typeof response.postgres_statement_timeout_ms === 'number' ? response.postgres_statement_timeout_ms : 25000,
   }))
 }
 

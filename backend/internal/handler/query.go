@@ -71,6 +71,14 @@ type QueryHandler struct {
 	appBaseURL   string
 }
 
+type sqlEditorConstraintsResponse struct {
+	DefaultLimit               int `json:"default_limit"`
+	MaxLimit                   int `json:"max_limit"`
+	AppTimeoutSeconds          int `json:"app_timeout_seconds"`
+	MySQLMaxExecutionTimeMs    int `json:"mysql_max_execution_time_ms"`
+	PostgresStatementTimeoutMs int `json:"postgres_statement_timeout_ms"`
+}
+
 type queryExecutionContext struct {
 	DatabaseName string
 	SchemaName   string
@@ -104,6 +112,17 @@ func NewQueryHandler(
 		lark:         lark,
 		appBaseURL:   strings.TrimRight(appBaseURL, "/"),
 	}
+}
+
+func (h *QueryHandler) Constraints(w http.ResponseWriter, r *http.Request) {
+	timeoutSettings := h.loadSQLEditorTimeoutSettings(r.Context())
+	jsonOK(w, sqlEditorConstraintsResponse{
+		DefaultLimit:               defaultQueryLimit,
+		MaxLimit:                   maxQueryLimit,
+		AppTimeoutSeconds:          int(timeoutSettings.AppTimeout / time.Second),
+		MySQLMaxExecutionTimeMs:    timeoutSettings.MySQLMaxExecutionTimeMs,
+		PostgresStatementTimeoutMs: timeoutSettings.PostgresStatementTimeoutMs,
+	})
 }
 
 func (h *QueryHandler) loadSQLEditorTimeoutSettings(ctx context.Context) sqlEditorTimeoutSettings {

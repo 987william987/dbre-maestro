@@ -285,6 +285,7 @@ func main() {
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSQLEditorQuery).Get("/connections", queryH.ListConnections)
+			r.With(requireSQLEditorQuery).Get("/constraints", queryH.Constraints)
 			r.With(requireSQLEditorQuery).Post("/", queryH.Execute)
 			r.With(requireSQLEditorSensitiveApply).Post("/sensitive-access", queryH.CreateSensitiveAccessTicket)
 			r.With(requireSQLEditorQuery).Get("/history", queryH.ListHistory)
