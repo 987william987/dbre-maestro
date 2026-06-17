@@ -65,6 +65,7 @@ function buildDetail(ticket: Ticket, overrides?: Partial<TicketDetail>): TicketD
     ticket,
     executions: [],
     review_results: [],
+    activity_logs: [],
     scopes: [],
     export_request: null,
     workflow_participants: {
@@ -170,7 +171,7 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('Review completed')).toBeInTheDocument()
     expect(screen.getByText('dba.cindy, dba.edgar')).toBeInTheDocument()
     expect(screen.getByText('Waiting for DBA execution')).toBeInTheDocument()
-    expect(screen.getByText('Execute')).toBeInTheDocument()
+    expect(screen.queryByText('Execute')).not.toBeInTheDocument()
   })
 
   it('dba 在 pending_execution 狀態不顯示 request execution，但可見 execution reject', async () => {
@@ -314,7 +315,7 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getAllByText('alice').length).toBeGreaterThan(0)
     expect(screen.getAllByText('reviewer.bob').length).toBeGreaterThan(0)
     expect(screen.getAllByText('dba.cindy').length).toBeGreaterThan(0)
-    expect(screen.getByText('ops.dan')).toBeInTheDocument()
+    expect(screen.queryByText('ops.dan')).not.toBeInTheDocument()
     expect(screen.queryByText(/^3$/)).not.toBeInTheDocument()
   })
 
@@ -344,9 +345,53 @@ describe('TicketDetailPage role visibility', () => {
 
     renderPage()
 
-    expect(await screen.findByText('Review Results')).toBeInTheDocument()
+    expect(await screen.findByText('Statement Results')).toBeInTheDocument()
     expect(screen.getByText('UPDATE users SET flagged = 1 WHERE id < 10')).toBeInTheDocument()
     expect(screen.getByText('10')).toBeInTheDocument()
     expect(screen.getByText('pass')).toBeInTheDocument()
+  })
+
+  it('顯示關鍵工單資訊與逐句 SQL 執行結果', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      status: 'completed',
+      reviewer_id: 2,
+      reviewer_name: 'reviewer.bob',
+      executor_id: 3,
+      executor_name: 'dba.cindy',
+    }, {
+      executions: [
+        {
+          id: 21,
+          ticket_id: 12,
+          seq: 1,
+          sql_stmt: 'UPDATE users SET flagged = 1 WHERE id < 10;',
+          status: 'completed',
+          rows_affected: 9,
+          error_msg: null,
+          started_at: '2026-06-09T10:00:00.000Z',
+          completed_at: '2026-06-09T10:00:01.250Z',
+        },
+      ],
+    }))
+
+    renderPage()
+
+    expect(await screen.findByText('Overview')).toBeInTheDocument()
+    expect(screen.getByText('analytics-primary')).toBeInTheDocument()
+    expect(screen.getByText('analytics_app')).toBeInTheDocument()
+    expect(screen.getAllByText('dba.cindy').length).toBeGreaterThan(0)
+    expect(screen.getByText('Statement Results')).toBeInTheDocument()
+    expect(screen.getByText('Execute Successfully')).toBeInTheDocument()
+    expect(screen.getByText('1.250s')).toBeInTheDocument()
   })
 })

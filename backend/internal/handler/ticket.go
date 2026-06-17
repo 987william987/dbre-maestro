@@ -735,11 +735,24 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "get ticket workflow failed")
 		return
 	}
+	auditResourceType := "ticket"
+	auditLogs, _, err := h.audit.List(r.Context(), repository.AuditListFilter{
+		ResourceType: &auditResourceType,
+		ResourceID:   &id,
+	}, 200, 0)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "get ticket activity logs failed")
+		return
+	}
+	if auditLogs == nil {
+		auditLogs = []model.AuditLog{}
+	}
 
 	jsonOK(w, map[string]any{
 		"ticket":                enrichedTicket,
 		"executions":            executions,
 		"review_results":        reviewResults,
+		"activity_logs":         auditLogs,
 		"scopes":                scopes,
 		"export_request":        exportDetail,
 		"workflow_participants": workflowParticipants,
@@ -1134,7 +1147,16 @@ func (h *TicketHandler) RequestExecution(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	_ = userID
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "ticket_request_execution",
+		ResourceType: "ticket",
+		ResourceID:   &id,
+		Details:      map[string]string{"status": string(model.TicketStatusPendingExecution)},
+		IPAddress:    clientIP(r),
+	})
+
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventPendingExecution, &userID, "工單已進入待執行隊列。")
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
@@ -1298,17 +1320,21 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 		}
 		_ = h.tickets.MarkExecutionRunning(ctx, execID)
 
+		startedAt := time.Now()
 		res, execErr := execDB.ExecContext(ctx, stmt)
-		var rowsAffected int64
+		durationMs := time.Since(startedAt).Milliseconds()
+		var rowsAffected *int64
 		var errMsg *string
 		if execErr != nil {
 			msg := execErr.Error()
 			errMsg = &msg
 			finalStatus = model.TicketStatusFailed
 		} else {
-			rowsAffected, _ = res.RowsAffected()
+			if value, err := res.RowsAffected(); err == nil {
+				rowsAffected = &value
+			}
 		}
-		_ = h.tickets.MarkExecutionDone(ctx, execID, rowsAffected, errMsg)
+		_ = h.tickets.MarkExecutionDone(ctx, execID, rowsAffected, durationMs, errMsg)
 
 		if execErr != nil {
 			break
@@ -1327,6 +1353,7 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 		ActionType:   actionType,
 		ResourceType: "ticket",
 		ResourceID:   &ticket.ID,
+		Details:      map[string]string{"status": string(finalStatus)},
 	})
 
 	if finalStatus == model.TicketStatusCompleted {

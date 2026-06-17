@@ -1,3 +1,5 @@
+import type { AuditLog } from '@/shared/types/audit'
+
 export type TicketStatus =
   | 'pending_review'
   | 'approved'
@@ -68,6 +70,7 @@ export type TicketExecution = {
   error_msg?: string | null
   started_at?: string | null
   completed_at?: string | null
+  duration_ms?: number | null
 }
 
 export type TicketReviewResult = {
@@ -99,6 +102,7 @@ export type TicketDetail = {
   ticket: Ticket
   executions: TicketExecution[]
   review_results: TicketReviewResult[]
+  activity_logs: AuditLog[]
   scopes: TicketScope[]
   export_request: {
     status: string

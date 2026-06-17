@@ -282,14 +282,14 @@ func (r *TicketRepo) MarkExecutionRunning(ctx context.Context, id uint64) error 
 	return err
 }
 
-func (r *TicketRepo) MarkExecutionDone(ctx context.Context, id uint64, rowsAffected int64, errMsg *string) error {
+func (r *TicketRepo) MarkExecutionDone(ctx context.Context, id uint64, rowsAffected *int64, durationMs int64, errMsg *string) error {
 	status := "completed"
 	if errMsg != nil {
 		status = "failed"
 	}
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE ticket_executions SET status = ?, rows_affected = ?, error_msg = ?, completed_at = ? WHERE id = ?`,
-		status, rowsAffected, errMsg, time.Now(), id,
+		`UPDATE ticket_executions SET status = ?, rows_affected = ?, error_msg = ?, completed_at = ?, duration_ms = ? WHERE id = ?`,
+		status, rowsAffected, errMsg, time.Now(), durationMs, id,
 	)
 	return err
 }

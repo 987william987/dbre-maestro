@@ -89,6 +89,7 @@ export async function getTicket(id: string) {
     ...response,
     executions: Array.isArray(response.executions) ? response.executions : [],
     review_results: Array.isArray(response.review_results) ? response.review_results : [],
+    activity_logs: Array.isArray(response.activity_logs) ? response.activity_logs : [],
     scopes: Array.isArray(response.scopes) ? response.scopes : [],
     export_request: response.export_request ?? null,
     workflow_participants: {

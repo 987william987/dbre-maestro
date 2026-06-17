@@ -75,6 +75,7 @@ type TicketExecution struct {
 	ErrorMsg     *string    `db:"error_msg"     json:"error_msg,omitempty"`
 	StartedAt    *time.Time `db:"started_at"    json:"started_at,omitempty"`
 	CompletedAt  *time.Time `db:"completed_at"  json:"completed_at,omitempty"`
+	DurationMs   *int64     `db:"duration_ms"   json:"duration_ms,omitempty"`
 }
 
 type TicketReviewResult struct {
