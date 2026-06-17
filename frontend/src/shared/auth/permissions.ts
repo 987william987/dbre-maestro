@@ -32,7 +32,7 @@ export function defaultRouteForPermissions(userPermissions: string[]) {
     return '/masking-rules'
   }
   if (userPermissions.includes('sql_review.read') || userPermissions.includes('sql_review.write')) {
-    return '/sql-review-rules'
+    return '/sql-review-rules/mysql'
   }
   if (userPermissions.includes('audit_logs.read') || userPermissions.includes('audit_logs.write')) {
     return '/audit-logs'

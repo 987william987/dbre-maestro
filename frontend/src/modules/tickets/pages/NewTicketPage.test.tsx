@@ -52,6 +52,21 @@ describe('NewTicketPage', () => {
           created_at: '2026-01-01T00:00:00Z',
           updated_at: '2026-01-01T00:00:00Z',
         },
+        {
+          id: 2,
+          name: 'cache-primary',
+          db_type: 'redis',
+          host: 'cache-primary.internal',
+          port: 6379,
+          database_name: null,
+          username: 'default',
+          encryption_key_version: 1,
+          ssl_mode: 'disable',
+          extra_params: null,
+          created_by: 1,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
       ],
     })
 
@@ -76,6 +91,7 @@ describe('NewTicketPage', () => {
           ticket_id: 0,
           seq: 1,
           sql_stmt: 'ALTER TABLE orders ADD INDEX idx_status (status)',
+          phase: 'validation',
           scan_rows: 0,
           status: 'pass',
           message: null,
@@ -163,5 +179,28 @@ describe('NewTicketPage', () => {
       })
     })
     expect(mockedNavigate).toHaveBeenCalledWith('/tickets/99', { replace: true })
+  })
+
+  it('shows database index selector for redis tickets', async () => {
+    mockedListTicketDatabases.mockResolvedValueOnce({
+      databases: [{ name: '0' }, { name: '1' }, { name: '2' }],
+    })
+
+    render(
+      <MemoryRouter>
+        <NewTicketPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('New Ticket')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ticket Type' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Redis' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Target Instance' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'cache-primary · REDIS' }))
+
+    await waitFor(() => expect(mockedListTicketDatabases).toHaveBeenCalledWith(2))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Target Database Index' })).toHaveTextContent('Not Selected'))
   })
 })

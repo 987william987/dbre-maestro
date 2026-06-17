@@ -86,6 +86,23 @@ function formatExecutionStage(status: string) {
   }
 }
 
+function formatTicketTypeLabel(ticketType: string) {
+  switch (ticketType) {
+    case 'ddl':
+      return 'DDL'
+    case 'dml':
+      return 'DML'
+    case 'redis_command':
+      return 'Redis'
+    case 'sql_export':
+      return 'SQL Export'
+    case 'sensitive_query_access':
+      return 'Sensitive Access'
+    default:
+      return ticketType
+  }
+}
+
 function formatActivityAction(actionType: string) {
   switch (actionType) {
     case 'ticket_submit':
@@ -169,17 +186,24 @@ function buildStatementResults(detail: TicketDetail) {
   const rows = new Map<number, StatementResultRow>()
 
   detail.review_results.forEach((result) => {
+    if (result.phase && result.phase !== 'validation') {
+      return
+    }
+    const existing = rows.get(result.seq)
+    const nextMessage = [existing?.reviewMessage, result.message]
+      .filter((item): item is string => Boolean(item && item.trim()))
+      .join(' | ')
     rows.set(result.seq, {
       seq: result.seq,
       sql: result.sql_stmt,
-      scanRows: result.scan_rows,
-      reviewStatus: result.status,
-      reviewMessage: result.message ?? null,
-      rowsAffected: null,
-      executionStatus: null,
-      currentStage: null,
-      duration: null,
-      errorMessage: null,
+      scanRows: Math.max(existing?.scanRows ?? 0, result.scan_rows),
+      reviewStatus: existing?.reviewStatus === 'error' || result.status === 'error' ? 'error' : result.status,
+      reviewMessage: nextMessage || null,
+      rowsAffected: existing?.rowsAffected ?? null,
+      executionStatus: existing?.executionStatus ?? null,
+      currentStage: existing?.currentStage ?? null,
+      duration: existing?.duration ?? null,
+      errorMessage: existing?.errorMessage ?? null,
     })
   })
 
@@ -230,7 +254,7 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
   const executor = ticket.executor_id != null || ticket.executor_name
     ? formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)
     : joinParticipantNames(workflowParticipants.executors, 'Pending executor assignment')
-  const usesExecutor = ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml'
+  const usesExecutor = ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml' || ticket.ticket_type === 'redis_command'
 
   const reviewerTone: WorkflowStepTone =
     ticket.status === 'pending_review' ? 'current'
@@ -528,7 +552,7 @@ export function TicketDetailPage() {
               <DetailTable
                 headers={['Ticket Type', 'DB Connection', 'Database', 'Submitter', 'Reviewer', 'Executor', 'Description', 'Current Status']}
                 rows={[[
-                  ticket.ticket_type.toUpperCase(),
+                  formatTicketTypeLabel(ticket.ticket_type),
                   ticket.db_connection_name || ticket.db_connection_id || 'Not specified',
                   ticket.database_name || '—',
                   formatTicketActor(ticket.submitter_name, ticket.submitter_id),

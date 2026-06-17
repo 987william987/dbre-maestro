@@ -9,6 +9,14 @@ vi.mock('@/modules/sql-review-rules/api', () => ({
   patchSQLReviewRule: vi.fn(),
 }))
 
+vi.mock('@/shared/auth/AuthContext', () => ({
+  useAuth: () => ({
+    user: {
+      permissions: ['sql_review.read', 'sql_review.write'],
+    },
+  }),
+}))
+
 import { listSQLReviewRules, patchSQLReviewRule } from '@/modules/sql-review-rules/api'
 
 const mockedListSQLReviewRules = vi.mocked(listSQLReviewRules)

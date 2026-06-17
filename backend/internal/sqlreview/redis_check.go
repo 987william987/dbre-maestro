@@ -102,6 +102,16 @@ var redisCommandCategories = map[string]redisCommandCategory{
 	"UNSUBSCRIBE": redisCategoryAdmin,
 }
 
+var redisTicketAllowedCommands = map[string]struct{}{
+	"SET":    {},
+	"DEL":    {},
+	"HSET":   {},
+	"LPUSH":  {},
+	"SADD":   {},
+	"ZADD":   {},
+	"EXPIRE": {},
+}
+
 // CheckRedisReadOnly returns an error if the command is not in the read-only whitelist.
 func CheckRedisReadOnly(cmdLine string) error {
 	cmd, _, err := ParseRedisCommand(cmdLine)
@@ -129,6 +139,20 @@ func ParseRedisCommand(cmdLine string) (cmd string, args []string, err error) {
 		return "", nil, fmt.Errorf("empty command")
 	}
 	return strings.ToUpper(parts[0]), parts[1:], nil
+}
+
+func CheckRedisTicketCommand(cmdLine string) error {
+	cmd, args, err := ParseRedisCommand(cmdLine)
+	if err != nil {
+		return err
+	}
+	if _, ok := redisTicketAllowedCommands[cmd]; !ok {
+		return fmt.Errorf("command %q is not allowed in redis tickets", cmd)
+	}
+	if err := validateRedisTicketArity(cmd, len(args)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func categorizeRedisCommand(cmd string) redisCommandCategory {
@@ -188,4 +212,38 @@ func tokenizeRedisCommand(cmdLine string) ([]string, error) {
 	}
 	flush()
 	return parts, nil
+}
+
+func validateRedisTicketArity(cmd string, argCount int) error {
+	switch cmd {
+	case "SET":
+		if argCount < 2 {
+			return fmt.Errorf("SET requires at least key and value")
+		}
+	case "DEL":
+		if argCount < 1 {
+			return fmt.Errorf("DEL requires at least one key")
+		}
+	case "HSET":
+		if argCount < 3 || argCount%2 == 0 {
+			return fmt.Errorf("HSET requires key plus one or more field/value pairs")
+		}
+	case "LPUSH":
+		if argCount < 2 {
+			return fmt.Errorf("LPUSH requires key plus one or more values")
+		}
+	case "SADD":
+		if argCount < 2 {
+			return fmt.Errorf("SADD requires key plus one or more members")
+		}
+	case "ZADD":
+		if argCount < 3 || argCount%2 == 0 {
+			return fmt.Errorf("ZADD requires key plus one or more score/member pairs")
+		}
+	case "EXPIRE":
+		if argCount != 2 {
+			return fmt.Errorf("EXPIRE requires key and seconds")
+		}
+	}
+	return nil
 }

@@ -18,7 +18,6 @@ import (
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/dbre-maestro/maestro/internal/sqlpolicy"
-	"github.com/dbre-maestro/maestro/internal/sqlreview"
 	ticketsm "github.com/dbre-maestro/maestro/internal/ticket"
 	"github.com/go-chi/chi/v5"
 )
@@ -51,11 +50,16 @@ type ticketWorkflowParticipants struct {
 }
 
 type ticketReviewItem struct {
-	Seq      int     `json:"seq"`
-	SQLStmt  string  `json:"sql_stmt"`
-	ScanRows int64   `json:"scan_rows"`
-	Status   string  `json:"status"`
-	Message  *string `json:"message,omitempty"`
+	Seq              int     `json:"seq"`
+	SQLStmt          string  `json:"sql_stmt"`
+	Phase            string  `json:"phase"`
+	ValidationStage  *string `json:"validation_stage,omitempty"`
+	StatementKind    *string `json:"statement_kind,omitempty"`
+	ObjectType       *string `json:"object_type,omitempty"`
+	ValidationMethod *string `json:"validation_method,omitempty"`
+	ScanRows         int64   `json:"scan_rows"`
+	Status           string  `json:"status"`
+	Message          *string `json:"message,omitempty"`
 }
 
 type ticketDatabaseOption struct {
@@ -245,6 +249,8 @@ func (h *TicketHandler) ticketTypeLabel(ticketType model.TicketType) string {
 		return "DDL"
 	case model.TicketTypeDML:
 		return "DML"
+	case model.TicketTypeRedisCommand:
+		return "REDIS_COMMAND"
 	case model.TicketTypeSQLExport:
 		return "SQL_EXPORT"
 	case model.TicketTypeSensitiveQueryAccess:
@@ -430,6 +436,10 @@ func (h *TicketHandler) ReviewSQL(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
 		return
 	}
+	if err := h.validateTicketConnectionType(r.Context(), req.TicketType, *req.DBConnectionID); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
 
 	results := h.runTicketSQLReviewWithType(r.Context(), *req.DBConnectionID, req.TicketType, req.SQLContent, req.DatabaseName)
 	blocked := false
@@ -469,7 +479,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch req.TicketType {
-	case model.TicketTypeDDL, model.TicketTypeDML, model.TicketTypeSQLExport, model.TicketTypeSensitiveQueryAccess:
+	case model.TicketTypeDDL, model.TicketTypeDML, model.TicketTypeRedisCommand, model.TicketTypeSQLExport, model.TicketTypeSensitiveQueryAccess:
 	default:
 		jsonErr(w, http.StatusUnprocessableEntity, "invalid ticket_type")
 		return
@@ -484,20 +494,24 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
 			return
 		}
+		if err := h.validateTicketConnectionType(r.Context(), req.TicketType, *req.DBConnectionID); err != nil {
+			jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 	}
-	if (req.TicketType == model.TicketTypeDDL || req.TicketType == model.TicketTypeDML) && strings.TrimSpace(nullableStringValue(req.DatabaseName)) == "" {
+	if (req.TicketType == model.TicketTypeDDL || req.TicketType == model.TicketTypeDML || req.TicketType == model.TicketTypeRedisCommand) && strings.TrimSpace(nullableStringValue(req.DatabaseName)) == "" {
 		jsonErr(w, http.StatusUnprocessableEntity, "database_name is required")
 		return
 	}
 
-	// SQL Review: run static + EXPLAIN-based checks if a target DB is specified
+	// SQL/Command Review
 	var reviewResults []ticketReviewItem
-	if req.DBConnectionID != nil && (req.TicketType == model.TicketTypeDDL || req.TicketType == model.TicketTypeDML) {
+	if req.DBConnectionID != nil && (req.TicketType == model.TicketTypeDDL || req.TicketType == model.TicketTypeDML || req.TicketType == model.TicketTypeRedisCommand) {
 		reviewResults = h.runTicketSQLReviewWithType(r.Context(), *req.DBConnectionID, req.TicketType, req.SQLContent, req.DatabaseName)
 		issues := make([]string, 0)
 		for _, result := range reviewResults {
 			if result.Status == "error" && result.Message != nil && strings.TrimSpace(*result.Message) != "" {
-				issues = append(issues, fmt.Sprintf("statement %d: %s", result.Seq, *result.Message))
+				issues = append(issues, fmt.Sprintf("statement %d (%s): %s", result.Seq, result.Phase, *result.Message))
 			}
 		}
 		if len(issues) > 0 {
@@ -543,12 +557,17 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		persistedResults := make([]model.TicketReviewResult, 0, len(reviewResults))
 		for _, result := range reviewResults {
 			persistedResults = append(persistedResults, model.TicketReviewResult{
-				TicketID: created.ID,
-				Seq:      result.Seq,
-				SQLStmt:  result.SQLStmt,
-				ScanRows: result.ScanRows,
-				Status:   result.Status,
-				Message:  result.Message,
+				TicketID:         created.ID,
+				Seq:              result.Seq,
+				SQLStmt:          result.SQLStmt,
+				Phase:            result.Phase,
+				ValidationStage:  result.ValidationStage,
+				StatementKind:    result.StatementKind,
+				ObjectType:       result.ObjectType,
+				ValidationMethod: result.ValidationMethod,
+				ScanRows:         result.ScanRows,
+				Status:           result.Status,
+				Message:          result.Message,
 			})
 		}
 		if err := h.tickets.ReplaceReviewResults(r.Context(), created.ID, persistedResults); err != nil {
@@ -757,10 +776,10 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"export_request":        exportDetail,
 		"workflow_participants": workflowParticipants,
 		"capabilities": map[string]any{
-			"can_review":            canReview,
-			"can_reject":            canReject,
-			"can_withdraw":          canWithdraw,
-			"can_revoke":            canRevoke,
+			"can_review":   canReview,
+			"can_reject":   canReject,
+			"can_withdraw": canWithdraw,
+			"can_revoke":   canRevoke,
 			"can_request_execution": middleware.HasPermission(r.Context(), "tickets.execute") &&
 				ticket.TicketType != model.TicketTypeSQLExport &&
 				ticket.TicketType != model.TicketTypeSensitiveQueryAccess &&
@@ -769,7 +788,7 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 				ticket.TicketType != model.TicketTypeSQLExport &&
 				ticket.TicketType != model.TicketTypeSensitiveQueryAccess &&
 				ticket.Status == model.TicketStatusPendingExecution,
-			"can_download_export":   ticket.TicketType == model.TicketTypeSQLExport && ticket.Status == model.TicketStatusApproved && ticket.SubmitterID == userID,
+			"can_download_export": ticket.TicketType == model.TicketTypeSQLExport && ticket.Status == model.TicketStatusApproved && ticket.SubmitterID == userID,
 		},
 	})
 }
@@ -792,7 +811,7 @@ func (h *TicketHandler) loadWorkflowParticipants(ctx context.Context, ticket *mo
 		return participants, err
 	}
 
-	if ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML {
+	if ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML || ticket.TicketType == model.TicketTypeRedisCommand {
 		executorIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionTicketExecute})
 		if err != nil {
 			return participants, err
@@ -910,7 +929,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetStatus := model.TicketStatusApproved
-	if ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML {
+	if ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML || ticket.TicketType == model.TicketTypeRedisCommand {
 		targetStatus = model.TicketStatusPendingExecution
 	}
 
@@ -1128,8 +1147,8 @@ func (h *TicketHandler) RequestExecution(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	if ticket.TicketType != model.TicketTypeDDL && ticket.TicketType != model.TicketTypeDML {
-		jsonErr(w, http.StatusUnprocessableEntity, "only ddl/dml tickets can request execution")
+	if ticket.TicketType != model.TicketTypeDDL && ticket.TicketType != model.TicketTypeDML && ticket.TicketType != model.TicketTypeRedisCommand {
+		jsonErr(w, http.StatusUnprocessableEntity, "only ddl/dml/redis tickets can request execution")
 		return
 	}
 
@@ -1215,8 +1234,8 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "ticket is not pending execution")
 		return
 	}
-	if ticket.TicketType != model.TicketTypeDDL && ticket.TicketType != model.TicketTypeDML {
-		jsonErr(w, http.StatusUnprocessableEntity, "only ddl/dml tickets can execute")
+	if ticket.TicketType != model.TicketTypeDDL && ticket.TicketType != model.TicketTypeDML && ticket.TicketType != model.TicketTypeRedisCommand {
+		jsonErr(w, http.StatusUnprocessableEntity, "only ddl/dml/redis tickets can execute")
 		return
 	}
 
@@ -1270,7 +1289,7 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	// Run SQL asynchronously so the HTTP response returns immediately.
 	// Status is persisted to DB; the client polls GET /tickets/{id} for progress.
 	ticket.ExecutorID = &userID
-	go h.runTicketSQL(ticket, userID)
+	go h.runTicketExecution(ticket, userID)
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
@@ -1278,6 +1297,14 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 
 // runTicketSQL splits the ticket SQL into statements and executes each one serially
 // against the target DB, recording results in ticket_executions.
+func (h *TicketHandler) runTicketExecution(ticket *model.Ticket, executorID uint64) {
+	if ticket.TicketType == model.TicketTypeRedisCommand {
+		h.runTicketRedisCommands(ticket, executorID)
+		return
+	}
+	h.runTicketSQL(ticket, executorID)
+}
+
 func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 	ctx := context.Background()
 	executorName, err := h.lookupUsername(ctx, executorID)
@@ -1369,7 +1396,7 @@ func (h *TicketHandler) finishTicket(ctx context.Context, id uint64, status mode
 
 // RunScheduledTicket is the public entry point for the background scheduler.
 func (h *TicketHandler) RunScheduledTicket(ticket *model.Ticket, executorID uint64) {
-	h.runTicketSQL(ticket, executorID)
+	h.runTicketExecution(ticket, executorID)
 }
 
 func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
@@ -1445,7 +1472,7 @@ func (h *TicketHandler) canRejectTicket(ctx context.Context, ticket *model.Ticke
 	if err != nil || allowed {
 		return allowed, err
 	}
-	if ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML {
+	if ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML || ticket.TicketType == model.TicketTypeRedisCommand {
 		if ticket.Status == model.TicketStatusApproved || ticket.Status == model.TicketStatusPendingExecution {
 			return middleware.HasPermission(ctx, permissionTicketExecute), nil
 		}
@@ -1469,6 +1496,27 @@ func (h *TicketHandler) canRevokeSensitiveTicket(ctx context.Context, ticket *mo
 	}
 	_ = userID
 	return middleware.HasPermission(ctx, permissionSQLEditorSensitiveRev), nil
+}
+
+func (h *TicketHandler) validateTicketConnectionType(ctx context.Context, ticketType model.TicketType, connID uint64) error {
+	conn, err := h.dbConns.GetByID(ctx, connID)
+	if err != nil {
+		return fmt.Errorf("load db connection failed")
+	}
+	if conn == nil {
+		return fmt.Errorf("db connection not found")
+	}
+	switch ticketType {
+	case model.TicketTypeRedisCommand:
+		if conn.DBType != "redis" {
+			return fmt.Errorf("redis_command tickets only support redis connections")
+		}
+	case model.TicketTypeDDL, model.TicketTypeDML, model.TicketTypeSQLExport, model.TicketTypeSensitiveQueryAccess:
+		if conn.DBType == "redis" {
+			return fmt.Errorf("%s tickets do not support redis connections", ticketType)
+		}
+	}
+	return nil
 }
 
 func (h *TicketHandler) ensureReadyExportRequest(ctx context.Context, ticket *model.Ticket) (*model.ExportRequest, error) {
@@ -1503,105 +1551,6 @@ func (h *TicketHandler) ensureReadyExportRequest(ctx context.Context, ticket *mo
 	return req, nil
 }
 
-// runTicketSQLReview runs static + EXPLAIN-based checks against each SQL statement.
-// Returns a list of blocking issue messages.
-func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64, sqlContent string, databaseName *string) []ticketReviewItem {
-	return h.runTicketSQLReviewWithType(ctx, dbConnID, model.TicketTypeDDL, sqlContent, databaseName)
-}
-
-// runTicketSQLReview runs static + EXPLAIN-based checks against each SQL statement.
-func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID uint64, ticketType model.TicketType, sqlContent string, databaseName *string) []ticketReviewItem {
-	parsedStatements, dialect, err := h.parseTicketStatements(ctx, dbConnID, sqlContent)
-	if err != nil {
-		return buildSyntaxErrorReviewItems(err, sqlContent)
-	}
-	if ticketType == model.TicketTypeDDL || ticketType == model.TicketTypeDML {
-		if err := sqlpolicy.CheckTicketStatementKinds(ticketType, parsedStatements); err != nil {
-			return buildTicketKindReviewItems(parsedStatements, err)
-		}
-	}
-
-	rules, err := h.sqlReviewRules.List(ctx)
-	if err != nil {
-		return buildPassThroughReviewItems(parsedStatements)
-	}
-
-	ruleMap := make(map[string]bool, len(rules))
-	var rowThreshold int64 = sqlreview.DefaultRowThreshold
-	for _, r := range rules {
-		if r.Enabled {
-			ruleMap[r.RuleName] = true
-			if r.RuleName == "high_row_count" && r.Threshold != nil {
-				rowThreshold = *r.Threshold
-			}
-		}
-	}
-
-	results := make([]ticketReviewItem, 0, len(parsedStatements))
-
-	// Static checks (no DB connection required)
-	staticNames := []string{"dml_no_where", "ddl_no_comment", "require_utf8mb4"}
-	hasStatic := false
-	for _, name := range staticNames {
-		if ruleMap[name] {
-			hasStatic = true
-			break
-		}
-	}
-	if hasStatic {
-		for _, stmt := range parsedStatements {
-			issues := sqlreview.RunStaticChecksParsed(stmt, ruleMap)
-			results = append(results, buildTicketReviewItem(stmt.Seq, stmt.RawSQL, 0, issues))
-		}
-	} else {
-		for _, stmt := range parsedStatements {
-			results = append(results, buildTicketReviewItem(stmt.Seq, stmt.RawSQL, 0, nil))
-		}
-	}
-
-	// EXPLAIN-based checks (need DB connection)
-	if !ruleMap["full_table_scan"] && !ruleMap["high_row_count"] {
-		return results
-	}
-
-	queryDB, cleanup, err := h.openTicketSQLDB(ctx, dbConnID, model.DBCredentialRoleReadonly, databaseName)
-	if err != nil {
-		return results
-	}
-	defer cleanup()
-
-	for index, stmt := range parsedStatements {
-		if dialect == sqlparse.DialectMySQL && stmt.Kind != sqlparse.StatementKindSelect {
-			continue
-		}
-		if dialect != sqlparse.DialectMySQL && stmt.Kind != sqlparse.StatementKindSelect {
-			continue
-		}
-		issues, err := sqlreview.CheckExplain(ctx, queryDB, stmt.RawSQL, rowThreshold)
-		if err != nil {
-			continue
-		}
-		maxRows := int64(0)
-		explainMessages := make([]string, 0)
-		for _, issue := range issues {
-			if issue.Rows > maxRows {
-				maxRows = issue.Rows
-			}
-			if ruleMap[issue.Kind] {
-				explainMessages = append(explainMessages, issue.Msg)
-			}
-		}
-		if len(explainMessages) == 0 && results[index].ScanRows < maxRows {
-			results[index].ScanRows = maxRows
-			continue
-		}
-		if len(explainMessages) > 0 {
-			results[index] = buildTicketReviewItem(stmt.Seq, stmt.RawSQL, maxRows, explainMessages)
-		}
-	}
-	return results
-}
-
 func (h *TicketHandler) parseTicketStatements(ctx context.Context, dbConnID uint64, sqlContent string) ([]sqlparse.ParsedStatement, sqlparse.Dialect, error) {
 	conn, err := h.dbConns.GetByID(ctx, dbConnID)
 	if err != nil {
@@ -1626,6 +1575,12 @@ func (h *TicketHandler) listTicketDatabases(ctx context.Context, connID uint64) 
 	defer cleanup()
 
 	switch conn.DBType {
+	case "redis":
+		items := make([]ticketDatabaseOption, 0, 16)
+		for index := 0; index < 16; index++ {
+			items = append(items, ticketDatabaseOption{Name: strconv.Itoa(index)})
+		}
+		return items, nil
 	case "postgres", "postgresql":
 		rows, err := queryDB.QueryContext(ctx,
 			`SELECT datname
@@ -1727,7 +1682,7 @@ func (h *TicketHandler) openTicketSQLDBWithConnection(
 func buildPassThroughReviewItems(statements []sqlparse.ParsedStatement) []ticketReviewItem {
 	items := make([]ticketReviewItem, 0)
 	for _, stmt := range statements {
-		items = append(items, buildTicketReviewItem(stmt.Seq, stmt.RawSQL, 0, nil))
+		items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodStaticRule, nil, string(stmt.Kind), inferDDLObjectType(stmt), 0, nil))
 	}
 	return items
 }
@@ -1739,9 +1694,9 @@ func buildSyntaxErrorReviewItems(parseErr error, sqlContent string) []ticketRevi
 		if seq <= 0 {
 			seq = 1
 		}
-		return []ticketReviewItem{buildTicketReviewItem(seq, strings.TrimSpace(sqlContent), 0, []string{message})}
+		return []ticketReviewItem{buildParserErrorReviewItem(seq, strings.TrimSpace(sqlContent), message)}
 	}
-	return []ticketReviewItem{buildTicketReviewItem(1, strings.TrimSpace(sqlContent), 0, []string{message})}
+	return []ticketReviewItem{buildParserErrorReviewItem(1, strings.TrimSpace(sqlContent), message)}
 }
 
 func buildTicketKindReviewItems(statements []sqlparse.ParsedStatement, kindErr error) []ticketReviewItem {
@@ -1753,31 +1708,10 @@ func buildTicketKindReviewItems(statements []sqlparse.ParsedStatement, kindErr e
 	}
 	for _, stmt := range statements {
 		if stmt.Seq == targetSeq {
-			items = append(items, buildTicketReviewItem(stmt.Seq, stmt.RawSQL, 0, []string{message}))
-			continue
+			items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodTicketPolicy, nil, string(stmt.Kind), inferDDLObjectType(stmt), 0, []string{message}))
 		}
-		items = append(items, buildTicketReviewItem(stmt.Seq, stmt.RawSQL, 0, nil))
 	}
 	return items
-}
-
-func buildTicketReviewItem(seq int, stmt string, scanRows int64, issues []string) ticketReviewItem {
-	if len(issues) == 0 {
-		return ticketReviewItem{
-			Seq:      seq,
-			SQLStmt:  stmt,
-			ScanRows: scanRows,
-			Status:   "pass",
-		}
-	}
-	message := strings.Join(issues, "; ")
-	return ticketReviewItem{
-		Seq:      seq,
-		SQLStmt:  stmt,
-		ScanRows: scanRows,
-		Status:   "error",
-		Message:  &message,
-	}
 }
 
 // splitSQLStatements splits a multi-statement SQL string by semicolons.

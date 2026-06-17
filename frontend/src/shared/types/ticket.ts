@@ -13,6 +13,7 @@ export type TicketStatus =
   | 'interrupted'
 
 export type TicketType = 'ddl' | 'dml'
+  | 'redis_command'
   | 'sql_export'
   | 'sensitive_query_access'
 
@@ -78,6 +79,11 @@ export type TicketReviewResult = {
   ticket_id: number
   seq: number
   sql_stmt: string
+  phase: string
+  validation_stage?: string | null
+  statement_kind?: string | null
+  object_type?: string | null
+  validation_method?: string | null
   scan_rows: number
   status: 'pass' | 'error' | string
   message?: string | null

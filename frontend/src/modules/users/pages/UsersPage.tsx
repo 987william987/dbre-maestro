@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { Database, Info, Loader2, Shield, Trash2, UserPlus, Users as UsersIcon, X } from 'lucide-react'
+import { Database, Info, Loader2, Shield, UserPlus, Users as UsersIcon, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { createAuthGroup, deleteAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
 import { createUser, deleteUser, getUser, listUserDBConnections, listUsers, patchUser } from '@/modules/users/api'

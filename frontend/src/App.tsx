@@ -60,7 +60,8 @@ export default function App() {
               <Route path="/masking-rules/dsl-guide" element={<MaskingDSLGuidePage />} />
             </Route>
             <Route element={<RoleRoute allowedPermissions={['sql_review.read', 'sql_review.write']} />}>
-              <Route path="/sql-review-rules" element={<SQLReviewRulesPage />} />
+              <Route path="/sql-review-rules" element={<Navigate to="/sql-review-rules/mysql" replace />} />
+              <Route path="/sql-review-rules/:engine" element={<SQLReviewRulesPage />} />
             </Route>
             <Route element={<RoleRoute allowedPermissions={['audit_logs.read', 'audit_logs.write']} />}>
               <Route path="/audit-logs" element={<AuditLogsPage />} />

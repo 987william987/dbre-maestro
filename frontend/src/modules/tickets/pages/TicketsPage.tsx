@@ -35,9 +35,27 @@ const TYPE_OPTIONS: Array<{ value: '' | TicketType; label: string }> = [
   { value: '', label: 'All Types' },
   { value: 'ddl', label: 'DDL' },
   { value: 'dml', label: 'DML' },
+  { value: 'redis_command', label: 'Redis' },
   { value: 'sql_export', label: 'SQL Export' },
   { value: 'sensitive_query_access', label: 'Sensitive Query Access' },
 ]
+
+function formatTicketTypeLabel(ticketType: TicketType) {
+  switch (ticketType) {
+    case 'ddl':
+      return 'DDL'
+    case 'dml':
+      return 'DML'
+    case 'redis_command':
+      return 'Redis'
+    case 'sql_export':
+      return 'SQL Export'
+    case 'sensitive_query_access':
+      return 'Sensitive Query Access'
+    default:
+      return ticketType
+  }
+}
 
 type TicketFilters = {
   keyword: string
@@ -235,7 +253,7 @@ export function TicketsPage() {
                     </td>
                     <td className="px-4 py-3.5 align-top">
                       <span className="rounded-full border border-border bg-panel-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">
-                        {ticket.ticket_type}
+                        {formatTicketTypeLabel(ticket.ticket_type)}
                       </span>
                     </td>
                     <td className="px-4 py-3.5 align-top">

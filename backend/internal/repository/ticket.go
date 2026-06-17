@@ -321,9 +321,21 @@ func (r *TicketRepo) ReplaceReviewResults(ctx context.Context, ticketID uint64, 
 	}
 	for _, result := range results {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO ticket_review_results (ticket_id, seq, sql_stmt, scan_rows, status, message, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			ticketID, result.Seq, result.SQLStmt, result.ScanRows, result.Status, result.Message, timeutil.NowUTC(),
+			`INSERT INTO ticket_review_results
+			 (ticket_id, seq, sql_stmt, phase, validation_stage, statement_kind, object_type, validation_method, scan_rows, status, message, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			ticketID,
+			result.Seq,
+			result.SQLStmt,
+			result.Phase,
+			result.ValidationStage,
+			result.StatementKind,
+			result.ObjectType,
+			result.ValidationMethod,
+			result.ScanRows,
+			result.Status,
+			result.Message,
+			timeutil.NowUTC(),
 		); err != nil {
 			return fmt.Errorf("insert ticket review result: %w", err)
 		}
@@ -339,7 +351,7 @@ func (r *TicketRepo) ReplaceReviewResults(ctx context.Context, ticketID uint64, 
 func (r *TicketRepo) ListReviewResults(ctx context.Context, ticketID uint64) ([]model.TicketReviewResult, error) {
 	results := []model.TicketReviewResult{}
 	if err := r.db.SelectContext(ctx, &results,
-		`SELECT id, ticket_id, seq, sql_stmt, scan_rows, status, message, created_at
+		`SELECT id, ticket_id, seq, sql_stmt, phase, validation_stage, statement_kind, object_type, validation_method, scan_rows, status, message, created_at
 		 FROM ticket_review_results
 		 WHERE ticket_id = ?
 		 ORDER BY seq ASC, id ASC`,
@@ -348,6 +360,10 @@ func (r *TicketRepo) ListReviewResults(ctx context.Context, ticketID uint64) ([]
 		return nil, fmt.Errorf("list ticket review results: %w", err)
 	}
 	return results, nil
+}
+
+func (r *TicketRepo) DB() *sqlx.DB {
+	return r.db
 }
 
 // MarkStopped transitions an executing ticket to stopped.

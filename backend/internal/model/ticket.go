@@ -22,6 +22,7 @@ type TicketType string
 const (
 	TicketTypeDDL                  TicketType = "ddl"
 	TicketTypeDML                  TicketType = "dml"
+	TicketTypeRedisCommand         TicketType = "redis_command"
 	TicketTypeSQLExport            TicketType = "sql_export"
 	TicketTypeSensitiveQueryAccess TicketType = "sensitive_query_access"
 )
@@ -79,12 +80,17 @@ type TicketExecution struct {
 }
 
 type TicketReviewResult struct {
-	ID        uint64    `db:"id"            json:"id"`
-	TicketID  uint64    `db:"ticket_id"     json:"ticket_id"`
-	Seq       int       `db:"seq"           json:"seq"`
-	SQLStmt   string    `db:"sql_stmt"      json:"sql_stmt"`
-	ScanRows  int64     `db:"scan_rows"     json:"scan_rows"`
-	Status    string    `db:"status"        json:"status"`
-	Message   *string   `db:"message"       json:"message,omitempty"`
-	CreatedAt time.Time `db:"created_at"    json:"created_at"`
+	ID               uint64    `db:"id"                json:"id"`
+	TicketID         uint64    `db:"ticket_id"         json:"ticket_id"`
+	Seq              int       `db:"seq"               json:"seq"`
+	SQLStmt          string    `db:"sql_stmt"          json:"sql_stmt"`
+	Phase            string    `db:"phase"             json:"phase"`
+	ValidationStage  *string   `db:"validation_stage"  json:"validation_stage,omitempty"`
+	StatementKind    *string   `db:"statement_kind"    json:"statement_kind,omitempty"`
+	ObjectType       *string   `db:"object_type"       json:"object_type,omitempty"`
+	ValidationMethod *string   `db:"validation_method" json:"validation_method,omitempty"`
+	ScanRows         int64     `db:"scan_rows"         json:"scan_rows"`
+	Status           string    `db:"status"            json:"status"`
+	Message          *string   `db:"message"           json:"message,omitempty"`
+	CreatedAt        time.Time `db:"created_at"        json:"created_at"`
 }

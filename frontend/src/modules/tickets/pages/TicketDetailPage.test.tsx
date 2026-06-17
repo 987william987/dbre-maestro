@@ -336,6 +336,7 @@ describe('TicketDetailPage role visibility', () => {
           ticket_id: 12,
           seq: 1,
           sql_stmt: 'UPDATE users SET flagged = 1 WHERE id < 10',
+          phase: 'validation',
           scan_rows: 10,
           status: 'pass',
           message: null,
