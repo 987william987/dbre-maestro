@@ -387,11 +387,11 @@ func (h *TicketHandler) publishTicketUpdate(ctx context.Context, ticket *model.T
 	if actorID != nil && *actorID != 0 {
 		recipients = append(recipients, *actorID)
 	}
+	if workspaceReaders, err := listActiveUserIDsByPermissions(ctx, h.users, ticketWorkspaceRealtimePermissions()); err == nil {
+		recipients = append(recipients, workspaceReaders...)
+	}
 	if reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, reviewPermissionsForTicket(ticket.TicketType)); err == nil {
 		recipients = append(recipients, reviewerIDs...)
-	}
-	if executorIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionTicketExecute}); err == nil {
-		recipients = append(recipients, executorIDs...)
 	}
 	if ticket.ExecutorID != nil {
 		recipients = append(recipients, *ticket.ExecutorID)

@@ -38,11 +38,11 @@ func publishTicketRealtimeEvent(ctx context.Context, broker *realtime.Broker, us
 	if actorID != nil && *actorID != 0 {
 		recipients = append(recipients, *actorID)
 	}
+	if workspaceReaders, err := listActiveUserIDsByPermissions(ctx, users, ticketWorkspaceRealtimePermissions()); err == nil {
+		recipients = append(recipients, workspaceReaders...)
+	}
 	if reviewerIDs, err := listActiveUserIDsByPermissions(ctx, users, reviewPermissionsForTicket(ticket.TicketType)); err == nil {
 		recipients = append(recipients, reviewerIDs...)
-	}
-	if executorIDs, err := listActiveUserIDsByPermissions(ctx, users, []string{permissionTicketExecute}); err == nil {
-		recipients = append(recipients, executorIDs...)
 	}
 	if ticket.ExecutorID != nil {
 		recipients = append(recipients, *ticket.ExecutorID)
