@@ -3,12 +3,13 @@ import type { FormEvent, ReactNode } from 'react'
 import { Database, Info, Loader2, Shield, UserPlus, Users as UsersIcon, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { createAuthGroup, deleteAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
+import { getDBConnectionBindings } from '@/modules/db-connections/api'
 import { createUser, deleteUser, getUser, listUserDBConnections, listUsers, patchUser } from '@/modules/users/api'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import type { AuthGroup } from '@/shared/types/auth'
 import type { AuthGroupDetail } from '@/shared/types/authGroup'
-import type { DBConnection } from '@/shared/types/dbConnection'
+import type { DBConnection, DBConnectionBindings } from '@/shared/types/dbConnection'
 import type { UserDetail, UserSummary } from '@/shared/types/user'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
@@ -56,7 +57,7 @@ const PAGE_SIZE = 20
 
 const PERMISSION_INDEX = new Map(PERMISSION_METADATA.map((item) => [item.key, item] as const))
 
-type ViewMode = 'users' | 'auth-groups'
+type ViewMode = 'users' | 'auth-groups' | 'resources'
 
 type DrawerState =
   | { mode: 'create-user' }
@@ -123,9 +124,11 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   const [viewMode, setViewMode] = useState<ViewMode>(initialView)
   const [usersOffset, setUsersOffset] = useState(0)
   const [authGroupsOffset, setAuthGroupsOffset] = useState(0)
+  const [resourcesOffset, setResourcesOffset] = useState(0)
   const [users, setUsers] = useState<UserSummary[]>([])
   const [authGroups, setAuthGroups] = useState<AuthGroupDetail[]>([])
   const [connections, setConnections] = useState<DBConnection[]>([])
+  const [connectionBindings, setConnectionBindings] = useState<Record<number, DBConnectionBindings>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [drawerState, setDrawerState] = useState<DrawerState>(null)
@@ -161,9 +164,16 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         listUserDBConnections(),
         loadAuthGroupDetails(),
       ])
+      const bindingsEntries = await Promise.all(
+        connectionsResponse.connections.map(async (connection) => {
+          const bindings = await getDBConnectionBindings(connection.id)
+          return [connection.id, bindings] as const
+        }),
+      )
       setUsers(usersResponse.users)
       setConnections(connectionsResponse.connections)
       setAuthGroups(authGroupDetails)
+      setConnectionBindings(Object.fromEntries(bindingsEntries))
     } catch (loadError) {
       setError(loadError instanceof ApiError ? loadError.message : 'Failed to load the RBAC workspace.')
     } finally {
@@ -537,6 +547,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     () => authGroups.slice(authGroupsOffset, authGroupsOffset + PAGE_SIZE),
     [authGroups, authGroupsOffset],
   )
+  const pagedResources = useMemo(
+    () => connections.slice(resourcesOffset, resourcesOffset + PAGE_SIZE),
+    [connections, resourcesOffset],
+  )
 
   useEffect(() => {
     if (usersOffset > 0 && usersOffset >= users.length) {
@@ -549,6 +563,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       setAuthGroupsOffset(Math.max(0, Math.floor((Math.max(authGroups.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
     }
   }, [authGroups.length, authGroupsOffset])
+
+  useEffect(() => {
+    if (resourcesOffset > 0 && resourcesOffset >= connections.length) {
+      setResourcesOffset(Math.max(0, Math.floor((Math.max(connections.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
+    }
+  }, [connections.length, resourcesOffset])
 
   return (
     <>
@@ -596,6 +616,15 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
             onClick: () => {
               setViewMode('auth-groups')
               navigate('/users/groups')
+            },
+          },
+          {
+            key: 'resources',
+            label: 'Resources',
+            active: viewMode === 'resources',
+            onClick: () => {
+              setViewMode('resources')
+              navigate('/users/resources')
             },
           },
         ]}
@@ -679,7 +708,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                 </table>
               </div>
             </section>
-          ) : (
+          ) : viewMode === 'auth-groups' ? (
             <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
               <div className="overflow-x-auto">
                 <table className="min-w-full border-collapse">
@@ -720,14 +749,55 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                 </table>
               </div>
             </section>
+          ) : (
+            <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-collapse">
+                  <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+                    <tr>
+                      <th className="whitespace-nowrap px-3 py-3">Resource</th>
+                      <th className="whitespace-nowrap px-3 py-3">Type</th>
+                      <th className="whitespace-nowrap px-3 py-3">Direct Users</th>
+                      <th className="whitespace-nowrap px-3 py-3">Auth Groups</th>
+                      <th className="whitespace-nowrap px-3 py-3">Effective Users</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedResources.map((connection) => {
+                      const bindings = connectionBindings[connection.id]
+                      return (
+                        <tr key={connection.id} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
+                          <td className="px-3 py-3">
+                            <div className="grid gap-1">
+                              <p className="font-semibold">{connection.name}</p>
+                              <p className="text-[11px] text-muted">{getConnectionLabel(connection.id, connections)}</p>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-muted">{formatDBType(connection.db_type)}</td>
+                          <td className="px-3 py-3">
+                            <BindingTags items={bindings?.direct_users.map((user) => user.username) ?? []} emptyLabel="—" />
+                          </td>
+                          <td className="px-3 py-3">
+                            <BindingTags items={bindings?.auth_groups.map((group) => group.name || group.group_key) ?? []} emptyLabel="—" />
+                          </td>
+                          <td className="px-3 py-3">
+                            <BindingTags items={bindings?.effective_users.map((user) => user.username) ?? []} emptyLabel="—" />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           )}
 
       <Pagination
-        offset={viewMode === 'users' ? usersOffset : authGroupsOffset}
+        offset={viewMode === 'users' ? usersOffset : viewMode === 'auth-groups' ? authGroupsOffset : resourcesOffset}
         pageSize={PAGE_SIZE}
-        count={viewMode === 'users' ? pagedUsers.length : pagedAuthGroups.length}
-        total={viewMode === 'users' ? users.length : authGroups.length}
-        onChange={viewMode === 'users' ? setUsersOffset : setAuthGroupsOffset}
+        count={viewMode === 'users' ? pagedUsers.length : viewMode === 'auth-groups' ? pagedAuthGroups.length : pagedResources.length}
+        total={viewMode === 'users' ? users.length : viewMode === 'auth-groups' ? authGroups.length : connections.length}
+        onChange={viewMode === 'users' ? setUsersOffset : viewMode === 'auth-groups' ? setAuthGroupsOffset : setResourcesOffset}
       />
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
@@ -1348,6 +1418,31 @@ function formatPermissionList(permissionKeys: string[]) {
 function getConnectionLabel(connectionId: number, connections: DBConnection[]) {
   const connection = connections.find((item) => item.id === connectionId)
   return connection ? connection.name : `Connection #${connectionId}`
+}
+
+function formatDBType(dbType: string) {
+  switch (dbType) {
+    case 'postgres':
+      return 'PostgreSQL'
+    case 'redis':
+      return 'Redis'
+    default:
+      return 'MySQL'
+  }
+}
+
+function BindingTags({ items, emptyLabel }: { items: string[]; emptyLabel: string }) {
+  if (items.length === 0) {
+    return <span className="text-[12px] text-muted">{emptyLabel}</span>
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((item) => (
+        <Tag key={item} label={item} />
+      ))}
+    </div>
+  )
 }
 
 function equalStringArrays(left: string[], right: string[]) {

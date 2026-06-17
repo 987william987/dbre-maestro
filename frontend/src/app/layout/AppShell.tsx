@@ -53,6 +53,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { to: '/users', label: 'Users', icon: Users },
       { to: '/users/groups', label: 'Auth Groups', icon: Users },
+      { to: '/users/resources', label: 'Resources', icon: Users },
     ],
   },
   {

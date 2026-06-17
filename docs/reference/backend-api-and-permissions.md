@@ -11,10 +11,11 @@
 | SQL Editor | `/sql-editor` | `sql_editor.query` |
 | Users | `/users` | `users.read` 或 `users.write` |
 | Auth Groups | `/users/groups` | `users.read` 或 `users.write` |
+| Resources | `/users/resources` | `users.read` 或 `users.write` |
 | DB Connections | `/db-connections` | `db_connections.read` 或 `db_connections.write` |
 | DB Metadata | `/db-metadata/inventory`、`/db-metadata/objects` | `db_metadata.read` |
 | Masking Rules | `/masking-rules`、`/masking-rules/dsl-guide` | `masking_rules.read` 或 `masking_rules.write` |
-| SQL Review Rules | `/sql-review-rules` | `sql_review.read` 或 `sql_review.write` |
+| SQL Review Rules | `/sql-review-rules/mysql`、`/sql-review-rules/postgresql`、`/sql-review-rules/redis` | `sql_review.read` 或 `sql_review.write` |
 | Audit Logs | `/audit-logs` | `audit_logs.read` 或 `audit_logs.write` |
 | Settings | `/settings` | `settings.read` 或 `settings.write` |
 
@@ -29,16 +30,16 @@
 
 | Permission | 用途 |
 |---|---|
-| `users.read` / `users.write` | Users / Auth Groups |
+| `users.read` / `users.write` | Users / Auth Groups / Resources |
 | `db_connections.read` / `db_connections.write` | DB Connections |
 | `db_metadata.read` | DB Metadata |
 | `masking_rules.read` / `masking_rules.write` | Masking Rules + Whitelist |
 | `sql_review.read` / `sql_review.write` | SQL Review Rules |
 | `audit_logs.read` / `audit_logs.write` | Audit Logs |
 | `settings.read` / `settings.write` | Settings |
-| `tickets.apply` | 建立 DDL / DML 工單，並可進入 ticket workspace |
-| `tickets.review` | 審核 DDL / DML 工單 |
-| `tickets.execute` | 執行 DDL / DML 工單 |
+| `tickets.apply` | 建立 DDL / DML / Redis 工單，並可進入 ticket workspace |
+| `tickets.review` | 審核 DDL / DML / Redis 工單 |
+| `tickets.execute` | 執行 DDL / DML / Redis 工單 |
 | `sql_editor.query` | 使用 SQL Editor |
 | `sql_editor.export` | 從 SQL Editor 建立 export 工單 |
 | `sql_editor.export_review` | 審核 export 工單 |
@@ -66,14 +67,14 @@
 | `GET /api/tickets` | `requireTicketsWorkspaceRead` | 實際結果仍受 ticket access 控制 |
 | `GET /api/tickets/{id}` | `requireTicketsWorkspaceRead` | 同上 |
 | `GET /api/tickets/connections` | `requireTicketsApply` | DB 清單再受 DB Scope 過濾 |
-| `GET /api/tickets/connections/{id}/databases` | `requireTicketsApply` | 目標 DB 選單 |
-| `POST /api/tickets/review` | `requireTicketsApply` | SQL review / parser / policy 檢測 |
-| `POST /api/tickets` | `requireTicketsApply` | 建立 DDL / DML 工單 |
+| `GET /api/tickets/connections/{id}/databases` | `requireTicketsApply` | 目標 DB 或 Redis DB index 選單 |
+| `POST /api/tickets/review` | `requireTicketsApply` | SQL / Redis review、parser、policy、validation |
+| `POST /api/tickets` | `requireTicketsApply` | 建立 DDL / DML / Redis 工單 |
 | `POST /api/tickets/{id}/approve` | `requireTicketWorkflowReview` | 依 ticket type 二次檢查 reviewer 權限 |
-| `POST /api/tickets/{id}/reject` | `requireTicketWorkflowReject` | reviewer 可拒絕；DDL / DML 的 DBA 也可於 `approved` / `pending_execution` 階段拒絕 |
+| `POST /api/tickets/{id}/reject` | `requireTicketWorkflowReject` | reviewer 可拒絕；DDL / DML / Redis 的 DBA 也可於 `approved` / `pending_execution` 階段拒絕 |
 | `POST /api/tickets/{id}/withdraw` | `requireTicketsApply` | 僅 submitter 可於 `pending_review` 收回 |
-| `POST /api/tickets/{id}/request-execution` | `requireTicketsExecute` | 只適用 DDL / DML |
-| `POST /api/tickets/{id}/execute` | `requireTicketsExecute` | 只適用 DDL / DML |
+| `POST /api/tickets/{id}/request-execution` | `requireTicketsExecute` | 只適用 DDL / DML / Redis |
+| `POST /api/tickets/{id}/execute` | `requireTicketsExecute` | 只適用 DDL / DML / Redis |
 | `POST /api/tickets/{id}/stop` | `requireTicketsExecute` | 停止執行中 ticket |
 | `POST /api/tickets/{id}/revoke` | `requireSensitiveReview` | 只適用 sensitive access |
 
@@ -82,6 +83,7 @@
 | API | Gate | 備註 |
 |---|---|---|
 | `GET /api/query/connections` | `requireSQLEditorQuery` | 回傳使用者可用 DB connections |
+| `GET /api/query/constraints` | `requireSQLEditorQuery` | 回傳 limit / timeout 約束 |
 | `POST /api/query` | `requireSQLEditorQuery` | 單 statement 唯讀查詢 |
 | `POST /api/query/sensitive-access` | `requireSQLEditorSensitiveApply` | 建立 sensitive query access 工單 |
 | `GET /api/query/history` | `requireSQLEditorQuery` | 查詢歷史 |
@@ -109,6 +111,7 @@
 | API | Gate |
 |---|---|
 | `GET /api/db-connections` | `requireDBConnectionsRead` |
+| `GET /api/db-connections/{id}/bindings` | `requireDBConnectionsRead` |
 | `POST /api/db-connections` | `requireDBConnectionsWrite` |
 | `PATCH /api/db-connections/{id}` | `requireDBConnectionsWrite` |
 | `POST /api/db-connections/{id}/test` | `requireDBConnectionsWrite` |
@@ -149,6 +152,7 @@
 | API | Gate |
 |---|---|
 | `GET /api/users` | `requireUsersRead` |
+| `GET /api/users/db-connections` | `requireUsersRead` |
 | `POST /api/users` | `requireUsersWrite` |
 | `GET /api/users/{id}` | `requireUsersRead` |
 | `PATCH /api/users/{id}` | `requireUsersWrite` |
@@ -164,8 +168,12 @@
 | `GET /api/auth-groups/{group}` | `requireUsersRead` |
 | `PATCH /api/auth-groups/{group}` | `requireUsersWrite` |
 | `DELETE /api/auth-groups/{group}` | `requireUsersWrite` |
+| `POST /api/auth-groups/{group}/permissions` | `requireUsersWrite` |
+| `DELETE /api/auth-groups/{group}/permissions/{permissionKey}` | `requireUsersWrite` |
+| `POST /api/auth-groups/{group}/db-connections` | `requireUsersWrite` |
+| `DELETE /api/auth-groups/{group}/db-connections/{connID}` | `requireUsersWrite` |
 
-### Audit Logs / Settings / Notifications
+### Audit Logs / Settings / Notifications / Realtime
 
 | API | Gate |
 |---|---|
@@ -177,6 +185,7 @@
 | `GET /api/notifications` | 已登入 |
 | `POST /api/notifications/read-all` | 已登入 |
 | `POST /api/notifications/{id}/read` | 已登入 |
+| `GET /api/events/stream` | 已登入 + active |
 
 ## Ticket 類型與 workflow 權限
 
@@ -184,6 +193,7 @@
 |---|---|---|
 | `ddl` | `tickets.review` | `tickets.execute` |
 | `dml` | `tickets.review` | `tickets.execute` |
+| `redis_command` | `tickets.review` | `tickets.execute` |
 | `sql_export` | `sql_editor.export_review` | 無獨立 execute，approve 後可下載 |
 | `sensitive_query_access` | `sql_editor.sensitive_review` | 無獨立 execute，approve 後 scope 生效 |
 
@@ -194,7 +204,7 @@
 | submit | 否 | 是 | 否 |
 | withdraw | 否 | 是 | 否 |
 | review reject | 是 | 否 | 否 |
-| review approve: `ddl` / `dml` | 否 | 否 | 是 |
+| review approve: `ddl` / `dml` / `redis_command` | 否 | 否 | 是 |
 | review approve: `sql_export` / `sensitive_query_access` | 是 | 否 | 否 |
 | execution reject | 是 | 否 | 否 |
 | execution success | 是 | 否 | 否 |
@@ -212,9 +222,11 @@
 | CRUD 型導航頁 | 是 | 不適用 |
 | SQL Editor | 是，使用動作型 permission 代表頁面入口 | 是，DB 作用範圍靠 DB Scope |
 | Tickets | 是，`tickets.apply` 作為工作台最小入口 | 是，DB 作用範圍靠 DB Scope |
+| Resources 子頁 | 是，隸屬 `users.read` / `users.write` workspace | 不適用 |
 
 ## 相關文件
 
 - [權限模型](../explanation/permission-model.md)
 - [Tickets](tickets.md)
 - [SQL Editor](sql-editor.md)
+- [Users / RBAC](users-and-rbac.md)

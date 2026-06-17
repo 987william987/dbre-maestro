@@ -1,262 +1,123 @@
-# 通知與工單更新架構：REST/輪詢 vs SSE
+# 通知與工單更新架構：REST 初始化 + SSE 即時更新
 
-本文整理目前專案內「工單狀態更新 / 站內信通知」的實際架構，並給出未來若升級到 `SSE` 的建議藍圖。
+本文整理目前專案內「工單狀態更新 / 站內通知 / Lark 通知」的實際架構。
 
-最後更新日期：`2026-06-12`
+最後更新日期：`2026-06-18`
 
-## 1. 目前架構：REST + 輪詢
+## 1. 現況總覽
 
-### 1.1 核心特性
+系統目前採混合模型：
 
-目前系統不是事件驅動。
+- REST：初始化資料、重新整理頁面、斷線後補資料
+- SSE：通知與工單狀態的即時推送
+- Meta DB：通知、工單、審批與執行結果的持久化來源
+- Lark：工單狀態變更的外部即時通知通道
 
-無論是：
+也就是說，現在不是「純輪詢」，也不是「完全靠前端 reload」。
 
-- 工單列表
-- 工單詳情
-- 右上角鈴鐺通知
-- 待審批 / 待執行 toast
+## 2. 事件流
 
-本質上都還是靠「前端重新發 HTTP API 取最新資料」。
+### 2.1 後端事件來源
 
-### 1.2 工單狀態更新流程
+當下列事件發生時，後端除了寫入資料表，還會發送即時事件：
 
-```text
-[使用者操作]
-    |
-    v
-POST /api/tickets/{id}/approve
-POST /api/tickets/{id}/reject
-POST /api/tickets/{id}/request-execution
-POST /api/tickets/{id}/execute
-POST /api/tickets/{id}/revoke
-    |
-    v
-[Backend Handler]
-    |
-    +--> 更新 tickets / executions / export_requests
-    |
-    +--> 寫入 audit_logs
-    |
-    +--> 寫入 notifications
-    |
-    v
-[MySQL]
-    |
-    v
-[前端不會被主動通知]
-    |
-    +--> TicketDetail 頁在操作成功後主動 reload
-    |
-    +--> Tickets 頁需再次 GET /api/tickets 才會看到新狀態
-```
+- 建立站內通知
+- 工單提交、收回、審批、駁回
+- 工單進入待執行
+- 工單執行成功或失敗
 
-### 1.3 站內信通知流程
+主要元件：
 
-```text
-[某個業務事件發生]
-例如：
-- 建單成功
-- reviewer 待審批
-- approve / reject
-- 待執行
-- 執行完成 / 失敗
-    |
-    v
-[Backend Handler]
-    |
-    +--> INSERT INTO notifications
-    |
-    v
-[MySQL.notifications]
-    |
-    v
-[前端通知中心]
-    |
-    +--> 初次載入：GET /api/notifications
-    |
-    +--> 之後每 30s 輪詢一次 GET /api/notifications
-    |
-    +--> 發現新通知後更新鈴鐺未讀數
-    |
-    +--> 若 type = ticket_pending_review / ticket_pending_execution
-         額外顯示 toast
-```
+- `backend/internal/handler/realtime_events.go`
+- `backend/internal/handler/event_stream.go`
+- `backend/internal/realtime/broker.go`
 
-### 1.4 目前前後端元件位置
+### 2.2 SSE Stream
 
-#### 後端
+目前單一 SSE 入口為：
 
-- `backend/internal/handler/ticket.go`
-- `backend/internal/handler/query.go`
-- `backend/internal/handler/export.go`
-- `backend/internal/handler/notification.go`
-- `backend/internal/repository/notification.go`
+- `GET /api/events/stream`
 
-#### 前端
+連線建立後：
 
-- `frontend/src/app/layout/AppShell.tsx`
-- `frontend/src/modules/notifications/api.ts`
-- `frontend/src/shared/types/notification.ts`
-- `frontend/src/shared/ui/ToastContext.tsx`
+- 會先送一個 `ready` 事件
+- 每 `25s` 送一次 heartbeat
+- 後續按使用者身分推送事件
 
-### 1.5 優點
+目前已使用的事件：
 
-- 架構簡單，直接沿用既有 REST API。
-- 不需要新增長連線基礎設施。
-- 不需要處理多機事件廣播。
-- 對目前工單型產品來說足夠可用。
+- `notification.created`
+- `ticket.updated`
 
-### 1.6 限制
+## 3. 前端使用方式
 
-- 通知最多延遲一個輪詢週期，目前是約 `30s`。
-- Tickets 列表與詳情不是即時同步。
-- 前端要反覆打 API 才能知道資料更新。
-- 未來若通知密度提高，輪詢效率不佳。
+### 3.1 App Shell
 
-## 2. 未來架構：SSE 事件驅動
+`frontend/src/app/layout/AppShell.tsx` 會：
 
-### 2.1 適用情境
+1. 先以 `GET /api/notifications` 取得通知清單與未讀數
+2. 再呼叫 `openEventStream('/events/stream')`
+3. 收到 `notification.created` 後刷新通知清單、更新 badge、依情境顯示 toast
 
-若未來希望做到：
+### 3.2 Tickets 頁與 Detail 頁
 
-- 工單狀態幾乎即時更新
-- 鈴鐺通知不靠輪詢
-- 審批/待執行 toast 幾乎立即出現
-- 工單詳情頁執行進度持續推送
+- `frontend/src/modules/tickets/pages/TicketsPage.tsx`
+- `frontend/src/modules/tickets/pages/TicketDetailPage.tsx`
 
-則 `SSE` 會是比 WebSocket 更輕量、也更適合目前場景的做法。
+兩頁都會監聽前端自訂事件 `maestro:realtime`。
 
-### 2.2 建議事件流
+當 SSE 收到 `ticket.updated` 時：
 
-```text
-[某個業務事件發生]
-例如：
-- ticket created
-- ticket approved
-- ticket rejected
-- ticket pending_execution
-- ticket completed
-- notification created
-    |
-    v
-[Backend Handler / Service]
-    |
-    +--> 寫入業務資料表（tickets / executions / exports）
-    |
-    +--> 寫入 notifications
-    |
-    +--> publish event
-           例如：
-           - notification.created
-           - ticket.updated
-    |
-    v
-[Event Bus / Dispatcher]
-    |
-    +--> 單機版：process memory hub
-    |
-    +--> 多機版：Redis Pub/Sub / NATS / Kafka / Outbox Dispatcher
-    |
-    v
-[SSE Stream Endpoint]
-GET /api/notifications/stream
-GET /api/tickets/stream   (可選)
-    |
-    v
-[Browser EventSource]
-    |
-    +--> 更新鈴鐺未讀數
-    +--> 插入新的 notification item
-    +--> 顯示 toast
-    +--> 若需要，也可更新 tickets list / detail
-```
+- Tickets List 會重新載入目前篩選頁
+- Ticket Detail 會重新抓單張工單資料
 
-### 2.3 前端視角
+因此工單狀態切換不需要手動 F5。
 
-```text
-App 啟動
-  |
-  +--> 先 GET /api/notifications          （初始化列表）
-  |
-  +--> 再建立 SSE：/api/notifications/stream
-           |
-           +--> 收到 notification.created
-           |      - 更新通知下拉
-           |      - 更新未讀 badge
-           |      - 依 type 顯示 toast
-           |
-           +--> 斷線時自動重連
-           |
-           +--> 重連成功後再補一次 GET /api/notifications
-                  避免漏事件
-```
+## 4. 站內通知與 Lark 的分工
 
-### 2.4 後端視角
+### 4.1 站內通知
 
-```text
-HTTP Handler
-  |
-  +--> 驗證 auth
-  +--> 驗證權限
-  +--> 執行業務更新
-  +--> 寫 DB
-  +--> 發 event
+站內通知仍以 `notifications` 表為持久化來源。
 
-SSE Hub
-  |
-  +--> 記錄目前有哪些 user 正在線上
-  +--> 哪些連線訂閱哪些事件
-  +--> 有 event 時推到對應 user 的連線
-  +--> 斷線時清理 client
-```
+SSE 只是讓前端更快得知「有新通知」，不是取代資料庫保存。
 
-## 3. 目前 vs 未來：對照簡表
+這樣的好處是：
 
-| 面向 | 現在 REST/輪詢 | 未來 SSE |
-|---|---|---|
-| 資料取得方式 | 前端定期 GET | 後端主動 push |
-| 通知延遲 | 最多約 30s | 幾乎即時 |
-| 前端複雜度 | 低 | 中 |
-| 後端複雜度 | 低 | 中 |
-| 基礎設施需求 | 幾乎無新增 | 需長連線與事件分發 |
-| 多機擴展 | 容易 | 需 event bus / pubsub |
-| 適合場景 | 工單、後台、低頻通知 | 即時通知、進度推送、狀態同步 |
+- 使用者重整頁面仍可看到歷史通知
+- SSE 中斷後，前端可再用 REST 補資料
+- Audit 與通知記錄不依賴記憶體事件本身
 
-## 4. 若未來要做 SSE，建議分階段
+### 4.2 Lark 通知
 
-### Phase 1：只做通知 SSE
+Lark 與站內通知是並行通道：
 
-目的：
+- 站內通知：平台內可追蹤、可回看
+- Lark：讓 submitter、reviewer、executor 及時收到外部通知
 
-- 保留現有 notifications table
-- 只把鈴鐺通知從輪詢改成即時推送
+Lark 收件人目前使用 `users.lark_recipient`，值需為可投遞的 `open_id`。
 
-建議：
+## 5. 目前架構的優點
 
-- 新增 `GET /api/notifications/stream`
-- 後端在建立通知時額外發 `notification.created`
-- 前端保留 `GET /api/notifications` 作初始化與重連補償
+- 即時性比輪詢好很多
+- 仍保留 REST 作為初始化與補償機制
+- 實作成本低於 WebSocket
+- 對目前通知量與工單型產品很合適
 
-### Phase 2：工單詳情 SSE
+## 6. 目前限制
 
-目的：
+目前 broker 是 app process 內記憶體實作，代表：
 
-- 工單詳情頁不必手動 refresh
-- 執行中工單的狀態、execution rows、completed/failed 可即時更新
+- 單機或單副本時行為最直接
+- 若未來是多副本部署，不同 app instance 之間不會自動共享事件
+- 若要真正水平擴展，需補 Redis Pub/Sub、NATS、outbox dispatcher 等跨節點事件層
 
-建議：
+另外，前端收到事件後目前多數仍採「重新拉 REST 資料」，而不是直接把 SSE payload 當成唯一真相來源。這是刻意的保守設計，可避免前後端局部狀態漂移。
 
-- 新增 `GET /api/tickets/{id}/stream`
-- 發送 `ticket.updated`、`ticket.execution.updated`
+## 7. 與舊文件的差異
 
-### Phase 3：多機事件分發
+若你看過較舊版本文件，最大的差異是：
 
-目的：
+- 舊版描述是「REST + 輪詢為主，SSE 是未來規劃」
+- 現況已經是「REST 初始化 + SSE 即時更新」
 
-- 支援多台 app server / 多副本部署
-
-建議：
-
-- 引入 Redis Pub/Sub、NATS、Kafka 或 Outbox Dispatcher
-- 不再依賴單機記憶體 hub
+因此後續討論通知問題時，應以本文件為準，不再把 SSE 當成尚未落地的藍圖。

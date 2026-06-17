@@ -78,6 +78,15 @@
 | `DB_POOL_SCOPED_PG_QUERY_CONN_MAX_LIFETIME` | `2m` |
 | `DB_POOL_SCOPED_PG_QUERY_CONN_MAX_IDLE_TIME` | `1m` |
 
+### Shadow Validation
+
+| 變數 | 預設 |
+|---|---|
+| `DB_POOL_SHADOW_VALIDATION_MAX_OPEN` | `1` |
+| `DB_POOL_SHADOW_VALIDATION_MAX_IDLE` | `1` |
+| `DB_POOL_SHADOW_VALIDATION_CONN_MAX_LIFETIME` | `2m` |
+| `DB_POOL_SHADOW_VALIDATION_CONN_MAX_IDLE_TIME` | `1m` |
+
 ## Compose 的實際行為
 
 `make dev` 會使用專案根目錄的 `docker-compose.yml`。Compose 會：
@@ -85,6 +94,7 @@
 - 讀取根目錄 `.env`
 - 把需要的值展開到 `app` service 的 `environment`
 - 將 `${HOME}/.aws` 掛進 container，供 inventory scan 使用
+- 將所有 `DB_POOL_*` profile 參數映射進 app container
 
 所以只有 `.env` 而不寫入 `docker-compose.yml` 並不等於 app 一定吃得到。前提是該變數必須先被 Compose 映射到 container 環境中。
 
@@ -153,6 +163,15 @@ Lark 通知目前有兩種來源，優先順序如下：
 - `LARK_WEBHOOK_URL` 保留作相容或過渡用途；它只能做 webhook 廣播，無法依使用者定向送達
 - 定向通知會使用使用者資料上的 `lark_recipient`，值必須是可投遞的 Lark `open_id`
 
+## DB Connections 讀寫 endpoint
+
+DB Connections 已支援雙 endpoint：
+
+- readonly：SQL Editor、metadata、export 等 read path 使用
+- readwrite：ticket execute 使用
+
+若只配置單一 host / port，系統會把 readwrite 預設回退到 readonly。
+
 ## 範例
 
 ```dotenv
@@ -167,6 +186,7 @@ DB_POOL_QUERY_MAX_IDLE=5
 DB_POOL_EXEC_MAX_OPEN=3
 DB_POOL_METADATA_MAX_OPEN=1
 DB_POOL_SCOPED_PG_QUERY_MAX_OPEN=2
+DB_POOL_SHADOW_VALIDATION_MAX_OPEN=1
 ```
 
 ## 相關文件

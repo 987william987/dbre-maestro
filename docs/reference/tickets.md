@@ -1,6 +1,6 @@
 # Tickets
 
-Tickets 模組負責 DDL / DML 變更工單，以及 SQL Export、Sensitive Query Access 兩類特殊工單的審批流轉。
+Tickets 模組負責 DDL / DML / Redis 變更工單，以及 SQL Export、Sensitive Query Access 兩類特殊工單的審批流轉。
 
 ## 功能範圍
 
@@ -8,6 +8,7 @@ Tickets 模組負責 DDL / DML 變更工單，以及 SQL Export、Sensitive Quer
 |---|---|
 | `ddl` | 結構變更 |
 | `dml` | 資料變更 |
+| `redis_command` | 受控 Redis 命令變更 |
 | `sql_export` | 從 SQL Editor 導出資料 |
 | `sensitive_query_access` | 申請敏感欄位臨時查詢權限 |
 
@@ -23,15 +24,20 @@ Tickets 模組負責 DDL / DML 變更工單，以及 SQL Export、Sensitive Quer
 
 | 權限 | 意義 |
 |---|---|
-| `tickets.apply` | 建立 DDL / DML 工單，且可進入 ticket workspace |
-| `tickets.review` | 審核 DDL / DML 工單 |
-| `tickets.execute` | 執行 DDL / DML 工單 |
+| `tickets.apply` | 建立 DDL / DML / Redis 工單，且可進入 ticket workspace |
+| `tickets.review` | 審核 DDL / DML / Redis 工單 |
+| `tickets.execute` | 執行 DDL / DML / Redis 工單 |
 | `sql_editor.export_review` | 審核 `sql_export` |
 | `sql_editor.sensitive_review` | 審核 / 撤銷 `sensitive_query_access` |
 
+實際上：
+
+- `tickets.apply` 也是 Tickets workspace 的最小讀取入口
+- 可建立的連線清單仍受 DB Scope 過濾
+
 ## 建單前檢測
 
-DDL / DML 工單在提交前，應先經過 `POST /api/tickets/review`。
+DDL / DML / Redis 工單在提交前，應先經過 `POST /api/tickets/review`。
 
 檢測內容包括：
 
@@ -39,6 +45,7 @@ DDL / DML 工單在提交前，應先經過 `POST /api/tickets/review`。
 - syntax / parser 檢查
 - ticket type policy
 - SQL review rule 檢測
+- validation 檢測
 - 每一句 statement 的 review result
 
 前端應要求檢測通過後才能提交。
@@ -53,6 +60,9 @@ DDL / DML 工單在提交前，應先經過 `POST /api/tickets/review`。
 
 回傳目標實例可選資料庫清單。前端應顯示為下拉選單，而不是自由輸入。
 
+- MySQL / PostgreSQL：目標 database 名稱
+- Redis：目標 database index
+
 ### `POST /api/tickets/review`
 
 請求欄位：
@@ -60,7 +70,7 @@ DDL / DML 工單在提交前，應先經過 `POST /api/tickets/review`。
 | 欄位 | 型別 |
 |---|---|
 | `sql_content` | `string` |
-| `ticket_type` | `ddl` 或 `dml` |
+| `ticket_type` | `ddl`、`dml` 或 `redis_command` |
 | `db_connection_id` | `number` |
 | `database_name` | `string` |
 
@@ -88,7 +98,7 @@ DDL / DML 工單在提交前，應先經過 `POST /api/tickets/review`。
 | `title` | `string` | 是 |
 | `description` | `string \| null` | 否 |
 | `sql_content` | `string` | 是 |
-| `ticket_type` | `ddl \| dml` | 是 |
+| `ticket_type` | `ddl \| dml \| redis_command` | 是 |
 | `db_connection_id` | `number \| null` | 是 |
 | `database_name` | `string \| null` | 是 |
 
@@ -112,6 +122,29 @@ pending_execution
 
 executing
   -> interrupted
+  -> failed
+  -> completed
+```
+
+### Redis
+
+Redis 工單沿用 DDL / DML 的 reviewer / executor workflow：
+
+```text
+pending_review
+  -> approved
+  -> rejected
+  -> withdrawn
+
+approved
+  -> pending_execution
+  -> rejected
+
+pending_execution
+  -> rejected
+  -> executing
+
+executing
   -> failed
   -> completed
 ```
@@ -152,7 +185,7 @@ pending_review
 - 審批人拒絕後：
   - 通知提交人
 - 審批人同意後：
-  - `ddl` / `dml`：通知執行人
+  - `ddl` / `dml` / `redis_command`：通知執行人
   - `sql_export` / `sensitive_query_access`：通知提交人
 
 ### 執行階段
@@ -175,14 +208,14 @@ pending_review
 
 Ticket Detail 頁會展示：
 
-- 工單基本資訊
+- 工單基本資訊與審批流程
 - DB connection / database
 - submitter / reviewer / executor
-- SQL content
-- scopes
-- review results
-- export request（若適用）
-- execution records
+- SQL 或 Redis command 內容
+- statement-level review results
+- execution statement results
+- activity timeline 與操作紀錄
+- scope / export request / sensitive access details（依類型顯示）
 
 Review results 應以 statement 粒度呈現，而不是只顯示一個整體結論。
 
@@ -203,6 +236,24 @@ review result 是多 statement 工單的重要輸出。使用場景：
 | `scan_rows` | 掃描 / 影響行數 |
 | `status` | 審核狀態 |
 | `message` | 錯誤或說明 |
+
+對 DDL 工單，validation 還可能包含 shadow validation 結果。
+
+## MySQL DDL Shadow Validation
+
+MySQL DDL review 目前會額外做 shadow validation，目的不是替代正式執行，而是盡量提前抓出：
+
+- 目標 database / table 不存在
+- 重複名稱
+- statement 在複製出的結構環境中無法執行
+
+目前範圍：
+
+- 以 MySQL 為主
+- 聚焦 database / table 等常見 DDL
+- 不處理 stored procedure、trigger、event 等複雜物件
+
+若平台 validation database 權限未配置，review result 會回報 shadow validation unavailable，而不是直接把底層錯誤細節暴露到前端。
 
 ## Ticket Number
 
@@ -252,3 +303,4 @@ Ticket number 不使用單純 auto increment 流水號，而改成較不易碰�
 - [How to 建立與執行 Tickets](../how-to/create-and-execute-tickets.md)
 - [後端 API 與權限對照](backend-api-and-permissions.md)
 - [SQL Editor](sql-editor.md)
+- [DB Connections](db-connections.md)

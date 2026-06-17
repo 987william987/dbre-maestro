@@ -17,6 +17,8 @@
 - Inventory Scan
 - Object Scan
 
+這些設定是「運行中行為」設定，不是 `.env` 啟動參數編輯器。
+
 ## Lark Notifications
 
 這一區用來配置工單相關的 Lark 通知，不是站內信設定。

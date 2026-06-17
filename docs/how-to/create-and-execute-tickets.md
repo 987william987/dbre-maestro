@@ -1,6 +1,6 @@
 # How to 建立與執行 Tickets
 
-這份指南說明如何建立 DDL / DML 工單、先做 SQL 檢測，再完成審核與執行流程。
+這份指南說明如何建立 DDL / DML / Redis 工單、先做檢測，再完成審核與執行流程。
 
 ## Prerequisites
 
@@ -20,24 +20,36 @@
 
    `Target Instance` 與 `Target Database` 都應從下拉選單選擇，不應手動輸入。
 
-3. 輸入 SQL 內容，必要時先點 `Format`。
+   - MySQL / PostgreSQL：選 database 名稱
+   - Redis：選 database index
+
+3. 輸入 SQL 或 Redis command，必要時先點 `Format`。
+
+   SQL 類型範例：
 
    ```sql
    ALTER TABLE orders ADD COLUMN archived_at DATETIME NULL;
    ```
 
+   Redis 範例：
+
+   ```text
+   SET my:key "value"
+   EXPIRE my:key 60
+   ```
+
 4. 點擊 `Review SQL` 做檢測。
 
-   系統會回傳每一句 statement 的：
+   系統會回傳每一句 statement / command 的：
 
-   - SQL 內容
+   - 內容
    - 掃描 / 影響行數
    - 審核狀態
    - 訊息
 
 5. 確認 `Review SQL` 通過後，再提交工單。
 
-   如果檢測未通過，請先修正 SQL；前端不應允許跳過檢測直接提交。
+   如果檢測未通過，請先修正內容；前端不應允許跳過檢測直接提交。
 
 6. 到 `Ticket Detail` 查看詳細結果。
 
@@ -49,7 +61,7 @@
    - 不通過：`Reject`
    - 若提交人改變需求且尚未開始審核：`Withdraw`
 
-8. 若是 DDL / DML，Executor / DBA 再進行執行。
+8. 若是 DDL / DML / Redis，Executor / DBA 再進行執行。
 
    流程通常是：
 
@@ -65,7 +77,7 @@ Ticket 流程中的通知規則如下：
 - 收回後通知審批人
 - 審批拒絕後通知提交人
 - 審批通過後：
-  - `DDL / DML` 通知執行人
+  - `DDL / DML / Redis` 通知執行人
   - `SQL Export / Sensitive Query Access` 通知提交人
 - 執行階段拒絕後通知提交人
 - 執行成功後通知提交人

@@ -10,7 +10,7 @@ DBRE Maestro 的核心目標，是把資料庫治理拆成一個獨立的控制�
 - 敏感欄位缺少統一遮罩策略，查詢結果容易外洩
 - 變更流程分散在聊天、腳本與人工操作，缺少可追溯的審批與執行紀錄
 
-DBRE Maestro 把這些能力集中在同一個工作台裡，並用 RBAC、DB Scope、Ticket Workflow 與 Audit Log 做閉環。
+DBRE Maestro 把這些能力集中在同一個工作台裡，並用 RBAC、DB Scope、Ticket Workflow、Realtime Notification 與 Audit Log 做閉環。
 
 ## 整體組成
 
@@ -43,7 +43,7 @@ DBRE Maestro 把這些能力集中在同一個工作台裡，並用 RBAC、DB Sc
 - route guard 與導航可見性控制
 - SQL Editor 的 tab 工作區狀態隔離
 - Ticket / Masking / Settings 等頁面操作
-- 暫時錯誤提示與結果展示
+- 暫時錯誤提示、即時事件接收與結果展示
 
 前端不是權限最終來源。所有關鍵動作仍由後端再次驗證 permission 與 DB Scope。
 
@@ -75,7 +75,7 @@ DBRE Maestro 把這些能力集中在同一個工作台裡，並用 RBAC、DB Sc
 
 - SQL Editor 查詢
 - Ticket review 前的 SQL 檢測與 scope 分析
-- DDL / DML 工單執行
+- DDL / DML / Redis 工單執行
 - Metadata 讀取
 
 也就是說，頁面展示大多數治理資料時，查的是平台自己的 Meta DB；只有實際查詢、執行、metadata 掃描時才連外部 DB。
@@ -88,8 +88,21 @@ DBRE Maestro 把這些能力集中在同一個工作台裡，並用 RBAC、DB Sc
 - `exec`：Ticket execute
 - `metadata`：background metadata scan
 - `scoped_pg_query`：PostgreSQL 跨 database 臨時查詢
+- `shadow_validation`：MySQL DDL shadow validation
 
 這樣做的目的是避免長查詢、工單執行與背景掃描互相搶同一組連線。
+
+## 即時更新模型
+
+通知與工單列表 / 詳情目前不是純輪詢模式，而是：
+
+- 先用 REST 取得初始化資料
+- 再透過 `GET /api/events/stream` 建立 SSE
+- 後端發送 `notification.created`、`ticket.updated`
+
+這讓鈴鐺通知與工單狀態切換可以即時反映，又保留 REST 作為重整與重連補償來源。
+
+目前事件 broker 是 app process 內記憶體實作，適合單機或單副本；若未來做多副本部署，需要再補跨節點事件分發。
 
 ## SQL Editor 的限制與定位
 
@@ -106,10 +119,19 @@ SQL Editor 目前是「受控讀取介面」，不是通用 SQL console。核心
 
 平台把資料庫互動分成兩條路徑：
 
-- `SQL Editor`：讀取資料、Explain、Export 申請、Sensitive Access 申請
-- `Tickets`：DDL / DML 變更工單與執行流轉
+- `SQL Editor`：讀取資料、Explain、Export、Sensitive Access
+- `Tickets`：DDL / DML / Redis 變更工單與執行流轉
 
 這個切分的目的，是讓查詢與變更在權限、流程與審計上清楚分開。
+
+## DB Connections 讀寫拆分
+
+DB Connections 已拆成 read / write endpoint：
+
+- readonly endpoint：主要供 SQL Editor、export、metadata read path 使用
+- readwrite endpoint：主要供 DDL / DML / Redis ticket execute 使用
+
+如果只配置單一 host / port，系統會把 readwrite 預設回退到 readonly。
 
 ## Metadata 掃描模型
 
@@ -143,7 +165,9 @@ Masking rule 本身則不是 SQL parser 問題，而是 DSL / 規則引擎問題
 ## 相關文件
 
 - [權限模型](permission-model.md)
+- [通知與工單更新架構](notification-architecture-rest-vs-sse.md)
 - [後端 API 與權限對照](../reference/backend-api-and-permissions.md)
 - [SQL Editor](../reference/sql-editor.md)
 - [Tickets](../reference/tickets.md)
+- [DB Connections](../reference/db-connections.md)
 - [DB Metadata](../reference/db-metadata.md)
