@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Pencil, Plus, ServerCog, Trash2, X } from 'lucide-react'
-import { createDBConnection, deleteDBConnection, listDBConnections, patchDBConnection, testDBConnection } from '@/modules/db-connections/api'
+import { createDBConnection, deleteDBConnection, getDBConnectionBindings, listDBConnections, patchDBConnection, testDBConnection } from '@/modules/db-connections/api'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
-import type { DBConnection } from '@/shared/types/dbConnection'
+import type { DBConnection, DBConnectionBindings } from '@/shared/types/dbConnection'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
@@ -22,8 +22,10 @@ type DrawerState =
 type ConnectionForm = {
   name: string
   dbType: 'mysql' | 'postgres' | 'redis'
-  host: string
-  port: string
+  readonlyHost: string
+  readonlyPort: string
+  readwriteHost: string
+  readwritePort: string
   readonlyUsername: string
   readonlyPassword: string
   readwriteUsername: string
@@ -40,8 +42,10 @@ const DEFAULT_PORT_BY_DB_TYPE: Record<ConnectionForm['dbType'], string> = {
 const EMPTY_FORM: ConnectionForm = {
   name: '',
   dbType: 'mysql',
-  host: '',
-  port: '3306',
+  readonlyHost: '',
+  readonlyPort: '3306',
+  readwriteHost: '',
+  readwritePort: '3306',
   readonlyUsername: '',
   readonlyPassword: '',
   readwriteUsername: '',
@@ -75,6 +79,8 @@ export function DBConnectionsPage() {
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState<ConnectionForm>(EMPTY_FORM)
   const [selectedConnection, setSelectedConnection] = useState<DBConnection | null>(null)
+  const [bindings, setBindings] = useState<DBConnectionBindings | null>(null)
+  const [bindingsLoading, setBindingsLoading] = useState(false)
   const [testingId, setTestingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
@@ -102,6 +108,8 @@ export function DBConnectionsPage() {
     setDrawerError('')
     setDrawerLoading(false)
     setSelectedConnection(null)
+    setBindings(null)
+    setBindingsLoading(false)
     setForm(EMPTY_FORM)
   }
 
@@ -110,17 +118,22 @@ export function DBConnectionsPage() {
     setDrawerError('')
     setDrawerLoading(false)
     setSelectedConnection(connection)
+    setBindings(null)
+    setBindingsLoading(true)
     setForm({
       name: connection.name,
       dbType: normalizeDBType(connection.db_type),
-      host: connection.host,
-      port: String(connection.port),
+      readonlyHost: connection.readonly_host || connection.host,
+      readonlyPort: String(connection.readonly_port || connection.port),
+      readwriteHost: connection.readwrite_host || connection.readonly_host || connection.host,
+      readwritePort: String(connection.readwrite_port || connection.readonly_port || connection.port),
       readonlyUsername: findCredentialUsername(connection, 'readonly') ?? connection.username ?? '',
       readonlyPassword: '',
       readwriteUsername: findCredentialUsername(connection, 'readwrite') ?? '',
       readwritePassword: '',
       sslMode: normalizeSSLMode(connection.ssl_mode),
     })
+    void loadBindings(connection.id)
   }
 
   function closeDrawer() {
@@ -129,7 +142,20 @@ export function DBConnectionsPage() {
     setDrawerLoading(false)
     setSubmitting(false)
     setSelectedConnection(null)
+    setBindings(null)
+    setBindingsLoading(false)
     setForm(EMPTY_FORM)
+  }
+
+  async function loadBindings(connectionId: number) {
+    try {
+      const response = await getDBConnectionBindings(connectionId)
+      setBindings(response)
+    } catch {
+      setBindings(null)
+    } finally {
+      setBindingsLoading(false)
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -176,9 +202,9 @@ export function DBConnectionsPage() {
           : connection
       )))
       if (result.ok) {
-        pushToast(`${connectionName} connection test succeeded`, 'success', { placement: 'center' })
+        pushToast(`${connectionName} connection test succeeded for readonly and readwrite`, 'success', { placement: 'center' })
       } else {
-        pushToast(`${connectionName} connection test failed: ${result.error ?? 'Connection test failed'}`, 'error', { placement: 'center', durationMs: 3600 })
+        pushToast(`${connectionName} connection test failed: ${formatConnectionTestFailure(result)}`, 'error', { placement: 'center', durationMs: 4200 })
       }
     } catch (testError) {
       const message = testError instanceof ApiError ? testError.message : 'Connection test failed'
@@ -255,7 +281,8 @@ export function DBConnectionsPage() {
                     <tr>
                       <th className="px-3 py-3">Name</th>
                       <th className="px-3 py-3">Type</th>
-                      <th className="px-3 py-3">Target</th>
+                      <th className="px-3 py-3">Readonly Endpoint</th>
+                      <th className="px-3 py-3">Readwrite Endpoint</th>
                       <th className="px-3 py-3">
                         <div className="group relative inline-flex">
                           <span>SSL</span>
@@ -286,7 +313,14 @@ export function DBConnectionsPage() {
                           </td>
                           <td className={`px-3 py-2.5 align-top text-[12px] font-medium whitespace-nowrap ${isFailed ? 'text-danger' : 'text-ink'}`}>{formatDBType(connection.db_type)}</td>
                           <td className="px-3 py-2.5 align-top">
-                            <p className="break-all font-mono text-[12px]">{connection.host}:{connection.port}</p>
+                            <p className="break-all font-mono text-[12px]">
+                              {formatReadonlyConnectionTarget(connection)}
+                            </p>
+                          </td>
+                          <td className="px-3 py-2.5 align-top">
+                            <p className="break-all font-mono text-[12px]">
+                              {formatReadwriteConnectionTarget(connection)}
+                            </p>
                           </td>
                           <td className="px-3 py-2.5 align-top whitespace-nowrap">
                             <p className={`text-[12px] ${isFailed ? 'text-danger' : 'text-ink'}`}>{connection.ssl_mode}</p>
@@ -395,7 +429,8 @@ export function DBConnectionsPage() {
                               setForm((current) => ({
                                 ...current,
                                 dbType: nextType,
-                                port: current.port === DEFAULT_PORT_BY_DB_TYPE[current.dbType] || current.port === '' ? DEFAULT_PORT_BY_DB_TYPE[nextType] : current.port,
+                                readonlyPort: current.readonlyPort === DEFAULT_PORT_BY_DB_TYPE[current.dbType] || current.readonlyPort === '' ? DEFAULT_PORT_BY_DB_TYPE[nextType] : current.readonlyPort,
+                                readwritePort: current.readwritePort === DEFAULT_PORT_BY_DB_TYPE[current.dbType] || current.readwritePort === '' ? DEFAULT_PORT_BY_DB_TYPE[nextType] : current.readwritePort,
                               }))
                             }}
                             disabled={submitting}
@@ -416,19 +451,40 @@ export function DBConnectionsPage() {
 
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="grid gap-1.5 text-[12px] font-medium text-muted">
-                          Host
+                          Readonly Host
                           <input
-                            value={form.host}
-                            onChange={(event) => setForm((current) => ({ ...current, host: event.target.value }))}
+                            value={form.readonlyHost}
+                            onChange={(event) => setForm((current) => ({ ...current, readonlyHost: event.target.value }))}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           />
                         </label>
                         <label className="grid gap-1.5 text-[12px] font-medium text-muted">
-                          Port
+                          Readonly Port
                           <input
-                            value={form.port}
-                            onChange={(event) => setForm((current) => ({ ...current, port: event.target.value }))}
+                            value={form.readonlyPort}
+                            onChange={(event) => setForm((current) => ({ ...current, readonlyPort: event.target.value }))}
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            disabled={submitting}
+                          />
+                        </label>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                          Readwrite Host
+                          <input
+                            value={form.readwriteHost}
+                            onChange={(event) => setForm((current) => ({ ...current, readwriteHost: event.target.value }))}
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            disabled={submitting}
+                          />
+                        </label>
+                        <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                          Readwrite Port
+                          <input
+                            value={form.readwritePort}
+                            onChange={(event) => setForm((current) => ({ ...current, readwritePort: event.target.value }))}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           />
@@ -485,7 +541,7 @@ export function DBConnectionsPage() {
 
                       <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
                         <p className="font-semibold text-ink">Credential Policy</p>
-                        <p className="mt-1">SQL Editor and DB Metadata use `readonly`; DDL and DML execution use `readwrite`. In edit mode, leaving a password blank keeps the current password.</p>
+                        <p className="mt-1">SQL Editor and DB Metadata use `readonly`; ticket execution uses `readwrite`. In edit mode, leaving a password blank keeps the current password.</p>
                       </div>
 
                       <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
@@ -503,6 +559,31 @@ export function DBConnectionsPage() {
                       </button>
                     </form>
                   </CardSection>
+                  {drawerState.mode === 'edit' ? (
+                    <CardSection title="Resource Bindings" icon={<ServerCog className="h-4 w-4 text-accent" />}>
+                      {bindingsLoading ? (
+                        <LoadingBlock message="Loading resource bindings..." className="min-h-[160px] rounded-xl border-border bg-panel" />
+                      ) : (
+                        <div className="grid gap-4 sm:grid-cols-3">
+                          <BindingList
+                            title="Direct Users"
+                            items={bindings?.direct_users.map((user) => user.username) ?? []}
+                            emptyLabel="No direct user bindings."
+                          />
+                          <BindingList
+                            title="Auth Groups"
+                            items={bindings?.auth_groups.map((group) => group.name || group.group_key) ?? []}
+                            emptyLabel="No auth group bindings."
+                          />
+                          <BindingList
+                            title="Effective Users"
+                            items={bindings?.effective_users.map((user) => user.username) ?? []}
+                            emptyLabel="No effective users."
+                          />
+                        </div>
+                      )}
+                    </CardSection>
+                  ) : null}
                   {drawerError ? <InlineAlert>{drawerError}</InlineAlert> : null}
                 </div>
               )}
@@ -530,13 +611,27 @@ export function DBConnectionsPage() {
   )
 }
 
+function formatConnectionTestFailure(result: { error?: string; results?: Array<{ credential_role: string; ok: boolean; error?: string }> }) {
+  const failures = (result.results ?? [])
+    .filter((item) => !item.ok)
+    .map((item) => `${item.credential_role}: ${item.error || 'Connection test failed'}`)
+  if (failures.length > 0) {
+    return failures.join('; ')
+  }
+  return result.error ?? 'Connection test failed'
+}
+
 function toPayload(form: ConnectionForm) {
   const databaseName = form.dbType === 'postgres' ? 'postgres' : null
   return {
     name: form.name.trim(),
     db_type: form.dbType,
-    host: form.host.trim(),
-    port: Number(form.port),
+    host: form.readonlyHost.trim(),
+    port: Number(form.readonlyPort),
+    readonly_host: form.readonlyHost.trim(),
+    readonly_port: Number(form.readonlyPort),
+    readwrite_host: form.readwriteHost.trim(),
+    readwrite_port: Number(form.readwritePort),
     database_name: databaseName,
     username: form.readonlyUsername.trim(),
     password: form.readonlyPassword,
@@ -563,7 +658,7 @@ function normalizeSSLMode(value: string): ConnectionForm['sslMode'] {
 }
 
 function isFormSubmittable(form: ConnectionForm, isEdit = false) {
-  if (!form.name.trim() || !form.host.trim() || !form.port.trim()) {
+  if (!form.name.trim() || !form.readonlyHost.trim() || !form.readonlyPort.trim()) {
     return false
   }
   if (!form.readonlyUsername.trim() && form.dbType !== 'redis') {
@@ -572,7 +667,7 @@ function isFormSubmittable(form: ConnectionForm, isEdit = false) {
   if (!isEdit && !form.readonlyPassword) {
     return false
   }
-  return Number(form.port) > 0
+  return Number(form.readonlyPort) > 0 && Number(form.readwritePort || form.readonlyPort) > 0
 }
 
 function formatDBType(dbType: string) {
@@ -587,6 +682,33 @@ function formatDBType(dbType: string) {
 
 function findCredentialUsername(connection: DBConnection, role: 'readonly' | 'readwrite') {
   return connection.credentials?.find((item) => item.credential_role === role)?.username
+}
+
+function formatReadonlyConnectionTarget(connection: DBConnection) {
+  return `${connection.readonly_host || connection.host}:${connection.readonly_port || connection.port}`
+}
+
+function formatReadwriteConnectionTarget(connection: DBConnection) {
+  return `${connection.readwrite_host || connection.readonly_host || connection.host}:${connection.readwrite_port || connection.readonly_port || connection.port}`
+}
+
+function BindingList({ title, items, emptyLabel }: { title: string; items: string[]; emptyLabel: string }) {
+  return (
+    <div className="grid gap-2">
+      <p className="text-[12px] font-semibold text-ink">{title}</p>
+      {items.length === 0 ? (
+        <p className="text-[12px] text-muted">{emptyLabel}</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {items.map((item) => (
+            <span key={item} className="inline-flex rounded-full border border-border bg-panel-soft px-2.5 py-1 text-[11px] font-medium text-ink">
+              {item}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 

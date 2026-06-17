@@ -41,9 +41,9 @@ func (r *DBConnectionRepo) Create(ctx context.Context, c *model.DBConnection, pl
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO db_connections
-         (name, db_type, host, port, database_name, username, password_encrypted, encryption_key_version, ssl_mode, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
-		c.Name, c.DBType, c.Host, c.Port, c.DatabaseName,
+         (name, db_type, host, port, readonly_host, readonly_port, readwrite_host, readwrite_port, database_name, username, password_encrypted, encryption_key_version, ssl_mode, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+		c.Name, c.DBType, c.Host, c.Port, c.ReadonlyHost, c.ReadonlyPort, c.ReadwriteHost, c.ReadwritePort, c.DatabaseName,
 		c.Username, legacyEnc, c.SSLMode, c.CreatedBy, timeutil.NowUTC(), timeutil.NowUTC(),
 	)
 	if err != nil {
@@ -118,6 +118,7 @@ func (r *DBConnectionRepo) ResolveCredential(conn *model.DBConnection, role stri
 		}
 		cloned := *conn
 		cloned.Username = credential.Username
+		applyConnectionEndpoint(&cloned, targetRole)
 		return &cloned, string(plain), nil
 	}
 
@@ -130,6 +131,7 @@ func (r *DBConnectionRepo) ResolveCredential(conn *model.DBConnection, role stri
 		return nil, "", fmt.Errorf("decrypt legacy credential for connection %d: %w", conn.ID, err)
 	}
 	cloned := *conn
+	applyConnectionEndpoint(&cloned, targetRole)
 	return &cloned, string(plain), nil
 }
 
@@ -146,12 +148,12 @@ func (r *DBConnectionRepo) UpdatePassword(ctx context.Context, id uint64, plainP
 }
 
 // Update patches non-sensitive fields. Call UpdatePassword separately if password changed.
-func (r *DBConnectionRepo) Update(ctx context.Context, id uint64, name, dbType, host string, port uint16, databaseName *string, username, sslMode string) error {
+func (r *DBConnectionRepo) Update(ctx context.Context, id uint64, name, dbType, host string, port uint16, readonlyHost string, readonlyPort uint16, readwriteHost string, readwritePort uint16, databaseName *string, username, sslMode string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE db_connections
-         SET name=?, db_type=?, host=?, port=?, database_name=?, username=?, ssl_mode=?, updated_at=?
+         SET name=?, db_type=?, host=?, port=?, readonly_host=?, readonly_port=?, readwrite_host=?, readwrite_port=?, database_name=?, username=?, ssl_mode=?, updated_at=?
          WHERE id=?`,
-		name, dbType, host, port, databaseName, username, sslMode, timeutil.NowUTC(), id,
+		name, dbType, host, port, readonlyHost, readonlyPort, readwriteHost, readwritePort, databaseName, username, sslMode, timeutil.NowUTC(), id,
 	)
 	return err
 }
@@ -292,4 +294,15 @@ func collectConnectionIDs(conns []model.DBConnection) []uint64 {
 		ids = append(ids, conn.ID)
 	}
 	return ids
+}
+
+func applyConnectionEndpoint(conn *model.DBConnection, role string) {
+	switch strings.TrimSpace(role) {
+	case model.DBCredentialRoleReadwrite:
+		conn.Host = conn.EffectiveReadwriteHost()
+		conn.Port = conn.EffectiveReadwritePort()
+	default:
+		conn.Host = conn.EffectiveReadonlyHost()
+		conn.Port = conn.EffectiveReadonlyPort()
+	}
 }

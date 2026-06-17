@@ -15,6 +15,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
+	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/dbre-maestro/maestro/internal/sqlpolicy"
@@ -33,6 +34,7 @@ type TicketHandler struct {
 	sqlReviewRules     *repository.SQLReviewRuleRepo
 	shadowValidationDB *sqlx.DB
 	notifRepo          *repository.NotificationRepo
+	broker             *realtime.Broker
 	lark               *notification.Dispatcher
 	appBaseURL         string
 }
@@ -179,6 +181,7 @@ func NewTicketHandler(
 	shadowValidationDB *sqlx.DB,
 	lark *notification.Dispatcher,
 	notifRepo *repository.NotificationRepo,
+	broker *realtime.Broker,
 	appBaseURL string,
 ) *TicketHandler {
 	return &TicketHandler{
@@ -191,6 +194,7 @@ func NewTicketHandler(
 		sqlReviewRules:     sqlReviewRules,
 		shadowValidationDB: shadowValidationDB,
 		notifRepo:          notifRepo,
+		broker:             broker,
 		lark:               lark,
 		appBaseURL:         strings.TrimRight(appBaseURL, "/"),
 	}
@@ -366,7 +370,37 @@ func (h *TicketHandler) sendInApp(ctx context.Context, userID uint64, notifType,
 	if h.notifRepo == nil {
 		return
 	}
-	_ = h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
+	notificationID, err := h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
+	if err != nil {
+		return
+	}
+	publishNotificationCreated(ctx, h.broker, h.notifRepo, userID, notificationID)
+}
+
+func (h *TicketHandler) publishTicketUpdate(ctx context.Context, ticket *model.Ticket, actorID *uint64) {
+	if h.broker == nil || ticket == nil || h.users == nil {
+		return
+	}
+
+	recipients := make([]uint64, 0, 8)
+	recipients = append(recipients, ticket.SubmitterID)
+	if actorID != nil && *actorID != 0 {
+		recipients = append(recipients, *actorID)
+	}
+	if reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, reviewPermissionsForTicket(ticket.TicketType)); err == nil {
+		recipients = append(recipients, reviewerIDs...)
+	}
+	if executorIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionTicketExecute}); err == nil {
+		recipients = append(recipients, executorIDs...)
+	}
+	if ticket.ExecutorID != nil {
+		recipients = append(recipients, *ticket.ExecutorID)
+	}
+
+	h.broker.PublishToUsers(recipients, "ticket.updated", ticketUpdatedEvent{
+		TicketID: ticket.ID,
+		Status:   string(ticket.Status),
+	})
 }
 
 // GET /tickets/connections
@@ -591,6 +625,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 
 	h.dispatchTicketNotification(r.Context(), created, ticketEventPendingReview, &userID, "提交人已送出工單，等待 reviewer 處理。")
+	h.publishTicketUpdate(r.Context(), created, &userID)
 	jsonCreated(w, created)
 }
 
@@ -1008,6 +1043,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
+	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
 }
 
@@ -1077,6 +1113,7 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventRejected, &userID, rejectDetail)
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
+	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
 }
 
@@ -1131,6 +1168,7 @@ func (h *TicketHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventWithdrawn, &userID, "submitter 已收回此工單。")
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
+	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
 }
 
@@ -1182,6 +1220,7 @@ func (h *TicketHandler) RequestExecution(w http.ResponseWriter, r *http.Request)
 
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventPendingExecution, &userID, "工單已進入待執行隊列。")
 	updated, _ := h.tickets.GetByID(r.Context(), id)
+	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
 }
 
@@ -1212,6 +1251,9 @@ func (h *TicketHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
+	if updated, _ := h.tickets.GetByID(r.Context(), id); updated != nil {
+		h.publishTicketUpdate(r.Context(), updated, &userID)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1296,6 +1338,7 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	go h.runTicketExecution(ticket, userID)
 
 	updated, _ := h.tickets.GetByID(r.Context(), id)
+	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
 }
 
@@ -1392,6 +1435,9 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 	} else {
 		h.dispatchTicketNotification(ctx, ticket, ticketEventExecutionFailed, &executorID, "工單執行失敗，請查看 execution log。")
 	}
+	if updated, _ := h.tickets.GetByID(ctx, ticket.ID); updated != nil {
+		h.publishTicketUpdate(ctx, updated, &executorID)
+	}
 }
 
 func (h *TicketHandler) finishTicket(ctx context.Context, id uint64, status model.TicketStatus, _ string) {
@@ -1451,6 +1497,7 @@ func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventRevoked, &userID, "敏感權限已提前撤銷，後續查詢起即失效。")
 	updated, _ := h.tickets.GetByID(r.Context(), id)
+	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
 }
 

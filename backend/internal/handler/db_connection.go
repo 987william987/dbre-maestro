@@ -18,6 +18,7 @@ import (
 type DBConnectionHandler struct {
 	repo  *repository.DBConnectionRepo
 	users *repository.UserRepo
+	auths *repository.AuthGroupRepo
 	audit *repository.AuditRepo
 }
 
@@ -27,6 +28,13 @@ type dbConnectionTestResponse struct {
 	LastTestStatus string     `json:"last_test_status"`
 	LastTestError  string     `json:"last_test_error,omitempty"`
 	LastTestedAt   *time.Time `json:"last_tested_at,omitempty"`
+	Results        []dbConnectionEndpointTestResult `json:"results,omitempty"`
+}
+
+type dbConnectionEndpointTestResult struct {
+	CredentialRole string `json:"credential_role"`
+	OK             bool   `json:"ok"`
+	Error          string `json:"error,omitempty"`
 }
 
 type connectionCredentialPayload struct {
@@ -35,8 +43,8 @@ type connectionCredentialPayload struct {
 	Password       string `json:"password"`
 }
 
-func NewDBConnectionHandler(repo *repository.DBConnectionRepo, users *repository.UserRepo, audit *repository.AuditRepo) *DBConnectionHandler {
-	return &DBConnectionHandler{repo: repo, users: users, audit: audit}
+func NewDBConnectionHandler(repo *repository.DBConnectionRepo, users *repository.UserRepo, auths *repository.AuthGroupRepo, audit *repository.AuditRepo) *DBConnectionHandler {
+	return &DBConnectionHandler{repo: repo, users: users, auths: auths, audit: audit}
 }
 
 // GET /db-connections
@@ -80,15 +88,19 @@ func (h *DBConnectionHandler) List(w http.ResponseWriter, r *http.Request) {
 // POST /db-connections
 func (h *DBConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name         string                        `json:"name"`
-		DBType       string                        `json:"db_type"`
-		Host         string                        `json:"host"`
-		Port         uint16                        `json:"port"`
-		DatabaseName *string                       `json:"database_name"`
-		Username     string                        `json:"username"`
-		Password     string                        `json:"password"`
-		SSLMode      string                        `json:"ssl_mode"`
-		Credentials  []connectionCredentialPayload `json:"credentials"`
+		Name          string                        `json:"name"`
+		DBType        string                        `json:"db_type"`
+		Host          string                        `json:"host"`
+		Port          uint16                        `json:"port"`
+		ReadonlyHost  string                        `json:"readonly_host"`
+		ReadonlyPort  uint16                        `json:"readonly_port"`
+		ReadwriteHost string                        `json:"readwrite_host"`
+		ReadwritePort uint16                        `json:"readwrite_port"`
+		DatabaseName  *string                       `json:"database_name"`
+		Username      string                        `json:"username"`
+		Password      string                        `json:"password"`
+		SSLMode       string                        `json:"ssl_mode"`
+		Credentials   []connectionCredentialPayload `json:"credentials"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -97,8 +109,16 @@ func (h *DBConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.DBType == "" {
 		req.DBType = "mysql"
 	}
-	if req.Name == "" || req.Host == "" || req.Port == 0 {
-		jsonErr(w, http.StatusUnprocessableEntity, "name, host, and port are required")
+	host, port, readonlyHost, readonlyPort, readwriteHost, readwritePort := normalizeConnectionEndpoints(
+		req.Host,
+		req.Port,
+		req.ReadonlyHost,
+		req.ReadonlyPort,
+		req.ReadwriteHost,
+		req.ReadwritePort,
+	)
+	if req.Name == "" || readonlyHost == "" || readonlyPort == 0 {
+		jsonErr(w, http.StatusUnprocessableEntity, "name, readonly_host, and readonly_port are required")
 		return
 	}
 	if req.Password == "" && len(req.Credentials) == 0 {
@@ -116,14 +136,18 @@ func (h *DBConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	userID := middleware.UserIDFromCtx(r.Context())
 	c := &model.DBConnection{
-		Name:         req.Name,
-		DBType:       req.DBType,
-		Host:         req.Host,
-		Port:         req.Port,
-		DatabaseName: normalizeDatabaseName(req.DBType, req.DatabaseName),
-		Username:     req.Username,
-		SSLMode:      req.SSLMode,
-		CreatedBy:    userID,
+		Name:          req.Name,
+		DBType:        req.DBType,
+		Host:          host,
+		Port:          port,
+		ReadonlyHost:  readonlyHost,
+		ReadonlyPort:  readonlyPort,
+		ReadwriteHost: readwriteHost,
+		ReadwritePort: readwritePort,
+		DatabaseName:  normalizeDatabaseName(req.DBType, req.DatabaseName),
+		Username:      req.Username,
+		SSLMode:       req.SSLMode,
+		CreatedBy:     userID,
 	}
 
 	created, err := h.repo.Create(r.Context(), c, req.Password, credentials)
@@ -163,54 +187,34 @@ func (h *DBConnectionHandler) Test(w http.ResponseWriter, r *http.Request) {
 	}
 
 	role := strings.TrimSpace(r.URL.Query().Get("credential_role"))
-	if role == "" {
-		if conn.DBType == "redis" {
-			role = model.DBCredentialRoleReadonly
-		} else {
-			role = model.DBCredentialRoleReadonly
+	if role != "" {
+		ok, message := h.testConnectionByRole(r.Context(), conn, role)
+		h.writeTestResult(w, r, conn.ID, ok, message, []dbConnectionEndpointTestResult{{
+			CredentialRole: role,
+			OK:             ok,
+			Error:          strings.TrimSpace(message),
+		}})
+		return
+	}
+
+	results := make([]dbConnectionEndpointTestResult, 0, 2)
+	roles := []string{model.DBCredentialRoleReadonly, model.DBCredentialRoleReadwrite}
+	overallOK := true
+	failures := make([]string, 0, len(roles))
+	for _, targetRole := range roles {
+		ok, message := h.testConnectionByRole(r.Context(), conn, targetRole)
+		if !ok {
+			overallOK = false
+			failures = append(failures, targetRole+": "+strings.TrimSpace(message))
 		}
+		results = append(results, dbConnectionEndpointTestResult{
+			CredentialRole: targetRole,
+			OK:             ok,
+			Error:          strings.TrimSpace(message),
+		})
 	}
 
-	resolvedConn, password, err := h.repo.ResolveCredential(conn, role)
-	if err != nil {
-		h.writeTestResult(w, r, conn.ID, false, err.Error())
-		return
-	}
-
-	if conn.DBType == "redis" {
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		if err := pool.RedisGlobal().Ping(ctx, pool.RedisConnOptions{
-			ConnID:   resolvedConn.ID,
-			Host:     resolvedConn.Host,
-			Port:     resolvedConn.Port,
-			Username: resolvedConn.Username,
-			Password: password,
-			DB:       0,
-			SSLMode:  resolvedConn.SSLMode,
-		}); err != nil {
-			h.writeTestResult(w, r, conn.ID, false, err.Error())
-			return
-		}
-		h.writeTestResult(w, r, conn.ID, true, "")
-		return
-	}
-
-	driver, dsn := pool.BuildDSN(resolvedConn, password)
-	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
-	if err != nil {
-		h.writeTestResult(w, r, conn.ID, false, err.Error())
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	if err := pools.QueryPool.PingContext(ctx); err != nil {
-		h.writeTestResult(w, r, conn.ID, false, err.Error())
-		return
-	}
-
-	h.writeTestResult(w, r, conn.ID, true, "")
+	h.writeTestResult(w, r, conn.ID, overallOK, strings.Join(failures, "; "), results)
 }
 
 // PATCH /db-connections/{id}
@@ -230,15 +234,19 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name         *string                        `json:"name"`
-		DBType       *string                        `json:"db_type"`
-		Host         *string                        `json:"host"`
-		Port         *uint16                        `json:"port"`
-		DatabaseName json.RawMessage                `json:"database_name"`
-		Username     *string                        `json:"username"`
-		Password     *string                        `json:"password"`
-		SSLMode      *string                        `json:"ssl_mode"`
-		Credentials  *[]connectionCredentialPayload `json:"credentials"`
+		Name          *string                        `json:"name"`
+		DBType        *string                        `json:"db_type"`
+		Host          *string                        `json:"host"`
+		Port          *uint16                        `json:"port"`
+		ReadonlyHost  *string                        `json:"readonly_host"`
+		ReadonlyPort  *uint16                        `json:"readonly_port"`
+		ReadwriteHost *string                        `json:"readwrite_host"`
+		ReadwritePort *uint16                        `json:"readwrite_port"`
+		DatabaseName  json.RawMessage                `json:"database_name"`
+		Username      *string                        `json:"username"`
+		Password      *string                        `json:"password"`
+		SSLMode       *string                        `json:"ssl_mode"`
+		Credentials   *[]connectionCredentialPayload `json:"credentials"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -261,6 +269,34 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	if req.Port != nil {
 		port = *req.Port
 	}
+	readonlyHost := existing.EffectiveReadonlyHost()
+	if req.ReadonlyHost != nil {
+		readonlyHost = strings.TrimSpace(*req.ReadonlyHost)
+	} else if req.Host != nil {
+		readonlyHost = strings.TrimSpace(*req.Host)
+	}
+	readonlyPort := existing.EffectiveReadonlyPort()
+	if req.ReadonlyPort != nil {
+		readonlyPort = *req.ReadonlyPort
+	} else if req.Port != nil {
+		readonlyPort = *req.Port
+	}
+	readwriteHost := existing.EffectiveReadwriteHost()
+	if req.ReadwriteHost != nil {
+		readwriteHost = strings.TrimSpace(*req.ReadwriteHost)
+	}
+	readwritePort := existing.EffectiveReadwritePort()
+	if req.ReadwritePort != nil {
+		readwritePort = *req.ReadwritePort
+	}
+	host, port, readonlyHost, readonlyPort, readwriteHost, readwritePort = normalizeConnectionEndpoints(
+		host,
+		port,
+		readonlyHost,
+		readonlyPort,
+		readwriteHost,
+		readwritePort,
+	)
 	databaseName := existing.DatabaseName
 	if req.DatabaseName != nil {
 		if string(req.DatabaseName) == "null" {
@@ -284,7 +320,7 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		sslMode = *req.SSLMode
 	}
 
-	if err := h.repo.Update(r.Context(), id, name, dbType, host, port, databaseName, username, sslMode); err != nil {
+	if err := h.repo.Update(r.Context(), id, name, dbType, host, port, readonlyHost, readonlyPort, readwriteHost, readwritePort, databaseName, username, sslMode); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "update failed")
 		return
 	}
@@ -335,7 +371,122 @@ func normalizeDatabaseName(dbType string, databaseName *string) *string {
 	return &trimmed
 }
 
-func (h *DBConnectionHandler) writeTestResult(w http.ResponseWriter, r *http.Request, connectionID uint64, ok bool, message string) {
+// GET /db-connections/{id}/bindings
+func (h *DBConnectionHandler) Bindings(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	conn, err := h.repo.GetByID(r.Context(), id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load failed")
+		return
+	}
+	if conn == nil {
+		jsonErr(w, http.StatusNotFound, "connection not found")
+		return
+	}
+
+	directUsers, err := h.users.ListDirectUsersByDBConnection(r.Context(), id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list direct users failed")
+		return
+	}
+	effectiveUsers, err := h.users.ListEffectiveUsersByDBConnection(r.Context(), id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list effective users failed")
+		return
+	}
+	authGroups := []repository.ResourceBoundAuthGroup{}
+	if h.auths != nil {
+		authGroups, err = h.auths.ListByDBConnection(r.Context(), id)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "list auth groups failed")
+			return
+		}
+	}
+
+	if directUsers == nil {
+		directUsers = []repository.ResourceBoundUser{}
+	}
+	if effectiveUsers == nil {
+		effectiveUsers = []repository.ResourceBoundUser{}
+	}
+	if authGroups == nil {
+		authGroups = []repository.ResourceBoundAuthGroup{}
+	}
+
+	jsonOK(w, map[string]any{
+		"db_connection_id": id,
+		"direct_users":     directUsers,
+		"effective_users":  effectiveUsers,
+		"auth_groups":      authGroups,
+	})
+}
+
+func normalizeConnectionEndpoints(host string, port uint16, readonlyHost string, readonlyPort uint16, readwriteHost string, readwritePort uint16) (string, uint16, string, uint16, string, uint16) {
+	normalizedReadonlyHost := strings.TrimSpace(readonlyHost)
+	if normalizedReadonlyHost == "" {
+		normalizedReadonlyHost = strings.TrimSpace(host)
+	}
+	normalizedReadonlyPort := readonlyPort
+	if normalizedReadonlyPort == 0 {
+		normalizedReadonlyPort = port
+	}
+
+	normalizedReadwriteHost := strings.TrimSpace(readwriteHost)
+	if normalizedReadwriteHost == "" {
+		normalizedReadwriteHost = normalizedReadonlyHost
+	}
+	normalizedReadwritePort := readwritePort
+	if normalizedReadwritePort == 0 {
+		normalizedReadwritePort = normalizedReadonlyPort
+	}
+
+	return normalizedReadonlyHost, normalizedReadonlyPort, normalizedReadonlyHost, normalizedReadonlyPort, normalizedReadwriteHost, normalizedReadwritePort
+}
+
+func (h *DBConnectionHandler) testConnectionByRole(ctx context.Context, conn *model.DBConnection, role string) (bool, string) {
+	resolvedConn, password, err := h.repo.ResolveCredential(conn, role)
+	if err != nil {
+		return false, err.Error()
+	}
+
+	if conn.DBType == "redis" {
+		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := pool.RedisGlobal().Ping(pingCtx, pool.RedisConnOptions{
+			ConnID:   resolvedConn.ID,
+			Host:     resolvedConn.Host,
+			Port:     resolvedConn.Port,
+			Username: resolvedConn.Username,
+			Password: password,
+			DB:       0,
+			SSLMode:  resolvedConn.SSLMode,
+		}); err != nil {
+			return false, err.Error()
+		}
+		return true, ""
+	}
+
+	driver, dsn := pool.BuildDSN(resolvedConn, password)
+	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
+	if err != nil {
+		return false, err.Error()
+	}
+
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := pools.QueryPool.PingContext(pingCtx); err != nil {
+		return false, err.Error()
+	}
+
+	return true, ""
+}
+
+func (h *DBConnectionHandler) writeTestResult(w http.ResponseWriter, r *http.Request, connectionID uint64, ok bool, message string, results []dbConnectionEndpointTestResult) {
 	testedAt, err := h.repo.RecordTestResult(r.Context(), connectionID, ok, message)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "persist test result failed")
@@ -346,6 +497,7 @@ func (h *DBConnectionHandler) writeTestResult(w http.ResponseWriter, r *http.Req
 		OK:             ok,
 		LastTestStatus: "passed",
 		LastTestedAt:   &testedAt,
+		Results:        results,
 	}
 	if !ok {
 		response.Error = message

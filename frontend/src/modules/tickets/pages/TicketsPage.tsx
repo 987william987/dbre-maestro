@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/tickets/EmptyState'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { formatDateTime } from '@/shared/lib/format'
+import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
 import type { Ticket, TicketStatus, TicketType } from '@/shared/types/ticket'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
@@ -108,6 +109,21 @@ export function TicketsPage() {
 
   useEffect(() => {
     void loadTickets(appliedFilters, offset)
+  }, [appliedFilters, offset])
+
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const realtimeEvent = event as CustomEvent<{ event?: string }>
+      if (realtimeEvent.detail?.event !== 'ticket.updated') {
+        return
+      }
+      void loadTickets(appliedFilters, offset)
+    }
+
+    window.addEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
+    return () => {
+      window.removeEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
+    }
   }, [appliedFilters, offset])
 
   const canCreateTicket = user?.permissions.includes('tickets.apply') ?? false

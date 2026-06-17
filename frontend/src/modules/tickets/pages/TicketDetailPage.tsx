@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
+import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
 import type { Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants } from '@/shared/types/ticket'
 import type { AuditLog } from '@/shared/types/audit'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
@@ -439,6 +440,28 @@ export function TicketDetailPage() {
 
     return () => {
       active = false
+    }
+  }, [id])
+
+  useEffect(() => {
+    if (!id) {
+      return
+    }
+
+    const handleRealtime = (event: Event) => {
+      const realtimeEvent = event as CustomEvent<{ event?: string; data?: { ticket_id?: number } | null }>
+      if (realtimeEvent.detail?.event !== 'ticket.updated') {
+        return
+      }
+      if (String(realtimeEvent.detail?.data?.ticket_id ?? '') !== id) {
+        return
+      }
+      void reloadTicket()
+    }
+
+    window.addEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
+    return () => {
+      window.removeEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
     }
   }, [id])
 

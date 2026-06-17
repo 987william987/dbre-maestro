@@ -27,6 +27,12 @@ type AuthGroupEntity struct {
 	UpdatedAt        string `db:"updated_at"`
 }
 
+type ResourceBoundAuthGroup struct {
+	ID       uint64 `db:"id" json:"id"`
+	GroupKey string `db:"group_key" json:"group_key"`
+	Name     string `db:"name" json:"name"`
+}
+
 func NewAuthGroupRepo(db *sqlx.DB) *AuthGroupRepo {
 	return &AuthGroupRepo{db: db}
 }
@@ -79,6 +85,18 @@ func (r *AuthGroupRepo) ListDBConnectionIDs(ctx context.Context, authGroupID uin
 		ORDER BY db_connection_id
 	`, authGroupID)
 	return ids, err
+}
+
+func (r *AuthGroupRepo) ListByDBConnection(ctx context.Context, dbConnectionID uint64) ([]ResourceBoundAuthGroup, error) {
+	var groups []ResourceBoundAuthGroup
+	err := r.db.SelectContext(ctx, &groups, `
+		SELECT ag.id, ag.group_key, ag.name
+		FROM auth_groups ag
+		INNER JOIN auth_group_db_connections agdc ON agdc.auth_group_id = ag.id
+		WHERE agdc.db_connection_id = ?
+		ORDER BY ag.name, ag.group_key
+	`, dbConnectionID)
+	return groups, err
 }
 
 func (r *AuthGroupRepo) Create(ctx context.Context, groupKey, name, description string, isSystem, isProtected bool) (*AuthGroupEntity, error) {

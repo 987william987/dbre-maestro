@@ -15,6 +15,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
+	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
@@ -29,6 +30,7 @@ type ExportHandler struct {
 	audit               *repository.AuditRepo
 	masking             *maskingRuntime
 	notifRepo           *repository.NotificationRepo
+	broker              *realtime.Broker
 	lark                *notification.Dispatcher
 	downloadRateLimiter *requestRateLimiter
 	appBaseURL          string
@@ -44,6 +46,7 @@ func NewExportHandler(
 	whitelist *repository.MaskingWhitelistRepo,
 	engine *masking.Engine,
 	notifRepo *repository.NotificationRepo,
+	broker *realtime.Broker,
 	lark *notification.Dispatcher,
 	appBaseURL string,
 ) *ExportHandler {
@@ -55,6 +58,7 @@ func NewExportHandler(
 		audit:               audit,
 		masking:             newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:           notifRepo,
+		broker:              broker,
 		lark:                lark,
 		downloadRateLimiter: newRequestRateLimiter(3, time.Minute),
 		appBaseURL:          strings.TrimRight(appBaseURL, "/"),
@@ -189,7 +193,11 @@ func (h *ExportHandler) sendInApp(ctx context.Context, userID uint64, notifType,
 	if h.notifRepo == nil {
 		return
 	}
-	_ = h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
+	notificationID, err := h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
+	if err != nil {
+		return
+	}
+	publishNotificationCreated(ctx, h.broker, h.notifRepo, userID, notificationID)
 }
 
 func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body, ticketNo string) {
@@ -287,6 +295,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 	)
 	h.sendInApp(r.Context(), userID, "ticket_submitted", fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
 	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
+	publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":          ticket.ID,

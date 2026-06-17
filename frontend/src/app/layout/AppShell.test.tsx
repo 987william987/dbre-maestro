@@ -14,6 +14,14 @@ vi.mock('@/modules/notifications/api', () => ({
   markAllNotificationsRead: vi.fn(),
 }))
 
+vi.mock('@/shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/api/client')>('@/shared/api/client')
+  return {
+    ...actual,
+    openEventStream: vi.fn(() => () => undefined),
+  }
+})
+
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 

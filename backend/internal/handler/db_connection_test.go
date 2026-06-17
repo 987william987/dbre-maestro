@@ -23,6 +23,10 @@ func dbConnectionRows(databaseName any) *sqlmock.Rows {
 		"db_type",
 		"host",
 		"port",
+		"readonly_host",
+		"readonly_port",
+		"readwrite_host",
+		"readwrite_port",
 		"database_name",
 		"username",
 		"password_encrypted",
@@ -36,7 +40,7 @@ func dbConnectionRows(databaseName any) *sqlmock.Rows {
 		"created_at",
 		"updated_at",
 	}).
-		AddRow(5, "analytics", "mysql", "db.internal", 3306, databaseName, "readonly", []byte("cipher"), 1, "prefer", nil, nil, nil, nil, 1, now, now)
+		AddRow(5, "analytics", "mysql", "db.internal", 3306, "db.internal", 3306, "db-write.internal", 3307, databaseName, "readonly", []byte("cipher"), 1, "prefer", nil, nil, nil, nil, 1, now, now)
 }
 
 func TestDBConnectionHandlerPatchAllowsClearingDatabaseName(t *testing.T) {
@@ -50,6 +54,7 @@ func TestDBConnectionHandlerPatchAllowsClearingDatabaseName(t *testing.T) {
 	handler := NewDBConnectionHandler(
 		repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")),
 		repository.NewUserRepo(sqlxDB),
+		repository.NewAuthGroupRepo(sqlxDB),
 		repository.NewAuditRepo(sqlxDB),
 	)
 
@@ -62,6 +67,10 @@ func TestDBConnectionHandlerPatchAllowsClearingDatabaseName(t *testing.T) {
 			"db_type",
 			"host",
 			"port",
+			"readonly_host",
+			"readonly_port",
+			"readwrite_host",
+			"readwrite_port",
 			"database_name",
 			"username",
 			"password_encrypted",
@@ -74,12 +83,12 @@ func TestDBConnectionHandlerPatchAllowsClearingDatabaseName(t *testing.T) {
 			"created_by",
 			"created_at",
 			"updated_at",
-		}).AddRow(5, "analytics", "mysql", "db.internal", 3306, "analytics", "readonly", []byte(nil), 1, "prefer", nil, nil, nil, nil, 1, now, now))
+		}).AddRow(5, "analytics", "mysql", "db.internal", 3306, "db.internal", 3306, "db-write.internal", 3307, "analytics", "readonly", []byte(nil), 1, "prefer", nil, nil, nil, nil, 1, now, now))
 	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
 		WithArgs(uint64(5)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
 	mock.ExpectExec(`UPDATE db_connections`).
-		WithArgs("analytics", "mysql", "db.internal", uint16(3306), nil, "readonly", "prefer", sqlmock.AnyArg(), uint64(5)).
+		WithArgs("analytics", "mysql", "db.internal", uint16(3306), "db.internal", uint16(3306), "db-write.internal", uint16(3307), nil, "readonly", "prefer", sqlmock.AnyArg(), uint64(5)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`INSERT INTO audit_logs`).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -123,12 +132,13 @@ func TestDBConnectionHandlerCreateRedisAllowsEmptyUsername(t *testing.T) {
 	handler := NewDBConnectionHandler(
 		repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")),
 		repository.NewUserRepo(sqlxDB),
+		repository.NewAuthGroupRepo(sqlxDB),
 		repository.NewAuditRepo(sqlxDB),
 	)
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO db_connections`).
-		WithArgs("cache-redis", "redis", "redis.internal", uint16(6379), nil, "", sqlmock.AnyArg(), "prefer", uint64(99), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("cache-redis", "redis", "redis.internal", uint16(6379), "redis.internal", uint16(6379), "redis.internal", uint16(6379), nil, "", sqlmock.AnyArg(), "prefer", uint64(99), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(7, 1))
 	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
 		WithArgs(uint64(7)).
@@ -145,6 +155,10 @@ func TestDBConnectionHandlerCreateRedisAllowsEmptyUsername(t *testing.T) {
 			"db_type",
 			"host",
 			"port",
+			"readonly_host",
+			"readonly_port",
+			"readwrite_host",
+			"readwrite_port",
 			"database_name",
 			"username",
 			"password_encrypted",
@@ -157,7 +171,7 @@ func TestDBConnectionHandlerCreateRedisAllowsEmptyUsername(t *testing.T) {
 			"created_by",
 			"created_at",
 			"updated_at",
-		}).AddRow(7, "cache-redis", "redis", "redis.internal", 6379, nil, "", []byte("cipher"), 1, "prefer", nil, nil, nil, nil, 99, time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)))
+		}).AddRow(7, "cache-redis", "redis", "redis.internal", 6379, "redis.internal", 6379, "redis.internal", 6379, nil, "", []byte("cipher"), 1, "prefer", nil, nil, nil, nil, 99, time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
 		WithArgs(uint64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
@@ -198,12 +212,13 @@ func TestDBConnectionHandlerCreatePostgresDefaultsDatabaseNameToPostgres(t *test
 	handler := NewDBConnectionHandler(
 		repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")),
 		repository.NewUserRepo(sqlxDB),
+		repository.NewAuthGroupRepo(sqlxDB),
 		repository.NewAuditRepo(sqlxDB),
 	)
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO db_connections`).
-		WithArgs("analytics-pg", "postgres", "pg.internal", uint16(5432), "postgres", "postgres", sqlmock.AnyArg(), "prefer", uint64(99), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("analytics-pg", "postgres", "pg.internal", uint16(5432), "pg.internal", uint16(5432), "pg.internal", uint16(5432), "postgres", "postgres", sqlmock.AnyArg(), "prefer", uint64(99), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(8, 1))
 	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
 		WithArgs(uint64(8)).
@@ -220,6 +235,10 @@ func TestDBConnectionHandlerCreatePostgresDefaultsDatabaseNameToPostgres(t *test
 			"db_type",
 			"host",
 			"port",
+			"readonly_host",
+			"readonly_port",
+			"readwrite_host",
+			"readwrite_port",
 			"database_name",
 			"username",
 			"password_encrypted",
@@ -232,7 +251,7 @@ func TestDBConnectionHandlerCreatePostgresDefaultsDatabaseNameToPostgres(t *test
 			"created_by",
 			"created_at",
 			"updated_at",
-		}).AddRow(8, "analytics-pg", "postgres", "pg.internal", 5432, "postgres", "postgres", []byte("cipher"), 1, "prefer", nil, nil, nil, nil, 99, time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)))
+		}).AddRow(8, "analytics-pg", "postgres", "pg.internal", 5432, "pg.internal", 5432, "pg.internal", 5432, "postgres", "postgres", []byte("cipher"), 1, "prefer", nil, nil, nil, nil, 99, time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
 		WithArgs(uint64(8)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
@@ -269,6 +288,7 @@ func TestTicketHandlerCreateRejectsConnectionOutsideScope(t *testing.T) {
 		repository.NewAuditRepo(sqlxDB),
 		repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")),
 		repository.NewUserRepo(sqlxDB),
+		nil,
 		nil,
 		nil,
 		nil,

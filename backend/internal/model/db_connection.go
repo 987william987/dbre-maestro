@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type DBConnection struct {
 	ID                   uint64                   `db:"id"                     json:"id"`
@@ -8,6 +11,10 @@ type DBConnection struct {
 	DBType               string                   `db:"db_type"                json:"db_type"`
 	Host                 string                   `db:"host"                   json:"host"`
 	Port                 uint16                   `db:"port"                   json:"port"`
+	ReadonlyHost         string                   `db:"readonly_host"          json:"readonly_host"`
+	ReadonlyPort         uint16                   `db:"readonly_port"          json:"readonly_port"`
+	ReadwriteHost        string                   `db:"readwrite_host"         json:"readwrite_host"`
+	ReadwritePort        uint16                   `db:"readwrite_port"         json:"readwrite_port"`
 	DatabaseName         *string                  `db:"database_name"          json:"database_name,omitempty"`
 	Username             string                   `db:"username"               json:"username"`
 	PasswordEncrypted    []byte                   `db:"password_encrypted"     json:"-"`
@@ -44,4 +51,38 @@ type DBConnectionCredentialInput struct {
 	CredentialRole string
 	Username       string
 	Password       string
+}
+
+func (c *DBConnection) EffectiveReadonlyHost() string {
+	if host := strings.TrimSpace(c.ReadonlyHost); host != "" {
+		return host
+	}
+	return strings.TrimSpace(c.Host)
+}
+
+func (c *DBConnection) EffectiveReadonlyPort() uint16 {
+	if c.ReadonlyPort != 0 {
+		return c.ReadonlyPort
+	}
+	return c.Port
+}
+
+func (c *DBConnection) EffectiveReadwriteHost() string {
+	if host := strings.TrimSpace(c.ReadwriteHost); host != "" {
+		return host
+	}
+	if host := c.EffectiveReadonlyHost(); host != "" {
+		return host
+	}
+	return strings.TrimSpace(c.Host)
+}
+
+func (c *DBConnection) EffectiveReadwritePort() uint16 {
+	if c.ReadwritePort != 0 {
+		return c.ReadwritePort
+	}
+	if port := c.EffectiveReadonlyPort(); port != 0 {
+		return port
+	}
+	return c.Port
 }

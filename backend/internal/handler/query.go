@@ -15,6 +15,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
+	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
@@ -67,6 +68,7 @@ type QueryHandler struct {
 	settings     *repository.SettingsRepo
 	masking      *maskingRuntime
 	notifRepo    *repository.NotificationRepo
+	broker       *realtime.Broker
 	lark         *notification.Dispatcher
 	appBaseURL   string
 }
@@ -96,6 +98,7 @@ func NewQueryHandler(
 	engine *masking.Engine,
 	whitelist *repository.MaskingWhitelistRepo,
 	notifRepo *repository.NotificationRepo,
+	broker *realtime.Broker,
 	lark *notification.Dispatcher,
 	appBaseURL string,
 ) *QueryHandler {
@@ -109,6 +112,7 @@ func NewQueryHandler(
 		settings:     settings,
 		masking:      newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:    notifRepo,
+		broker:       broker,
 		lark:         lark,
 		appBaseURL:   strings.TrimRight(appBaseURL, "/"),
 	}
@@ -151,7 +155,11 @@ func (h *QueryHandler) sendInApp(ctx context.Context, userID uint64, notifType, 
 	if h.notifRepo == nil {
 		return
 	}
-	_ = h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
+	notificationID, err := h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
+	if err != nil {
+		return
+	}
+	publishNotificationCreated(ctx, h.broker, h.notifRepo, userID, notificationID)
 }
 
 func (h *QueryHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body, ticketNo string) {
@@ -440,6 +448,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		h.ticketLink(ticket.ID),
 	)
 	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
+	publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":   ticket.ID,

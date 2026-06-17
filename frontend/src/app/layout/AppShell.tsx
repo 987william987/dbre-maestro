@@ -3,8 +3,10 @@ import { Bell, BriefcaseBusiness, ChevronDown, Database, DatabaseZap, FileClock,
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
+import { openEventStream } from '@/shared/api/client'
 import { hasAnyPermission, TICKET_WORKSPACE_PERMISSIONS } from '@/shared/auth/permissions'
 import { useAuth } from '@/shared/auth/AuthContext'
+import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
 import type { NotificationItem } from '@/shared/types/notification'
 import { useToast } from '@/shared/ui/ToastContext'
 
@@ -240,13 +242,18 @@ export function AppShell() {
     }
 
     void loadNotifications(false)
-    const timer = window.setInterval(() => {
-      void loadNotifications(true)
-    }, 30000)
+    const stopStream = openEventStream('/events/stream', {
+      onEvent: (message) => {
+        window.dispatchEvent(new CustomEvent(MAESTRO_REALTIME_EVENT, { detail: message }))
+        if (message.event === 'notification.created') {
+          void loadNotifications(true)
+        }
+      },
+    })
 
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      stopStream()
     }
   }, [pushToast])
 
