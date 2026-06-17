@@ -77,7 +77,6 @@ function seedAuthGroups() {
 describe('UsersPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     mockedListUsers.mockResolvedValue({ users: [] })
     mockedListUserDBConnections.mockResolvedValue({ connections: [] })
     seedAuthGroups()
@@ -103,8 +102,8 @@ describe('UsersPage', () => {
 
     renderPage()
 
-    const email = await screen.findByText('alice@example.com')
-    const row = email.closest('tr')
+    const username = await screen.findByText('alice')
+    const row = username.closest('tr')
 
     expect(row).not.toBeNull()
     expect(within(row as HTMLTableRowElement).getByText('Developer')).toBeInTheDocument()
@@ -143,6 +142,7 @@ describe('UsersPage', () => {
     fireEvent.change(screen.getByLabelText('User auth group membership selection'), { target: { value: 'developer' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add to Group' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirm Create' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Create User' }))[1])
 
     await waitFor(() => {
       expect(mockedCreateUser).toHaveBeenCalledWith({
@@ -204,6 +204,7 @@ describe('UsersPage', () => {
     expect(mockedPatchUser).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Save Changes' }))[1])
 
     await waitFor(() => {
       expect(mockedPatchUser).toHaveBeenCalledWith(3, {
@@ -264,6 +265,7 @@ describe('UsersPage', () => {
 
     fireEvent.change(password, { target: { value: 'NewSecret123!' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Save Changes' }))[1])
 
     await waitFor(() => {
       expect(mockedPatchUser).toHaveBeenCalledWith(1, { password: 'NewSecret123!' })
@@ -327,10 +329,11 @@ describe('UsersPage', () => {
     selectOption('Auth Group user selection', 'amy')
     fireEvent.click(screen.getByRole('button', { name: 'Add User' }))
     fireEvent.click(screen.getAllByRole('button', { name: 'Add' })[0])
-    fireEvent.change(screen.getByPlaceholderText('Search connection name, host, database'), { target: { value: 'analytics' } })
+    fireEvent.change(screen.getByPlaceholderText('Search connection name, type, database'), { target: { value: 'analytics' } })
     const addButtons = screen.getAllByRole('button', { name: 'Add' })
     fireEvent.click(addButtons[addButtons.length - 1])
     fireEvent.click(screen.getAllByRole('button', { name: 'Create Auth Group' })[1])
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Create Auth Group' }))[2])
 
     await waitFor(() => {
       expect(mockedCreateAuthGroup).toHaveBeenCalledWith({
@@ -367,6 +370,7 @@ describe('UsersPage', () => {
 
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'db admin team' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Auth Group' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Save Changes' }))[0])
 
     await waitFor(() => {
       expect(mockedPatchAuthGroup).toHaveBeenCalledWith('developer', {
@@ -420,6 +424,7 @@ describe('UsersPage', () => {
     expect(mockedDeleteUser).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Confirm Delete' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Delete User' }))[0])
 
     await waitFor(() => {
       expect(mockedDeleteUser).toHaveBeenCalledWith(6)
@@ -444,12 +449,12 @@ describe('UsersPage', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByText('user-1@example.com')).toBeInTheDocument())
-    expect(screen.queryByText('user-21@example.com')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('user-1')).toBeInTheDocument())
+    expect(screen.queryByText('user-21')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
 
-    await waitFor(() => expect(screen.getByText('user-21@example.com')).toBeInTheDocument())
-    expect(screen.queryByText('user-1@example.com')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('user-21')).toBeInTheDocument())
+    expect(screen.queryByText('user-1')).not.toBeInTheDocument()
   })
 })

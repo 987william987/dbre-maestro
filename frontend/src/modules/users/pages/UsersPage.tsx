@@ -10,6 +10,7 @@ import type { AuthGroup } from '@/shared/types/auth'
 import type { AuthGroupDetail } from '@/shared/types/authGroup'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { UserDetail, UserSummary } from '@/shared/types/user'
+import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
@@ -85,6 +86,16 @@ type AuthGroupDraft = {
   pendingDelete: boolean
 }
 
+type ConfirmState =
+  | {
+      kind: 'create-user' | 'update-user' | 'delete-user' | 'create-auth-group' | 'update-auth-group' | 'delete-auth-group'
+      title: string
+      lines: string[]
+      confirmLabel: string
+      tone?: 'default' | 'danger'
+    }
+  | null
+
 const EMPTY_USER_DRAFT: UserDraft = {
   username: '',
   email: '',
@@ -131,6 +142,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   const [userDBScopeSearch, setUserDBScopeSearch] = useState('')
   const [authGroupPermissionSearch, setAuthGroupPermissionSearch] = useState('')
   const [authGroupDBScopeSearch, setAuthGroupDBScopeSearch] = useState('')
+  const [confirmState, setConfirmState] = useState<ConfirmState>(null)
 
   useEffect(() => {
     void bootstrap()
@@ -211,6 +223,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     setUserDBScopeSearch('')
     setAuthGroupPermissionSearch('')
     setAuthGroupDBScopeSearch('')
+    setConfirmState(null)
   }
 
   function openCreateUserDrawer() {
@@ -218,6 +231,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     setDrawerError('')
     setSelectedUser(null)
     setSelectedAuthGroup(null)
+    setConfirmState(null)
     setUserDraft(EMPTY_USER_DRAFT)
     setPendingUserAuthGroup(authGroupOptions[0] ?? '')
   }
@@ -226,6 +240,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     setDrawerState({ mode: 'edit-user', userId })
     setDrawerLoading(true)
     setDrawerError('')
+    setConfirmState(null)
+    setSelectedUser(null)
     setSelectedAuthGroup(null)
     try {
       const detail = await getUser(userId)
@@ -254,6 +270,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     setDrawerError('')
     setSelectedUser(null)
     setSelectedAuthGroup(null)
+    setConfirmState(null)
     setAuthGroupDraft(EMPTY_AUTH_GROUP_DRAFT)
     setPendingAuthGroupUserID('')
   }
@@ -262,7 +279,9 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     setDrawerState({ mode: 'edit-auth-group', authGroupKey })
     setDrawerLoading(true)
     setDrawerError('')
+    setConfirmState(null)
     setSelectedUser(null)
+    setSelectedAuthGroup(null)
     try {
       const detail = await getAuthGroup(authGroupKey)
       setSelectedAuthGroup(detail)
@@ -282,11 +301,6 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     }
   }
 
-  function confirmChanges(title: string, lines: string[]) {
-    const summary = lines.length > 0 ? lines.map((line) => `- ${line}`).join('\n') : '- No field changes'
-    return window.confirm(`${title}\n\n${summary}\n\nDo you want to continue?`)
-  }
-
   async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!drawerState) {
@@ -299,16 +313,87 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         `Email: ${userDraft.email}`,
         `Lark Open ID: ${userDraft.larkRecipient || 'Not set'}`,
         `Auth Groups: ${formatAuthGroupList(userDraft.authGroups, authGroupLabelMap)}`,
-        `Direct Permissions: ${userDraft.directPermissions.join(', ') || 'None'}`,
+        `Direct Permissions: ${formatPermissionList(userDraft.directPermissions)}`,
         `Direct DB Scope: ${formatConnectionIDs(userDraft.directDBConnectionIDs, connections)}`,
       ]
-      if (!confirmChanges('Create User', createSummary)) {
-        return
-      }
+      setConfirmState({
+        kind: 'create-user',
+        title: 'Confirm Create User',
+        lines: createSummary,
+        confirmLabel: 'Create User',
+      })
+      return
+    }
 
-      setSaving(true)
-      setDrawerError('')
-      try {
+    if (drawerState.mode !== 'edit-user' || !selectedUser) {
+      return
+    }
+
+    const changeSummary = summarizeUserChanges(selectedUser, userDraft, authGroupLabelMap, connections)
+    if (changeSummary.length === 0) {
+      pushToast('No changes to save', 'success')
+      return
+    }
+    setConfirmState({
+      kind: userDraft.pendingDelete ? 'delete-user' : 'update-user',
+      title: userDraft.pendingDelete ? 'Confirm Delete User' : 'Confirm Save User Changes',
+      lines: changeSummary,
+      confirmLabel: userDraft.pendingDelete ? 'Delete User' : 'Save Changes',
+      tone: userDraft.pendingDelete ? 'danger' : 'default',
+    })
+  }
+
+  async function handleSaveAuthGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!drawerState) {
+      return
+    }
+
+    if (drawerState.mode === 'create-auth-group') {
+      const createSummary = [
+        `Name: ${authGroupDraft.name}`,
+        `Description: ${authGroupDraft.description || 'None'}`,
+        `Bound Users: ${formatUserIDs(authGroupDraft.userIDs, users)}`,
+        `Permissions: ${formatPermissionList(authGroupDraft.permissions)}`,
+        `DB Scope: ${formatConnectionIDs(authGroupDraft.dbConnectionIDs, connections)}`,
+      ]
+      setConfirmState({
+        kind: 'create-auth-group',
+        title: 'Confirm Create Auth Group',
+        lines: createSummary,
+        confirmLabel: 'Create Auth Group',
+      })
+      return
+    }
+
+    if (drawerState.mode !== 'edit-auth-group' || !selectedAuthGroup) {
+      return
+    }
+
+    const changeSummary = summarizeAuthGroupChanges(selectedAuthGroup, authGroupDraft, users, connections)
+    if (changeSummary.length === 0) {
+      pushToast('No changes to save', 'success')
+      return
+    }
+    setConfirmState({
+      kind: authGroupDraft.pendingDelete ? 'delete-auth-group' : 'update-auth-group',
+      title: authGroupDraft.pendingDelete ? 'Confirm Delete Auth Group' : 'Confirm Save Auth Group Changes',
+      lines: changeSummary,
+      confirmLabel: authGroupDraft.pendingDelete ? 'Delete Auth Group' : 'Save Changes',
+      tone: authGroupDraft.pendingDelete ? 'danger' : 'default',
+    })
+  }
+
+  async function handleConfirmSubmit() {
+    if (!confirmState || !drawerState) {
+      return
+    }
+
+    setSaving(true)
+    setDrawerError('')
+
+    try {
+      if (confirmState.kind === 'create-user') {
         const created = await createUser({
           username: userDraft.username,
           email: userDraft.email,
@@ -324,99 +409,61 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         }
         await reloadAll()
         pushToast('User created', 'success')
+        setConfirmState(null)
         await openEditUserDrawer(created.id)
-      } catch (saveError) {
-        setDrawerError(saveError instanceof ApiError ? saveError.message : 'Failed to create the user.')
-      } finally {
-        setSaving(false)
+        return
       }
-      return
-    }
 
-    if (drawerState.mode !== 'edit-user' || !selectedUser) {
-      return
-    }
+      if (confirmState.kind === 'update-user' || confirmState.kind === 'delete-user') {
+        if (drawerState.mode !== 'edit-user' || !selectedUser) {
+          return
+        }
+        if (confirmState.kind === 'delete-user') {
+          await deleteUser(drawerState.userId)
+          await reloadAll()
+          pushToast('User deleted', 'success')
+          setConfirmState(null)
+          closeDrawer()
+          return
+        }
 
-    const changeSummary = summarizeUserChanges(selectedUser, userDraft, authGroupLabelMap, connections)
-    if (changeSummary.length === 0) {
-      pushToast('No changes to save', 'success')
-      return
-    }
-    if (!confirmChanges(userDraft.pendingDelete ? 'Delete User' : 'Save User Changes', changeSummary)) {
-      return
-    }
+        const payload: {
+          username?: string
+          email?: string
+          lark_recipient?: string
+          password?: string
+          is_active?: boolean
+          auth_groups?: string[]
+          direct_permissions?: string[]
+          direct_db_connection_ids?: number[]
+        } = {}
 
-    setSaving(true)
-    setDrawerError('')
-    try {
-      if (userDraft.pendingDelete) {
-        await deleteUser(drawerState.userId)
+        if (selectedUserIsProtected) {
+          if (userDraft.password.trim()) {
+            payload.password = userDraft.password
+          }
+        } else {
+          payload.username = userDraft.username
+          payload.email = userDraft.email
+          payload.lark_recipient = userDraft.larkRecipient.trim()
+          payload.is_active = userDraft.isActive
+          payload.auth_groups = userDraft.authGroups
+          payload.direct_permissions = userDraft.directPermissions
+          payload.direct_db_connection_ids = userDraft.directDBConnectionIDs
+          if (userDraft.password.trim()) {
+            payload.password = userDraft.password
+          }
+        }
+
+        await patchUser(drawerState.userId, payload)
         await reloadAll()
-        pushToast('User deleted', 'success')
-        closeDrawer()
+        pushToast('User updated', 'success')
+        setConfirmState(null)
+        await openEditUserDrawer(drawerState.userId)
         return
       }
 
-      const payload: {
-        username?: string
-        email?: string
-        lark_recipient?: string
-        password?: string
-        is_active?: boolean
-        auth_groups?: string[]
-        direct_permissions?: string[]
-        direct_db_connection_ids?: number[]
-      } = {}
-
-      if (selectedUserIsProtected) {
-        if (userDraft.password.trim()) {
-          payload.password = userDraft.password
-        }
-      } else {
-        payload.username = userDraft.username
-        payload.email = userDraft.email
-        payload.lark_recipient = userDraft.larkRecipient.trim()
-        payload.is_active = userDraft.isActive
-        payload.auth_groups = userDraft.authGroups
-        payload.direct_permissions = userDraft.directPermissions
-        payload.direct_db_connection_ids = userDraft.directDBConnectionIDs
-        if (userDraft.password.trim()) {
-          payload.password = userDraft.password
-        }
-      }
-
-      await patchUser(drawerState.userId, payload)
-      await reloadAll()
-      pushToast('User updated', 'success')
-      await openEditUserDrawer(drawerState.userId)
-    } catch (saveError) {
-      setDrawerError(saveError instanceof ApiError ? saveError.message : 'Failed to update the user.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleSaveAuthGroup(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!drawerState) {
-      return
-    }
-
-    if (drawerState.mode === 'create-auth-group') {
-      const createSummary = [
-        `Name: ${authGroupDraft.name}`,
-        `Description: ${authGroupDraft.description || 'None'}`,
-        `Bound Users: ${formatUserIDs(authGroupDraft.userIDs, users)}`,
-        `Permissions: ${authGroupDraft.permissions.join(', ') || 'None'}`,
-        `DB Scope: ${formatConnectionIDs(authGroupDraft.dbConnectionIDs, connections)}`,
-      ]
-      if (!confirmChanges('Create Auth Group', createSummary)) {
-        return
-      }
-
-      setSaving(true)
-      setDrawerError('')
-      try {
+      if (confirmState.kind === 'create-auth-group') {
         const created = await createAuthGroup({
           name: authGroupDraft.name,
           description: authGroupDraft.description,
@@ -426,51 +473,52 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         })
         await reloadAll()
         pushToast('Auth group created', 'success')
+        setConfirmState(null)
         await openEditAuthGroupDrawer(created.name as AuthGroup)
-      } catch (saveError) {
-        setDrawerError(saveError instanceof ApiError ? saveError.message : 'Failed to create the auth group.')
-      } finally {
-        setSaving(false)
-      }
-      return
-    }
-
-    if (drawerState.mode !== 'edit-auth-group' || !selectedAuthGroup) {
-      return
-    }
-
-    const changeSummary = summarizeAuthGroupChanges(selectedAuthGroup, authGroupDraft, users, connections)
-    if (changeSummary.length === 0) {
-      pushToast('No changes to save', 'success')
-      return
-    }
-    if (!confirmChanges(authGroupDraft.pendingDelete ? 'Delete Auth Group' : 'Save Auth Group Changes', changeSummary)) {
-      return
-    }
-
-    setSaving(true)
-    setDrawerError('')
-    try {
-      if (authGroupDraft.pendingDelete) {
-        await deleteAuthGroup(drawerState.authGroupKey)
-        await reloadAll()
-        pushToast('Auth group deleted', 'success')
-        closeDrawer()
         return
       }
 
-      await patchAuthGroup(drawerState.authGroupKey, {
-        name: authGroupDraft.name,
-        description: authGroupDraft.description,
-        user_ids: authGroupDraft.userIDs,
-        permissions: authGroupDraft.permissions,
-        db_connection_ids: authGroupDraft.dbConnectionIDs,
-      })
-      await reloadAll()
-      pushToast('Auth group updated', 'success')
-      await openEditAuthGroupDrawer(drawerState.authGroupKey)
+      if (confirmState.kind === 'update-auth-group' || confirmState.kind === 'delete-auth-group') {
+        if (drawerState.mode !== 'edit-auth-group' || !selectedAuthGroup) {
+          return
+        }
+        if (confirmState.kind === 'delete-auth-group') {
+          await deleteAuthGroup(drawerState.authGroupKey)
+          await reloadAll()
+          pushToast('Auth group deleted', 'success')
+          setConfirmState(null)
+          closeDrawer()
+          return
+        }
+
+        await patchAuthGroup(drawerState.authGroupKey, {
+          name: authGroupDraft.name,
+          description: authGroupDraft.description,
+          user_ids: authGroupDraft.userIDs,
+          permissions: authGroupDraft.permissions,
+          db_connection_ids: authGroupDraft.dbConnectionIDs,
+        })
+        await reloadAll()
+        pushToast('Auth group updated', 'success')
+        setConfirmState(null)
+        await openEditAuthGroupDrawer(drawerState.authGroupKey)
+      }
     } catch (saveError) {
-      setDrawerError(saveError instanceof ApiError ? saveError.message : 'Failed to update the auth group.')
+      setDrawerError(
+        saveError instanceof ApiError
+          ? saveError.message
+          : confirmState.kind === 'create-user'
+            ? 'Failed to create the user.'
+            : confirmState.kind === 'update-user'
+              ? 'Failed to update the user.'
+              : confirmState.kind === 'delete-user'
+                ? 'Failed to delete the user.'
+                : confirmState.kind === 'create-auth-group'
+                  ? 'Failed to create the auth group.'
+                  : confirmState.kind === 'update-auth-group'
+                    ? 'Failed to update the auth group.'
+                    : 'Failed to delete the auth group.'
+      )
     } finally {
       setSaving(false)
     }
@@ -503,7 +551,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   }, [authGroups.length, authGroupsOffset])
 
   return (
-    <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
+    <>
+      <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
       <PageIntro
         title="User Management"
         description="Manage users and auth groups with their permissions, direct capabilities, and DB scope. All changes take effect only after saving, with a confirmation summary shown first."
@@ -576,8 +625,6 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           <div className="flex items-center gap-2">
                             <div>
                               <p className="font-semibold">{user.username}</p>
-                              <p className="mt-0.5 text-[11px] text-muted">{user.email}</p>
-                              {user.lark_recipient ? <p className="mt-0.5 text-[11px] text-faint">Lark Open ID: {user.lark_recipient}</p> : null}
                             </div>
                             {user.protected ? <Tag label="protected" tone="danger" /> : null}
                           </div>
@@ -651,10 +698,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     {pagedAuthGroups.map((group) => (
                       <tr key={group.name} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
                         <td className="px-3 py-3">
-                          <div>
-                            <p className="font-semibold">{group.label}</p>
-                            <p className="mt-0.5 text-[11px] text-muted">{group.name}</p>
-                          </div>
+                          <p className="font-semibold">{group.label}</p>
                         </td>
                         <td className="px-3 py-3 text-muted">{group.users.length}</td>
                         <td className="px-3 py-3 text-muted">{group.permissions?.length ?? 0}</td>
@@ -716,7 +760,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               {drawerLoading ? (
                 <LoadingBlock message="Loading details..." className="min-h-[240px] rounded-xl border-border bg-panel" />
-              ) : drawerState.mode === 'create-user' || (drawerState.mode === 'edit-user' && selectedUser) ? (
+              ) : drawerState.mode === 'create-user' || drawerState.mode === 'edit-user' ? (
                 <form className="grid gap-4" onSubmit={handleSaveUser}>
                   <CardSection title="User Profile" icon={<UsersIcon className="h-4 w-4 text-accent" />}>
                     <div className="grid gap-3">
@@ -793,29 +837,6 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     </div>
                   </CardSection>
 
-                  {drawerState.mode === 'edit-user' && selectedUser ? (
-                    <CardSection title="Account Status" icon={<Shield className="h-4 w-4 text-accent" />}>
-                      <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-panel-soft px-3 py-3">
-                        <div>
-                          <p className="text-[12px] font-semibold text-ink">Sign-in Status</p>
-                          <p className="mt-1 text-[11px] text-muted">Disabling only updates the draft. The change is applied after you save at the top.</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setUserDraft((current) => ({ ...current, isActive: !current.isActive, pendingDelete: false }))}
-                          disabled={saving || selectedUserIsProtected}
-                          className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-[13px] font-semibold transition disabled:opacity-50 ${
-                            userDraft.isActive
-                              ? 'border border-danger/20 bg-red-50 text-danger hover:bg-red-100'
-                              : 'border border-border bg-white text-ink hover:bg-page'
-                          }`}
-                        >
-                          {userDraft.isActive ? 'Mark Disabled' : 'Mark Enabled'}
-                        </button>
-                      </div>
-                    </CardSection>
-                  ) : null}
-
                   <CardSection title="Auth Groups" icon={<Shield className="h-4 w-4 text-accent" />}>
                     <div className="grid gap-3">
                       <div className="flex flex-wrap gap-2">
@@ -824,7 +845,6 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                               <ActionTag
                                 key={group}
                                 label={authGroupLabelMap.get(group) ?? group}
-                                meta={group}
                                 disabled={saving || selectedUserIsProtected}
                                 onRemove={() => setUserDraft((current) => ({
                                   ...current,
@@ -923,7 +943,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       />
                       <DBScopePanel
                         title="Add Direct DB Scope"
-                        description="Search assignable connections by name, host, or database."
+                        description="Search assignable connections by name, type, or database."
                         search={userDBScopeSearch}
                         onSearchChange={setUserDBScopeSearch}
                         connections={availableUserConnections}
@@ -954,24 +974,44 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                   ) : null}
 
                   {drawerState.mode === 'edit-user' && !selectedUserIsProtected ? (
-                    <CardSection title="Danger Zone" icon={<Trash2 className="h-4 w-4 text-danger" />}>
-                      <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/20 bg-red-50 px-3 py-3">
-                        <div>
-                          <p className="text-[12px] font-semibold text-danger">Delete This User</p>
-                          <p className="mt-1 text-[11px] text-danger/80">This only marks the user for deletion. The deletion runs after you confirm Save Changes at the top.</p>
+                    <CardSection title="Account Controls" icon={<Shield className="h-4 w-4 text-accent" />}>
+                      <div className="grid gap-3">
+                        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
+                          <div>
+                            <p className="text-[12px] font-semibold text-amber-800">Sign-in Status</p>
+                            <p className="mt-1 text-[11px] text-amber-700/90">Disabling only updates the draft. The change is applied after you save at the bottom.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setUserDraft((current) => ({ ...current, isActive: !current.isActive, pendingDelete: false }))}
+                            disabled={saving}
+                            className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-[13px] font-semibold transition disabled:opacity-50 ${
+                              userDraft.isActive
+                                ? 'border border-amber-300 bg-amber-100 text-amber-800 hover:bg-amber-200'
+                                : 'border border-amber-200 bg-white text-amber-800 hover:bg-amber-50'
+                            }`}
+                          >
+                            {userDraft.isActive ? 'Mark Disabled' : 'Mark Enabled'}
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setUserDraft((current) => ({ ...current, pendingDelete: !current.pendingDelete }))}
-                          disabled={saving}
-                          className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-[13px] font-semibold transition ${
-                            userDraft.pendingDelete
-                              ? 'border border-border bg-white text-ink hover:bg-page'
-                              : 'border border-danger/20 bg-red-100 text-danger hover:bg-red-200'
-                          }`}
-                        >
-                          {userDraft.pendingDelete ? 'Cancel Delete' : 'Mark Delete'}
-                        </button>
+                        <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/20 bg-red-50 px-3 py-3">
+                          <div>
+                            <p className="text-[12px] font-semibold text-danger">Delete This User</p>
+                            <p className="mt-1 text-[11px] text-danger/80">This only marks the user for deletion. The deletion runs after you confirm Save Changes at the bottom.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setUserDraft((current) => ({ ...current, pendingDelete: !current.pendingDelete }))}
+                            disabled={saving}
+                            className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-[13px] font-semibold transition ${
+                              userDraft.pendingDelete
+                                ? 'border border-border bg-white text-ink hover:bg-page'
+                                : 'border border-danger/20 bg-red-100 text-danger hover:bg-red-200'
+                            }`}
+                          >
+                            {userDraft.pendingDelete ? 'Cancel Delete' : 'Mark Delete'}
+                          </button>
+                        </div>
                       </div>
                     </CardSection>
                   ) : null}
@@ -994,7 +1034,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
 
                   {drawerError ? <InlineAlert>{drawerError}</InlineAlert> : null}
                 </form>
-              ) : drawerState.mode === 'create-auth-group' || (drawerState.mode === 'edit-auth-group' && selectedAuthGroup) ? (
+              ) : drawerState.mode === 'create-auth-group' || drawerState.mode === 'edit-auth-group' ? (
                 <form className="grid gap-4" onSubmit={handleSaveAuthGroup}>
                   <CardSection title="Auth Group Profile" icon={<Shield className="h-4 w-4 text-accent" />}>
                     <div className="grid gap-3">
@@ -1036,7 +1076,6 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                               <ActionTag
                                 key={userID}
                                 label={user?.username ?? `User #${userID}`}
-                                meta={user?.email}
                                 disabled={saving || user?.protected === true || selectedAuthGroupIsProtected}
                                 onRemove={() => setAuthGroupDraft((current) => ({
                                   ...current,
@@ -1133,7 +1172,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     />
                     <DBScopePanel
                       title="Add DB Scope"
-                      description="Search assignable database assets by name, host, or database."
+                      description="Search assignable database assets by name, type, or database."
                       search={authGroupDBScopeSearch}
                       onSearchChange={setAuthGroupDBScopeSearch}
                       connections={availableAuthGroupConnections}
@@ -1148,24 +1187,26 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                   </CardSection>
 
                   {drawerState.mode === 'edit-auth-group' && !selectedAuthGroupIsProtected ? (
-                    <CardSection title="Danger Zone" icon={<Trash2 className="h-4 w-4 text-danger" />}>
-                      <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/20 bg-red-50 px-3 py-3">
-                        <div>
-                          <p className="text-[12px] font-semibold text-danger">Delete This Auth Group</p>
-                          <p className="mt-1 text-[11px] text-danger/80">This only marks the auth group for deletion. The deletion runs after you save at the top.</p>
+                    <CardSection title="Account Controls" icon={<Shield className="h-4 w-4 text-accent" />}>
+                      <div className="grid gap-3">
+                        <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/20 bg-red-50 px-3 py-3">
+                          <div>
+                            <p className="text-[12px] font-semibold text-danger">Delete This Auth Group</p>
+                            <p className="mt-1 text-[11px] text-danger/80">This only marks the auth group for deletion. The deletion runs after you confirm Save Changes at the bottom.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setAuthGroupDraft((current) => ({ ...current, pendingDelete: !current.pendingDelete }))}
+                            disabled={saving}
+                            className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-[13px] font-semibold transition ${
+                              authGroupDraft.pendingDelete
+                                ? 'border border-border bg-white text-ink hover:bg-page'
+                                : 'border border-danger/20 bg-red-100 text-danger hover:bg-red-200'
+                            }`}
+                          >
+                            {authGroupDraft.pendingDelete ? 'Cancel Delete' : 'Mark Delete'}
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setAuthGroupDraft((current) => ({ ...current, pendingDelete: !current.pendingDelete }))}
-                          disabled={saving}
-                          className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-[13px] font-semibold transition ${
-                            authGroupDraft.pendingDelete
-                              ? 'border border-border bg-white text-ink hover:bg-page'
-                              : 'border border-danger/20 bg-red-100 text-danger hover:bg-red-200'
-                          }`}
-                        >
-                          {authGroupDraft.pendingDelete ? 'Cancel Delete' : 'Mark Delete'}
-                        </button>
                       </div>
                     </CardSection>
                   ) : null}
@@ -1188,7 +1229,26 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
           </div>
         </div>
       ) : null}
-    </div>
+      </div>
+      <ConfirmDialog
+        open={confirmState !== null}
+        title={confirmState?.title ?? 'Confirm Changes'}
+        description={confirmState ? <ConfirmSummary lines={confirmState.lines} /> : null}
+        confirmLabel={confirmState?.confirmLabel ?? 'Confirm'}
+        cancelLabel="Cancel"
+        tone={confirmState?.tone ?? 'default'}
+        loading={saving}
+        panelClassName="max-w-2xl"
+        onCancel={() => {
+          if (!saving) {
+            setConfirmState(null)
+          }
+        }}
+        onConfirm={() => {
+          void handleConfirmSubmit()
+        }}
+      />
+    </>
   )
 }
 
@@ -1226,7 +1286,7 @@ function summarizeUserChanges(
     lines.push(`Auth Groups: ${formatAuthGroupList(draft.authGroups, labelMap)}`)
   }
   if (!equalStringArrays(originalDirectPermissions, draft.directPermissions)) {
-    lines.push(`Direct Permissions: ${draft.directPermissions.join(', ') || 'None'}`)
+    lines.push(`Direct Permissions: ${formatPermissionList(draft.directPermissions)}`)
   }
   if (!equalNumberArrays(originalDirectConnectionIDs, draft.directDBConnectionIDs)) {
     lines.push(`Direct DB Scope: ${formatConnectionIDs(draft.directDBConnectionIDs, connections)}`)
@@ -1260,7 +1320,7 @@ function summarizeAuthGroupChanges(
     lines.push(`Bound Users: ${formatUserIDs(draft.userIDs, users)}`)
   }
   if (!equalStringArrays(originalPermissions, draft.permissions)) {
-    lines.push(`Permissions: ${draft.permissions.join(', ') || 'None'}`)
+    lines.push(`Permissions: ${formatPermissionList(draft.permissions)}`)
   }
   if (!equalNumberArrays(originalConnectionIDs, draft.dbConnectionIDs)) {
     lines.push(`DB Scope: ${formatConnectionIDs(draft.dbConnectionIDs, connections)}`)
@@ -1279,6 +1339,10 @@ function formatUserIDs(userIDs: number[], users: UserSummary[]) {
 
 function formatConnectionIDs(connectionIDs: number[], connections: DBConnection[]) {
   return connectionIDs.length > 0 ? connectionIDs.map((id) => getConnectionLabel(id, connections)).join(', ') : 'None'
+}
+
+function formatPermissionList(permissionKeys: string[]) {
+  return permissionKeys.length > 0 ? permissionKeys.map((permissionKey) => getPermissionMeta(permissionKey).label).join(', ') : 'None'
 }
 
 function getConnectionLabel(connectionId: number, connections: DBConnection[]) {
@@ -1465,7 +1529,6 @@ function PermissionGroupBoard({
                   <ActionTag
                     key={permission.key}
                     label={permission.label}
-                    meta={permission.key}
                     disabled={disabled}
                     onRemove={() => onRemove(permission.key)}
                   />
@@ -1530,7 +1593,6 @@ function PermissionSearchPanel({
                   <div>
                     <p className="text-[12px] font-semibold text-ink">{permission.label}</p>
                     <p className="mt-1 text-[11px] text-muted">{permission.description}</p>
-                    <p className="mt-1 font-mono text-[11px] text-faint">{permission.key}</p>
                   </div>
                   <button
                     type="button"
@@ -1581,7 +1643,7 @@ function DBScopeBoard({
         {connectionIDs.length > 0 ? connectionIDs.map((connectionId) => {
           const connection = resolveConnection(connectionId)
           const label = connection?.name ?? `Connection #${connectionId}`
-          const meta = connection ? `${connection.db_type} / ${connection.host}` : undefined
+          const meta = connection?.db_type
           return removable && onRemove ? (
             <ActionTag key={connectionId} label={label} meta={meta} disabled={disabled} onRemove={() => onRemove(connectionId)} />
           ) : (
@@ -1621,7 +1683,7 @@ function DBScopePanel({
       <input
         value={search}
         onChange={(event) => onSearchChange(event.target.value)}
-        placeholder="Search connection name, host, database"
+        placeholder="Search connection name, type, database"
         className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
         disabled={disabled}
       />
@@ -1630,7 +1692,7 @@ function DBScopePanel({
           <div key={connection.id} className="flex items-start justify-between gap-3 rounded-lg border border-border bg-white px-3 py-2.5">
             <div>
               <p className="text-[12px] font-semibold text-ink">{connection.name}</p>
-              <p className="mt-1 text-[11px] text-muted">{connection.db_type} / {connection.host}</p>
+              <p className="mt-1 text-[11px] text-muted">{connection.db_type}</p>
             </div>
             <button
               type="button"
@@ -1643,6 +1705,28 @@ function DBScopePanel({
           </div>
         )) : <span className="text-[12px] text-muted">{emptyMessage}</span>}
       </div>
+    </div>
+  )
+}
+
+function ConfirmSummary({ lines }: { lines: string[] }) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-border bg-panel-soft/80 p-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">Change Summary</p>
+        <div className="mt-3 grid gap-2">
+          {lines.length > 0 ? (
+            lines.map((line) => (
+              <div key={line} className="rounded-lg border border-border/80 bg-white px-3 py-2 text-[13px] text-ink">
+                {line}
+              </div>
+            ))
+          ) : (
+            <div className="rounded-lg border border-border/80 bg-white px-3 py-2 text-[13px] text-muted">No field changes.</div>
+          )}
+        </div>
+      </div>
+      <p className="text-[12px] text-muted">Please confirm these changes before continuing.</p>
     </div>
   )
 }
