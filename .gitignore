@@ -8,3 +8,4 @@ backend/vendor/
 .claude/
 frontend/node_modules/
 frontend/dist/
+backend/.gocache/
