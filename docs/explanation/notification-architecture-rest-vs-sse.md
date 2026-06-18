@@ -49,9 +49,61 @@
 - `notification.created`
 - `ticket.updated`
 
-## 3. 前端使用方式
+## 3. SSE 與 Timeout
 
-### 3.1 App Shell
+SSE 是長連線，不適合直接套用一般 REST request 的 timeout 模型。這次實作的最終方案是：
+
+- `GET /api/events/stream` 不走一般 `chi` 的 `Timeout(45s)`
+- 主 HTTP server 仍保留 `WriteTimeout = 45s`
+- 只有 SSE handler 內，才用 `http.NewResponseController(w).SetWriteDeadline(time.Time{})` 清掉該條 stream 的 write deadline
+
+對應程式碼位置：
+
+- `backend/cmd/server/main.go`
+- `backend/internal/handler/event_stream.go`
+
+這代表目前不是：
+
+- 直接移除全域 `WriteTimeout`
+- 額外再起一台獨立 SSE server
+
+而是「同一台 server，只有 `/api/events/stream` 這條 route 做 per-request timeout 特例」。
+
+### 3.1 為什麼不能直接沿用一般 Timeout
+
+若 SSE 直接套用一般 request timeout：
+
+- 長連線在 timeout 到點後會被中斷
+- 前端會出現事件流反覆重連
+- 工單狀態與通知的即時更新會不穩定，甚至看起來像偶發失效
+
+若 SSE 直接套用一般 write timeout：
+
+- heartbeat 或後續事件推送時，可能因 write deadline 到期而斷線
+- 某些角色頁面會出現「有的人能收到更新、有的人收不到」的表面症狀
+
+### 3.2 為什麼不直接拿掉全域 WriteTimeout
+
+如果把全域 `WriteTimeout` 拿掉，雖然 SSE 會自然恢復穩定，但一般 REST API 也會失去這層保護，風險包括：
+
+- 慢客戶端長時間占住 response write
+- 某些異常連線更難被及時回收
+- 一般 API 與 SSE 的連線特性被混在一起，缺少邊界
+
+因此目前方案的取捨是：
+
+- 一般 REST：保留 `requestTimeout = 45s` 與 `WriteTimeout = 45s`
+- SSE：只對 `/api/events/stream` 做例外處理
+
+這樣能同時兼顧：
+
+- SSE 長連線正確性
+- 一般 API 的保護性
+- 架構簡單度，不必額外拆第二台 server
+
+## 4. 前端使用方式
+
+### 4.1 App Shell
 
 `frontend/src/app/layout/AppShell.tsx` 會：
 
@@ -59,7 +111,7 @@
 2. 再呼叫 `openEventStream('/events/stream')`
 3. 收到 `notification.created` 後刷新通知清單、更新 badge、依情境顯示 toast
 
-### 3.2 Tickets 頁與 Detail 頁
+### 4.2 Tickets 頁與 Detail 頁
 
 - `frontend/src/modules/tickets/pages/TicketsPage.tsx`
 - `frontend/src/modules/tickets/pages/TicketDetailPage.tsx`
@@ -73,9 +125,9 @@
 
 因此工單狀態切換不需要手動 F5。
 
-## 4. 站內通知與 Lark 的分工
+## 5. 站內通知與 Lark 的分工
 
-### 4.1 站內通知
+### 5.1 站內通知
 
 站內通知仍以 `notifications` 表為持久化來源。
 
@@ -87,7 +139,7 @@ SSE 只是讓前端更快得知「有新通知」，不是取代資料庫保存�
 - SSE 中斷後，前端可再用 REST 補資料
 - Audit 與通知記錄不依賴記憶體事件本身
 
-### 4.2 Lark 通知
+### 5.2 Lark 通知
 
 Lark 與站內通知是並行通道：
 
@@ -96,14 +148,16 @@ Lark 與站內通知是並行通道：
 
 Lark 收件人目前使用 `users.lark_recipient`，值需為可投遞的 `open_id`。
 
-## 5. 目前架構的優點
+## 6. 目前架構的優點
 
 - 即時性比輪詢好很多
 - 仍保留 REST 作為初始化與補償機制
 - 實作成本低於 WebSocket
 - 對目前通知量與工單型產品很合適
+- 不必為 SSE 額外拆一台 server
+- 一般 REST timeout 保護不會因 SSE 被一併移除
 
-## 6. 目前限制
+## 7. 目前限制
 
 目前 broker 是 app process 內記憶體實作，代表：
 
@@ -113,7 +167,7 @@ Lark 收件人目前使用 `users.lark_recipient`，值需為可投遞的 `open_
 
 另外，前端收到事件後目前多數仍採「重新拉 REST 資料」，而不是直接把 SSE payload 當成唯一真相來源。這是刻意的保守設計，可避免前後端局部狀態漂移。
 
-## 7. 與舊文件的差異
+## 8. 與舊文件的差異
 
 若你看過較舊版本文件，最大的差異是：
 

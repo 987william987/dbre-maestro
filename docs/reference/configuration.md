@@ -109,6 +109,16 @@
 
 這是 API 層的 timeout，不等同於 SQL Editor 查詢 timeout，也不直接等同 ticket execute timeout。
 
+### SSE timeout 特例
+
+`GET /api/events/stream` 是長連線 SSE endpoint，行為與一般 REST API 不同：
+
+- route middleware 不套用一般 `requestTimeout = 45s`
+- 主 server 仍保留 `writeTimeout = 45s`
+- 但 SSE handler 會在單一 request 內清除 write deadline，避免 stream 被錯誤中斷
+
+也就是說，目前不是把整個 server 的 timeout 全部拿掉，而是只讓 SSE stream 走例外路徑；其他 REST API 仍保有原本的 timeout 保護。
+
 ## 時間與時區
 
 平台的時間處理規則如下：

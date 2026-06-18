@@ -102,6 +102,14 @@ DBRE Maestro 把這些能力集中在同一個工作台裡，並用 RBAC、DB Sc
 
 這讓鈴鐺通知與工單狀態切換可以即時反映，又保留 REST 作為重整與重連補償來源。
 
+在 server 端，REST 與 SSE 目前共用同一台 HTTP server，沒有額外拆獨立 SSE server；但 timeout 策略有明確分流：
+
+- 一般 REST request：保留 `requestTimeout = 45s`
+- 一般 HTTP response：保留 `WriteTimeout = 45s`
+- `GET /api/events/stream`：不套一般 request timeout，且僅在該 SSE request 內清除 write deadline
+
+這樣可以避免 SSE 長連線被一般 API timeout 模型誤傷，同時不犧牲其他 REST API 的保護性。
+
 目前事件 broker 是 app process 內記憶體實作，適合單機或單副本；若未來做多副本部署，需要再補跨節點事件分發。
 
 ## SQL Editor 的限制與定位
