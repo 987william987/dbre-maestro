@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +16,8 @@ import (
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
+	"github.com/dbre-maestro/maestro/internal/queryaccess"
+	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
@@ -27,8 +30,10 @@ type ExportHandler struct {
 	dbConns             *repository.DBConnectionRepo
 	users               *repository.UserRepo
 	audit               *repository.AuditRepo
+	queryAccess         *queryaccess.Service
 	masking             *maskingRuntime
 	notifRepo           *repository.NotificationRepo
+	broker              *realtime.Broker
 	lark                *notification.Dispatcher
 	downloadRateLimiter *requestRateLimiter
 	appBaseURL          string
@@ -40,10 +45,12 @@ func NewExportHandler(
 	dbConns *repository.DBConnectionRepo,
 	users *repository.UserRepo,
 	audit *repository.AuditRepo,
+	queryAccessRepo *repository.QueryAccessRepo,
 	maskingRules *repository.MaskingRuleRepo,
 	whitelist *repository.MaskingWhitelistRepo,
 	engine *masking.Engine,
 	notifRepo *repository.NotificationRepo,
+	broker *realtime.Broker,
 	lark *notification.Dispatcher,
 	appBaseURL string,
 ) *ExportHandler {
@@ -53,8 +60,10 @@ func NewExportHandler(
 		dbConns:             dbConns,
 		users:               users,
 		audit:               audit,
+		queryAccess:         queryaccess.NewService(queryAccessRepo),
 		masking:             newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:           notifRepo,
+		broker:              broker,
 		lark:                lark,
 		downloadRateLimiter: newRequestRateLimiter(3, time.Minute),
 		appBaseURL:          strings.TrimRight(appBaseURL, "/"),
@@ -189,7 +198,11 @@ func (h *ExportHandler) sendInApp(ctx context.Context, userID uint64, notifType,
 	if h.notifRepo == nil {
 		return
 	}
-	_ = h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
+	notificationID, err := h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
+	if err != nil {
+		return
+	}
+	publishNotificationCreated(ctx, h.broker, h.notifRepo, userID, notificationID)
 }
 
 func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body, ticketNo string) {
@@ -245,6 +258,18 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
 		return
 	}
+	if err := h.queryAccess.CheckSQL(r.Context(), userID, conn, req.SQLContent, queryaccess.CheckContext{
+		DatabaseName: strings.TrimSpace(req.DatabaseName),
+		SchemaName:   strings.TrimSpace(req.SchemaName),
+	}); err != nil {
+		if missingErr, ok := err.(*queryaccess.MissingAccessError); ok {
+			jsonErr(w, http.StatusForbidden, missingErr.Error())
+			return
+		}
+		slog.Error("query access check failed for export", "user_id", userID, "connection_id", conn.ID, "err", err)
+		jsonErr(w, http.StatusUnprocessableEntity, "Query access is temporarily unavailable. Please try again later.")
+		return
+	}
 
 	analysis, err := analyzeSQLScopes(r.Context(), h.dbConns, h.masking, conn, req.SQLContent, buildQueryExecutionContext(req.DatabaseName, req.SchemaName))
 	if err != nil {
@@ -287,6 +312,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 	)
 	h.sendInApp(r.Context(), userID, "ticket_submitted", fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
 	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
+	publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":          ticket.ID,

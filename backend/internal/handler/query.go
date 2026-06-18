@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +16,8 @@ import (
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
+	"github.com/dbre-maestro/maestro/internal/queryaccess"
+	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
@@ -65,8 +68,10 @@ type QueryHandler struct {
 	artifacts    *repository.QueryArtifactRepo
 	tickets      *repository.TicketRepo
 	settings     *repository.SettingsRepo
+	queryAccess  *queryaccess.Service
 	masking      *maskingRuntime
 	notifRepo    *repository.NotificationRepo
+	broker       *realtime.Broker
 	lark         *notification.Dispatcher
 	appBaseURL   string
 }
@@ -93,9 +98,11 @@ func NewQueryHandler(
 	artifacts *repository.QueryArtifactRepo,
 	tickets *repository.TicketRepo,
 	settings *repository.SettingsRepo,
+	queryAccessRepo *repository.QueryAccessRepo,
 	engine *masking.Engine,
 	whitelist *repository.MaskingWhitelistRepo,
 	notifRepo *repository.NotificationRepo,
+	broker *realtime.Broker,
 	lark *notification.Dispatcher,
 	appBaseURL string,
 ) *QueryHandler {
@@ -107,8 +114,10 @@ func NewQueryHandler(
 		artifacts:    artifacts,
 		tickets:      tickets,
 		settings:     settings,
+		queryAccess:  queryaccess.NewService(queryAccessRepo),
 		masking:      newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:    notifRepo,
+		broker:       broker,
 		lark:         lark,
 		appBaseURL:   strings.TrimRight(appBaseURL, "/"),
 	}
@@ -151,7 +160,11 @@ func (h *QueryHandler) sendInApp(ctx context.Context, userID uint64, notifType, 
 	if h.notifRepo == nil {
 		return
 	}
-	_ = h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
+	notificationID, err := h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
+	if err != nil {
+		return
+	}
+	publishNotificationCreated(ctx, h.broker, h.notifRepo, userID, notificationID)
 }
 
 func (h *QueryHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body, ticketNo string) {
@@ -267,6 +280,23 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	queryCtx := queryExecutionContext{
+		DatabaseName: strings.TrimSpace(req.Database),
+		SchemaName:   strings.TrimSpace(req.Schema),
+	}
+	if err := h.queryAccess.CheckSQL(r.Context(), userID, conn, req.SQL, queryaccess.CheckContext{
+		DatabaseName: queryCtx.DatabaseName,
+		SchemaName:   queryCtx.SchemaName,
+	}); err != nil {
+		if missingErr, ok := err.(*queryaccess.MissingAccessError); ok {
+			jsonErr(w, http.StatusForbidden, missingErr.Error())
+			return
+		}
+		slog.Error("query access check failed", "user_id", userID, "connection_id", conn.ID, "err", err)
+		jsonErr(w, http.StatusUnprocessableEntity, "Query access is temporarily unavailable. Please try again later.")
+		return
+	}
+
 	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal error")
@@ -286,11 +316,6 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 
 	// Inject LIMIT if not present (simple heuristic for SELECT statements)
 	execSQL := injectLimit(req.SQL, limit, conn.DBType)
-	queryCtx := queryExecutionContext{
-		DatabaseName: strings.TrimSpace(req.Database),
-		SchemaName:   strings.TrimSpace(req.Schema),
-	}
-
 	start := time.Now()
 	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx, timeoutSettings)
 	if err != nil {
@@ -362,11 +387,9 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		jsonErr(w, http.StatusUnprocessableEntity, "db_connection_id and sql_content are required")
 		return
 	}
-	if req.ApprovedDurationMinutes == 0 {
-		req.ApprovedDurationMinutes = 10
-	}
-	if req.ApprovedDurationMinutes != 10 && req.ApprovedDurationMinutes != 30 && req.ApprovedDurationMinutes != 60 {
-		jsonErr(w, http.StatusUnprocessableEntity, "approved_duration_minutes must be 10, 30, or 60")
+	approvedDurationMinutes, err := normalizeSensitiveAccessDurationMinutes(req.ApprovedDurationMinutes)
+	if err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	conn, err := h.dbConns.GetByID(r.Context(), req.DBConnectionID)
@@ -401,7 +424,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		jsonErr(w, http.StatusUnprocessableEntity, "query does not contain sensitive columns")
 		return
 	}
-	description := fmt.Sprintf("由 SQL Editor 建立的臨時敏感查詢申請。Duration=%d minutes", req.ApprovedDurationMinutes)
+	description := fmt.Sprintf("由 SQL Editor 建立的臨時敏感查詢申請。Duration=%d minutes", approvedDurationMinutes)
 	ticket, err := h.tickets.CreateWithScopes(r.Context(), &model.Ticket{
 		Title:                   fmt.Sprintf("Sensitive Query Access / %s", conn.Name),
 		Description:             &description,
@@ -410,7 +433,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		DBConnectionID:          &req.DBConnectionID,
 		DatabaseName:            optionalTrimmedString(req.DatabaseName),
 		SubmitterID:             userID,
-		ApprovedDurationMinutes: &req.ApprovedDurationMinutes,
+		ApprovedDurationMinutes: &approvedDurationMinutes,
 	}, analysis.Scopes)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "create sensitive access ticket failed")
@@ -425,7 +448,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		ResourceID:   &ticket.ID,
 		Details: map[string]any{
 			"ticket_type":                ticket.TicketType,
-			"approved_duration_minutes":  req.ApprovedDurationMinutes,
+			"approved_duration_minutes":  approvedDurationMinutes,
 			"contains_sensitive_columns": true,
 			"scope_count":                len(analysis.Scopes),
 		},
@@ -440,6 +463,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		h.ticketLink(ticket.ID),
 	)
 	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
+	publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":   ticket.ID,

@@ -8,15 +8,17 @@ import { ToastProvider } from '@/shared/ui/ToastContext'
 vi.mock('@/modules/db-connections/api', () => ({
   listDBConnections: vi.fn(),
   createDBConnection: vi.fn(),
+  getDBConnectionBindings: vi.fn(),
   testDBConnection: vi.fn(),
   deleteDBConnection: vi.fn(),
   patchDBConnection: vi.fn(),
 }))
 
-import { createDBConnection, deleteDBConnection, listDBConnections, patchDBConnection, testDBConnection } from '@/modules/db-connections/api'
+import { createDBConnection, deleteDBConnection, getDBConnectionBindings, listDBConnections, patchDBConnection, testDBConnection } from '@/modules/db-connections/api'
 
 const mockedListDBConnections = vi.mocked(listDBConnections)
 const mockedCreateDBConnection = vi.mocked(createDBConnection)
+const mockedGetDBConnectionBindings = vi.mocked(getDBConnectionBindings)
 const mockedTestDBConnection = vi.mocked(testDBConnection)
 const mockedDeleteDBConnection = vi.mocked(deleteDBConnection)
 
@@ -32,6 +34,10 @@ const connection: DBConnection = {
   db_type: 'mysql',
   host: 'db.internal',
   port: 3306,
+  readonly_host: 'db.internal',
+  readonly_port: 3306,
+  readwrite_host: 'db.internal',
+  readwrite_port: 3306,
   database_name: 'analytics',
   username: 'readonly',
   encryption_key_version: 1,
@@ -59,6 +65,12 @@ describe('DBConnectionsPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     mockedListDBConnections.mockResolvedValue({ connections: [connection] })
+    mockedGetDBConnectionBindings.mockResolvedValue({
+      db_connection_id: 5,
+      direct_users: [],
+      effective_users: [],
+      auth_groups: [],
+    })
   })
 
   it('creates a connection from the new connection drawer and reloads the list', async () => {
@@ -74,8 +86,8 @@ describe('DBConnectionsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New Connection' }))
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'analytics' } })
-    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'db.internal' } })
-    fireEvent.change(screen.getByLabelText('Port'), { target: { value: '3306' } })
+    fireEvent.change(screen.getByLabelText('Readonly Host'), { target: { value: 'db.internal' } })
+    fireEvent.change(screen.getByLabelText('Readonly Port'), { target: { value: '3306' } })
     fireEvent.change(screen.getByLabelText('Readonly Username'), { target: { value: 'readonly' } })
     fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create Connection' }))
@@ -85,6 +97,10 @@ describe('DBConnectionsPage', () => {
       db_type: 'mysql',
       host: 'db.internal',
       port: 3306,
+      readonly_host: 'db.internal',
+      readonly_port: 3306,
+      readwrite_host: '',
+      readwrite_port: 3306,
       database_name: null,
       username: 'readonly',
       password: 'secret',
@@ -103,7 +119,7 @@ describe('DBConnectionsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New Connection' }))
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'warehouse' } })
     selectOption('DB Type', 'PostgreSQL')
-    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'pg.internal' } })
+    fireEvent.change(screen.getByLabelText('Readonly Host'), { target: { value: 'pg.internal' } })
     fireEvent.change(screen.getByLabelText('Readonly Username'), { target: { value: 'postgres' } })
     fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
@@ -114,6 +130,10 @@ describe('DBConnectionsPage', () => {
       db_type: 'postgres',
       host: 'pg.internal',
       port: 5432,
+      readonly_host: 'pg.internal',
+      readonly_port: 5432,
+      readwrite_host: '',
+      readwrite_port: 5432,
       database_name: 'postgres',
       username: 'postgres',
       password: 'secret',
@@ -146,7 +166,7 @@ describe('DBConnectionsPage', () => {
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'cache-redis' } })
     selectOption('DB Type', 'Redis')
-    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'redis.internal' } })
+    fireEvent.change(screen.getByLabelText('Readonly Host'), { target: { value: 'redis.internal' } })
     fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create Connection' }))
 
@@ -155,6 +175,10 @@ describe('DBConnectionsPage', () => {
       db_type: 'redis',
       host: 'redis.internal',
       port: 6379,
+      readonly_host: 'redis.internal',
+      readonly_port: 6379,
+      readwrite_host: '',
+      readwrite_port: 6379,
       database_name: null,
       username: '',
       password: 'secret',
@@ -168,6 +192,10 @@ describe('DBConnectionsPage', () => {
       ok: true,
       last_test_status: 'passed',
       last_tested_at: '2026-06-16T12:00:00Z',
+      results: [
+        { credential_role: 'readonly', ok: true },
+        { credential_role: 'readwrite', ok: true },
+      ],
     })
 
     renderPage()
@@ -176,7 +204,7 @@ describe('DBConnectionsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test' }))
 
     await waitFor(() => expect(mockedTestDBConnection).toHaveBeenCalledWith(5))
-    await waitFor(() => expect(screen.getByText('analytics connection test succeeded')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('analytics connection test succeeded for readonly and readwrite')).toBeInTheDocument())
     expect(screen.queryByText((content) => content === 'Connection test succeeded')).not.toBeInTheDocument()
   })
 
@@ -191,10 +219,14 @@ describe('DBConnectionsPage', () => {
     mockedListDBConnections.mockResolvedValue({ connections: [connection, newerConnection] })
     mockedTestDBConnection.mockResolvedValueOnce({
       ok: false,
-      error: 'timeout',
+      error: 'readonly: timeout; readwrite: access denied',
       last_test_status: 'failed',
-      last_test_error: 'timeout',
+      last_test_error: 'readonly: timeout; readwrite: access denied',
       last_tested_at: '2026-06-16T12:00:00Z',
+      results: [
+        { credential_role: 'readonly', ok: false, error: 'timeout' },
+        { credential_role: 'readwrite', ok: false, error: 'access denied' },
+      ],
     })
 
     renderPage()
@@ -202,7 +234,7 @@ describe('DBConnectionsPage', () => {
     await waitFor(() => expect(screen.getAllByText(/analytics|warehouse/).length).toBeGreaterThan(1))
     fireEvent.click(screen.getAllByRole('button', { name: 'Test' })[0])
 
-    await waitFor(() => expect(screen.getByText('warehouse connection test failed: timeout')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('warehouse connection test failed: readonly: timeout; readwrite: access denied')).toBeInTheDocument())
 
     const rows = screen.getAllByRole('row')
     expect(rows[1]).toHaveTextContent('warehouse')
@@ -226,6 +258,10 @@ describe('DBConnectionsPage', () => {
       db_type: 'postgres',
       host: 'db.internal',
       port: 5432,
+      readonly_host: 'db.internal',
+      readonly_port: 5432,
+      readwrite_host: 'db.internal',
+      readwrite_port: 5432,
       database_name: 'postgres',
       username: 'readonly',
       password: '',
@@ -243,8 +279,8 @@ describe('DBConnectionsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New Connection' }))
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'mysql-conn' } })
-    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'db.internal' } })
-    fireEvent.change(screen.getByLabelText('Port'), { target: { value: '3306' } })
+    fireEvent.change(screen.getByLabelText('Readonly Host'), { target: { value: 'db.internal' } })
+    fireEvent.change(screen.getByLabelText('Readonly Port'), { target: { value: '3306' } })
     fireEvent.change(screen.getByLabelText('Readonly Username'), { target: { value: 'root' } })
     fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create Connection' }))
@@ -254,6 +290,10 @@ describe('DBConnectionsPage', () => {
       db_type: 'mysql',
       host: 'db.internal',
       port: 3306,
+      readonly_host: 'db.internal',
+      readonly_port: 3306,
+      readwrite_host: '',
+      readwrite_port: 3306,
       database_name: null,
       username: 'root',
       password: 'secret',

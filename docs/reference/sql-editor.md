@@ -27,6 +27,7 @@ SQL Editor 是平台上的受控查詢工作區，用於 MySQL、PostgreSQL 與 
 - Columns / Definition 詳情
 - Sensitive access duration
 - 分頁頁碼
+- 該 tab 是否正在執行查詢
 
 重新整理頁面或重新登入後，SQL Editor 會重置成單一預設 tab，SQL 內容回到 `SELECT 1;`。
 
@@ -34,9 +35,9 @@ SQL Editor 是平台上的受控查詢工作區，用於 MySQL、PostgreSQL 與 
 
 | DB Type | 支援項目 |
 |---|---|
-| MySQL | 查詢、metadata、Explain、export、sensitive access |
-| PostgreSQL | 查詢、metadata、Explain、export、sensitive access |
-| Redis | 查詢與部分 metadata / DB index 工作流，無 SQL formatter 語意保證 |
+| MySQL | 查詢、metadata、Format、Explain、export、sensitive access |
+| PostgreSQL | 查詢、metadata、Format、Explain、export、sensitive access |
+| Redis | 查詢與部分 metadata / DB index 工作流；不使用 SQL formatter |
 
 ## 查詢限制
 
@@ -46,6 +47,11 @@ SQL Editor 是平台上的受控查詢工作區，用於 MySQL、PostgreSQL 與 
 - 只允許唯讀查詢類型
 - `Explain` 也只支援單一 statement
 - 若使用者有選取片段，功能會優先作用在選取 SQL
+- 因此整個 editor 可以保留多句草稿，但真正執行 / Explain / export / sensitive access 的是目前選取片段或唯一 statement
+
+### 快捷鍵
+
+- `Cmd/Ctrl + Enter`：執行目前 statement 或選取片段
 
 ### Query Timeout
 
@@ -75,6 +81,16 @@ SQL Editor 走 `query` pool profile。預設值：
 ### `GET /api/query/connections`
 
 回傳目前使用者可用的 DB connections。結果已受 DB Scope 過濾。
+
+### `GET /api/query/constraints`
+
+回傳目前 SQL Editor 工具列需要的限制資訊，例如：
+
+- `default_limit`
+- `max_limit`
+- `app_timeout_seconds`
+- `mysql_max_execution_time_ms`
+- `postgres_statement_timeout_ms`
 
 ### `POST /api/query`
 
@@ -134,6 +150,7 @@ SQL Editor 左側資產樹使用：
 - metadata 讀取失敗時，前端只顯示暫時錯誤訊息
 - 實際錯誤細節應寫入後端日誌
 - 不應把原始錯誤直接灌滿整棵資產樹
+- 搜尋結果與一般樹狀展開狀態都應維持在 tab 內隔離
 
 ## Format / Explain
 
@@ -142,6 +159,7 @@ SQL Editor 左側資產樹使用：
 - 前端使用 `sql-formatter`
 - Dialect 依資料源決定：MySQL 用 `mysql`、PostgreSQL 用 `postgresql`
 - 若有選取 SQL，優先格式化選取區塊
+- Format 是前端本地處理，正常情況應為即時操作，不需呼叫後端
 
 ### Explain
 
@@ -159,11 +177,11 @@ SQL Editor 左側資產樹使用：
 - 動作權限：`sql_editor.export`
 - 目標資料源必須在使用者 DB Scope 內
 
-下載行為目前另有頻率限制：
+下載限制與回饋：
 
-- 1 分鐘內最多 3 次
-
-若超過限制，前端應顯示暫時錯誤提示，而不是導向其他頁面。
+- `GET /api/exports/download/{token}` 為 token-based 下載
+- 1 分鐘內最多 3 次下載
+- 前端應以頁內錯誤提示或 toast 顯示限制，不應跳轉到獨立錯誤頁
 
 ## 敏感資料
 
@@ -204,5 +222,6 @@ SQL Editor 左側資產樹使用：
 
 - [How to 使用 SQL Editor](../how-to/use-sql-editor.md)
 - [Tickets](tickets.md)
+- [DB Connections](db-connections.md)
 - [Masking 與 DSL](masking-and-dsl.md)
 - [平台 Settings](settings.md)

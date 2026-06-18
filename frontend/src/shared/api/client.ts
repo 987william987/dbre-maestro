@@ -4,6 +4,11 @@ type ApiClientConfig = {
   handleAuthFailure: () => void
 }
 
+type EventStreamMessage = {
+  event: string
+  data: JsonValue | null
+}
+
 type JsonPrimitive = string | number | boolean | null
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 
@@ -156,4 +161,142 @@ export const apiClient = {
     request<T>(path, {
       method: 'DELETE',
     }),
+}
+
+export function openEventStream(
+  path: string,
+  callbacks: {
+    signal?: AbortSignal
+    onOpen?: () => void
+    onEvent: (message: EventStreamMessage) => void
+    onError?: (error: unknown) => void
+  },
+) {
+  const controller = new AbortController()
+  let reconnectTimer: number | null = null
+  let closed = false
+
+  const cleanup = () => {
+    closed = true
+    controller.abort()
+    if (reconnectTimer !== null) {
+      window.clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+  }
+
+  callbacks.signal?.addEventListener('abort', cleanup, { once: true })
+
+  const scheduleReconnect = () => {
+    if (closed || callbacks.signal?.aborted) {
+      return
+    }
+    reconnectTimer = window.setTimeout(() => {
+      reconnectTimer = null
+      void connect(true)
+    }, 1000)
+  }
+
+  const emitBlock = (block: string) => {
+    const lines = block.split(/\r?\n/)
+    let eventName = 'message'
+    const dataLines: string[] = []
+
+    for (const line of lines) {
+      if (!line || line.startsWith(':')) {
+        continue
+      }
+      if (line.startsWith('event:')) {
+        eventName = line.slice(6).trim() || 'message'
+        continue
+      }
+      if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).trimStart())
+      }
+    }
+
+    let parsed: JsonValue | null = null
+    const rawData = dataLines.join('\n').trim()
+    if (rawData) {
+      try {
+        parsed = JSON.parse(rawData) as JsonValue
+      } catch {
+        parsed = rawData
+      }
+    }
+
+    callbacks.onEvent({ event: eventName, data: parsed })
+  }
+
+  const readStream = async (response: Response) => {
+    const reader = response.body?.getReader()
+    if (!reader) {
+      throw new Error('event stream body is unavailable')
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (!closed && !controller.signal.aborted) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+      buffer += decoder.decode(value, { stream: true })
+
+      let separatorIndex = buffer.search(/\r?\n\r?\n/)
+      while (separatorIndex >= 0) {
+        const block = buffer.slice(0, separatorIndex)
+        buffer = buffer.slice(separatorIndex + (buffer[separatorIndex] === '\r' ? 4 : 2))
+        if (block.trim()) {
+          emitBlock(block)
+        }
+        separatorIndex = buffer.search(/\r?\n\r?\n/)
+      }
+    }
+  }
+
+  const connect = async (canRetryAuth: boolean, tokenOverride?: string | null): Promise<void> => {
+    const headers = new Headers({ Accept: 'text/event-stream' })
+    const token = tokenOverride ?? config.getAccessToken()
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`)
+    }
+
+    try {
+      const response = await fetch(withApiPath(path), {
+        method: 'GET',
+        headers,
+        credentials: 'same-origin',
+        signal: controller.signal,
+      })
+
+      if (response.status === 401 && canRetryAuth) {
+        const refreshedToken = await config.refreshAccessToken()
+        if (refreshedToken) {
+          return connect(false, refreshedToken)
+        }
+        config.handleAuthFailure()
+        return
+      }
+
+      if (!response.ok) {
+        throw new ApiError(response.status, `Request failed with status ${response.status}`, null)
+      }
+
+      callbacks.onOpen?.()
+      await readStream(response)
+      if (!closed && !controller.signal.aborted) {
+        scheduleReconnect()
+      }
+    } catch (error) {
+      if (controller.signal.aborted || closed) {
+        return
+      }
+      callbacks.onError?.(error)
+      scheduleReconnect()
+    }
+  }
+
+  void connect(true)
+  return cleanup
 }

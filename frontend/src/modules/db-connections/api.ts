@@ -1,5 +1,5 @@
 import { apiClient } from '@/shared/api/client'
-import type { DBConnection } from '@/shared/types/dbConnection'
+import type { DBConnection, DBConnectionBindings } from '@/shared/types/dbConnection'
 
 type ConnectionsResponse = {
   connections: DBConnection[]
@@ -11,6 +11,11 @@ type ConnectionTestResponse = {
   last_test_status: 'passed' | 'failed' | string
   last_test_error?: string
   last_tested_at?: string
+  results?: Array<{
+    credential_role: 'readonly' | 'readwrite' | string
+    ok: boolean
+    error?: string
+  }>
 }
 
 type CreateConnectionPayload = {
@@ -18,6 +23,10 @@ type CreateConnectionPayload = {
   db_type: string
   host: string
   port: number
+  readonly_host: string
+  readonly_port: number
+  readwrite_host: string
+  readwrite_port: number
   database_name?: string | null
   username: string
   password: string
@@ -30,6 +39,7 @@ type CreateConnectionPayload = {
 }
 
 type PatchConnectionPayload = Partial<CreateConnectionPayload>
+type ConnectionBindingsResponse = DBConnectionBindings
 
 export function listDBConnections() {
   return apiClient.get<ConnectionsResponse>('/db-connections').then((response) => ({
@@ -53,4 +63,8 @@ export function deleteDBConnection(id: number) {
 
 export function patchDBConnection(id: number, payload: PatchConnectionPayload) {
   return apiClient.patch<DBConnection>(`/db-connections/${id}`, payload)
+}
+
+export function getDBConnectionBindings(id: number) {
+  return apiClient.get<ConnectionBindingsResponse>(`/db-connections/${id}/bindings`)
 }

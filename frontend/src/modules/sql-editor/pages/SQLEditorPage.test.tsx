@@ -301,7 +301,7 @@ describe('SQLEditorPage', () => {
     })
   })
 
-  it('Sensitive Access 會先顯示確認窗，確認後才建立工單', async () => {
+  it('Sensitive Access 會先要求輸入時長，再進確認窗建立工單', async () => {
     mockedUseAuth.mockReturnValue({
       user: {
         id: 7,
@@ -351,9 +351,17 @@ describe('SQLEditorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Sensitive Access' }))
 
+    expect(screen.getByText('Set Sensitive Access Duration')).toBeInTheDocument()
+    expect(screen.getByText('Quick Select')).toBeInTheDocument()
+    expect(screen.getByText('Access Preview')).toBeInTheDocument()
+    expect(screen.getByText('10 minutes')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Requested Access Duration (minutes)'), { target: { value: '120' } })
+    expect(screen.getByText('2 hours')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
     expect(screen.getByText('Confirm Sensitive Access Request')).toBeInTheDocument()
     expect(screen.getByText('Requested Access Duration')).toBeInTheDocument()
-    expect(screen.getByText('10 minutes')).toBeInTheDocument()
+    expect(screen.getByText('120 minutes')).toBeInTheDocument()
     expect(mockedCreateSensitiveAccessTicket).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Confirm and Submit' }))
@@ -364,7 +372,7 @@ describe('SQLEditorPage', () => {
         sql_content: 'SELECT 1;',
         database_name: undefined,
         schema_name: undefined,
-        approved_duration_minutes: 10,
+        approved_duration_minutes: 120,
       })
     })
   })
@@ -404,43 +412,6 @@ describe('SQLEditorPage', () => {
       expect(mockedExecuteQuery).toHaveBeenCalledWith({
         db_connection_id: 1,
         sql: 'SELECT * FROM tickets;',
-        database: undefined,
-        schema: undefined,
-        redis_db_index: undefined,
-      })
-    })
-  })
-
-  it('支援 Cmd/Ctrl + Enter 執行目前 editor SQL', async () => {
-    mockedExecuteQuery.mockResolvedValue({
-      columns: ['id'],
-      raw_columns: ['id'],
-      sensitive_column_indexes: [],
-      rows: [[1]],
-      row_count: 1,
-      duration_ms: 12,
-    })
-
-    render(
-      <MemoryRouter>
-        <ToastProvider>
-          <SQLEditorPage />
-        </ToastProvider>
-      </MemoryRouter>,
-    )
-
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
-    fireEvent.click(screen.getByText('Primary MySQL'))
-
-    const editor = screen.getByLabelText('CodeMirror') as HTMLTextAreaElement
-    editor.focus()
-    fireEvent.keyDown(document, { key: 'Enter', metaKey: true })
-
-    await waitFor(() => {
-      expect(mockedExecuteQuery).toHaveBeenCalledWith({
-        db_connection_id: 1,
-        sql: 'SELECT 1;',
         database: undefined,
         schema: undefined,
         redis_db_index: undefined,

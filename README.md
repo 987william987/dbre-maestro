@@ -1,6 +1,6 @@
 # DBRE Maestro
 
-DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL/DML 工單、敏感資料遮罩、資料庫連線治理、Metadata 掃描與 RBAC 權限控管。專案採前後端分離：
+DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL / DML / Redis 工單、敏感資料遮罩、資料庫連線治理、Metadata 掃描、即時通知與 RBAC 權限控管。專案採前後端分離：
 
 - `backend/`：Go API、排程工作、Meta DB 存取、外部資料庫連線與治理邏輯
 - `frontend/`：React + Vite 管理介面
@@ -8,13 +8,13 @@ DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL/DML 工
 
 ## 功能概覽
 
-- `Tickets`：提交與流轉 DDL / DML / SQL Export / Sensitive Access 工單
+- `Tickets`：提交與流轉 DDL / DML / Redis / SQL Export / Sensitive Access 工單
 - `SQL Editor`：單 statement 查詢、格式化、Explain、匯出申請、敏感查詢權限申請
-- `DB Connections`：管理 MySQL / PostgreSQL / Redis 連線與憑證角色
+- `DB Connections`：管理 MySQL / PostgreSQL / Redis 連線、讀寫 endpoint 與憑證角色
 - `DB Metadata`：AWS Inventory 快照與資料庫物件快照
 - `Masking Rules`：欄位脫敏規則與 Unmask Whitelist
-- `SQL Review Rules`：DDL / DML 審核規則
-- `Users / Auth Groups`：權限與 DB Scope 管理
+- `SQL Review Rules`：依資料庫類型拆分的審核規則
+- `Users / Auth Groups / Resources`：權限、DB Scope 與資源綁定反查
 - `Settings`：SQL Editor timeout 與 DB Metadata 掃描設定
 
 ## 文件入口
@@ -25,6 +25,8 @@ DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL/DML 工
 - [本機開發教學](docs/tutorials/getting-started-local-dev.md)
 - [SQL Editor 參考](docs/reference/sql-editor.md)
 - [Tickets 參考](docs/reference/tickets.md)
+- [DB Connections 參考](docs/reference/db-connections.md)
+- [Users / RBAC 參考](docs/reference/users-and-rbac.md)
 - [Masking DSL 參考](docs/reference/masking-and-dsl.md)
 - [設定與環境變數](docs/reference/configuration.md)
 

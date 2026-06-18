@@ -1,0 +1,3 @@
+-- Backfill migration for environments that had already advanced past 034 before
+-- query_access was introduced. Intentionally no-op to avoid dropping tables that
+-- may also be created by 034_query_access on fresh environments.

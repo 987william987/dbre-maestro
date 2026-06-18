@@ -19,7 +19,7 @@
 
    選定後，當前 tab 會記住自己的 connection、database、schema 與資產樹展開狀態。
 
-3. 在編輯器輸入單一查詢 statement。
+3. 在編輯器輸入查詢。
 
    ```sql
    SELECT id, email
@@ -27,13 +27,16 @@
    LIMIT 20;
    ```
 
-   SQL Editor 目前只接受單一 statement。若貼入多句 SQL，查詢與 Explain 都會被拒絕。
+   SQL Editor 真正執行時只接受單一 statement。你可以在 editor 中保留多句草稿，但：
+
+   - 若有反白選取片段，系統會優先使用選取片段
+   - 若沒有選取片段，則要求目前內容是單一 statement
 
 4. 點擊 `Format` 美化 SQL。
 
    這會依資料源類型套用對應 SQL formatter。若你有反白選取 SQL，系統只會格式化選取片段。
 
-5. 點擊 `Run Query` 執行查詢。
+5. 點擊 `Run Query`，或直接按 `Cmd/Ctrl + Enter` 執行查詢。
 
    成功後可在下方看到：
 

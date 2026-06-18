@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/tickets/EmptyState'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { formatDateTime } from '@/shared/lib/format'
+import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
 import type { Ticket, TicketStatus, TicketType } from '@/shared/types/ticket'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
@@ -36,6 +37,7 @@ const TYPE_OPTIONS: Array<{ value: '' | TicketType; label: string }> = [
   { value: 'ddl', label: 'DDL' },
   { value: 'dml', label: 'DML' },
   { value: 'redis_command', label: 'Redis' },
+  { value: 'query_access', label: 'Query Access' },
   { value: 'sql_export', label: 'SQL Export' },
   { value: 'sensitive_query_access', label: 'Sensitive Query Access' },
 ]
@@ -48,6 +50,8 @@ function formatTicketTypeLabel(ticketType: TicketType) {
       return 'DML'
     case 'redis_command':
       return 'Redis'
+    case 'query_access':
+      return 'Query Access'
     case 'sql_export':
       return 'SQL Export'
     case 'sensitive_query_access':
@@ -108,6 +112,21 @@ export function TicketsPage() {
 
   useEffect(() => {
     void loadTickets(appliedFilters, offset)
+  }, [appliedFilters, offset])
+
+  useEffect(() => {
+    const handleRealtime = (event: Event) => {
+      const realtimeEvent = event as CustomEvent<{ event?: string }>
+      if (realtimeEvent.detail?.event !== 'ticket.updated') {
+        return
+      }
+      void loadTickets(appliedFilters, offset)
+    }
+
+    window.addEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
+    return () => {
+      window.removeEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
+    }
   }, [appliedFilters, offset])
 
   const canCreateTicket = user?.permissions.includes('tickets.apply') ?? false

@@ -21,6 +21,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
+	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -31,6 +32,18 @@ const (
 	requestTimeout = 45 * time.Second
 	writeTimeout   = 45 * time.Second
 )
+
+func timeoutExceptEventStream(timeout time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/events/stream" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			chimw.Timeout(timeout)(next).ServeHTTP(w, r)
+		})
+	}
+}
 
 func main() {
 	migrateOnly := flag.Bool("migrate-only", false, "run migrations and exit")
@@ -86,6 +99,7 @@ func main() {
 
 	// Crash recovery: mark any executing tickets as interrupted
 	ticketRepo := repository.NewTicketRepo(metaDB)
+	queryAccessRepo := repository.NewQueryAccessRepo(metaDB)
 	n, err := ticketRepo.MarkInterruptedAll(context.Background())
 	if err != nil {
 		slog.Warn("crash recovery scan failed", "err", err)
@@ -112,6 +126,7 @@ func main() {
 
 	maskingRuleRepo := repository.NewMaskingRuleRepo(metaDB)
 	sqlReviewRuleRepo := repository.NewSQLReviewRuleRepo(metaDB)
+	eventBroker := realtime.NewBroker()
 
 	maskingEngine, err := masking.NewEngine(cfg.EncryptionKey, masking.GlobalCache())
 	if err != nil {
@@ -121,17 +136,18 @@ func main() {
 
 	healthH := handler.NewHealthHandler(metaDB)
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret)
-	ticketH := handler.NewTicketHandler(ticketRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, cfg.AppBaseURL)
-	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, auditRepo)
-	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, larkDispatcher, cfg.AppBaseURL)
+	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL)
+	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo)
+	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
 	auditH := handler.NewAuditHandler(auditRepo)
 	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
 	sqlReviewRuleH := handler.NewSQLReviewRuleHandler(sqlReviewRuleRepo, auditRepo)
-	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, settingsRepo, maskingEngine, whitelistRepo, notifRepo, larkDispatcher, cfg.AppBaseURL)
+	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, settingsRepo, queryAccessRepo, maskingEngine, whitelistRepo, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
 	userH := handler.NewUserHandler(userRepo, authGroupRepo, sessionRepo, auditRepo, dbConnRepo)
 	metadataH := handler.NewMetadataHandler(dbConnRepo, userRepo)
 	authGroupH := handler.NewAuthGroupHandler(authGroupRepo, userRepo, auditRepo)
 	notifH := handler.NewNotificationHandler(notifRepo)
+	eventStreamH := handler.NewEventStreamHandler(eventBroker)
 	whitelistH := handler.NewMaskingWhitelistHandler(dbConnRepo, whitelistRepo, auditRepo)
 	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, dbConnRepo, auditRepo)
 	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo, settingsRepo)
@@ -148,7 +164,7 @@ func main() {
 	r.Use(chimw.RealIP)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
-	r.Use(chimw.Timeout(requestTimeout))
+	r.Use(timeoutExceptEventStream(requestTimeout))
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", healthH.ServeHTTP)
@@ -185,6 +201,7 @@ func main() {
 			r.Use(middleware.InjectPermissions(userRepo))
 
 			r.With(requireDBConnectionsRead).Get("/", dbConnH.List)
+			r.With(requireDBConnectionsRead).Get("/{id}/bindings", dbConnH.Bindings)
 			r.With(requireDBConnectionsWrite).Post("/", dbConnH.Create)
 			r.With(requireDBConnectionsWrite).Patch("/{id}", dbConnH.Patch)
 			r.With(requireDBConnectionsWrite).Post("/{id}/test", dbConnH.Test)
@@ -320,7 +337,6 @@ func main() {
 				r.With(requireTicketWorkflowReject).Post("/reject", ticketH.Reject)
 				r.With(requireTicketsApply).Post("/withdraw", ticketH.Withdraw)
 				r.With(requireSensitiveReview).Post("/revoke", ticketH.Revoke)
-				r.With(requireTicketsExecute).Post("/request-execution", ticketH.RequestExecution)
 				r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)
 				r.With(requireTicketsExecute).Post("/stop", ticketH.Stop)
 			})
@@ -333,6 +349,12 @@ func main() {
 			r.Get("/", notifH.List)
 			r.Post("/read-all", notifH.MarkAllRead)
 			r.Post("/{id}/read", notifH.MarkRead)
+		})
+
+		r.Route("/events", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Get("/stream", eventStreamH.Stream)
 		})
 	})
 

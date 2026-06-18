@@ -42,7 +42,7 @@ Query parameters：
 - `mapping_status`
 - `mapping_connections`
 
-目前 mapping 主要用 endpoint 與 DB Connections 的 `host` 做比對。
+目前 mapping 主要用 endpoint 與 DB Connections 的 readonly / readwrite host 做比對。
 
 ## Object API
 
@@ -78,7 +78,13 @@ PostgreSQL metadata 掃描目前會避開 AWS RDS 的 `rdsadmin` database，因�
 
 ## 去重與匹配
 
-目前 inventory 與 objects 是 snapshot 模型，平台以掃描結果入庫後再展示。若未來遇到：
+目前 inventory 與 objects 是 snapshot 模型，平台以掃描結果入庫後再展示。這代表：
+
+- 前端展示大多來自平台 MySQL 中的 snapshot
+- 不會在每次打開頁面時同步直連所有外部 DB
+- 掃描失敗會記錄在後端日誌，而不是直接把錯誤灌進 UI 清單
+
+若未來遇到：
 
 - 重複實例
 - endpoint 改名
@@ -110,4 +116,5 @@ PostgreSQL metadata 掃描目前會避開 AWS RDS 的 `rdsadmin` database，因�
 ## 相關文件
 
 - [平台 Settings](settings.md)
+- [DB Connections](db-connections.md)
 - [架構總覽](../explanation/architecture-overview.md)

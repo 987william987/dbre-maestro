@@ -22,8 +22,10 @@
 
 - [設定與環境變數](reference/configuration.md)
 - [後端 API 與權限對照](reference/backend-api-and-permissions.md)
+- [DB Connections](reference/db-connections.md)
 - [SQL Editor](reference/sql-editor.md)
 - [Tickets](reference/tickets.md)
+- [Users / RBAC](reference/users-and-rbac.md)
 - [Masking 與 DSL](reference/masking-and-dsl.md)
 - [DB Metadata](reference/db-metadata.md)
 - [平台 Settings](reference/settings.md)
@@ -33,7 +35,7 @@
 
 - [架構總覽](explanation/architecture-overview.md)
 - [權限模型](explanation/permission-model.md)
-- [通知與工單更新架構：REST/輪詢 vs SSE](explanation/notification-architecture-rest-vs-sse.md)
+- [通知與工單更新架構：REST 初始化 + SSE 即時更新](explanation/notification-architecture-rest-vs-sse.md)
 
 ## Specs
 

@@ -15,6 +15,10 @@ export type DBConnection = {
   db_type: string
   host: string
   port: number
+  readonly_host?: string
+  readonly_port?: number
+  readwrite_host?: string
+  readwrite_port?: number
   database_name?: string | null
   username: string
   encryption_key_version: number
@@ -27,4 +31,22 @@ export type DBConnection = {
   created_at: string
   updated_at: string
   credentials?: DBConnectionCredential[]
+}
+
+export type ResourceBoundUser = {
+  id: number
+  username: string
+}
+
+export type ResourceBoundAuthGroup = {
+  id: number
+  group_key: string
+  name: string
+}
+
+export type DBConnectionBindings = {
+  db_connection_id: number
+  direct_users: ResourceBoundUser[]
+  effective_users: ResourceBoundUser[]
+  auth_groups: ResourceBoundAuthGroup[]
 }

@@ -24,6 +24,11 @@ type AuthGroupRecord struct {
 	IsProtected bool   `db:"is_protected"`
 }
 
+type ResourceBoundUser struct {
+	ID       uint64 `db:"id" json:"id"`
+	Username string `db:"username" json:"username"`
+}
+
 func NewUserRepo(db *sqlx.DB) *UserRepo {
 	return &UserRepo{db: db}
 }
@@ -521,6 +526,47 @@ func (r *UserRepo) ListUsersByAuthGroup(ctx context.Context, group model.AuthGro
 		)
 		ORDER BY u.username
 	`, group, timeutil.NowUTC(), group, timeutil.NowUTC())
+	return users, err
+}
+
+func (r *UserRepo) ListDirectUsersByDBConnection(ctx context.Context, dbConnectionID uint64) ([]ResourceBoundUser, error) {
+	var users []ResourceBoundUser
+	err := r.db.SelectContext(ctx, &users, `
+		SELECT DISTINCT u.id, u.username
+		FROM users u
+		INNER JOIN user_db_connections udc ON udc.user_id = u.id
+		WHERE udc.db_connection_id = ?
+		ORDER BY u.username
+	`, dbConnectionID)
+	return users, err
+}
+
+func (r *UserRepo) ListEffectiveUsersByDBConnection(ctx context.Context, dbConnectionID uint64) ([]ResourceBoundUser, error) {
+	var users []ResourceBoundUser
+	now := timeutil.NowUTC()
+	err := r.db.SelectContext(ctx, &users, `
+		SELECT DISTINCT u.id, u.username
+		FROM users u
+		WHERE u.id IN (
+			SELECT udc.user_id
+			FROM user_db_connections udc
+			WHERE udc.db_connection_id = ?
+			UNION
+			SELECT uag.user_id
+			FROM auth_group_db_connections agdc
+			INNER JOIN user_auth_groups uag ON uag.auth_group_id = agdc.auth_group_id
+			WHERE agdc.db_connection_id = ?
+			  AND (uag.expires_at IS NULL OR uag.expires_at > ?)
+			UNION
+			SELECT agm.user_id
+			FROM auth_group_db_connections agdc
+			INNER JOIN auth_groups ag ON ag.id = agdc.auth_group_id
+			INNER JOIN auth_group_memberships agm ON agm.auth_group = ag.group_key
+			WHERE agdc.db_connection_id = ?
+			  AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+		)
+		ORDER BY u.username
+	`, dbConnectionID, dbConnectionID, now, dbConnectionID, now)
 	return users, err
 }
 

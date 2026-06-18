@@ -14,6 +14,15 @@ const (
 	permissionSQLEditorSensitiveRev = "sql_editor.sensitive_review"
 )
 
+func ticketWorkspaceRealtimePermissions() []string {
+	return []string{
+		permissionTicketReview,
+		permissionTicketExecute,
+		permissionSQLEditorExportReview,
+		permissionSQLEditorSensitiveRev,
+	}
+}
+
 func reviewPermissionsForTicket(ticketType model.TicketType) []string {
 	switch ticketType {
 	case model.TicketTypeSQLExport:

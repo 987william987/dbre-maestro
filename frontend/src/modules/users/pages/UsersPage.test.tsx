@@ -13,6 +13,10 @@ vi.mock('@/modules/users/api', () => ({
   listUserDBConnections: vi.fn(),
 }))
 
+vi.mock('@/modules/db-connections/api', () => ({
+  getDBConnectionBindings: vi.fn(),
+}))
+
 vi.mock('@/modules/auth-groups/api', () => ({
   listAuthGroups: vi.fn(),
   getAuthGroup: vi.fn(),
@@ -22,6 +26,7 @@ vi.mock('@/modules/auth-groups/api', () => ({
 }))
 
 import { createAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
+import { getDBConnectionBindings } from '@/modules/db-connections/api'
 import { createUser, deleteUser, getUser, listUserDBConnections, listUsers, patchUser } from '@/modules/users/api'
 
 const mockedListUsers = vi.mocked(listUsers)
@@ -34,6 +39,7 @@ const mockedListAuthGroups = vi.mocked(listAuthGroups)
 const mockedGetAuthGroup = vi.mocked(getAuthGroup)
 const mockedCreateAuthGroup = vi.mocked(createAuthGroup)
 const mockedPatchAuthGroup = vi.mocked(patchAuthGroup)
+const mockedGetDBConnectionBindings = vi.mocked(getDBConnectionBindings)
 
 function selectOption(label: string, option: string) {
   fireEvent.click(screen.getByRole('button', { name: label }))
@@ -79,7 +85,53 @@ describe('UsersPage', () => {
     vi.restoreAllMocks()
     mockedListUsers.mockResolvedValue({ users: [] })
     mockedListUserDBConnections.mockResolvedValue({ connections: [] })
+    mockedGetDBConnectionBindings.mockResolvedValue({
+      db_connection_id: 1,
+      direct_users: [],
+      effective_users: [],
+      auth_groups: [],
+    })
     seedAuthGroups()
+  })
+
+  it('resource 子分頁會顯示 DB connection 的反查綁定', async () => {
+    mockedListUserDBConnections.mockResolvedValue({
+      connections: [
+        {
+          id: 9,
+          name: 'analytics-ro',
+          db_type: 'mysql',
+          host: 'db.internal',
+          port: 3306,
+          username: 'readonly',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          created_by: 1,
+          created_at: '2026-06-10T00:00:00Z',
+          updated_at: '2026-06-10T00:00:00Z',
+        },
+      ],
+    })
+    mockedGetDBConnectionBindings.mockResolvedValue({
+      db_connection_id: 9,
+      direct_users: [{ id: 2, username: 'alan' }],
+      effective_users: [{ id: 2, username: 'alan' }, { id: 3, username: 'william' }],
+      auth_groups: [{ id: 1, group_key: 'developer', name: 'Developer' }],
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <UsersPage initialView="resources" />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect((await screen.findAllByText('analytics-ro')).length).toBeGreaterThan(0)
+    expect(screen.getByText('Resources')).toBeInTheDocument()
+    expect(screen.getByText('Developer')).toBeInTheDocument()
+    expect(screen.getAllByText('alan').length).toBeGreaterThan(0)
+    expect(screen.getByText('william')).toBeInTheDocument()
   })
 
   it('列表會顯示 auth group label', async () => {

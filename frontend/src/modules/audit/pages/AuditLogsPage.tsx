@@ -28,7 +28,6 @@ const ACTION_OPTIONS = [
   { value: 'ticket_submit', label: 'Submit Ticket' },
   { value: 'ticket_approve', label: 'Approve Ticket' },
   { value: 'ticket_reject', label: 'Reject Ticket' },
-  { value: 'ticket_request_execution', label: 'Request Execution' },
   { value: 'ticket_execute_start', label: 'Start Execution' },
   { value: 'ticket_execute_complete', label: 'Execution Complete' },
   { value: 'ticket_execute_failed', label: 'Execution Failed' },

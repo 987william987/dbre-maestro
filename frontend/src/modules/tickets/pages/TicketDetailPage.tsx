@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { startTransition, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Check, ChevronDown, Download, Loader2, Play, Send, ShieldCheck, ShieldX, X } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
+import { cn } from '@/lib/utils'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
+import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
 import type { Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants } from '@/shared/types/ticket'
 import type { AuditLog } from '@/shared/types/audit'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
@@ -12,7 +14,7 @@ import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useToast } from '@/shared/ui/ToastContext'
-import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, requestExecution, revokeTicket, withdrawTicket } from '@/modules/tickets/api'
+import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, revokeTicket, withdrawTicket } from '@/modules/tickets/api'
 
 function DetailTable({
   headers,
@@ -94,6 +96,8 @@ function formatTicketTypeLabel(ticketType: string) {
       return 'DML'
     case 'redis_command':
       return 'Redis'
+    case 'query_access':
+      return 'Query Access'
     case 'sql_export':
       return 'SQL Export'
     case 'sensitive_query_access':
@@ -113,8 +117,6 @@ function formatActivityAction(actionType: string) {
       return 'Rejected'
     case 'ticket_withdraw':
       return 'Withdrawn'
-    case 'ticket_request_execution':
-      return 'Queued for Execution'
     case 'ticket_execute_start':
       return 'Execution Started'
     case 'ticket_execute_complete':
@@ -152,8 +154,6 @@ function formatActivityDetail(log: AuditLog) {
         : 'Ticket rejected.'
     case 'ticket_withdraw':
       return 'Ticket withdrawn by submitter.'
-    case 'ticket_request_execution':
-      return 'Ticket moved to the pending execution queue.'
     case 'ticket_execute_start':
       return 'Ticket execution started.'
     case 'ticket_execute_complete':
@@ -161,12 +161,43 @@ function formatActivityDetail(log: AuditLog) {
     case 'ticket_execute_failed':
       return 'Execution result: failed.'
     case 'ticket_revoke':
-      return 'Sensitive access was revoked early.'
+      return 'Access was revoked early.'
     case 'ticket_schedule':
       return 'Ticket was scheduled for execution.'
     default:
       return details ? JSON.stringify(details) : '—'
   }
+}
+
+function extractRealtimeTicketID(detail: unknown): string | null {
+  if (!detail || typeof detail !== 'object') {
+    return null
+  }
+
+  const eventDetail = detail as {
+    event?: string
+    data?: {
+      ticket_id?: number
+      notification?: {
+        resource_type?: string | null
+        resource_id?: number | null
+      } | null
+    } | null
+  }
+
+  if (eventDetail.event === 'ticket.updated') {
+    const ticketID = eventDetail.data?.ticket_id
+    return ticketID == null ? null : String(ticketID)
+  }
+
+  if (eventDetail.event === 'notification.created') {
+    const notification = eventDetail.data?.notification
+    if (notification?.resource_type === 'ticket' && notification.resource_id != null) {
+      return String(notification.resource_id)
+    }
+  }
+
+  return null
 }
 
 type StatementResultRow = {
@@ -285,14 +316,19 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
       : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' || ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
         : 'upcoming'
     : ticket.status === 'approved' || ticket.status === 'completed' ? 'done'
-      : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
+      : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' || ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
         : 'upcoming'
   const completionDetail = usesExecutor
     ? completionTone === 'done' ? 'Ticket closed successfully'
       : completionTone === 'failed' ? 'Ticket closed unsuccessfully'
         : 'Waiting for execution to finish'
     : completionTone === 'done' ? 'Ticket completed after approval'
-      : completionTone === 'failed' ? 'Ticket closed unsuccessfully'
+      : completionTone === 'failed'
+        ? (ticket.ticket_type === 'sensitive_query_access' || ticket.ticket_type === 'query_access') && ticket.status === 'stopped'
+          ? ticket.ticket_type === 'query_access'
+            ? 'Query access was revoked and the ticket is closed'
+            : 'Sensitive access was revoked and the ticket is closed'
+          : 'Ticket closed unsuccessfully'
         : 'Waiting for approval to complete the request'
 
   const steps: WorkflowStep[] = [
@@ -360,13 +396,36 @@ function WorkflowStepIcon({ tone }: { tone: WorkflowStepTone }) {
   )
 }
 
-function WorkflowTimeline({ ticket, workflowParticipants }: { ticket: Ticket; workflowParticipants: TicketWorkflowParticipants }) {
+function WorkflowTimeline({
+  ticket,
+  workflowParticipants,
+  highlight,
+  refreshing,
+}: {
+  ticket: Ticket
+  workflowParticipants: TicketWorkflowParticipants
+  highlight?: boolean
+  refreshing?: boolean
+}) {
   const steps = buildWorkflowSteps(ticket, workflowParticipants)
 
   return (
-    <section className="rounded-xl border border-border bg-panel shadow-soft">
+    <section
+      className={cn(
+        'rounded-xl border border-border bg-panel shadow-soft transition-all duration-300',
+        highlight ? 'border-accent/30 shadow-[0_0_0_3px_rgba(59,130,246,0.10)]' : '',
+      )}
+    >
       <div className="border-b border-border/80 px-4 py-3">
-        <p className="text-[13px] font-semibold text-ink">Approval Flow</p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[13px] font-semibold text-ink">Approval Flow</p>
+          {refreshing ? (
+            <span className="inline-flex items-center gap-2 text-[11px] font-medium text-muted">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+              Syncing status...
+            </span>
+          ) : null}
+        </div>
       </div>
 
       <div className="overflow-x-auto px-4 py-4">
@@ -401,10 +460,13 @@ export function TicketDetailPage() {
   const [error, setError] = useState('')
   const [comment, setComment] = useState('')
   const [reason, setReason] = useState('')
-  const [acting, setActing] = useState<'approve' | 'reject' | 'withdraw' | 'request-execution' | 'execute' | 'revoke' | null>(null)
-  const [confirmAction, setConfirmAction] = useState<'withdraw' | 'request-execution' | 'execute' | 'revoke' | null>(null)
+  const [acting, setActing] = useState<'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke' | null>(null)
+  const [confirmAction, setConfirmAction] = useState<'withdraw' | 'execute' | 'revoke' | null>(null)
   const [downloadingExport, setDownloadingExport] = useState(false)
   const [otherDetailsOpen, setOtherDetailsOpen] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [statusTransitioning, setStatusTransitioning] = useState(false)
+  const previousStatusRef = useRef<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -422,7 +484,9 @@ export function TicketDetailPage() {
       try {
         const nextDetail = await getTicket(id)
         if (active) {
-          setDetail(nextDetail)
+          startTransition(() => {
+            setDetail(nextDetail)
+          })
         }
       } catch (loadError) {
         if (active) {
@@ -442,6 +506,43 @@ export function TicketDetailPage() {
     }
   }, [id])
 
+  useEffect(() => {
+    if (!id) {
+      return
+    }
+
+    const handleRealtime = (event: Event) => {
+      const realtimeEvent = event as CustomEvent<unknown>
+      if (extractRealtimeTicketID(realtimeEvent.detail) !== id) {
+        return
+      }
+      void reloadTicket({ background: true })
+    }
+
+    window.addEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
+    return () => {
+      window.removeEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
+    }
+  }, [id])
+
+  useEffect(() => {
+    const nextStatus = detail?.ticket.status ?? null
+    const previousStatus = previousStatusRef.current
+    previousStatusRef.current = nextStatus
+
+    if (!nextStatus || !previousStatus || nextStatus === previousStatus) {
+      return
+    }
+
+    setStatusTransitioning(true)
+    const timer = window.setTimeout(() => {
+      setStatusTransitioning(false)
+    }, 900)
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [detail?.ticket.status])
+
   if (!user) {
     return null
   }
@@ -450,34 +551,45 @@ export function TicketDetailPage() {
   const canReview = detail?.capabilities?.can_review ?? false
   const canReject = detail?.capabilities?.can_reject ?? false
   const canWithdraw = detail?.capabilities?.can_withdraw ?? false
-  const canOperateDBA = detail?.capabilities?.can_request_execution ?? false
   const canExecute = detail?.capabilities?.can_execute ?? false
   const canRevoke = detail?.capabilities?.can_revoke ?? false
   const exportDownloadURL = detail?.export_request?.download_url ?? null
   const statementResults = detail ? buildStatementResults(detail) : []
-  const hasActionPanel = canReview || canWithdraw || canOperateDBA || canExecute || canReject || canRevoke || (ticket?.ticket_type === 'sql_export' && detail?.capabilities.can_download_export && exportDownloadURL)
+  const hasActionPanel = canReview || canWithdraw || canExecute || canReject || canRevoke || (ticket?.ticket_type === 'sql_export' && detail?.capabilities.can_download_export && exportDownloadURL)
   const shouldShowActionPanel = hasActionPanel && !['completed', 'failed', 'rejected', 'withdrawn', 'stopped', 'interrupted'].includes(ticket?.status ?? '')
-  const showExecutionActions = (ticket?.status === 'approved' && canOperateDBA) ||
+  const showExecutionActions = (ticket?.status === 'approved' && canReject) ||
     (ticket?.status === 'pending_execution' && (canExecute || canReject)) ||
-    (ticket?.ticket_type === 'sensitive_query_access' && ticket?.status === 'approved' && canRevoke)
+    ((ticket?.ticket_type === 'sensitive_query_access' || ticket?.ticket_type === 'query_access') && ticket?.status === 'approved' && canRevoke)
 
-  async function reloadTicket() {
+  async function reloadTicket(options?: { background?: boolean }) {
     if (!id) {
       return
     }
-    const nextDetail = await getTicket(id)
-    setDetail(nextDetail)
+    const background = options?.background === true
+    if (background) {
+      setIsRefreshing(true)
+    }
+    try {
+      const nextDetail = await getTicket(id)
+      startTransition(() => {
+        setDetail(nextDetail)
+      })
+    } finally {
+      if (background) {
+        setIsRefreshing(false)
+      }
+    }
   }
 
   async function runAction(
-    type: 'approve' | 'reject' | 'withdraw' | 'request-execution' | 'execute' | 'revoke',
+    type: 'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke',
     action: () => Promise<Ticket | void>,
   ) {
     setActing(type)
     setError('')
     try {
       await action()
-      await reloadTicket()
+      await reloadTicket({ background: true })
       setComment('')
       setReason('')
       pushToast('Ticket updated', 'success')
@@ -512,7 +624,21 @@ export function TicketDetailPage() {
         title={
           <span className="flex flex-wrap items-center gap-3">
             <span>{ticket ? ticket.title : 'Ticket Detail'}</span>
-            {ticket ? <StatusBadge status={ticket.status} /> : null}
+            {ticket ? (
+              <StatusBadge
+                status={ticket.status}
+                className={cn(
+                  statusTransitioning ? 'scale-[1.03] ring-4 ring-accent/15' : '',
+                  isRefreshing ? 'opacity-80' : '',
+                )}
+              />
+            ) : null}
+            {isRefreshing ? (
+              <span className="inline-flex items-center gap-2 text-[11px] font-medium text-muted">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+                Updating...
+              </span>
+            ) : null}
           </span>
         }
         description={
@@ -540,8 +666,13 @@ export function TicketDetailPage() {
       ) : !ticket || !detail ? (
         <div className="rounded-xl border border-border bg-panel p-6 text-sm text-muted shadow-soft">Ticket not found.</div>
       ) : (
-        <div className="space-y-3">
-          <WorkflowTimeline ticket={ticket} workflowParticipants={detail.workflow_participants} />
+        <div className={cn('space-y-3 transition-opacity duration-300', isRefreshing ? 'opacity-95' : 'opacity-100')}>
+          <WorkflowTimeline
+            ticket={ticket}
+            workflowParticipants={detail.workflow_participants}
+            highlight={statusTransitioning}
+            refreshing={isRefreshing}
+          />
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border px-4 py-3">
               <span className="font-mono text-sm font-semibold text-accent">{ticket.ticket_no}</span>
@@ -564,7 +695,43 @@ export function TicketDetailPage() {
               />
             </div>
 
-            {statementResults.length === 0 ? (
+            {ticket.ticket_type === 'query_access' ? (
+              <div className="px-4 pb-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Query Access Details</p>
+                <DetailTable
+                  headers={['Scope Mode', 'Approved Duration', 'Approved Until', 'Revoked At', 'Revoked By']}
+                  rows={[[
+                    detail.query_access_items[0]?.scope_mode ?? '—',
+                    ticket.approved_duration_minutes != null ? `${ticket.approved_duration_minutes} minutes` : '—',
+                    ticket.approved_until ? formatDateTime(ticket.approved_until, true) : '—',
+                    ticket.revoked_at ? formatDateTime(ticket.revoked_at, true) : '—',
+                    formatTicketActor(ticket.revoked_by_name, ticket.revoked_by ?? null),
+                  ]]}
+                />
+                <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+                  <table className="min-w-full border-collapse">
+                    <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
+                      <tr>
+                        <th className="px-4 py-3">ID</th>
+                        <th className="px-4 py-3">Scope</th>
+                        <th className="px-4 py-3">Database</th>
+                        <th className="px-4 py-3">Table</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border bg-white text-[13px] text-ink">
+                      {detail.query_access_items.map((item) => (
+                        <tr key={item.id}>
+                          <td className="px-4 py-3 align-top">{item.id}</td>
+                          <td className="px-4 py-3 align-top">{item.scope_mode}</td>
+                          <td className="px-4 py-3 align-top">{item.database_name}</td>
+                          <td className="px-4 py-3 align-top">{item.table_name || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : statementResults.length === 0 ? (
               <div className="px-4 pb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">SQL Content</p>
                 <pre className="mt-2 overflow-x-auto rounded-xl border border-border bg-panel-soft p-4 font-mono text-[13px] leading-7 text-ink">
@@ -688,17 +855,6 @@ export function TicketDetailPage() {
                   {showExecutionActions ? (
                     <div className="p-0">
                       <div className="flex flex-col gap-2">
-                        {ticket.status === 'approved' ? (
-                          <button
-                            type="button"
-                            disabled={acting !== null || !canOperateDBA}
-                            onClick={() => setConfirmAction('request-execution')}
-                            className="inline-flex h-9 w-auto items-center justify-center gap-2 self-start rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {acting === 'request-execution' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                            Request Execution
-                          </button>
-                        ) : null}
                         {canReject && (ticket.status === 'approved' || ticket.status === 'pending_execution') ? (
                           <>
                             <label className="flex flex-col gap-1.5">
@@ -739,12 +895,12 @@ export function TicketDetailPage() {
                         {canRevoke ? (
                           <button
                             type="button"
-                            disabled={acting !== null || ticket.status !== 'approved' || ticket.ticket_type !== 'sensitive_query_access'}
+                            disabled={acting !== null || ticket.status !== 'approved' || (ticket.ticket_type !== 'sensitive_query_access' && ticket.ticket_type !== 'query_access')}
                             onClick={() => setConfirmAction('revoke')}
                             className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {acting === 'revoke' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
-                            Revoke Access
+                            {ticket.ticket_type === 'query_access' ? 'Revoke Query Access' : 'Revoke Access'}
                           </button>
                         ) : null}
                       </div>
@@ -818,27 +974,25 @@ export function TicketDetailPage() {
         title={
           confirmAction === 'withdraw'
             ? 'Withdraw Ticket'
-            : confirmAction === 'request-execution'
-              ? 'Request Execution'
-              : confirmAction === 'execute'
+            : confirmAction === 'execute'
                 ? 'Execute Ticket'
-                : 'Revoke Sensitive Access'
+                : ticket?.ticket_type === 'query_access'
+                  ? 'Revoke Query Access'
+                  : 'Revoke Sensitive Access'
         }
         description={
           confirmAction === 'withdraw'
             ? 'Withdraw this ticket now? Reviewers will no longer process it.'
-            : confirmAction === 'request-execution'
-            ? 'Submit this ticket to the execution queue? A DBA can trigger execution from the pending_execution state.'
             : confirmAction === 'execute'
               ? 'Trigger execution for this ticket? This will call the backend execute API.'
-              : 'Revoke this sensitive access ticket early? Access will be invalidated from the next query onwards.'
+              : ticket?.ticket_type === 'query_access'
+                ? 'Revoke this query access ticket early? The granted query scope will be invalidated from the next query onwards.'
+                : 'Revoke this sensitive access ticket early? Access will be invalidated from the next query onwards.'
         }
         confirmLabel={
           confirmAction === 'withdraw'
             ? 'Withdraw'
-            : confirmAction === 'request-execution'
-              ? 'Confirm'
-              : confirmAction === 'execute'
+            : confirmAction === 'execute'
                 ? 'Execute'
                 : 'Revoke'
         }
@@ -848,9 +1002,6 @@ export function TicketDetailPage() {
           if (!ticket) return
           if (confirmAction === 'withdraw') {
             void runAction('withdraw', () => withdrawTicket(ticket.id)).finally(() => setConfirmAction(null))
-          }
-          if (confirmAction === 'request-execution') {
-            void runAction('request-execution', () => requestExecution(ticket.id)).finally(() => setConfirmAction(null))
           }
           if (confirmAction === 'execute') {
             void runAction('execute', () => executeTicket(ticket.id)).finally(() => setConfirmAction(null))

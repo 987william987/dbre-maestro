@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/dbre-maestro/maestro/internal/model"
@@ -18,15 +20,19 @@ func NewNotificationRepo(db *sqlx.DB) *NotificationRepo {
 }
 
 // Create inserts a notification for a user.
-func (r *NotificationRepo) Create(ctx context.Context, userID uint64, notifType, title, body string, resourceType *string, resourceID *uint64) error {
-	_, err := r.db.ExecContext(ctx,
+func (r *NotificationRepo) Create(ctx context.Context, userID uint64, notifType, title, body string, resourceType *string, resourceID *uint64) (uint64, error) {
+	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO notifications (user_id, type, title, body, resource_type, resource_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		userID, notifType, title, body, resourceType, resourceID, timeutil.NowUTC(),
 	)
 	if err != nil {
-		return fmt.Errorf("create notification: %w", err)
+		return 0, fmt.Errorf("create notification: %w", err)
 	}
-	return nil
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("read notification id: %w", err)
+	}
+	return uint64(id), nil
 }
 
 // List returns notifications for a user (unread first, then read), most recent first.
@@ -69,4 +75,16 @@ func (r *NotificationRepo) MarkAllRead(ctx context.Context, userID uint64) error
 		`UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0`, userID,
 	)
 	return err
+}
+
+func (r *NotificationRepo) GetByIDForUser(ctx context.Context, id, userID uint64) (*model.Notification, error) {
+	var notification model.Notification
+	err := r.db.GetContext(ctx, &notification, `SELECT * FROM notifications WHERE id = ? AND user_id = ?`, id, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &notification, nil
 }

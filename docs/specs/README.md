@@ -20,6 +20,38 @@
 - 目前仍未落地，且屬於後續治理與維運策略需要補完的 active work
 - 尚未被其他文件取代
 
+### [20260618 Query Access Ticket And SQL Editor Query Scope Spec](active/20260618-120025-query-access-ticket-and-sql-editor-query-scope-spec.md)
+
+判定：
+
+- 這是 Query Access 工單、SQL Editor 細粒度查詢權限、DB Scope / Sensitive Access 邊界的主設計文件
+- 目前尚未實作完成，且是後續功能落地的直接依據
+- 沒有被其他文件取代
+
+### [20260618 Query Access Implementation Checklist](active/20260618-123500-query-access-implementation-checklist.md)
+
+判定：
+
+- 這是上述 Query Access 主 spec 的實作拆解清單
+- 內容偏 execution checklist，不取代主 spec，但可作為實際開發排程與驗收依據
+- 應與主 spec 一起維護
+
+### [20260618 Query Access Backend Task List](active/20260618-124500-query-access-backend-task-list.md)
+
+判定：
+
+- 這是 Query Access 第一版的後端執行清單
+- 主要涵蓋 migration、domain、service、API、parser 整合、audit 與 tests
+- 屬於 implementation-ready 文件
+
+### [20260618 Query Access Frontend Task List](active/20260618-124700-query-access-frontend-task-list.md)
+
+判定：
+
+- 這是 Query Access 第一版的前端執行清單
+- 主要涵蓋 New Ticket、SQL Editor CTA、Ticket List / Detail、文案與 QA
+- 屬於 implementation-ready 文件
+
 ### [20260612 DB Metadata Module Spec](active/20260612-111500-db-metadata-module-spec.md)
 
 判定：
