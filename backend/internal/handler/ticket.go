@@ -578,10 +578,16 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusUnprocessableEntity, "sensitive_query_access requires db_connection_id and scopes")
 			return
 		}
-		if req.ApprovedDurationMinutes == nil || (*req.ApprovedDurationMinutes != 10 && *req.ApprovedDurationMinutes != 30 && *req.ApprovedDurationMinutes != 60) {
-			jsonErr(w, http.StatusUnprocessableEntity, "approved_duration_minutes must be 10, 30, or 60")
+		if req.ApprovedDurationMinutes == nil {
+			jsonErr(w, http.StatusUnprocessableEntity, "approved_duration_minutes is required")
 			return
 		}
+		approvedDurationMinutes, err := normalizeSensitiveAccessDurationMinutes(*req.ApprovedDurationMinutes)
+		if err != nil {
+			jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		req.ApprovedDurationMinutes = &approvedDurationMinutes
 	}
 
 	t := &model.Ticket{
@@ -835,10 +841,6 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"can_reject":   canReject,
 			"can_withdraw": canWithdraw,
 			"can_revoke":   canRevoke,
-			"can_request_execution": middleware.HasPermission(r.Context(), "tickets.execute") &&
-				ticket.TicketType != model.TicketTypeSQLExport &&
-				ticket.TicketType != model.TicketTypeSensitiveQueryAccess &&
-				ticket.Status == model.TicketStatusApproved,
 			"can_execute": middleware.HasPermission(r.Context(), "tickets.execute") &&
 				ticket.TicketType != model.TicketTypeSQLExport &&
 				ticket.TicketType != model.TicketTypeSensitiveQueryAccess &&
@@ -1189,58 +1191,6 @@ func (h *TicketHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventWithdrawn, &userID, "submitter 已收回此工單。")
 
-	h.publishTicketUpdateByID(r.Context(), id, ticket, &userID)
-	updated, _ := h.tickets.GetByID(r.Context(), id)
-	jsonOK(w, updated)
-}
-
-// POST /tickets/{id}/request-execution
-func (h *TicketHandler) RequestExecution(w http.ResponseWriter, r *http.Request) {
-	id := parseTicketID(w, r)
-	if id == 0 {
-		return
-	}
-
-	ticket, err := h.tickets.GetByID(r.Context(), id)
-	if err != nil || ticket == nil {
-		jsonErr(w, http.StatusNotFound, "ticket not found")
-		return
-	}
-
-	if err := ticketsm.ValidateTransition(ticket.Status, model.TicketStatusPendingExecution); err != nil {
-		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	if ticket.TicketType != model.TicketTypeDDL && ticket.TicketType != model.TicketTypeDML && ticket.TicketType != model.TicketTypeRedisCommand {
-		jsonErr(w, http.StatusUnprocessableEntity, "only ddl/dml/redis tickets can request execution")
-		return
-	}
-
-	userID := middleware.UserIDFromCtx(r.Context())
-	ok, err := h.tickets.UpdateStatus(r.Context(), id,
-		ticket.Status, model.TicketStatusPendingExecution,
-		nil, nil, nil,
-	)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "update failed")
-		return
-	}
-	if !ok {
-		jsonErr(w, http.StatusConflict, "ticket status changed concurrently")
-		return
-	}
-
-	h.audit.Log(r.Context(), repository.AuditEntry{
-		ActorID:      &userID,
-		ActorName:    middleware.UsernameFromCtx(r.Context()),
-		ActionType:   "ticket_request_execution",
-		ResourceType: "ticket",
-		ResourceID:   &id,
-		Details:      map[string]string{"status": string(model.TicketStatusPendingExecution)},
-		IPAddress:    clientIP(r),
-	})
-
-	h.dispatchTicketNotification(r.Context(), ticket, ticketEventPendingExecution, &userID, "工單已進入待執行隊列。")
 	h.publishTicketUpdateByID(r.Context(), id, ticket, &userID)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)

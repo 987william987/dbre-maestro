@@ -13,7 +13,6 @@ vi.mock('@/modules/tickets/api', () => ({
   approveTicket: vi.fn(),
   rejectTicket: vi.fn(),
   withdrawTicket: vi.fn(),
-  requestExecution: vi.fn(),
   executeTicket: vi.fn(),
   downloadTicketExport: vi.fn(),
   revokeTicket: vi.fn(),
@@ -77,7 +76,6 @@ function buildDetail(ticket: Ticket, overrides?: Partial<TicketDetail>): TicketD
       can_reject: false,
       can_withdraw: false,
       can_revoke: false,
-      can_request_execution: false,
       can_execute: false,
       can_download_export: false,
     },
@@ -122,7 +120,6 @@ describe('TicketDetailPage role visibility', () => {
         can_reject: true,
         can_withdraw: false,
         can_revoke: false,
-        can_request_execution: false,
         can_execute: false,
         can_download_export: false,
       },
@@ -139,7 +136,7 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
   })
 
-  it('dba 在 approved 狀態可見 request execution', async () => {
+  it('dba 在 approved 狀態不再顯示 request execution', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
       isAuthenticated: true,
@@ -159,7 +156,6 @@ describe('TicketDetailPage role visibility', () => {
         can_reject: true,
         can_withdraw: false,
         can_revoke: false,
-        can_request_execution: true,
         can_execute: true,
         can_download_export: false,
       },
@@ -167,10 +163,11 @@ describe('TicketDetailPage role visibility', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByText('Request Execution')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Waiting for DBA execution')).toBeInTheDocument())
     expect(screen.getByText('Review completed')).toBeInTheDocument()
     expect(screen.getByText('dba.cindy, dba.edgar')).toBeInTheDocument()
     expect(screen.getByText('Waiting for DBA execution')).toBeInTheDocument()
+    expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
     expect(screen.queryByText('Execute')).not.toBeInTheDocument()
   })
 
@@ -190,7 +187,6 @@ describe('TicketDetailPage role visibility', () => {
         can_reject: true,
         can_withdraw: false,
         can_revoke: false,
-        can_request_execution: true,
         can_execute: true,
         can_download_export: false,
       },
@@ -219,7 +215,6 @@ describe('TicketDetailPage role visibility', () => {
         can_reject: false,
         can_withdraw: true,
         can_revoke: false,
-        can_request_execution: false,
         can_execute: false,
         can_download_export: false,
       },
@@ -275,7 +270,6 @@ describe('TicketDetailPage role visibility', () => {
         can_reject: false,
         can_withdraw: false,
         can_revoke: false,
-        can_request_execution: false,
         can_execute: false,
         can_download_export: true,
       },

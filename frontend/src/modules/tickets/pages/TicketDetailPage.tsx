@@ -14,7 +14,7 @@ import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useToast } from '@/shared/ui/ToastContext'
-import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, requestExecution, revokeTicket, withdrawTicket } from '@/modules/tickets/api'
+import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, revokeTicket, withdrawTicket } from '@/modules/tickets/api'
 
 function DetailTable({
   headers,
@@ -115,8 +115,6 @@ function formatActivityAction(actionType: string) {
       return 'Rejected'
     case 'ticket_withdraw':
       return 'Withdrawn'
-    case 'ticket_request_execution':
-      return 'Queued for Execution'
     case 'ticket_execute_start':
       return 'Execution Started'
     case 'ticket_execute_complete':
@@ -154,8 +152,6 @@ function formatActivityDetail(log: AuditLog) {
         : 'Ticket rejected.'
     case 'ticket_withdraw':
       return 'Ticket withdrawn by submitter.'
-    case 'ticket_request_execution':
-      return 'Ticket moved to the pending execution queue.'
     case 'ticket_execute_start':
       return 'Ticket execution started.'
     case 'ticket_execute_complete':
@@ -457,8 +453,8 @@ export function TicketDetailPage() {
   const [error, setError] = useState('')
   const [comment, setComment] = useState('')
   const [reason, setReason] = useState('')
-  const [acting, setActing] = useState<'approve' | 'reject' | 'withdraw' | 'request-execution' | 'execute' | 'revoke' | null>(null)
-  const [confirmAction, setConfirmAction] = useState<'withdraw' | 'request-execution' | 'execute' | 'revoke' | null>(null)
+  const [acting, setActing] = useState<'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke' | null>(null)
+  const [confirmAction, setConfirmAction] = useState<'withdraw' | 'execute' | 'revoke' | null>(null)
   const [downloadingExport, setDownloadingExport] = useState(false)
   const [otherDetailsOpen, setOtherDetailsOpen] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -548,14 +544,13 @@ export function TicketDetailPage() {
   const canReview = detail?.capabilities?.can_review ?? false
   const canReject = detail?.capabilities?.can_reject ?? false
   const canWithdraw = detail?.capabilities?.can_withdraw ?? false
-  const canOperateDBA = detail?.capabilities?.can_request_execution ?? false
   const canExecute = detail?.capabilities?.can_execute ?? false
   const canRevoke = detail?.capabilities?.can_revoke ?? false
   const exportDownloadURL = detail?.export_request?.download_url ?? null
   const statementResults = detail ? buildStatementResults(detail) : []
-  const hasActionPanel = canReview || canWithdraw || canOperateDBA || canExecute || canReject || canRevoke || (ticket?.ticket_type === 'sql_export' && detail?.capabilities.can_download_export && exportDownloadURL)
+  const hasActionPanel = canReview || canWithdraw || canExecute || canReject || canRevoke || (ticket?.ticket_type === 'sql_export' && detail?.capabilities.can_download_export && exportDownloadURL)
   const shouldShowActionPanel = hasActionPanel && !['completed', 'failed', 'rejected', 'withdrawn', 'stopped', 'interrupted'].includes(ticket?.status ?? '')
-  const showExecutionActions = (ticket?.status === 'approved' && canOperateDBA) ||
+  const showExecutionActions = (ticket?.status === 'approved' && canReject) ||
     (ticket?.status === 'pending_execution' && (canExecute || canReject)) ||
     (ticket?.ticket_type === 'sensitive_query_access' && ticket?.status === 'approved' && canRevoke)
 
@@ -580,7 +575,7 @@ export function TicketDetailPage() {
   }
 
   async function runAction(
-    type: 'approve' | 'reject' | 'withdraw' | 'request-execution' | 'execute' | 'revoke',
+    type: 'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke',
     action: () => Promise<Ticket | void>,
   ) {
     setActing(type)
@@ -817,17 +812,6 @@ export function TicketDetailPage() {
                   {showExecutionActions ? (
                     <div className="p-0">
                       <div className="flex flex-col gap-2">
-                        {ticket.status === 'approved' ? (
-                          <button
-                            type="button"
-                            disabled={acting !== null || !canOperateDBA}
-                            onClick={() => setConfirmAction('request-execution')}
-                            className="inline-flex h-9 w-auto items-center justify-center gap-2 self-start rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {acting === 'request-execution' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                            Request Execution
-                          </button>
-                        ) : null}
                         {canReject && (ticket.status === 'approved' || ticket.status === 'pending_execution') ? (
                           <>
                             <label className="flex flex-col gap-1.5">
@@ -947,17 +931,13 @@ export function TicketDetailPage() {
         title={
           confirmAction === 'withdraw'
             ? 'Withdraw Ticket'
-            : confirmAction === 'request-execution'
-              ? 'Request Execution'
-              : confirmAction === 'execute'
+            : confirmAction === 'execute'
                 ? 'Execute Ticket'
                 : 'Revoke Sensitive Access'
         }
         description={
           confirmAction === 'withdraw'
             ? 'Withdraw this ticket now? Reviewers will no longer process it.'
-            : confirmAction === 'request-execution'
-            ? 'Submit this ticket to the execution queue? A DBA can trigger execution from the pending_execution state.'
             : confirmAction === 'execute'
               ? 'Trigger execution for this ticket? This will call the backend execute API.'
               : 'Revoke this sensitive access ticket early? Access will be invalidated from the next query onwards.'
@@ -965,9 +945,7 @@ export function TicketDetailPage() {
         confirmLabel={
           confirmAction === 'withdraw'
             ? 'Withdraw'
-            : confirmAction === 'request-execution'
-              ? 'Confirm'
-              : confirmAction === 'execute'
+            : confirmAction === 'execute'
                 ? 'Execute'
                 : 'Revoke'
         }
@@ -977,9 +955,6 @@ export function TicketDetailPage() {
           if (!ticket) return
           if (confirmAction === 'withdraw') {
             void runAction('withdraw', () => withdrawTicket(ticket.id)).finally(() => setConfirmAction(null))
-          }
-          if (confirmAction === 'request-execution') {
-            void runAction('request-execution', () => requestExecution(ticket.id)).finally(() => setConfirmAction(null))
           }
           if (confirmAction === 'execute') {
             void runAction('execute', () => executeTicket(ticket.id)).finally(() => setConfirmAction(null))

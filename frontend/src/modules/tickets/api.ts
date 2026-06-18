@@ -126,10 +126,6 @@ export async function withdrawTicket(id: number) {
   return apiClient.post<Ticket>(`/tickets/${id}/withdraw`)
 }
 
-export async function requestExecution(id: number) {
-  return apiClient.post<Ticket>(`/tickets/${id}/request-execution`)
-}
-
 export async function executeTicket(id: number) {
   return apiClient.post<Ticket>(`/tickets/${id}/execute`)
 }

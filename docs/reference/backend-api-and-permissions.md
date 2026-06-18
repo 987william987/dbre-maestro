@@ -73,7 +73,6 @@
 | `POST /api/tickets/{id}/approve` | `requireTicketWorkflowReview` | 依 ticket type 二次檢查 reviewer 權限 |
 | `POST /api/tickets/{id}/reject` | `requireTicketWorkflowReject` | reviewer 可拒絕；DDL / DML / Redis 的 DBA 也可於 `approved` / `pending_execution` 階段拒絕 |
 | `POST /api/tickets/{id}/withdraw` | `requireTicketsApply` | 僅 submitter 可於 `pending_review` 收回 |
-| `POST /api/tickets/{id}/request-execution` | `requireTicketsExecute` | 只適用 DDL / DML / Redis |
 | `POST /api/tickets/{id}/execute` | `requireTicketsExecute` | 只適用 DDL / DML / Redis |
 | `POST /api/tickets/{id}/stop` | `requireTicketsExecute` | 停止執行中 ticket |
 | `POST /api/tickets/{id}/revoke` | `requireSensitiveReview` | 只適用 sensitive access |

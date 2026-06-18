@@ -94,7 +94,6 @@ export type TicketCapabilities = {
   can_reject: boolean
   can_withdraw: boolean
   can_revoke: boolean
-  can_request_execution: boolean
   can_execute: boolean
   can_download_export: boolean
 }

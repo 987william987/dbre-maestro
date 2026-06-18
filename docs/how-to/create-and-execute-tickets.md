@@ -65,7 +65,6 @@
 
    流程通常是：
 
-   - `Request Execution`
    - `Execute`
    - 若在待執行階段發現問題：可於 `approved` 或 `pending_execution` 階段 `Reject`
 
