@@ -26,6 +26,7 @@ import (
 
 type TicketHandler struct {
 	tickets            *repository.TicketRepo
+	queryAccess        *repository.QueryAccessRepo
 	exports            *repository.ExportRepo
 	audit              *repository.AuditRepo
 	dbConns            *repository.DBConnectionRepo
@@ -163,13 +164,14 @@ var ticketNotificationPolicies = map[ticketNotificationEvent]ticketNotificationP
 		NotifType:   "ticket_revoked",
 		Roles:       []ticketRecipientRole{ticketRoleSubmitter},
 		NotifyActor: false,
-		Status:      model.TicketStatusApproved,
+		Status:      model.TicketStatusStopped,
 		NextAction:  "請查看工單詳情",
 	},
 }
 
 func NewTicketHandler(
 	tickets *repository.TicketRepo,
+	queryAccess *repository.QueryAccessRepo,
 	exports *repository.ExportRepo,
 	audit *repository.AuditRepo,
 	dbConns *repository.DBConnectionRepo,
@@ -186,6 +188,7 @@ func NewTicketHandler(
 ) *TicketHandler {
 	return &TicketHandler{
 		tickets:            tickets,
+		queryAccess:        queryAccess,
 		exports:            exports,
 		audit:              audit,
 		dbConns:            dbConns,
@@ -259,6 +262,8 @@ func (h *TicketHandler) ticketTypeLabel(ticketType model.TicketType) string {
 		return "DML"
 	case model.TicketTypeRedisCommand:
 		return "REDIS_COMMAND"
+	case model.TicketTypeQueryAccess:
+		return "QUERY_ACCESS"
 	case model.TicketTypeSQLExport:
 		return "SQL_EXPORT"
 	case model.TicketTypeSensitiveQueryAccess:
@@ -515,25 +520,30 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
 
 	var req struct {
-		Title                   string              `json:"title"`
-		Description             *string             `json:"description"`
-		SQLContent              string              `json:"sql_content"`
-		TicketType              model.TicketType    `json:"ticket_type"`
-		DBConnectionID          *uint64             `json:"db_connection_id"`
-		DatabaseName            *string             `json:"database_name"`
-		ApprovedDurationMinutes *int                `json:"approved_duration_minutes"`
-		Scopes                  []model.TicketScope `json:"scopes"`
+		Title                   string                      `json:"title"`
+		Description             *string                     `json:"description"`
+		SQLContent              string                      `json:"sql_content"`
+		TicketType              model.TicketType            `json:"ticket_type"`
+		DBConnectionID          *uint64                     `json:"db_connection_id"`
+		DatabaseName            *string                     `json:"database_name"`
+		ApprovedDurationMinutes *int                        `json:"approved_duration_minutes"`
+		Scopes                  []model.TicketScope         `json:"scopes"`
+		ScopeMode               *model.QueryAccessScopeMode `json:"scope_mode"`
+		Items                   []struct {
+			DatabaseName string  `json:"database_name"`
+			TableName    *string `json:"table_name"`
+		} `json:"items"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Title == "" || req.SQLContent == "" {
+	if req.TicketType != model.TicketTypeQueryAccess && (req.Title == "" || req.SQLContent == "") {
 		jsonErr(w, http.StatusUnprocessableEntity, "title and sql_content are required")
 		return
 	}
 	switch req.TicketType {
-	case model.TicketTypeDDL, model.TicketTypeDML, model.TicketTypeRedisCommand, model.TicketTypeSQLExport, model.TicketTypeSensitiveQueryAccess:
+	case model.TicketTypeDDL, model.TicketTypeDML, model.TicketTypeRedisCommand, model.TicketTypeSQLExport, model.TicketTypeSensitiveQueryAccess, model.TicketTypeQueryAccess:
 	default:
 		jsonErr(w, http.StatusUnprocessableEntity, "invalid ticket_type")
 		return
@@ -589,6 +599,40 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		req.ApprovedDurationMinutes = &approvedDurationMinutes
 	}
+	if req.TicketType == model.TicketTypeQueryAccess {
+		if req.DBConnectionID == nil {
+			jsonErr(w, http.StatusUnprocessableEntity, "query_access requires db_connection_id")
+			return
+		}
+		if req.ScopeMode == nil || (*req.ScopeMode != model.QueryAccessScopeModeDatabase && *req.ScopeMode != model.QueryAccessScopeModeTable) {
+			jsonErr(w, http.StatusUnprocessableEntity, "query_access requires scope_mode=database or table")
+			return
+		}
+		if req.ApprovedDurationMinutes == nil || *req.ApprovedDurationMinutes <= 0 {
+			jsonErr(w, http.StatusUnprocessableEntity, "query_access requires approved_duration_minutes")
+			return
+		}
+		if len(req.Items) == 0 {
+			jsonErr(w, http.StatusUnprocessableEntity, "query_access requires items")
+			return
+		}
+		for _, item := range req.Items {
+			if strings.TrimSpace(item.DatabaseName) == "" {
+				jsonErr(w, http.StatusUnprocessableEntity, "query_access item database_name is required")
+				return
+			}
+			if *req.ScopeMode == model.QueryAccessScopeModeTable && strings.TrimSpace(nullableStringValue(item.TableName)) == "" {
+				jsonErr(w, http.StatusUnprocessableEntity, "query_access table scope requires table_name")
+				return
+			}
+		}
+		if strings.TrimSpace(req.Title) == "" {
+			req.Title = "Query Access Request"
+		}
+		if strings.TrimSpace(req.SQLContent) == "" {
+			req.SQLContent = "QUERY ACCESS REQUEST"
+		}
+	}
 
 	t := &model.Ticket{
 		Title:                   req.Title,
@@ -612,6 +656,24 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		)
 		jsonErr(w, http.StatusInternalServerError, "create ticket failed")
 		return
+	}
+	if req.TicketType == model.TicketTypeQueryAccess && h.queryAccess != nil {
+		items := make([]model.QueryAccessTicketItem, 0, len(req.Items))
+		for _, item := range req.Items {
+			items = append(items, model.QueryAccessTicketItem{
+				TicketID:     created.ID,
+				ConnectionID: *req.DBConnectionID,
+				ScopeMode:    *req.ScopeMode,
+				DatabaseName: strings.TrimSpace(item.DatabaseName),
+				TableName:    optionalTrimmedString(nullableStringValue(item.TableName)),
+			})
+		}
+		if err := h.queryAccess.CreateTicketItems(r.Context(), created.ID, items); err != nil {
+			_ = h.tickets.Delete(r.Context(), created.ID)
+			slog.Error("persist query access ticket items failed", "ticket_id", created.ID, "err", err)
+			jsonErr(w, http.StatusInternalServerError, "persist query access ticket items failed")
+			return
+		}
 	}
 	if len(reviewResults) > 0 {
 		persistedResults := make([]model.TicketReviewResult, 0, len(reviewResults))
@@ -781,7 +843,7 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "ticket capability check failed")
 		return
 	}
-	canRevoke, err := h.canRevokeSensitiveTicket(r.Context(), ticket, userID)
+	canRevoke, err := h.canRevokeTicket(r.Context(), ticket, userID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "ticket capability check failed")
 		return
@@ -834,6 +896,7 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"review_results":        reviewResults,
 		"activity_logs":         auditLogs,
 		"scopes":                scopes,
+		"query_access_items":    h.mustListQueryAccessItems(r.Context(), id),
 		"export_request":        exportDetail,
 		"workflow_participants": workflowParticipants,
 		"capabilities": map[string]any{
@@ -844,6 +907,7 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"can_execute": middleware.HasPermission(r.Context(), "tickets.execute") &&
 				ticket.TicketType != model.TicketTypeSQLExport &&
 				ticket.TicketType != model.TicketTypeSensitiveQueryAccess &&
+				ticket.TicketType != model.TicketTypeQueryAccess &&
 				ticket.Status == model.TicketStatusPendingExecution,
 			"can_download_export": ticket.TicketType == model.TicketTypeSQLExport && ticket.Status == model.TicketStatusApproved && ticket.SubmitterID == userID,
 		},
@@ -999,6 +1063,17 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	if ticket.TicketType == model.TicketTypeSensitiveQueryAccess && ticket.ApprovedDurationMinutes != nil {
 		approvedUntil := time.Now().Add(time.Duration(*ticket.ApprovedDurationMinutes) * time.Minute)
 		ok, err = h.tickets.ApproveSensitiveAccess(r.Context(), id, ticket.Status, userID, approvedUntil)
+	} else if ticket.TicketType == model.TicketTypeQueryAccess {
+		if h.queryAccess == nil {
+			jsonErr(w, http.StatusInternalServerError, "query access repository is not configured")
+			return
+		}
+		var expiresAt *time.Time
+		if ticket.ApprovedDurationMinutes != nil && *ticket.ApprovedDurationMinutes > 0 {
+			value := time.Now().UTC().Add(time.Duration(*ticket.ApprovedDurationMinutes) * time.Minute)
+			expiresAt = &value
+		}
+		ok, err = h.queryAccess.ApproveTicket(r.Context(), id, ticket.Status, userID, req.Comment, ticket.SubmitterID, expiresAt)
 	} else {
 		ok, err = h.tickets.UpdateStatus(r.Context(), id,
 			ticket.Status, model.TicketStatusApproved,
@@ -1428,13 +1503,13 @@ func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "ticket not found")
 		return
 	}
-	if ticket.TicketType != model.TicketTypeSensitiveQueryAccess {
-		jsonErr(w, http.StatusUnprocessableEntity, "only sensitive_query_access tickets can be revoked")
+	if ticket.TicketType != model.TicketTypeSensitiveQueryAccess && ticket.TicketType != model.TicketTypeQueryAccess {
+		jsonErr(w, http.StatusUnprocessableEntity, "only sensitive_query_access and query_access tickets can be revoked")
 		return
 	}
 
 	userID := middleware.UserIDFromCtx(r.Context())
-	allowed, err := h.canRevokeSensitiveTicket(r.Context(), ticket, userID)
+	allowed, err := h.canRevokeTicket(r.Context(), ticket, userID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "ticket revoke check failed")
 		return
@@ -1444,7 +1519,17 @@ func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok, err := h.tickets.RevokeSensitiveAccess(r.Context(), id, userID)
+	var ok bool
+	switch ticket.TicketType {
+	case model.TicketTypeSensitiveQueryAccess:
+		ok, err = h.tickets.RevokeSensitiveAccess(r.Context(), id, userID)
+	case model.TicketTypeQueryAccess:
+		if h.queryAccess == nil {
+			jsonErr(w, http.StatusInternalServerError, "query access repository is not configured")
+			return
+		}
+		ok, err = h.queryAccess.RevokeTicket(r.Context(), id, userID)
+	}
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "revoke failed")
 		return
@@ -1463,7 +1548,11 @@ func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	h.dispatchTicketNotification(r.Context(), ticket, ticketEventRevoked, &userID, "敏感權限已提前撤銷，後續查詢起即失效。")
+	detail := "敏感權限已提前撤銷，後續查詢起即失效。"
+	if ticket.TicketType == model.TicketTypeQueryAccess {
+		detail = "查詢權限已提前回收，後續查詢起即失效。"
+	}
+	h.dispatchTicketNotification(r.Context(), ticket, ticketEventRevoked, &userID, detail)
 	h.publishTicketUpdateByID(r.Context(), id, ticket, &userID)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
@@ -1509,12 +1598,18 @@ func (h *TicketHandler) canWithdrawTicket(ctx context.Context, ticket *model.Tic
 	return ticket.SubmitterID == userID && ticket.Status == model.TicketStatusPendingReview, nil
 }
 
-func (h *TicketHandler) canRevokeSensitiveTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
-	if ticket.TicketType != model.TicketTypeSensitiveQueryAccess {
+func (h *TicketHandler) canRevokeTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
+	if ticket.TicketType != model.TicketTypeSensitiveQueryAccess && ticket.TicketType != model.TicketTypeQueryAccess {
+		return false, nil
+	}
+	if ticket.Status != model.TicketStatusApproved {
 		return false, nil
 	}
 	_ = userID
-	return middleware.HasPermission(ctx, permissionSQLEditorSensitiveRev), nil
+	if ticket.TicketType == model.TicketTypeSensitiveQueryAccess {
+		return middleware.HasPermission(ctx, permissionSQLEditorSensitiveRev), nil
+	}
+	return middleware.HasPermission(ctx, permissionTicketReview), nil
 }
 
 func (h *TicketHandler) validateTicketConnectionType(ctx context.Context, ticketType model.TicketType, connID uint64) error {
@@ -1530,12 +1625,23 @@ func (h *TicketHandler) validateTicketConnectionType(ctx context.Context, ticket
 		if conn.DBType != "redis" {
 			return fmt.Errorf("redis_command tickets only support redis connections")
 		}
-	case model.TicketTypeDDL, model.TicketTypeDML, model.TicketTypeSQLExport, model.TicketTypeSensitiveQueryAccess:
+	case model.TicketTypeDDL, model.TicketTypeDML, model.TicketTypeSQLExport, model.TicketTypeSensitiveQueryAccess, model.TicketTypeQueryAccess:
 		if conn.DBType == "redis" {
 			return fmt.Errorf("%s tickets do not support redis connections", ticketType)
 		}
 	}
 	return nil
+}
+
+func (h *TicketHandler) mustListQueryAccessItems(ctx context.Context, ticketID uint64) []model.QueryAccessTicketItem {
+	if h.queryAccess == nil {
+		return []model.QueryAccessTicketItem{}
+	}
+	items, err := h.queryAccess.ListTicketItems(ctx, ticketID)
+	if err != nil || items == nil {
+		return []model.QueryAccessTicketItem{}
+	}
+	return items
 }
 
 func (h *TicketHandler) ensureReadyExportRequest(ctx context.Context, ticket *model.Ticket) (*model.ExportRequest, error) {

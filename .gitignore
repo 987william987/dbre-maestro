@@ -9,3 +9,4 @@ backend/vendor/
 frontend/node_modules/
 frontend/dist/
 backend/.gocache/
+backend/.tmp/

@@ -66,6 +66,7 @@ function buildDetail(ticket: Ticket, overrides?: Partial<TicketDetail>): TicketD
     review_results: [],
     activity_logs: [],
     scopes: [],
+    query_access_items: [],
     export_request: null,
     workflow_participants: {
       reviewers: [],

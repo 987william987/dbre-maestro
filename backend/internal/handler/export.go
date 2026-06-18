@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
+	"github.com/dbre-maestro/maestro/internal/queryaccess"
 	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
@@ -28,6 +30,7 @@ type ExportHandler struct {
 	dbConns             *repository.DBConnectionRepo
 	users               *repository.UserRepo
 	audit               *repository.AuditRepo
+	queryAccess         *queryaccess.Service
 	masking             *maskingRuntime
 	notifRepo           *repository.NotificationRepo
 	broker              *realtime.Broker
@@ -42,6 +45,7 @@ func NewExportHandler(
 	dbConns *repository.DBConnectionRepo,
 	users *repository.UserRepo,
 	audit *repository.AuditRepo,
+	queryAccessRepo *repository.QueryAccessRepo,
 	maskingRules *repository.MaskingRuleRepo,
 	whitelist *repository.MaskingWhitelistRepo,
 	engine *masking.Engine,
@@ -56,6 +60,7 @@ func NewExportHandler(
 		dbConns:             dbConns,
 		users:               users,
 		audit:               audit,
+		queryAccess:         queryaccess.NewService(queryAccessRepo),
 		masking:             newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:           notifRepo,
 		broker:              broker,
@@ -251,6 +256,18 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if !hasAccess {
 		jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
+		return
+	}
+	if err := h.queryAccess.CheckSQL(r.Context(), userID, conn, req.SQLContent, queryaccess.CheckContext{
+		DatabaseName: strings.TrimSpace(req.DatabaseName),
+		SchemaName:   strings.TrimSpace(req.SchemaName),
+	}); err != nil {
+		if missingErr, ok := err.(*queryaccess.MissingAccessError); ok {
+			jsonErr(w, http.StatusForbidden, missingErr.Error())
+			return
+		}
+		slog.Error("query access check failed for export", "user_id", userID, "connection_id", conn.ID, "err", err)
+		jsonErr(w, http.StatusUnprocessableEntity, "Query access is temporarily unavailable. Please try again later.")
 		return
 	}
 

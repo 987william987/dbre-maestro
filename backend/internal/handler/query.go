@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
+	"github.com/dbre-maestro/maestro/internal/queryaccess"
 	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
@@ -66,6 +68,7 @@ type QueryHandler struct {
 	artifacts    *repository.QueryArtifactRepo
 	tickets      *repository.TicketRepo
 	settings     *repository.SettingsRepo
+	queryAccess  *queryaccess.Service
 	masking      *maskingRuntime
 	notifRepo    *repository.NotificationRepo
 	broker       *realtime.Broker
@@ -95,6 +98,7 @@ func NewQueryHandler(
 	artifacts *repository.QueryArtifactRepo,
 	tickets *repository.TicketRepo,
 	settings *repository.SettingsRepo,
+	queryAccessRepo *repository.QueryAccessRepo,
 	engine *masking.Engine,
 	whitelist *repository.MaskingWhitelistRepo,
 	notifRepo *repository.NotificationRepo,
@@ -110,6 +114,7 @@ func NewQueryHandler(
 		artifacts:    artifacts,
 		tickets:      tickets,
 		settings:     settings,
+		queryAccess:  queryaccess.NewService(queryAccessRepo),
 		masking:      newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:    notifRepo,
 		broker:       broker,
@@ -275,6 +280,23 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	queryCtx := queryExecutionContext{
+		DatabaseName: strings.TrimSpace(req.Database),
+		SchemaName:   strings.TrimSpace(req.Schema),
+	}
+	if err := h.queryAccess.CheckSQL(r.Context(), userID, conn, req.SQL, queryaccess.CheckContext{
+		DatabaseName: queryCtx.DatabaseName,
+		SchemaName:   queryCtx.SchemaName,
+	}); err != nil {
+		if missingErr, ok := err.(*queryaccess.MissingAccessError); ok {
+			jsonErr(w, http.StatusForbidden, missingErr.Error())
+			return
+		}
+		slog.Error("query access check failed", "user_id", userID, "connection_id", conn.ID, "err", err)
+		jsonErr(w, http.StatusUnprocessableEntity, "Query access is temporarily unavailable. Please try again later.")
+		return
+	}
+
 	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal error")
@@ -294,11 +316,6 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 
 	// Inject LIMIT if not present (simple heuristic for SELECT statements)
 	execSQL := injectLimit(req.SQL, limit, conn.DBType)
-	queryCtx := queryExecutionContext{
-		DatabaseName: strings.TrimSpace(req.Database),
-		SchemaName:   strings.TrimSpace(req.Schema),
-	}
-
 	start := time.Now()
 	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx, timeoutSettings)
 	if err != nil {

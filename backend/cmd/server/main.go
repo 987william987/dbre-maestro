@@ -99,6 +99,7 @@ func main() {
 
 	// Crash recovery: mark any executing tickets as interrupted
 	ticketRepo := repository.NewTicketRepo(metaDB)
+	queryAccessRepo := repository.NewQueryAccessRepo(metaDB)
 	n, err := ticketRepo.MarkInterruptedAll(context.Background())
 	if err != nil {
 		slog.Warn("crash recovery scan failed", "err", err)
@@ -135,13 +136,13 @@ func main() {
 
 	healthH := handler.NewHealthHandler(metaDB)
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret)
-	ticketH := handler.NewTicketHandler(ticketRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL)
+	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL)
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo)
-	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
+	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
 	auditH := handler.NewAuditHandler(auditRepo)
 	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
 	sqlReviewRuleH := handler.NewSQLReviewRuleHandler(sqlReviewRuleRepo, auditRepo)
-	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, settingsRepo, maskingEngine, whitelistRepo, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
+	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, settingsRepo, queryAccessRepo, maskingEngine, whitelistRepo, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
 	userH := handler.NewUserHandler(userRepo, authGroupRepo, sessionRepo, auditRepo, dbConnRepo)
 	metadataH := handler.NewMetadataHandler(dbConnRepo, userRepo)
 	authGroupH := handler.NewAuthGroupHandler(authGroupRepo, userRepo, auditRepo)

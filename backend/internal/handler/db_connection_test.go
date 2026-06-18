@@ -285,6 +285,7 @@ func TestTicketHandlerCreateRejectsConnectionOutsideScope(t *testing.T) {
 	handler := NewTicketHandler(
 		nil,
 		nil,
+		nil,
 		repository.NewAuditRepo(sqlxDB),
 		repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")),
 		repository.NewUserRepo(sqlxDB),

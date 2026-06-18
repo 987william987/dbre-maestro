@@ -1,6 +1,14 @@
 import { apiClient } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { Ticket, TicketDetail, TicketReviewResult, TicketStatus, TicketType } from '@/shared/types/ticket'
+import type {
+  QueryAccessScopeMode,
+  QueryAccessTicketItem,
+  Ticket,
+  TicketDetail,
+  TicketReviewResult,
+  TicketStatus,
+  TicketType,
+} from '@/shared/types/ticket'
 
 type TicketsResponse = {
   tickets: Ticket[]
@@ -26,6 +34,12 @@ type CreateTicketPayload = {
   ticket_type: TicketType
   db_connection_id?: number | null
   database_name?: string | null
+  approved_duration_minutes?: number | null
+  scope_mode?: QueryAccessScopeMode | null
+  items?: Array<{
+    database_name: string
+    table_name?: string | null
+  }>
 }
 
 type ReviewTicketPayload = {
@@ -91,6 +105,7 @@ export async function getTicket(id: string) {
     review_results: Array.isArray(response.review_results) ? response.review_results : [],
     activity_logs: Array.isArray(response.activity_logs) ? response.activity_logs : [],
     scopes: Array.isArray(response.scopes) ? response.scopes : [],
+    query_access_items: Array.isArray(response.query_access_items) ? response.query_access_items as QueryAccessTicketItem[] : [],
     export_request: response.export_request ?? null,
     workflow_participants: {
       reviewers: Array.isArray(response.workflow_participants?.reviewers) ? response.workflow_participants.reviewers : [],

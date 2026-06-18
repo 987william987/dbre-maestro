@@ -96,6 +96,8 @@ function formatTicketTypeLabel(ticketType: string) {
       return 'DML'
     case 'redis_command':
       return 'Redis'
+    case 'query_access':
+      return 'Query Access'
     case 'sql_export':
       return 'SQL Export'
     case 'sensitive_query_access':
@@ -159,7 +161,7 @@ function formatActivityDetail(log: AuditLog) {
     case 'ticket_execute_failed':
       return 'Execution result: failed.'
     case 'ticket_revoke':
-      return 'Sensitive access was revoked early.'
+      return 'Access was revoked early.'
     case 'ticket_schedule':
       return 'Ticket was scheduled for execution.'
     default:
@@ -322,8 +324,10 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
         : 'Waiting for execution to finish'
     : completionTone === 'done' ? 'Ticket completed after approval'
       : completionTone === 'failed'
-        ? ticket.ticket_type === 'sensitive_query_access' && ticket.status === 'stopped'
-          ? 'Sensitive access was revoked and the ticket is closed'
+        ? (ticket.ticket_type === 'sensitive_query_access' || ticket.ticket_type === 'query_access') && ticket.status === 'stopped'
+          ? ticket.ticket_type === 'query_access'
+            ? 'Query access was revoked and the ticket is closed'
+            : 'Sensitive access was revoked and the ticket is closed'
           : 'Ticket closed unsuccessfully'
         : 'Waiting for approval to complete the request'
 
@@ -555,7 +559,7 @@ export function TicketDetailPage() {
   const shouldShowActionPanel = hasActionPanel && !['completed', 'failed', 'rejected', 'withdrawn', 'stopped', 'interrupted'].includes(ticket?.status ?? '')
   const showExecutionActions = (ticket?.status === 'approved' && canReject) ||
     (ticket?.status === 'pending_execution' && (canExecute || canReject)) ||
-    (ticket?.ticket_type === 'sensitive_query_access' && ticket?.status === 'approved' && canRevoke)
+    ((ticket?.ticket_type === 'sensitive_query_access' || ticket?.ticket_type === 'query_access') && ticket?.status === 'approved' && canRevoke)
 
   async function reloadTicket(options?: { background?: boolean }) {
     if (!id) {
@@ -691,7 +695,43 @@ export function TicketDetailPage() {
               />
             </div>
 
-            {statementResults.length === 0 ? (
+            {ticket.ticket_type === 'query_access' ? (
+              <div className="px-4 pb-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Query Access Details</p>
+                <DetailTable
+                  headers={['Scope Mode', 'Approved Duration', 'Approved Until', 'Revoked At', 'Revoked By']}
+                  rows={[[
+                    detail.query_access_items[0]?.scope_mode ?? '—',
+                    ticket.approved_duration_minutes != null ? `${ticket.approved_duration_minutes} minutes` : '—',
+                    ticket.approved_until ? formatDateTime(ticket.approved_until, true) : '—',
+                    ticket.revoked_at ? formatDateTime(ticket.revoked_at, true) : '—',
+                    formatTicketActor(ticket.revoked_by_name, ticket.revoked_by ?? null),
+                  ]]}
+                />
+                <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+                  <table className="min-w-full border-collapse">
+                    <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
+                      <tr>
+                        <th className="px-4 py-3">ID</th>
+                        <th className="px-4 py-3">Scope</th>
+                        <th className="px-4 py-3">Database</th>
+                        <th className="px-4 py-3">Table</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border bg-white text-[13px] text-ink">
+                      {detail.query_access_items.map((item) => (
+                        <tr key={item.id}>
+                          <td className="px-4 py-3 align-top">{item.id}</td>
+                          <td className="px-4 py-3 align-top">{item.scope_mode}</td>
+                          <td className="px-4 py-3 align-top">{item.database_name}</td>
+                          <td className="px-4 py-3 align-top">{item.table_name || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : statementResults.length === 0 ? (
               <div className="px-4 pb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">SQL Content</p>
                 <pre className="mt-2 overflow-x-auto rounded-xl border border-border bg-panel-soft p-4 font-mono text-[13px] leading-7 text-ink">
@@ -855,12 +895,12 @@ export function TicketDetailPage() {
                         {canRevoke ? (
                           <button
                             type="button"
-                            disabled={acting !== null || ticket.status !== 'approved' || ticket.ticket_type !== 'sensitive_query_access'}
+                            disabled={acting !== null || ticket.status !== 'approved' || (ticket.ticket_type !== 'sensitive_query_access' && ticket.ticket_type !== 'query_access')}
                             onClick={() => setConfirmAction('revoke')}
                             className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {acting === 'revoke' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
-                            Revoke Access
+                            {ticket.ticket_type === 'query_access' ? 'Revoke Query Access' : 'Revoke Access'}
                           </button>
                         ) : null}
                       </div>
@@ -936,14 +976,18 @@ export function TicketDetailPage() {
             ? 'Withdraw Ticket'
             : confirmAction === 'execute'
                 ? 'Execute Ticket'
-                : 'Revoke Sensitive Access'
+                : ticket?.ticket_type === 'query_access'
+                  ? 'Revoke Query Access'
+                  : 'Revoke Sensitive Access'
         }
         description={
           confirmAction === 'withdraw'
             ? 'Withdraw this ticket now? Reviewers will no longer process it.'
             : confirmAction === 'execute'
               ? 'Trigger execution for this ticket? This will call the backend execute API.'
-              : 'Revoke this sensitive access ticket early? Access will be invalidated from the next query onwards.'
+              : ticket?.ticket_type === 'query_access'
+                ? 'Revoke this query access ticket early? The granted query scope will be invalidated from the next query onwards.'
+                : 'Revoke this sensitive access ticket early? Access will be invalidated from the next query onwards.'
         }
         confirmLabel={
           confirmAction === 'withdraw'

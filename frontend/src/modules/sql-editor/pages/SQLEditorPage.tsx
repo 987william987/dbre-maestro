@@ -39,6 +39,7 @@ import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
+import { useNavigate } from 'react-router-dom'
 import { createExportRequest } from '@/modules/exports/api'
 import {
   createSavedQuery,
@@ -278,6 +279,28 @@ function formatMetadataError(error: unknown): string {
     return error.message
   }
   return METADATA_ERROR_MESSAGE
+}
+
+function isQueryAccessDeniedMessage(message: string) {
+  return /query access/i.test(message)
+}
+
+function buildQueryAccessTicketURL(params: {
+  connectionId: number
+  database?: string
+  tableName?: string
+}) {
+  const searchParams = new URLSearchParams({
+    ticket_type: 'query_access',
+    db_connection_id: String(params.connectionId),
+  })
+  if (params.database?.trim()) {
+    searchParams.set('database_name', params.database.trim())
+  }
+  if (params.tableName?.trim()) {
+    searchParams.set('table_name', params.tableName.trim())
+  }
+  return `/tickets/new?${searchParams.toString()}`
 }
 
 function formatResultMetaLine(params: {
@@ -685,6 +708,7 @@ export function SQLEditorPage() {
   const editorContainerRef = useRef<HTMLDivElement | null>(null)
   const formatProfileRef = useRef<SQLFormatProfile | null>(null)
   const formatProfileIDRef = useRef(0)
+  const navigate = useNavigate()
   const { user } = useAuth()
   const { pushToast } = useToast()
   const hasSensitiveOverride = Boolean(user?.permissions.includes('global.sensitive'))
@@ -1275,6 +1299,19 @@ export function SQLEditorPage() {
 
   async function handleExplainQuery() {
     await executeEditorSQL('explain')
+  }
+
+  function openQueryAccessTicket() {
+    if (!activeTab?.connectionId) {
+      pushToast('Select a database connection first.', 'info')
+      return
+    }
+
+    navigate(buildQueryAccessTicketURL({
+      connectionId: activeTab.connectionId,
+      database: activeTab.database || undefined,
+      tableName: activeTab.selectedTable?.name || undefined,
+    }))
   }
 
   function handleFormatSQL() {
@@ -2138,6 +2175,14 @@ export function SQLEditorPage() {
                     >
                       {activeTabCreatingSensitiveAccess ? 'Submitting...' : 'Sensitive Access'}
                     </button>
+                    <button
+                      type="button"
+                      onClick={openQueryAccessTicket}
+                      disabled={!activeTab.connectionId}
+                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Query Access
+                    </button>
                     <div className="relative">
                       <button
                         type="button"
@@ -2202,7 +2247,23 @@ export function SQLEditorPage() {
                   <span>{resultMetaLine}</span>
                 </div>
 
-                {activeTab.error ? <InlineAlert className="mt-3">{activeTab.error}</InlineAlert> : null}
+                {activeTab.error ? (
+                  <div className="mt-3 space-y-2">
+                    <InlineAlert>{activeTab.error}</InlineAlert>
+                    {isQueryAccessDeniedMessage(activeTab.error) ? (
+                      <div className="flex justify-start">
+                        <button
+                          type="button"
+                          onClick={openQueryAccessTicket}
+                          disabled={!activeTab.connectionId}
+                          className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Apply Query Access
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="mt-3 min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-white">
                   {activeResultView === 'history' ? (

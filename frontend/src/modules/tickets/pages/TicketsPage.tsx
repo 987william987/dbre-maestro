@@ -37,6 +37,7 @@ const TYPE_OPTIONS: Array<{ value: '' | TicketType; label: string }> = [
   { value: 'ddl', label: 'DDL' },
   { value: 'dml', label: 'DML' },
   { value: 'redis_command', label: 'Redis' },
+  { value: 'query_access', label: 'Query Access' },
   { value: 'sql_export', label: 'SQL Export' },
   { value: 'sensitive_query_access', label: 'Sensitive Query Access' },
 ]
@@ -49,6 +50,8 @@ function formatTicketTypeLabel(ticketType: TicketType) {
       return 'DML'
     case 'redis_command':
       return 'Redis'
+    case 'query_access':
+      return 'Query Access'
     case 'sql_export':
       return 'SQL Export'
     case 'sensitive_query_access':

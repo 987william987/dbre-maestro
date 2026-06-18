@@ -102,6 +102,13 @@ func (r *TicketRepo) GetByID(ctx context.Context, id uint64) (*model.Ticket, err
 	return &t, err
 }
 
+func (r *TicketRepo) Delete(ctx context.Context, id uint64) error {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM tickets WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete ticket: %w", err)
+	}
+	return nil
+}
+
 func (r *TicketRepo) ListScopes(ctx context.Context, ticketID uint64) ([]model.TicketScope, error) {
 	scopes := []model.TicketScope{}
 	if err := r.db.SelectContext(ctx, &scopes,

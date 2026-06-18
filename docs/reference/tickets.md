@@ -1,6 +1,6 @@
 # Tickets
 
-Tickets 模組負責 DDL / DML / Redis 變更工單，以及 SQL Export、Sensitive Query Access 兩類特殊工單的審批流轉。
+Tickets 模組負責 DDL / DML / Redis 變更工單、Query Access 查詢授權工單，以及 SQL Export、Sensitive Query Access 兩類特殊工單的審批流轉。
 
 ## 功能範圍
 
@@ -8,7 +8,8 @@ Tickets 模組負責 DDL / DML / Redis 變更工單，以及 SQL Export、Sensit
 |---|---|
 | `ddl` | 結構變更 |
 | `dml` | 資料變更 |
-| `redis_command` | 受控 Redis 命令變更 |
+| `redis` | 受控 Redis 命令變更 |
+| `query_access` | 申請 database / table 級查詢授權 |
 | `sql_export` | 從 SQL Editor 導出資料 |
 | `sensitive_query_access` | 申請敏感欄位臨時查詢權限 |
 
@@ -24,8 +25,8 @@ Tickets 模組負責 DDL / DML / Redis 變更工單，以及 SQL Export、Sensit
 
 | 權限 | 意義 |
 |---|---|
-| `tickets.apply` | 建立 DDL / DML / Redis 工單，且可進入 ticket workspace |
-| `tickets.review` | 審核 DDL / DML / Redis 工單 |
+| `tickets.apply` | 建立 DDL / DML / Redis / Query Access 工單，且可進入 ticket workspace |
+| `tickets.review` | 審核 DDL / DML / Redis / Query Access 工單 |
 | `tickets.execute` | 執行 DDL / DML / Redis 工單 |
 | `sql_editor.export_review` | 審核 `sql_export` |
 | `sql_editor.sensitive_review` | 審核 / 撤銷 `sensitive_query_access` |
@@ -34,6 +35,35 @@ Tickets 模組負責 DDL / DML / Redis 變更工單，以及 SQL Export、Sensit
 
 - `tickets.apply` 也是 Tickets workspace 的最小讀取入口
 - 可建立的連線清單仍受 DB Scope 過濾
+
+`query_access` 復用既有 Tickets workspace：
+
+- 不新增獨立的 `query_access.apply`
+- 不新增獨立的 `query_access.review`
+- 建單沿用 `tickets.apply`
+- 審批 / 提前回收沿用 `tickets.review`
+
+## 入口模型
+
+並非所有 ticket type 都有相同入口。入口是否存在，取決於該工單是否依賴當前查詢上下文。
+
+### `Tickets > New Ticket`
+
+以下工單可獨立建立：
+
+- `ddl`
+- `dml`
+- `redis`
+- `query_access`
+
+### `SQL Editor`
+
+以下工單依賴當前查詢上下文，因此入口位於 SQL Editor：
+
+- `sql_export`
+- `sensitive_query_access`
+
+另外，`query_access` 也提供 SQL Editor 快捷入口，方便在查詢被拒絕時直接發起申請。
 
 ## 建單前檢測
 
@@ -70,7 +100,7 @@ DDL / DML / Redis 工單在提交前，應先經過 `POST /api/tickets/review`�
 | 欄位 | 型別 |
 |---|---|
 | `sql_content` | `string` |
-| `ticket_type` | `ddl`、`dml` 或 `redis_command` |
+| `ticket_type` | `ddl`、`dml` 或 `redis` |
 | `db_connection_id` | `number` |
 | `database_name` | `string` |
 
@@ -98,7 +128,7 @@ DDL / DML / Redis 工單在提交前，應先經過 `POST /api/tickets/review`�
 | `title` | `string` | 是 |
 | `description` | `string \| null` | 否 |
 | `sql_content` | `string` | 是 |
-| `ticket_type` | `ddl \| dml \| redis_command` | 是 |
+| `ticket_type` | `ddl \| dml \| redis \| query_access` | 是 |
 | `db_connection_id` | `number \| null` | 是 |
 | `database_name` | `string \| null` | 是 |
 
@@ -149,6 +179,23 @@ executing
   -> completed
 ```
 
+### Query Access
+
+`query_access` 採審批即生效，不進 execution：
+
+```text
+pending_review
+  -> approved
+  -> rejected
+  -> withdrawn
+  -> stopped
+```
+
+說明：
+
+- `approved`：對應 grant 生效
+- `stopped`：已生效 grant 被 reviewer / admin / dba 提前回收，或權限被手動停止
+
 ### SQL Export
 
 ```text
@@ -185,8 +232,8 @@ pending_review
 - 審批人拒絕後：
   - 通知提交人
 - 審批人同意後：
-  - `ddl` / `dml` / `redis_command`：通知執行人
-  - `sql_export` / `sensitive_query_access`：通知提交人
+  - `ddl` / `dml` / `redis`：通知執行人
+  - `sql_export` / `sensitive_query_access` / `query_access`：通知提交人
 
 ### 執行階段
 
@@ -216,6 +263,7 @@ Ticket Detail 頁會展示：
 - execution statement results
 - activity timeline 與操作紀錄
 - scope / export request / sensitive access details（依類型顯示）
+- query access scope / duration / revoke 狀態（依類型顯示）
 
 Review results 應以 statement 粒度呈現，而不是只顯示一個整體結論。
 

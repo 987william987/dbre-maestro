@@ -25,6 +25,7 @@ const (
 	TicketTypeRedisCommand         TicketType = "redis_command"
 	TicketTypeSQLExport            TicketType = "sql_export"
 	TicketTypeSensitiveQueryAccess TicketType = "sensitive_query_access"
+	TicketTypeQueryAccess          TicketType = "query_access"
 )
 
 type Ticket struct {

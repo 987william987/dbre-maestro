@@ -1,36 +1,105 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, CheckCircle2, FileText, Loader2, ScrollText, Wand2, XCircle } from 'lucide-react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { format as formatSQL } from 'sql-formatter'
 import { ApiError } from '@/shared/api/client'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { TicketReviewResult, TicketType } from '@/shared/types/ticket'
+import type { MetadataResponse } from '@/shared/types/sqlEditor'
+import type { QueryAccessScopeMode, TicketReviewResult, TicketType } from '@/shared/types/ticket'
+import { listMetadata } from '@/modules/sql-editor/api'
 import { createTicket, listConnections, listTicketDatabases, reviewTicketSQL } from '@/modules/tickets/api'
 
 function formatConnectionOptionLabel(connection: DBConnection) {
   return `${connection.name} · ${connection.db_type.toUpperCase()}`
 }
 
+type QueryAccessTableOption = {
+  key: string
+  label: string
+  databaseName: string
+  tableName: string
+}
+
+const MAX_QUERY_ACCESS_DURATION_MINUTES = 3 * 24 * 60
+
+function parseTicketType(value: string | null): TicketType | null {
+  switch (value) {
+    case 'ddl':
+    case 'dml':
+    case 'redis_command':
+    case 'sql_export':
+    case 'sensitive_query_access':
+    case 'query_access':
+      return value
+    default:
+      return null
+  }
+}
+
+function normalizeTableOptions(response: MetadataResponse, databaseName: string) {
+  return response.items
+    .filter((item) => item.kind === 'table')
+    .map((item) => {
+      const schemaLabel = item.schema && item.schema !== databaseName ? `${item.schema}.` : ''
+      return {
+        key: `${item.schema ?? ''}:${item.name}`,
+        label: `${schemaLabel}${item.name}`,
+        databaseName,
+        tableName: item.name,
+      } satisfies QueryAccessTableOption
+    })
+}
+
+function parseQueryAccessDuration(rawValue: string) {
+  const value = rawValue.trim()
+  if (!/^\d+$/.test(value)) {
+    return { error: 'Approved duration must be a whole number of minutes.' }
+  }
+
+  const minutes = Number(value)
+  if (minutes < 1 || minutes > MAX_QUERY_ACCESS_DURATION_MINUTES) {
+    return { error: `Approved duration must be between 1 and ${MAX_QUERY_ACCESS_DURATION_MINUTES} minutes.` }
+  }
+
+  return { minutes }
+}
+
 export function NewTicketPage() {
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const prefilledTicketType = parseTicketType(searchParams.get('ticket_type'))
+  const prefilledConnectionId = searchParams.get('db_connection_id')?.trim() ?? ''
+  const prefilledDatabaseName = searchParams.get('database_name')?.trim() ?? ''
+  const prefilledTableName = searchParams.get('table_name')?.trim() ?? ''
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [ticketType, setTicketType] = useState<TicketType>('ddl')
-  const [dbConnectionId, setDbConnectionId] = useState('')
+  const [ticketType, setTicketType] = useState<TicketType>(prefilledTicketType ?? 'ddl')
+  const [dbConnectionId, setDbConnectionId] = useState(prefilledConnectionId)
   const [databaseName, setDatabaseName] = useState('')
   const [sqlContent, setSqlContent] = useState('')
   const [reviewResults, setReviewResults] = useState<TicketReviewResult[]>([])
   const [reviewPassed, setReviewPassed] = useState(false)
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [databases, setDatabases] = useState<string[]>([])
+  const [queryAccessScopeMode, setQueryAccessScopeMode] = useState<QueryAccessScopeMode>(prefilledTableName ? 'table' : 'database')
+  const [queryAccessDuration, setQueryAccessDuration] = useState('60')
+  const [queryAccessDatabaseSelections, setQueryAccessDatabaseSelections] = useState<string[]>(
+    prefilledDatabaseName && !prefilledTableName ? [prefilledDatabaseName] : [],
+  )
+  const [queryAccessTableDatabase, setQueryAccessTableDatabase] = useState(prefilledDatabaseName)
+  const [queryAccessTables, setQueryAccessTables] = useState<QueryAccessTableOption[]>([])
+  const [queryAccessTableSelections, setQueryAccessTableSelections] = useState<string[]>([])
+  const [queryAccessTablePrefillApplied, setQueryAccessTablePrefillApplied] = useState(false)
   const [loadingConnections, setLoadingConnections] = useState(true)
   const [loadingDatabases, setLoadingDatabases] = useState(false)
+  const [loadingQueryAccessTables, setLoadingQueryAccessTables] = useState(false)
   const [reviewing, setReviewing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
+  const isQueryAccessTicket = ticketType === 'query_access'
   const selectedConnection = useMemo(
     () => connections.find((connection) => String(connection.id) === dbConnectionId) ?? null,
     [connections, dbConnectionId],
@@ -43,7 +112,22 @@ export function NewTicketPage() {
   }, [connections, ticketType])
   const parserResults = useMemo(() => reviewResults.filter((result) => result.phase === 'parser'), [reviewResults])
   const validationResults = useMemo(() => reviewResults.filter((result) => !result.phase || result.phase === 'validation'), [reviewResults])
-  const requiresDatabaseSelection = true
+  const selectedQueryAccessItems = useMemo(
+    () => queryAccessTables.filter((item) => queryAccessTableSelections.includes(item.key)),
+    [queryAccessTableSelections, queryAccessTables],
+  )
+  const requiresDatabaseSelection = !isQueryAccessTicket
+  const hasValidQueryAccessScope = isQueryAccessTicket && (
+    (queryAccessScopeMode === 'database' && queryAccessDatabaseSelections.length > 0) ||
+    (queryAccessScopeMode === 'table' && queryAccessTableDatabase.trim() !== '' && selectedQueryAccessItems.length > 0)
+  )
+  const canSubmit = isQueryAccessTicket
+    ? title.trim() !== '' && dbConnectionId !== '' && hasValidQueryAccessScope
+    : title.trim() !== '' &&
+      sqlContent.trim() !== '' &&
+      dbConnectionId !== '' &&
+      (!requiresDatabaseSelection || databaseName.trim() !== '') &&
+      reviewPassed
 
   useEffect(() => {
     let active = true
@@ -91,12 +175,20 @@ export function NewTicketPage() {
   }, [selectedConnection, ticketType])
 
   useEffect(() => {
-    if (!dbConnectionId) {
-      setDatabases([])
-      setDatabaseName('')
+    if (!isQueryAccessTicket) {
       return
     }
-    if (!requiresDatabaseSelection) {
+    setQueryAccessDatabaseSelections([])
+    setQueryAccessTableSelections([])
+    setQueryAccessTables([])
+    setQueryAccessTablePrefillApplied(false)
+    if (prefilledConnectionId !== dbConnectionId) {
+      setQueryAccessTableDatabase('')
+    }
+  }, [dbConnectionId, isQueryAccessTicket, prefilledConnectionId])
+
+  useEffect(() => {
+    if (!dbConnectionId) {
       setDatabases([])
       setDatabaseName('')
       return
@@ -116,6 +208,18 @@ export function NewTicketPage() {
           .filter((item) => item !== '')
         setDatabases(nextDatabases)
 
+        if (isQueryAccessTicket) {
+          if (queryAccessScopeMode === 'database' && queryAccessDatabaseSelections.length === 0 && prefilledDatabaseName && nextDatabases.includes(prefilledDatabaseName)) {
+            setQueryAccessDatabaseSelections([prefilledDatabaseName])
+          }
+          if (queryAccessScopeMode === 'table' && queryAccessTableDatabase.trim() === '' && prefilledDatabaseName && nextDatabases.includes(prefilledDatabaseName)) {
+            setQueryAccessTableDatabase(prefilledDatabaseName)
+          }
+        }
+
+        if (!requiresDatabaseSelection) {
+          return
+        }
         const defaultDatabase = (selectedConnection?.database_name ?? '').trim()
         if (defaultDatabase !== '' && nextDatabases.includes(defaultDatabase)) {
           setDatabaseName(defaultDatabase)
@@ -141,7 +245,93 @@ export function NewTicketPage() {
     return () => {
       active = false
     }
-  }, [dbConnectionId, requiresDatabaseSelection, selectedConnection?.database_name])
+  }, [
+    dbConnectionId,
+    isQueryAccessTicket,
+    prefilledDatabaseName,
+    queryAccessScopeMode,
+    requiresDatabaseSelection,
+    selectedConnection?.database_name,
+  ])
+
+  useEffect(() => {
+    if (!isQueryAccessTicket || queryAccessScopeMode !== 'table' || dbConnectionId === '' || queryAccessTableDatabase.trim() === '') {
+      setQueryAccessTables([])
+      return
+    }
+
+    let active = true
+
+    async function loadQueryAccessTables() {
+      setLoadingQueryAccessTables(true)
+      try {
+        const response = await listMetadata(Number(dbConnectionId), { database: queryAccessTableDatabase.trim() })
+        if (!active) {
+          return
+        }
+
+        let nextTables = normalizeTableOptions(response, queryAccessTableDatabase.trim())
+        if (response.level === 'schema') {
+          const schemaResponses = await Promise.all(
+            response.items
+              .filter((item) => item.kind === 'schema')
+              .map((item) => listMetadata(Number(dbConnectionId), {
+                database: queryAccessTableDatabase.trim(),
+                schema: item.name,
+              })),
+          )
+          if (!active) {
+            return
+          }
+          nextTables = schemaResponses.flatMap((item) => normalizeTableOptions(item, queryAccessTableDatabase.trim()))
+        }
+
+        setQueryAccessTables(nextTables)
+        if (prefilledTableName && !queryAccessTablePrefillApplied) {
+          const matched = nextTables.find((item) => item.tableName === prefilledTableName)
+          if (matched) {
+            setQueryAccessTableSelections([matched.key])
+            setQueryAccessTablePrefillApplied(true)
+          }
+        }
+      } catch (loadError) {
+        if (!active) {
+          return
+        }
+        setQueryAccessTables([])
+        setError(loadError instanceof ApiError ? loadError.message : 'Failed to load tables for query access.')
+      } finally {
+        if (active) {
+          setLoadingQueryAccessTables(false)
+        }
+      }
+    }
+
+    void loadQueryAccessTables()
+
+    return () => {
+      active = false
+    }
+  }, [dbConnectionId, isQueryAccessTicket, prefilledTableName, queryAccessScopeMode, queryAccessTableDatabase, queryAccessTablePrefillApplied])
+
+  useEffect(() => {
+    if (!isQueryAccessTicket) {
+      return
+    }
+    setDatabaseName('')
+  }, [isQueryAccessTicket])
+
+  function toggleDatabaseSelection(name: string) {
+    setQueryAccessDatabaseSelections((current) =>
+      current.includes(name) ? current.filter((item) => item !== name) : [...current, name],
+    )
+  }
+
+  function toggleTableSelection(key: string) {
+    setQueryAccessTableSelections((current) =>
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
+    )
+  }
 
   function handleFormatSQL() {
     if (!sqlContent.trim()) {
@@ -191,13 +381,47 @@ export function NewTicketPage() {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (title.trim() === '' || sqlContent.trim() === '' || dbConnectionId === '' || (requiresDatabaseSelection && databaseName.trim() === '') || !reviewPassed) {
+    if (!canSubmit) {
       return
     }
     setError('')
     setSubmitting(true)
 
     try {
+      if (isQueryAccessTicket) {
+        const duration = parseQueryAccessDuration(queryAccessDuration)
+        if ('error' in duration) {
+          setError(duration.error ?? 'Approved duration is invalid.')
+          return
+        }
+
+        const items = queryAccessScopeMode === 'database'
+          ? queryAccessDatabaseSelections.map((name) => ({
+            database_name: name,
+            table_name: null,
+          }))
+          : selectedQueryAccessItems.map((item) => ({
+            database_name: item.databaseName,
+            table_name: item.tableName,
+          }))
+
+        const created = await createTicket({
+          title,
+          description: description.trim() || null,
+          sql_content: 'QUERY ACCESS REQUEST',
+          ticket_type: ticketType,
+          db_connection_id: Number(dbConnectionId),
+          database_name: queryAccessScopeMode === 'table'
+            ? queryAccessTableDatabase.trim() || null
+            : queryAccessDatabaseSelections[0] ?? null,
+          approved_duration_minutes: duration.minutes,
+          scope_mode: queryAccessScopeMode,
+          items,
+        })
+        navigate(`/tickets/${created.id}`, { replace: true })
+        return
+      }
+
       const created = await createTicket({
         title,
         description: description.trim() || null,
@@ -276,6 +500,7 @@ export function NewTicketPage() {
                     { value: 'ddl', label: 'DDL' },
                     { value: 'dml', label: 'DML' },
                     { value: 'redis_command', label: 'Redis' },
+                    { value: 'query_access', label: 'Query Access' },
                   ]}
                 />
               </label>
@@ -334,44 +559,184 @@ export function NewTicketPage() {
             <div className="flex items-center gap-2">
               <ScrollText className="h-4 w-4 text-muted" />
               <p className="text-[13px] font-semibold text-ink">
-                {ticketType === 'redis_command' ? 'Command Content' : 'SQL Content'} <span className="text-danger">*</span>
+                {isQueryAccessTicket ? 'Query Access Scope' : ticketType === 'redis_command' ? 'Command Content' : 'SQL Content'} {isQueryAccessTicket ? null : <span className="text-danger">*</span>}
               </p>
             </div>
           </div>
 
-          <label className="flex flex-col gap-1.5 px-4 py-4">
-            <span className="sr-only">SQL Content</span>
-            <textarea
-              value={sqlContent}
-              onChange={(event) => setSqlContent(event.target.value)}
-              className="block min-h-[280px] w-full resize-y rounded-xl border border-border bg-panel-soft px-4 py-4 font-mono text-[13px] leading-7 text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 lg:min-h-[320px]"
-              placeholder={ticketType === 'redis_command' ? 'SET my:key "value"\nEXPIRE my:key 60' : 'ALTER TABLE ...;\nUPDATE ...;'}
-              disabled={submitting}
-            />
-          </label>
+          {isQueryAccessTicket ? (
+            <div className="grid gap-4 px-4 py-4">
+              <div className="grid gap-4 sm:grid-cols-[180px_minmax(0,1fr)] sm:items-start">
+                <div className="space-y-1.5">
+                  <p className="text-[12px] font-semibold text-ink">Scope Level</p>
+                  <p className="text-[12px] text-muted">Grant access by database or by table.</p>
+                </div>
+                <div className="inline-flex items-center rounded-lg border border-border bg-panel-soft p-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQueryAccessScopeMode('database')
+                      setQueryAccessTableSelections([])
+                    }}
+                    className={`inline-flex h-9 items-center rounded-md px-3 text-[12px] font-semibold ${
+                      queryAccessScopeMode === 'database' ? 'bg-white text-ink shadow-soft' : 'text-muted hover:text-ink'
+                    }`}
+                  >
+                    Database
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQueryAccessScopeMode('table')
+                      setQueryAccessDatabaseSelections([])
+                    }}
+                    className={`inline-flex h-9 items-center rounded-md px-3 text-[12px] font-semibold ${
+                      queryAccessScopeMode === 'table' ? 'bg-white text-ink shadow-soft' : 'text-muted hover:text-ink'
+                    }`}
+                  >
+                    Table
+                  </button>
+                </div>
+              </div>
 
-          <div className="px-4 pb-4">
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={handleFormatSQL}
-                disabled={submitting || reviewing || sqlContent.trim() === '' || ticketType === 'redis_command'}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Wand2 className="h-4 w-4" />
-                Format
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleReviewSQL()}
-                disabled={submitting || reviewing || sqlContent.trim() === '' || dbConnectionId === '' || (requiresDatabaseSelection && databaseName.trim() === '')}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {reviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                {reviewing ? 'Reviewing...' : 'SQL Review'}
-              </button>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[12px] font-semibold text-ink">
+                  Approved Duration (minutes) <span className="text-danger">*</span>
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  max={MAX_QUERY_ACCESS_DURATION_MINUTES}
+                  step={1}
+                  inputMode="numeric"
+                  value={queryAccessDuration}
+                  onChange={(event) => setQueryAccessDuration(event.target.value)}
+                  className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                  placeholder="60"
+                  disabled={submitting}
+                />
+                <p className="text-[12px] text-muted">Maximum {MAX_QUERY_ACCESS_DURATION_MINUTES} minutes (3 days).</p>
+              </label>
+
+              {queryAccessScopeMode === 'database' ? (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold text-ink">
+                    Target Databases <span className="text-danger">*</span>
+                  </span>
+                  <div className="rounded-xl border border-border bg-panel-soft p-3">
+                    {loadingDatabases ? (
+                      <p className="text-[12px] text-muted">Loading databases...</p>
+                    ) : dbConnectionId === '' ? (
+                      <p className="text-[12px] text-muted">Select instance first.</p>
+                    ) : databases.length === 0 ? (
+                      <p className="text-[12px] text-muted">No databases available.</p>
+                    ) : (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {databases.map((name) => (
+                          <label key={name} className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink">
+                            <input
+                              type="checkbox"
+                              checked={queryAccessDatabaseSelections.includes(name)}
+                              onChange={() => toggleDatabaseSelection(name)}
+                              disabled={submitting}
+                            />
+                            <span>{name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-[12px] font-semibold text-ink">
+                      Target Database <span className="text-danger">*</span>
+                    </span>
+                    <DropdownSelect
+                      ariaLabel="Query Access Target Database"
+                      value={queryAccessTableDatabase}
+                      onChange={(value) => {
+                        setQueryAccessTableDatabase(value)
+                        setQueryAccessTableSelections([])
+                        setQueryAccessTablePrefillApplied(false)
+                      }}
+                      disabled={submitting || loadingDatabases || dbConnectionId === ''}
+                      placeholder={dbConnectionId === '' ? 'Select instance first' : 'Select database'}
+                      options={[
+                        { value: '', label: 'Not Selected' },
+                        ...databases.map((name) => ({ value: name, label: name })),
+                      ]}
+                    />
+                  </label>
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[12px] font-semibold text-ink">
+                      Target Tables <span className="text-danger">*</span>
+                    </span>
+                    <div className="rounded-xl border border-border bg-panel-soft p-3">
+                      {loadingQueryAccessTables ? (
+                        <p className="text-[12px] text-muted">Loading tables...</p>
+                      ) : queryAccessTableDatabase.trim() === '' ? (
+                        <p className="text-[12px] text-muted">Select database first.</p>
+                      ) : queryAccessTables.length === 0 ? (
+                        <p className="text-[12px] text-muted">No tables available.</p>
+                      ) : (
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {queryAccessTables.map((item) => (
+                            <label key={item.key} className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink">
+                              <input
+                                type="checkbox"
+                                checked={queryAccessTableSelections.includes(item.key)}
+                                onChange={() => toggleTableSelection(item.key)}
+                                disabled={submitting}
+                              />
+                              <span>{item.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-          </div>
+          ) : (
+            <>
+              <label className="flex flex-col gap-1.5 px-4 py-4">
+                <span className="sr-only">SQL Content</span>
+                <textarea
+                  value={sqlContent}
+                  onChange={(event) => setSqlContent(event.target.value)}
+                  className="block min-h-[280px] w-full resize-y rounded-xl border border-border bg-panel-soft px-4 py-4 font-mono text-[13px] leading-7 text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 lg:min-h-[320px]"
+                  placeholder={ticketType === 'redis_command' ? 'SET my:key "value"\nEXPIRE my:key 60' : 'ALTER TABLE ...;\nUPDATE ...;'}
+                  disabled={submitting}
+                />
+              </label>
+
+              <div className="px-4 pb-4">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleFormatSQL}
+                    disabled={submitting || reviewing || sqlContent.trim() === '' || ticketType === 'redis_command'}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Wand2 className="h-4 w-4" />
+                    Format
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleReviewSQL()}
+                    disabled={submitting || reviewing || sqlContent.trim() === '' || dbConnectionId === '' || (requiresDatabaseSelection && databaseName.trim() === '')}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {reviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    {reviewing ? 'Reviewing...' : 'SQL Review'}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </section>
 
         <div className="xl:col-span-2">
@@ -381,7 +746,7 @@ export function NewTicketPage() {
             </div>
           ) : null}
 
-          {reviewResults.length > 0 ? (
+          {!isQueryAccessTicket && reviewResults.length > 0 ? (
             <section className="mb-4 overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
               <div className="border-b border-border/80 px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
@@ -487,7 +852,7 @@ export function NewTicketPage() {
             </Link>
             <button
               type="submit"
-              disabled={submitting || reviewing || title.trim() === '' || sqlContent.trim() === '' || dbConnectionId === '' || (requiresDatabaseSelection && databaseName.trim() === '') || !reviewPassed}
+              disabled={submitting || reviewing || !canSubmit}
               className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-5 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

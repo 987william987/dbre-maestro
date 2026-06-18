@@ -16,6 +16,19 @@ export type TicketType = 'ddl' | 'dml'
   | 'redis_command'
   | 'sql_export'
   | 'sensitive_query_access'
+  | 'query_access'
+
+export type QueryAccessScopeMode = 'database' | 'table'
+
+export type QueryAccessTicketItem = {
+  id: number
+  ticket_id: number
+  connection_id: number
+  scope_mode: QueryAccessScopeMode
+  database_name: string
+  table_name?: string | null
+  created_at: string
+}
 
 export type Ticket = {
   id: number
@@ -109,6 +122,7 @@ export type TicketDetail = {
   review_results: TicketReviewResult[]
   activity_logs: AuditLog[]
   scopes: TicketScope[]
+  query_access_items: QueryAccessTicketItem[]
   export_request: {
     status: string
     expires_at: string
