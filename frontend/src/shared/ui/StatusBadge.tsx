@@ -27,12 +27,13 @@ const STATUS_LABELS: Record<TicketStatus, string> = {
   interrupted: 'Interrupted',
 }
 
-export function StatusBadge({ status }: { status: TicketStatus }) {
+export function StatusBadge({ status, className }: { status: TicketStatus; className?: string }) {
   return (
     <span
       className={cn(
-        'inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em]',
+        'inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] transition-all duration-300',
         STATUS_STYLES[status],
+        className,
       )}
     >
       {STATUS_LABELS[status]}

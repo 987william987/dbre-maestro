@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { startTransition, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Check, ChevronDown, Download, Loader2, Play, Send, ShieldCheck, ShieldX, X } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
+import { cn } from '@/lib/utils'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
@@ -361,13 +362,36 @@ function WorkflowStepIcon({ tone }: { tone: WorkflowStepTone }) {
   )
 }
 
-function WorkflowTimeline({ ticket, workflowParticipants }: { ticket: Ticket; workflowParticipants: TicketWorkflowParticipants }) {
+function WorkflowTimeline({
+  ticket,
+  workflowParticipants,
+  highlight,
+  refreshing,
+}: {
+  ticket: Ticket
+  workflowParticipants: TicketWorkflowParticipants
+  highlight?: boolean
+  refreshing?: boolean
+}) {
   const steps = buildWorkflowSteps(ticket, workflowParticipants)
 
   return (
-    <section className="rounded-xl border border-border bg-panel shadow-soft">
+    <section
+      className={cn(
+        'rounded-xl border border-border bg-panel shadow-soft transition-all duration-300',
+        highlight ? 'border-accent/30 shadow-[0_0_0_3px_rgba(59,130,246,0.10)]' : '',
+      )}
+    >
       <div className="border-b border-border/80 px-4 py-3">
-        <p className="text-[13px] font-semibold text-ink">Approval Flow</p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[13px] font-semibold text-ink">Approval Flow</p>
+          {refreshing ? (
+            <span className="inline-flex items-center gap-2 text-[11px] font-medium text-muted">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+              Syncing status...
+            </span>
+          ) : null}
+        </div>
       </div>
 
       <div className="overflow-x-auto px-4 py-4">
@@ -406,6 +430,9 @@ export function TicketDetailPage() {
   const [confirmAction, setConfirmAction] = useState<'withdraw' | 'request-execution' | 'execute' | 'revoke' | null>(null)
   const [downloadingExport, setDownloadingExport] = useState(false)
   const [otherDetailsOpen, setOtherDetailsOpen] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [statusTransitioning, setStatusTransitioning] = useState(false)
+  const previousStatusRef = useRef<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -423,7 +450,9 @@ export function TicketDetailPage() {
       try {
         const nextDetail = await getTicket(id)
         if (active) {
-          setDetail(nextDetail)
+          startTransition(() => {
+            setDetail(nextDetail)
+          })
         }
       } catch (loadError) {
         if (active) {
@@ -456,7 +485,7 @@ export function TicketDetailPage() {
       if (String(realtimeEvent.detail?.data?.ticket_id ?? '') !== id) {
         return
       }
-      void reloadTicket()
+      void reloadTicket({ background: true })
     }
 
     window.addEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
@@ -464,6 +493,24 @@ export function TicketDetailPage() {
       window.removeEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
     }
   }, [id])
+
+  useEffect(() => {
+    const nextStatus = detail?.ticket.status ?? null
+    const previousStatus = previousStatusRef.current
+    previousStatusRef.current = nextStatus
+
+    if (!nextStatus || !previousStatus || nextStatus === previousStatus) {
+      return
+    }
+
+    setStatusTransitioning(true)
+    const timer = window.setTimeout(() => {
+      setStatusTransitioning(false)
+    }, 900)
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [detail?.ticket.status])
 
   if (!user) {
     return null
@@ -484,12 +531,24 @@ export function TicketDetailPage() {
     (ticket?.status === 'pending_execution' && (canExecute || canReject)) ||
     (ticket?.ticket_type === 'sensitive_query_access' && ticket?.status === 'approved' && canRevoke)
 
-  async function reloadTicket() {
+  async function reloadTicket(options?: { background?: boolean }) {
     if (!id) {
       return
     }
-    const nextDetail = await getTicket(id)
-    setDetail(nextDetail)
+    const background = options?.background === true
+    if (background) {
+      setIsRefreshing(true)
+    }
+    try {
+      const nextDetail = await getTicket(id)
+      startTransition(() => {
+        setDetail(nextDetail)
+      })
+    } finally {
+      if (background) {
+        setIsRefreshing(false)
+      }
+    }
   }
 
   async function runAction(
@@ -500,7 +559,7 @@ export function TicketDetailPage() {
     setError('')
     try {
       await action()
-      await reloadTicket()
+      await reloadTicket({ background: true })
       setComment('')
       setReason('')
       pushToast('Ticket updated', 'success')
@@ -535,7 +594,21 @@ export function TicketDetailPage() {
         title={
           <span className="flex flex-wrap items-center gap-3">
             <span>{ticket ? ticket.title : 'Ticket Detail'}</span>
-            {ticket ? <StatusBadge status={ticket.status} /> : null}
+            {ticket ? (
+              <StatusBadge
+                status={ticket.status}
+                className={cn(
+                  statusTransitioning ? 'scale-[1.03] ring-4 ring-accent/15' : '',
+                  isRefreshing ? 'opacity-80' : '',
+                )}
+              />
+            ) : null}
+            {isRefreshing ? (
+              <span className="inline-flex items-center gap-2 text-[11px] font-medium text-muted">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+                Updating...
+              </span>
+            ) : null}
           </span>
         }
         description={
@@ -563,8 +636,13 @@ export function TicketDetailPage() {
       ) : !ticket || !detail ? (
         <div className="rounded-xl border border-border bg-panel p-6 text-sm text-muted shadow-soft">Ticket not found.</div>
       ) : (
-        <div className="space-y-3">
-          <WorkflowTimeline ticket={ticket} workflowParticipants={detail.workflow_participants} />
+        <div className={cn('space-y-3 transition-opacity duration-300', isRefreshing ? 'opacity-95' : 'opacity-100')}>
+          <WorkflowTimeline
+            ticket={ticket}
+            workflowParticipants={detail.workflow_participants}
+            highlight={statusTransitioning}
+            refreshing={isRefreshing}
+          />
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border px-4 py-3">
               <span className="font-mono text-sm font-semibold text-accent">{ticket.ticket_no}</span>

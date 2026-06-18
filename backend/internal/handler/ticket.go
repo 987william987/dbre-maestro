@@ -403,6 +403,22 @@ func (h *TicketHandler) publishTicketUpdate(ctx context.Context, ticket *model.T
 	})
 }
 
+func (h *TicketHandler) publishTicketUpdateByID(ctx context.Context, ticketID uint64, fallback *model.Ticket, actorID *uint64) {
+	var current *model.Ticket
+	if h.tickets != nil {
+		updated, err := h.tickets.GetByID(ctx, ticketID)
+		if err != nil {
+			slog.Warn("load ticket for realtime update failed", "ticket_id", ticketID, "err", err)
+		} else if updated != nil {
+			current = updated
+		}
+	}
+	if current == nil {
+		current = fallback
+	}
+	h.publishTicketUpdate(ctx, current, actorID)
+}
+
 // GET /tickets/connections
 func (h *TicketHandler) ListConnections(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
@@ -625,7 +641,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 
 	h.dispatchTicketNotification(r.Context(), created, ticketEventPendingReview, &userID, "提交人已送出工單，等待 reviewer 處理。")
-	h.publishTicketUpdate(r.Context(), created, &userID)
+	h.publishTicketUpdateByID(r.Context(), created.ID, created, &userID)
 	jsonCreated(w, created)
 }
 
@@ -1042,7 +1058,13 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		h.dispatchTicketNotification(r.Context(), ticket, ticketEventApproved, &userID, body)
 	}
 
-	updated, _ := h.tickets.GetByID(r.Context(), id)
+	updated, err := h.tickets.GetByID(r.Context(), id)
+	if err != nil {
+		slog.Warn("load ticket after approve failed", "ticket_id", id, "err", err)
+		updated = ticket
+	} else if updated == nil {
+		updated = ticket
+	}
 	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
 }
@@ -1112,8 +1134,8 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	}
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventRejected, &userID, rejectDetail)
 
+	h.publishTicketUpdateByID(r.Context(), id, ticket, &userID)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
-	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
 }
 
@@ -1167,8 +1189,8 @@ func (h *TicketHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventWithdrawn, &userID, "submitter 已收回此工單。")
 
+	h.publishTicketUpdateByID(r.Context(), id, ticket, &userID)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
-	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
 }
 
@@ -1219,8 +1241,8 @@ func (h *TicketHandler) RequestExecution(w http.ResponseWriter, r *http.Request)
 	})
 
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventPendingExecution, &userID, "工單已進入待執行隊列。")
+	h.publishTicketUpdateByID(r.Context(), id, ticket, &userID)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
-	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
 }
 
@@ -1251,9 +1273,7 @@ func (h *TicketHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 	})
 
-	if updated, _ := h.tickets.GetByID(r.Context(), id); updated != nil {
-		h.publishTicketUpdate(r.Context(), updated, &userID)
-	}
+	h.publishTicketUpdateByID(r.Context(), id, nil, &userID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1337,8 +1357,8 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	ticket.ExecutorID = &userID
 	go h.runTicketExecution(ticket, userID)
 
+	h.publishTicketUpdateByID(r.Context(), id, ticket, &userID)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
-	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
 }
 
@@ -1435,9 +1455,7 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 	} else {
 		h.dispatchTicketNotification(ctx, ticket, ticketEventExecutionFailed, &executorID, "工單執行失敗，請查看 execution log。")
 	}
-	if updated, _ := h.tickets.GetByID(ctx, ticket.ID); updated != nil {
-		h.publishTicketUpdate(ctx, updated, &executorID)
-	}
+	h.publishTicketUpdateByID(ctx, ticket.ID, ticket, &executorID)
 }
 
 func (h *TicketHandler) finishTicket(ctx context.Context, id uint64, status model.TicketStatus, _ string) {
@@ -1496,8 +1514,8 @@ func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	})
 
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventRevoked, &userID, "敏感權限已提前撤銷，後續查詢起即失效。")
+	h.publishTicketUpdateByID(r.Context(), id, ticket, &userID)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
-	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
 }
 
