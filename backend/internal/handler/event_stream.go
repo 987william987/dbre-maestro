@@ -23,6 +23,11 @@ func (h *EventStreamHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+	responseController := http.NewResponseController(w)
+	if err := responseController.SetWriteDeadline(time.Time{}); err != nil {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
 
 	userID := middleware.UserIDFromCtx(r.Context())
 	if userID == 0 || h.broker == nil {

@@ -171,6 +171,37 @@ function formatActivityDetail(log: AuditLog) {
   }
 }
 
+function extractRealtimeTicketID(detail: unknown): string | null {
+  if (!detail || typeof detail !== 'object') {
+    return null
+  }
+
+  const eventDetail = detail as {
+    event?: string
+    data?: {
+      ticket_id?: number
+      notification?: {
+        resource_type?: string | null
+        resource_id?: number | null
+      } | null
+    } | null
+  }
+
+  if (eventDetail.event === 'ticket.updated') {
+    const ticketID = eventDetail.data?.ticket_id
+    return ticketID == null ? null : String(ticketID)
+  }
+
+  if (eventDetail.event === 'notification.created') {
+    const notification = eventDetail.data?.notification
+    if (notification?.resource_type === 'ticket' && notification.resource_id != null) {
+      return String(notification.resource_id)
+    }
+  }
+
+  return null
+}
+
 type StatementResultRow = {
   seq: number
   sql: string
@@ -478,11 +509,8 @@ export function TicketDetailPage() {
     }
 
     const handleRealtime = (event: Event) => {
-      const realtimeEvent = event as CustomEvent<{ event?: string; data?: { ticket_id?: number } | null }>
-      if (realtimeEvent.detail?.event !== 'ticket.updated') {
-        return
-      }
-      if (String(realtimeEvent.detail?.data?.ticket_id ?? '') !== id) {
+      const realtimeEvent = event as CustomEvent<unknown>
+      if (extractRealtimeTicketID(realtimeEvent.detail) !== id) {
         return
       }
       void reloadTicket({ background: true })

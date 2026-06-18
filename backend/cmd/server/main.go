@@ -33,6 +33,18 @@ const (
 	writeTimeout   = 45 * time.Second
 )
 
+func timeoutExceptEventStream(timeout time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/events/stream" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			chimw.Timeout(timeout)(next).ServeHTTP(w, r)
+		})
+	}
+}
+
 func main() {
 	migrateOnly := flag.Bool("migrate-only", false, "run migrations and exit")
 	flag.Parse()
@@ -151,7 +163,7 @@ func main() {
 	r.Use(chimw.RealIP)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
-	r.Use(chimw.Timeout(requestTimeout))
+	r.Use(timeoutExceptEventStream(requestTimeout))
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", healthH.ServeHTTP)
