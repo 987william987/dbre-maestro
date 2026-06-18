@@ -10,8 +10,8 @@ const STATUS_STYLES: Record<TicketStatus, string> = {
   executing: 'border-slate-200 bg-slate-100 text-slate-700',
   completed: 'border-emerald-200 bg-emerald-50 text-emerald-700',
   failed: 'border-rose-200 bg-rose-50 text-rose-700',
-  stopped: 'border-zinc-200 bg-zinc-100 text-zinc-700',
-  interrupted: 'border-orange-200 bg-orange-50 text-orange-700',
+  stopped: 'border-rose-200 bg-rose-50 text-rose-700',
+  interrupted: 'border-rose-200 bg-rose-50 text-rose-700',
 }
 
 const STATUS_LABELS: Record<TicketStatus, string> = {

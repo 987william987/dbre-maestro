@@ -281,6 +281,39 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByRole('button', { name: 'Download Export' })).toBeInTheDocument()
   })
 
+  it('sensitive access 在 stopped 狀態時，approval flow 不應顯示等待審批完成', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 2, username: 'admin', authGroups: ['admin'], authGroupDetails: [], permissions: ['sql_editor.sensitive_review'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      ticket_type: 'sensitive_query_access',
+      status: 'stopped',
+      sql_content: 'SELECT * FROM users;',
+    }, {
+      capabilities: {
+        can_review: false,
+        can_reject: false,
+        can_withdraw: false,
+        can_revoke: false,
+        can_execute: false,
+        can_download_export: false,
+      },
+    }))
+
+    renderPage()
+
+    expect(await screen.findByText('Approval Flow')).toBeInTheDocument()
+    expect(screen.getByText('Sensitive access was revoked and the ticket is closed')).toBeInTheDocument()
+    expect(screen.queryByText('Waiting for approval to complete the request')).not.toBeInTheDocument()
+  })
+
   it('工單資訊優先顯示人類可讀名稱而不是純 id', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',

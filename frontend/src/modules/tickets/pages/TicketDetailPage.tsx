@@ -314,14 +314,17 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
       : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' || ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
         : 'upcoming'
     : ticket.status === 'approved' || ticket.status === 'completed' ? 'done'
-      : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
+      : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' || ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
         : 'upcoming'
   const completionDetail = usesExecutor
     ? completionTone === 'done' ? 'Ticket closed successfully'
       : completionTone === 'failed' ? 'Ticket closed unsuccessfully'
         : 'Waiting for execution to finish'
     : completionTone === 'done' ? 'Ticket completed after approval'
-      : completionTone === 'failed' ? 'Ticket closed unsuccessfully'
+      : completionTone === 'failed'
+        ? ticket.ticket_type === 'sensitive_query_access' && ticket.status === 'stopped'
+          ? 'Sensitive access was revoked and the ticket is closed'
+          : 'Ticket closed unsuccessfully'
         : 'Waiting for approval to complete the request'
 
   const steps: WorkflowStep[] = [
