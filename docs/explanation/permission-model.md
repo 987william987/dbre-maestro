@@ -124,6 +124,21 @@ DB Scope 決定：
 
 這些權限是 workflow 權限，而不是頁面權限。
 
+## Admin 與 All Permissions 規則
+
+平台有兩種「全權限」來源：
+
+- `users.is_protected = true` 的 admin user
+- `auth_groups.is_all_permissions = true` 的 admin auth group
+
+這兩種身分在產品語意上都代表「永有所有權限」。因此新增任何功能時，不應在 handler 或 service 裡自行手寫 `username == admin`、`group_key == admin` 或類似判斷，而必須走統一 helper：
+
+- 頁面 / API permission：使用 `GetEffectivePermissionKeys()`
+- DB Scope：使用 `GetEffectiveDBConnectionIDs()`
+- 額外 grant 類能力，例如 query access：在檢查 grant 前先使用 `HasAllPermissions()`
+
+這條規則的目的，是避免新功能新增了額外授權表後，admin user 或 admin auth group 反而被細粒度 grant 擋住。
+
 ## 工單入口模型
 
 Tickets 系統允許不同 ticket type 擁有不同入口，但最後都收斂到同一套工單管理模型。

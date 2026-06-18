@@ -49,7 +49,7 @@ func TestAuthHandlerMe(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
 			AddRow(userID, "alice", "alice@example.com", "hash", 0, 0, 1, now, now))
 	mock.ExpectQuery(`SELECT EXISTS \(`).
-		WithArgs(userID, userID).
+		WithArgs(userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(`SELECT DISTINCT permission_key FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
@@ -60,6 +60,9 @@ func TestAuthHandlerMe(t *testing.T) {
 		WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
 			AddRow(userID, "alice", "alice@example.com", "hash", 0, 0, 1, now, now))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs(userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(`SELECT DISTINCT db_connection_id FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"db_connection_id"}).
@@ -174,7 +177,7 @@ func TestAuthHandlerMeReturnsEmptyArrayForNoGroups(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
 			AddRow(userID, "bob", "bob@example.com", "hash", 0, 0, 1, now, now))
 	mock.ExpectQuery(`SELECT EXISTS \(`).
-		WithArgs(userID, userID).
+		WithArgs(userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(`SELECT DISTINCT permission_key FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
@@ -183,6 +186,9 @@ func TestAuthHandlerMeReturnsEmptyArrayForNoGroups(t *testing.T) {
 		WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
 			AddRow(userID, "bob", "bob@example.com", "hash", 0, 0, 1, now, now))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs(userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(`SELECT DISTINCT db_connection_id FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"db_connection_id"}))

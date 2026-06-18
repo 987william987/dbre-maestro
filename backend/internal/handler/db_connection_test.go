@@ -314,6 +314,9 @@ func TestTicketHandlerCreateRejectsConnectionOutsideScope(t *testing.T) {
 			"created_at",
 			"updated_at",
 		}).AddRow(99, "alan", "alan@example.com", "hash", true, false, true, now, now))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs(uint64(99), sqlmock.AnyArg(), uint64(99), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(`SELECT DISTINCT db_connection_id FROM`).
 		WithArgs(uint64(99), uint64(99), sqlmock.AnyArg(), uint64(99), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"db_connection_id"}).AddRow(uint64(1)))

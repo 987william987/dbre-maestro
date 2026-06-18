@@ -60,7 +60,7 @@ func NewExportHandler(
 		dbConns:             dbConns,
 		users:               users,
 		audit:               audit,
-		queryAccess:         queryaccess.NewService(queryAccessRepo),
+		queryAccess:         queryaccess.NewService(queryAccessRepo, users),
 		masking:             newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:           notifRepo,
 		broker:              broker,

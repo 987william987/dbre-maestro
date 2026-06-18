@@ -1,9 +1,14 @@
 package queryaccess
 
 import (
+	"context"
 	"testing"
+	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/repository"
+	"github.com/jmoiron/sqlx"
 )
 
 func TestExtractObjectRefsMySQLJoinAndCTE(t *testing.T) {
@@ -94,6 +99,59 @@ func TestMatchesAnyGrantSupportsDatabaseAndTableScopes(t *testing.T) {
 	}
 }
 
+func TestCheckSQLAllowsProtectedAdminWithoutQueryAccessGrant(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC()
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(uint64(1)).
+		WillReturnRows(userRows().AddRow(uint64(1), "admin", "admin@example.com", "", "hash", true, true, true, now, now))
+
+	sqlxDB := sqlx.NewDb(db, "mysql")
+	service := NewService(repository.NewQueryAccessRepo(sqlxDB), repository.NewUserRepo(sqlxDB))
+	conn := mysqlConnection(7, "analytics")
+
+	err = service.CheckSQL(context.Background(), 1, conn, "SELECT * FROM users", CheckContext{})
+	if err != nil {
+		t.Fatalf("CheckSQL() error = %v, want nil for protected admin", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestCheckSQLAllowsAllPermissionsAuthGroupWithoutQueryAccessGrant(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC()
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(uint64(2)).
+		WillReturnRows(userRows().AddRow(uint64(2), "dba", "dba@example.com", "", "hash", true, false, true, now, now))
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs(uint64(2), sqlmock.AnyArg(), uint64(2), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	sqlxDB := sqlx.NewDb(db, "mysql")
+	service := NewService(repository.NewQueryAccessRepo(sqlxDB), repository.NewUserRepo(sqlxDB))
+	conn := mysqlConnection(7, "analytics")
+
+	err = service.CheckSQL(context.Background(), 2, conn, "SELECT * FROM users", CheckContext{})
+	if err != nil {
+		t.Fatalf("CheckSQL() error = %v, want nil for all-permissions auth group", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func assertHasRef(t *testing.T, refs []ObjectRef, expected ObjectRef) {
 	t.Helper()
 	for _, ref := range refs {
@@ -105,4 +163,30 @@ func assertHasRef(t *testing.T, refs []ObjectRef, expected ObjectRef) {
 		}
 	}
 	t.Fatalf("expected ref %#v not found in %#v", expected, refs)
+}
+
+func userRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"id",
+		"username",
+		"email",
+		"lark_recipient",
+		"password",
+		"is_setup",
+		"is_protected",
+		"is_active",
+		"created_at",
+		"updated_at",
+	})
+}
+
+func mysqlConnection(id uint64, databaseName string) *model.DBConnection {
+	return &model.DBConnection{
+		ID:     id,
+		DBType: "mysql",
+		DatabaseName: func() *string {
+			v := databaseName
+			return &v
+		}(),
+	}
 }

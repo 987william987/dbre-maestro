@@ -138,40 +138,11 @@ func (r *UserRepo) GetAuthGroupRecords(ctx context.Context, userID uint64) ([]Au
 }
 
 func (r *UserRepo) GetEffectivePermissionKeys(ctx context.Context, userID uint64) ([]string, error) {
-	user, err := r.GetByID(ctx, userID)
+	hasAllPermissions, err := r.HasAllPermissions(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	if user != nil && user.IsProtected {
-		var permissionKeys []string
-		err := r.db.SelectContext(ctx, &permissionKeys, `SELECT permission_key FROM permissions ORDER BY permission_key`)
-		return permissionKeys, err
-	}
-
-	// Check if the user belongs to any group with is_all_permissions = 1.
-	var inAllPermissionsGroup bool
-	err = r.db.GetContext(ctx, &inAllPermissionsGroup, `
-		SELECT EXISTS (
-			SELECT 1 FROM auth_groups ag
-			WHERE ag.is_all_permissions = 1
-			  AND (
-			    EXISTS (
-			      SELECT 1 FROM user_auth_groups uag
-			      WHERE uag.auth_group_id = ag.id AND uag.user_id = ?
-			        AND (uag.expires_at IS NULL OR uag.expires_at > NOW())
-			    )
-			    OR EXISTS (
-			      SELECT 1 FROM auth_group_memberships agm
-			      WHERE agm.auth_group = ag.group_key AND agm.user_id = ?
-			        AND (agm.expires_at IS NULL OR agm.expires_at > NOW())
-			    )
-			  )
-		)
-	`, userID, userID)
-	if err != nil {
-		return nil, err
-	}
-	if inAllPermissionsGroup {
+	if hasAllPermissions {
 		var permissionKeys []string
 		err := r.db.SelectContext(ctx, &permissionKeys, `SELECT permission_key FROM permissions ORDER BY permission_key`)
 		return permissionKeys, err
@@ -201,6 +172,37 @@ func (r *UserRepo) GetEffectivePermissionKeys(ctx context.Context, userID uint64
 		ORDER BY permission_key
 	`, userID, userID, timeutil.NowUTC(), userID, timeutil.NowUTC())
 	return permissionKeys, err
+}
+
+func (r *UserRepo) HasAllPermissions(ctx context.Context, userID uint64) (bool, error) {
+	user, err := r.GetByID(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if user != nil && user.IsProtected {
+		return true, nil
+	}
+
+	var hasAllPermissions bool
+	err = r.db.GetContext(ctx, &hasAllPermissions, `
+		SELECT EXISTS (
+			SELECT 1 FROM auth_groups ag
+			WHERE ag.is_all_permissions = 1
+			  AND (
+			    EXISTS (
+			      SELECT 1 FROM user_auth_groups uag
+			      WHERE uag.auth_group_id = ag.id AND uag.user_id = ?
+			        AND (uag.expires_at IS NULL OR uag.expires_at > ?)
+			    )
+			    OR EXISTS (
+			      SELECT 1 FROM auth_group_memberships agm
+			      WHERE agm.auth_group = ag.group_key AND agm.user_id = ?
+			        AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+			    )
+			  )
+		)
+	`, userID, timeutil.NowUTC(), userID, timeutil.NowUTC())
+	return hasAllPermissions, err
 }
 
 func (r *UserRepo) ListActiveUserIDsByPermissionKeys(ctx context.Context, permissionKeys []string) ([]uint64, error) {
@@ -263,11 +265,11 @@ func (r *UserRepo) ListActiveUserIDsByPermissionKeys(ctx context.Context, permis
 }
 
 func (r *UserRepo) GetEffectiveDBConnectionIDs(ctx context.Context, userID uint64) ([]uint64, error) {
-	user, err := r.GetByID(ctx, userID)
+	hasAllPermissions, err := r.HasAllPermissions(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	if user != nil && user.IsProtected {
+	if hasAllPermissions {
 		var allIDs []uint64
 		if err := r.db.SelectContext(ctx, &allIDs, `
 			SELECT id

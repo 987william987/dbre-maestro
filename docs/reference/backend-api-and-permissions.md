@@ -25,6 +25,7 @@
 - `SQL Editor` 與 `Tickets` 採動作型 permission
 - 實際可作用資料源仍受 DB Scope 限制
 - 前端 route guard 只做 UX gating，真正安全邊界在後端
+- admin user 與 all-permissions auth group 必須透過統一 helper 永遠取得完整 permission、DB Scope 與 grant 類能力
 
 ## 核心 permission 清單
 
@@ -46,6 +47,18 @@
 | `sql_editor.sensitive_apply` | 建立 sensitive access 工單 |
 | `sql_editor.sensitive_review` | 審核 / 撤銷 sensitive access |
 | `global.sensitive` | 永久繞過 masking |
+
+## Admin / All Permissions 工程規範
+
+新增 API 或 workflow 時，必須遵守以下規則：
+
+| 權限類型 | 必須使用的後端 helper | 原因 |
+|---|---|---|
+| 頁面 / API permission | `GetEffectivePermissionKeys()` | 內建 admin user / all-permissions auth group 展開 |
+| DB connection scope | `GetEffectiveDBConnectionIDs()` | 內建 admin user / all-permissions auth group 可作用所有 connection |
+| 額外授權表，例如 query access grant | `HasAllPermissions()` | grant 檢查前先放行平台全權限身分 |
+
+不要在 handler 或 service 內自行判斷 `admin` 字串，也不要只查新功能自己的 grant table。只查 grant table 會導致 admin user / admin auth group 在新功能中被誤擋。
 
 ## API 入口
 

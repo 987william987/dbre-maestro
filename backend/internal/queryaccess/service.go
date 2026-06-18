@@ -38,16 +38,26 @@ func (e *MissingAccessError) Error() string {
 }
 
 type Service struct {
-	repo *repository.QueryAccessRepo
+	repo  *repository.QueryAccessRepo
+	users *repository.UserRepo
 }
 
-func NewService(repo *repository.QueryAccessRepo) *Service {
-	return &Service{repo: repo}
+func NewService(repo *repository.QueryAccessRepo, users *repository.UserRepo) *Service {
+	return &Service{repo: repo, users: users}
 }
 
 func (s *Service) CheckSQL(ctx context.Context, userID uint64, conn *model.DBConnection, sqlText string, checkCtx CheckContext) error {
 	if s == nil || s.repo == nil || conn == nil {
 		return nil
+	}
+	if s.users != nil {
+		hasAllPermissions, err := s.users.HasAllPermissions(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if hasAllPermissions {
+			return nil
+		}
 	}
 	refs, err := ExtractObjectRefs(conn, sqlText, checkCtx)
 	if err != nil {
