@@ -370,11 +370,9 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		jsonErr(w, http.StatusUnprocessableEntity, "db_connection_id and sql_content are required")
 		return
 	}
-	if req.ApprovedDurationMinutes == 0 {
-		req.ApprovedDurationMinutes = 10
-	}
-	if req.ApprovedDurationMinutes != 10 && req.ApprovedDurationMinutes != 30 && req.ApprovedDurationMinutes != 60 {
-		jsonErr(w, http.StatusUnprocessableEntity, "approved_duration_minutes must be 10, 30, or 60")
+	approvedDurationMinutes, err := normalizeSensitiveAccessDurationMinutes(req.ApprovedDurationMinutes)
+	if err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	conn, err := h.dbConns.GetByID(r.Context(), req.DBConnectionID)
@@ -409,7 +407,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		jsonErr(w, http.StatusUnprocessableEntity, "query does not contain sensitive columns")
 		return
 	}
-	description := fmt.Sprintf("由 SQL Editor 建立的臨時敏感查詢申請。Duration=%d minutes", req.ApprovedDurationMinutes)
+	description := fmt.Sprintf("由 SQL Editor 建立的臨時敏感查詢申請。Duration=%d minutes", approvedDurationMinutes)
 	ticket, err := h.tickets.CreateWithScopes(r.Context(), &model.Ticket{
 		Title:                   fmt.Sprintf("Sensitive Query Access / %s", conn.Name),
 		Description:             &description,
@@ -418,7 +416,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		DBConnectionID:          &req.DBConnectionID,
 		DatabaseName:            optionalTrimmedString(req.DatabaseName),
 		SubmitterID:             userID,
-		ApprovedDurationMinutes: &req.ApprovedDurationMinutes,
+		ApprovedDurationMinutes: &approvedDurationMinutes,
 	}, analysis.Scopes)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "create sensitive access ticket failed")
@@ -433,7 +431,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		ResourceID:   &ticket.ID,
 		Details: map[string]any{
 			"ticket_type":                ticket.TicketType,
-			"approved_duration_minutes":  req.ApprovedDurationMinutes,
+			"approved_duration_minutes":  approvedDurationMinutes,
 			"contains_sensitive_columns": true,
 			"scope_count":                len(analysis.Scopes),
 		},

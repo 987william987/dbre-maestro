@@ -301,7 +301,7 @@ describe('SQLEditorPage', () => {
     })
   })
 
-  it('Sensitive Access 會先顯示確認窗，確認後才建立工單', async () => {
+  it('Sensitive Access 會先要求輸入時長，再進確認窗建立工單', async () => {
     mockedUseAuth.mockReturnValue({
       user: {
         id: 7,
@@ -351,9 +351,17 @@ describe('SQLEditorPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Sensitive Access' }))
 
+    expect(screen.getByText('Set Sensitive Access Duration')).toBeInTheDocument()
+    expect(screen.getByText('Quick Select')).toBeInTheDocument()
+    expect(screen.getByText('Access Preview')).toBeInTheDocument()
+    expect(screen.getByText('10 minutes')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Requested Access Duration (minutes)'), { target: { value: '120' } })
+    expect(screen.getByText('2 hours')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
     expect(screen.getByText('Confirm Sensitive Access Request')).toBeInTheDocument()
     expect(screen.getByText('Requested Access Duration')).toBeInTheDocument()
-    expect(screen.getByText('10 minutes')).toBeInTheDocument()
+    expect(screen.getByText('120 minutes')).toBeInTheDocument()
     expect(mockedCreateSensitiveAccessTicket).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Confirm and Submit' }))
@@ -364,7 +372,7 @@ describe('SQLEditorPage', () => {
         sql_content: 'SELECT 1;',
         database_name: undefined,
         schema_name: undefined,
-        approved_duration_minutes: 10,
+        approved_duration_minutes: 120,
       })
     })
   })

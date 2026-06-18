@@ -33,7 +33,6 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import { formatDateTime } from '@/shared/lib/format'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataColumn, MetadataDefinition, MetadataItem, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
-import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
@@ -116,6 +115,12 @@ type QueryRequestConfirmState = {
   sensitiveAccessDuration: number
 }
 
+type SensitiveAccessDurationDialogState = {
+  tabID: string
+  value: string
+  error: string
+}
+
 const DEFAULT_SQL = 'SELECT 1;'
 const HISTORY_LIMIT = 20
 const SAVED_QUERY_LIMIT = 10
@@ -141,6 +146,15 @@ const EDITOR_VERTICAL_PADDING = 24
 const EDITOR_MIN_HEIGHT = EDITOR_VERTICAL_PADDING + EDITOR_BASE_VISIBLE_LINES * EDITOR_LINE_HEIGHT
 const RESULT_PAGE_SIZE = 50
 const METADATA_ERROR_MESSAGE = 'Metadata is temporarily unavailable. Please try again later.'
+const DEFAULT_SENSITIVE_ACCESS_DURATION_MINUTES = 10
+const MAX_SENSITIVE_ACCESS_DURATION_MINUTES = 3 * 24 * 60
+const SENSITIVE_ACCESS_DURATION_PRESETS = [
+  { label: '30m', minutes: 30 },
+  { label: '2h', minutes: 120 },
+  { label: '8h', minutes: 480 },
+  { label: '1d', minutes: 1440 },
+  { label: '3d', minutes: 4320 },
+] as const
 const SQL_EDITOR_PROFILE_ENABLED = import.meta.env.DEV
 const SQL_EDITOR_EXTENSIONS = [sql()]
 const REDIS_EDITOR_EXTENSIONS = [javascript()]
@@ -294,6 +308,51 @@ function formatResultMetaLine(params: {
   return `${savedCount} entries`
 }
 
+function validateSensitiveAccessDurationInput(rawValue: string) {
+  const value = rawValue.trim()
+  if (!value) {
+    return { error: `Enter a duration between 1 and ${MAX_SENSITIVE_ACCESS_DURATION_MINUTES} minutes.` }
+  }
+  if (!/^\d+$/.test(value)) {
+    return { error: 'Duration must be a whole number of minutes.' }
+  }
+
+  const minutes = Number(value)
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_SENSITIVE_ACCESS_DURATION_MINUTES) {
+    return { error: `Duration must be between 1 and ${MAX_SENSITIVE_ACCESS_DURATION_MINUTES} minutes.` }
+  }
+
+  return { minutes }
+}
+
+function formatSensitiveAccessDuration(minutes: number) {
+  if (minutes < 60) {
+    return `${minutes} minute${minutes === 1 ? '' : 's'}`
+  }
+
+  const days = Math.floor(minutes / 1440)
+  const hours = Math.floor((minutes % 1440) / 60)
+  const remainingMinutes = minutes % 60
+  const parts: string[] = []
+
+  if (days > 0) {
+    parts.push(`${days} day${days === 1 ? '' : 's'}`)
+  }
+  if (hours > 0) {
+    parts.push(`${hours} hour${hours === 1 ? '' : 's'}`)
+  }
+  if (remainingMinutes > 0) {
+    parts.push(`${remainingMinutes} minute${remainingMinutes === 1 ? '' : 's'}`)
+  }
+
+  return parts.join(' ')
+}
+
+function formatSensitiveAccessExpiry(minutes: number) {
+  const expiresAt = new Date(Date.now() + minutes * 60 * 1000)
+  return formatDateTime(expiresAt.toISOString(), true)
+}
+
 function createTab(seed = 1): EditorTab {
   return {
     id: `tab-${Date.now()}-${seed}`,
@@ -318,7 +377,7 @@ function createTab(seed = 1): EditorTab {
     columnFilterOpen: false,
     visibleColumnIndexes: null,
     selectedSQL: '',
-    sensitiveAccessDuration: 10,
+    sensitiveAccessDuration: DEFAULT_SENSITIVE_ACCESS_DURATION_MINUTES,
     resultPage: 1,
     sql: DEFAULT_SQL,
     result: null,
@@ -644,6 +703,7 @@ export function SQLEditorPage() {
   const [sensitiveAccessTabIDs, setSensitiveAccessTabIDs] = useState<string[]>([])
   const [savedQueryToDelete, setSavedQueryToDelete] = useState<SavedQuery | null>(null)
   const [requestConfirmState, setRequestConfirmState] = useState<QueryRequestConfirmState | null>(null)
+  const [sensitiveAccessDurationDialog, setSensitiveAccessDurationDialog] = useState<SensitiveAccessDurationDialogState | null>(null)
   const [editorHeights, setEditorHeights] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -772,7 +832,7 @@ export function SQLEditorPage() {
   const activeVisibleColumnIndexes = activeTab?.visibleColumnIndexes ?? null
   const activeSelectedSQL = activeTab?.selectedSQL ?? ''
   const activeExecutionSQL = activeSelectedSQL.trim() || activeTab?.sql.trim() || ''
-  const activeSensitiveAccessDuration = activeTab?.sensitiveAccessDuration ?? 10
+  const activeSensitiveAccessDuration = activeTab?.sensitiveAccessDuration ?? DEFAULT_SENSITIVE_ACCESS_DURATION_MINUTES
   const activeResultPage = activeTab?.resultPage ?? 1
   const filteredExplorerNodes = useMemo(
     () => (activeExplorerSearch.trim() ? activeSearchTreeNodes : filterAssetTree(activeExplorerNodes, activeExplorerSearch)),
@@ -1284,22 +1344,34 @@ export function SQLEditorPage() {
     }
   }
 
-  function buildRequestConfirmState(kind: QueryRequestConfirmState['kind']): QueryRequestConfirmState | null {
-    if (!activeTab?.connectionId || !activeExecutionSQL || !activeConnection) {
+  function buildRequestConfirmState(
+    kind: QueryRequestConfirmState['kind'],
+    options?: {
+      tabID?: string
+      sensitiveAccessDuration?: number
+    },
+  ): QueryRequestConfirmState | null {
+    const sourceTab = tabs.find((tab) => tab.id === (options?.tabID ?? activeTab?.id)) ?? null
+    const sourceConnection = sourceTab
+      ? accessibleConnections.find((connection) => connection.id === sourceTab.connectionId) ?? null
+      : null
+    const sourceSQL = sourceTab?.selectedSQL.trim() || sourceTab?.sql.trim() || ''
+
+    if (!sourceTab?.connectionId || !sourceConnection || !sourceSQL) {
       return null
     }
 
     return {
       kind,
-      tabID: activeTab.id,
-      connectionId: activeTab.connectionId,
-      connectionName: activeConnection.name,
-      connectionType: activeConnection.db_type,
-      database: activeDatabase,
-      schema: activeSchema,
-      tableName: activeSelectedTable?.name ?? '',
-      sql: activeExecutionSQL,
-      sensitiveAccessDuration: activeSensitiveAccessDuration,
+      tabID: sourceTab.id,
+      connectionId: sourceTab.connectionId,
+      connectionName: sourceConnection.name,
+      connectionType: sourceConnection.db_type,
+      database: sourceTab.database,
+      schema: sourceTab.schema,
+      tableName: sourceTab.selectedTable?.name ?? '',
+      sql: sourceSQL,
+      sensitiveAccessDuration: options?.sensitiveAccessDuration ?? sourceTab.sensitiveAccessDuration,
     }
   }
 
@@ -1317,10 +1389,40 @@ export function SQLEditorPage() {
       return
     }
 
-    const state = buildRequestConfirmState('sensitive-access')
-    if (!state) {
+    if (!activeTab) {
       return
     }
+
+    setSensitiveAccessDurationDialog({
+      tabID: activeTab.id,
+      value: String(activeSensitiveAccessDuration),
+      error: '',
+    })
+  }
+
+  function handleSensitiveAccessDurationContinue() {
+    if (!sensitiveAccessDurationDialog) {
+      return
+    }
+
+    const validation = validateSensitiveAccessDurationInput(sensitiveAccessDurationDialog.value)
+    if ('error' in validation) {
+      const errorMessage = validation.error ?? 'Invalid duration.'
+      setSensitiveAccessDurationDialog((current) => (current ? { ...current, error: errorMessage } : current))
+      return
+    }
+
+    updateTabByID(sensitiveAccessDurationDialog.tabID, { sensitiveAccessDuration: validation.minutes })
+    const state = buildRequestConfirmState('sensitive-access', {
+      tabID: sensitiveAccessDurationDialog.tabID,
+      sensitiveAccessDuration: validation.minutes,
+    })
+    if (!state) {
+      setSensitiveAccessDurationDialog(null)
+      return
+    }
+
+    setSensitiveAccessDurationDialog(null)
     setRequestConfirmState(state)
   }
 
@@ -2028,30 +2130,14 @@ export function SQLEditorPage() {
                       {isFavorited ? <StarOff className="h-4 w-4" /> : <Star className="h-4 w-4" />}
                       {isFavorited ? 'Saved' : 'Save'}
                     </button>
-                    <div className="inline-flex items-center overflow-hidden rounded-md border border-border bg-white">
-                      <DropdownSelect
-                        ariaLabel="Sensitive access duration"
-                        value={String(activeSensitiveAccessDuration)}
-                        onChange={(value) => updateActiveTab({ sensitiveAccessDuration: Number(value) })}
-                        disabled={!canApplySensitiveAccess}
-                        size="sm"
-                        triggerClassName="h-9 rounded-none border-0 border-r border-border bg-transparent px-2 shadow-none hover:border-r hover:border-border"
-                        menuClassName="left-0 w-28 rounded-2xl p-2"
-                        options={[
-                          { value: '10', label: '10m' },
-                          { value: '30', label: '30m' },
-                          { value: '60', label: '60m' },
-                        ]}
-                      />
-                      <button
-                        type="button"
-                        onClick={openSensitiveAccessConfirm}
-                        disabled={!canApplySensitiveAccess || activeTabCreatingSensitiveAccess || !activeTab.connectionId || !activeExecutionSQL}
-                        className="inline-flex h-9 items-center gap-2 px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {activeTabCreatingSensitiveAccess ? 'Submitting...' : 'Sensitive Access'}
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={openSensitiveAccessConfirm}
+                      disabled={!canApplySensitiveAccess || activeTabCreatingSensitiveAccess || !activeTab.connectionId || !activeExecutionSQL}
+                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {activeTabCreatingSensitiveAccess ? 'Submitting...' : 'Sensitive Access'}
+                    </button>
                     <div className="relative">
                       <button
                         type="button"
@@ -2348,6 +2434,108 @@ export function SQLEditorPage() {
           </section>
         </div>
       </section>
+      <ConfirmDialog
+        open={sensitiveAccessDurationDialog !== null}
+        title="Set Sensitive Access Duration"
+        description={sensitiveAccessDurationDialog ? (
+          <div className="space-y-4">
+            <p className="text-[13px] leading-6 text-muted">
+              Enter the temporary access duration in minutes. Maximum {MAX_SENSITIVE_ACCESS_DURATION_MINUTES} minutes
+              (3 days). You will review the request details in the next step.
+            </p>
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">Quick Select</p>
+              <div className="flex flex-wrap gap-2">
+                {SENSITIVE_ACCESS_DURATION_PRESETS.map((preset) => (
+                  <button
+                    key={preset.minutes}
+                    type="button"
+                    onClick={() =>
+                      setSensitiveAccessDurationDialog((current) => (
+                        current
+                          ? {
+                              ...current,
+                              value: String(preset.minutes),
+                              error: '',
+                            }
+                          : current
+                      ))
+                    }
+                    className={cn(
+                      'inline-flex h-8 items-center rounded-md border px-3 text-[12px] font-semibold transition',
+                      sensitiveAccessDurationDialog.value.trim() === String(preset.minutes)
+                        ? 'border-accent bg-accent/10 text-accent'
+                        : 'border-border bg-white text-ink hover:bg-page',
+                    )}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label
+                htmlFor="sensitive-access-duration"
+                className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint"
+              >
+                Requested Access Duration (minutes)
+              </label>
+              <input
+                id="sensitive-access-duration"
+                type="number"
+                min={1}
+                max={MAX_SENSITIVE_ACCESS_DURATION_MINUTES}
+                step={1}
+                inputMode="numeric"
+                value={sensitiveAccessDurationDialog.value}
+                onChange={(event) =>
+                  setSensitiveAccessDurationDialog((current) => (
+                    current
+                      ? {
+                          ...current,
+                          value: event.target.value,
+                          error: '',
+                        }
+                      : current
+                  ))
+                }
+                className="h-10 w-full rounded-control border border-border bg-panel px-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+              />
+              <p className="text-[12px] text-faint">Examples: 30 for 30 minutes, 120 for 2 hours, 1440 for 1 day.</p>
+              {sensitiveAccessDurationDialog.error ? (
+                <p className="text-[12px] font-medium text-danger">{sensitiveAccessDurationDialog.error}</p>
+              ) : null}
+            </div>
+            {(() => {
+              const validation = validateSensitiveAccessDurationInput(sensitiveAccessDurationDialog.value)
+              if ('error' in validation) {
+                return null
+              }
+
+              return (
+                <div className="rounded-xl border border-border bg-white/80 p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">Access Preview</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <p className="text-[11px] font-semibold text-faint">Human Readable</p>
+                      <p className="mt-1 text-[13px] font-semibold text-ink">{formatSensitiveAccessDuration(validation.minutes)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold text-faint">Expires At</p>
+                      <p className="mt-1 text-[13px] font-semibold text-ink">{formatSensitiveAccessExpiry(validation.minutes)}</p>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+        ) : null}
+        confirmLabel="Continue"
+        cancelLabel="Cancel"
+        panelClassName="max-w-lg"
+        onCancel={() => setSensitiveAccessDurationDialog(null)}
+        onConfirm={handleSensitiveAccessDurationContinue}
+      />
       <ConfirmDialog
         open={requestConfirmState !== null}
         title={requestConfirmState?.kind === 'sensitive-access' ? 'Confirm Sensitive Access Request' : 'Confirm Export Request'}
