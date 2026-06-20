@@ -713,7 +713,8 @@ export function TicketDetailPage() {
                     <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
                       <tr>
                         <th className="px-4 py-3">ID</th>
-                        <th className="px-4 py-3">Scope</th>
+                        <th className="px-4 py-3">Effect</th>
+                        <th className="px-4 py-3">Connection</th>
                         <th className="px-4 py-3">Database</th>
                         <th className="px-4 py-3">Table</th>
                       </tr>
@@ -722,9 +723,16 @@ export function TicketDetailPage() {
                       {detail.query_access_items.map((item) => (
                         <tr key={item.id}>
                           <td className="px-4 py-3 align-top">{item.id}</td>
-                          <td className="px-4 py-3 align-top">{item.scope_mode}</td>
-                          <td className="px-4 py-3 align-top">{item.database_name}</td>
-                          <td className="px-4 py-3 align-top">{item.table_name || '—'}</td>
+                          <td className="px-4 py-3 align-top">
+                            <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
+                              item.effect === 'deny' ? 'bg-red-50 text-danger' : 'bg-emerald-50 text-emerald-700'
+                            }`}>
+                              {item.effect === 'deny' ? 'Deny' : 'Allow'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 align-top">{item.connection_id}</td>
+                          <td className="px-4 py-3 align-top">{item.database_pattern === '*' ? 'All Databases' : item.database_pattern || item.database_name}</td>
+                          <td className="px-4 py-3 align-top">{item.table_pattern === '*' ? 'All Tables' : item.table_pattern || item.table_name || '—'}</td>
                         </tr>
                       ))}
                     </tbody>

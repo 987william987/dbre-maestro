@@ -67,13 +67,20 @@ func (s *Service) CheckSQL(ctx context.Context, userID uint64, conn *model.DBCon
 		return nil
 	}
 
-	grants, err := s.repo.ListActiveGrants(ctx, userID, conn.ID)
+	authGroupIDs := []uint64{}
+	if s.users != nil {
+		authGroupIDs, err = s.users.GetEffectiveAuthGroupIDs(ctx, userID)
+		if err != nil {
+			return err
+		}
+	}
+	rules, err := s.repo.ListActiveRules(ctx, userID, authGroupIDs, conn.ID)
 	if err != nil {
 		return err
 	}
 	missing := make([]ObjectRef, 0)
 	for _, ref := range refs {
-		if !matchesAnyGrant(ref, grants) {
+		if !isAllowedByRules(ref, rules) {
 			missing = append(missing, ref)
 		}
 	}
@@ -81,6 +88,38 @@ func (s *Service) CheckSQL(ctx context.Context, userID uint64, conn *model.DBCon
 		return &MissingAccessError{Missing: dedupeRefs(missing)}
 	}
 	return nil
+}
+
+func isAllowedByRules(ref ObjectRef, rules []model.QueryAccessRule) bool {
+	allowed := false
+	for _, rule := range rules {
+		if !matchesRule(ref, rule) {
+			continue
+		}
+		if rule.Effect == model.QueryAccessEffectDeny {
+			return false
+		}
+		allowed = true
+	}
+	return allowed
+}
+
+func matchesRule(ref ObjectRef, rule model.QueryAccessRule) bool {
+	if rule.ConnectionID != ref.ConnectionID {
+		return false
+	}
+	if !matchesPattern(rule.DatabasePattern, ref.DatabaseName) {
+		return false
+	}
+	return matchesPattern(rule.TablePattern, ref.TableName)
+}
+
+func matchesPattern(pattern, value string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" || pattern == "*" {
+		return true
+	}
+	return equalFold(pattern, value)
 }
 
 func matchesAnyGrant(ref ObjectRef, grants []model.QueryAccessGrant) bool {

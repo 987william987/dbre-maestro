@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, CheckCircle2, FileText, Loader2, ScrollText, Wand2, XCircle } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, FileText, Loader2, Plus, ScrollText, Trash2, Wand2, XCircle } from 'lucide-react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { format as formatSQL } from 'sql-formatter'
 import { ApiError } from '@/shared/api/client'
@@ -7,7 +7,7 @@ import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataResponse } from '@/shared/types/sqlEditor'
-import type { QueryAccessScopeMode, TicketReviewResult, TicketType } from '@/shared/types/ticket'
+import type { QueryAccessEffect, TicketReviewResult, TicketType } from '@/shared/types/ticket'
 import { listMetadata } from '@/modules/sql-editor/api'
 import { createTicket, listConnections, listTicketDatabases, reviewTicketSQL } from '@/modules/tickets/api'
 
@@ -22,7 +22,33 @@ type QueryAccessTableOption = {
   tableName: string
 }
 
-const MAX_QUERY_ACCESS_DURATION_MINUTES = 3 * 24 * 60
+type QueryAccessRuleDraft = {
+  id: string
+  effect: QueryAccessEffect
+  connectionId: string
+  databasePattern: string
+  tablePattern: string
+}
+
+const QUERY_ACCESS_DURATION_OPTIONS = [
+  { value: String(24 * 60), label: '1 day' },
+  { value: String(7 * 24 * 60), label: '1 week' },
+  { value: String(30 * 24 * 60), label: '1 month' },
+  { value: String(365 * 24 * 60), label: '1 year' },
+  { value: String(3 * 365 * 24 * 60), label: '3 years' },
+]
+const MAX_QUERY_ACCESS_DURATION_MINUTES = 3 * 365 * 24 * 60
+
+function createQueryAccessRuleDraft(overrides: Partial<QueryAccessRuleDraft> = {}): QueryAccessRuleDraft {
+  return {
+    id: `rule-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    effect: 'allow',
+    connectionId: '',
+    databasePattern: '*',
+    tablePattern: '*',
+    ...overrides,
+  }
+}
 
 function parseTicketType(value: string | null): TicketType | null {
   switch (value) {
@@ -83,18 +109,20 @@ export function NewTicketPage() {
   const [reviewPassed, setReviewPassed] = useState(false)
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [databases, setDatabases] = useState<string[]>([])
-  const [queryAccessScopeMode, setQueryAccessScopeMode] = useState<QueryAccessScopeMode>(prefilledTableName ? 'table' : 'database')
-  const [queryAccessDuration, setQueryAccessDuration] = useState('60')
-  const [queryAccessDatabaseSelections, setQueryAccessDatabaseSelections] = useState<string[]>(
-    prefilledDatabaseName && !prefilledTableName ? [prefilledDatabaseName] : [],
-  )
-  const [queryAccessTableDatabase, setQueryAccessTableDatabase] = useState(prefilledDatabaseName)
-  const [queryAccessTables, setQueryAccessTables] = useState<QueryAccessTableOption[]>([])
-  const [queryAccessTableSelections, setQueryAccessTableSelections] = useState<string[]>([])
-  const [queryAccessTablePrefillApplied, setQueryAccessTablePrefillApplied] = useState(false)
+  const [queryAccessDuration, setQueryAccessDuration] = useState(String(24 * 60))
+  const [queryAccessRules, setQueryAccessRules] = useState<QueryAccessRuleDraft[]>([
+    createQueryAccessRuleDraft({
+      connectionId: prefilledConnectionId,
+      databasePattern: prefilledDatabaseName || '*',
+      tablePattern: prefilledTableName || '*',
+    }),
+  ])
+  const [queryAccessDatabasesByConnection, setQueryAccessDatabasesByConnection] = useState<Record<string, string[]>>({})
+  const [queryAccessTablesByRule, setQueryAccessTablesByRule] = useState<Record<string, QueryAccessTableOption[]>>({})
+  const [loadingQueryAccessConnections, setLoadingQueryAccessConnections] = useState<Record<string, boolean>>({})
+  const [loadingQueryAccessRuleTables, setLoadingQueryAccessRuleTables] = useState<Record<string, boolean>>({})
   const [loadingConnections, setLoadingConnections] = useState(true)
   const [loadingDatabases, setLoadingDatabases] = useState(false)
-  const [loadingQueryAccessTables, setLoadingQueryAccessTables] = useState(false)
   const [reviewing, setReviewing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -112,17 +140,17 @@ export function NewTicketPage() {
   }, [connections, ticketType])
   const parserResults = useMemo(() => reviewResults.filter((result) => result.phase === 'parser'), [reviewResults])
   const validationResults = useMemo(() => reviewResults.filter((result) => !result.phase || result.phase === 'validation'), [reviewResults])
-  const selectedQueryAccessItems = useMemo(
-    () => queryAccessTables.filter((item) => queryAccessTableSelections.includes(item.key)),
-    [queryAccessTableSelections, queryAccessTables],
-  )
   const requiresDatabaseSelection = !isQueryAccessTicket
   const hasValidQueryAccessScope = isQueryAccessTicket && (
-    (queryAccessScopeMode === 'database' && queryAccessDatabaseSelections.length > 0) ||
-    (queryAccessScopeMode === 'table' && queryAccessTableDatabase.trim() !== '' && selectedQueryAccessItems.length > 0)
+    queryAccessRules.length > 0 &&
+    queryAccessRules.every((rule) =>
+      rule.connectionId !== '' &&
+      rule.databasePattern.trim() !== '' &&
+      rule.tablePattern.trim() !== '',
+    )
   )
   const canSubmit = isQueryAccessTicket
-    ? title.trim() !== '' && dbConnectionId !== '' && hasValidQueryAccessScope
+    ? title.trim() !== '' && hasValidQueryAccessScope
     : title.trim() !== '' &&
       sqlContent.trim() !== '' &&
       dbConnectionId !== '' &&
@@ -178,14 +206,8 @@ export function NewTicketPage() {
     if (!isQueryAccessTicket) {
       return
     }
-    setQueryAccessDatabaseSelections([])
-    setQueryAccessTableSelections([])
-    setQueryAccessTables([])
-    setQueryAccessTablePrefillApplied(false)
-    if (prefilledConnectionId !== dbConnectionId) {
-      setQueryAccessTableDatabase('')
-    }
-  }, [dbConnectionId, isQueryAccessTicket, prefilledConnectionId])
+    setDbConnectionId('')
+  }, [isQueryAccessTicket])
 
   useEffect(() => {
     if (!dbConnectionId) {
@@ -207,15 +229,6 @@ export function NewTicketPage() {
           .map((item) => item.name.trim())
           .filter((item) => item !== '')
         setDatabases(nextDatabases)
-
-        if (isQueryAccessTicket) {
-          if (queryAccessScopeMode === 'database' && queryAccessDatabaseSelections.length === 0 && prefilledDatabaseName && nextDatabases.includes(prefilledDatabaseName)) {
-            setQueryAccessDatabaseSelections([prefilledDatabaseName])
-          }
-          if (queryAccessScopeMode === 'table' && queryAccessTableDatabase.trim() === '' && prefilledDatabaseName && nextDatabases.includes(prefilledDatabaseName)) {
-            setQueryAccessTableDatabase(prefilledDatabaseName)
-          }
-        }
 
         if (!requiresDatabaseSelection) {
           return
@@ -249,70 +262,9 @@ export function NewTicketPage() {
     dbConnectionId,
     isQueryAccessTicket,
     prefilledDatabaseName,
-    queryAccessScopeMode,
     requiresDatabaseSelection,
     selectedConnection?.database_name,
   ])
-
-  useEffect(() => {
-    if (!isQueryAccessTicket || queryAccessScopeMode !== 'table' || dbConnectionId === '' || queryAccessTableDatabase.trim() === '') {
-      setQueryAccessTables([])
-      return
-    }
-
-    let active = true
-
-    async function loadQueryAccessTables() {
-      setLoadingQueryAccessTables(true)
-      try {
-        const response = await listMetadata(Number(dbConnectionId), { database: queryAccessTableDatabase.trim() })
-        if (!active) {
-          return
-        }
-
-        let nextTables = normalizeTableOptions(response, queryAccessTableDatabase.trim())
-        if (response.level === 'schema') {
-          const schemaResponses = await Promise.all(
-            response.items
-              .filter((item) => item.kind === 'schema')
-              .map((item) => listMetadata(Number(dbConnectionId), {
-                database: queryAccessTableDatabase.trim(),
-                schema: item.name,
-              })),
-          )
-          if (!active) {
-            return
-          }
-          nextTables = schemaResponses.flatMap((item) => normalizeTableOptions(item, queryAccessTableDatabase.trim()))
-        }
-
-        setQueryAccessTables(nextTables)
-        if (prefilledTableName && !queryAccessTablePrefillApplied) {
-          const matched = nextTables.find((item) => item.tableName === prefilledTableName)
-          if (matched) {
-            setQueryAccessTableSelections([matched.key])
-            setQueryAccessTablePrefillApplied(true)
-          }
-        }
-      } catch (loadError) {
-        if (!active) {
-          return
-        }
-        setQueryAccessTables([])
-        setError(loadError instanceof ApiError ? loadError.message : 'Failed to load tables for query access.')
-      } finally {
-        if (active) {
-          setLoadingQueryAccessTables(false)
-        }
-      }
-    }
-
-    void loadQueryAccessTables()
-
-    return () => {
-      active = false
-    }
-  }, [dbConnectionId, isQueryAccessTicket, prefilledTableName, queryAccessScopeMode, queryAccessTableDatabase, queryAccessTablePrefillApplied])
 
   useEffect(() => {
     if (!isQueryAccessTicket) {
@@ -321,16 +273,95 @@ export function NewTicketPage() {
     setDatabaseName('')
   }, [isQueryAccessTicket])
 
-  function toggleDatabaseSelection(name: string) {
-    setQueryAccessDatabaseSelections((current) =>
-      current.includes(name) ? current.filter((item) => item !== name) : [...current, name],
-    )
+  useEffect(() => {
+    if (!isQueryAccessTicket) {
+      return
+    }
+    queryAccessRules.forEach((rule) => {
+      if (rule.connectionId !== '') {
+        void loadQueryAccessDatabases(rule.connectionId)
+      }
+      if (rule.connectionId !== '' && rule.databasePattern !== '*') {
+        void loadQueryAccessRuleTables(rule)
+      }
+    })
+  }, [isQueryAccessTicket, queryAccessRules])
+
+  async function loadQueryAccessDatabases(connectionId: string) {
+    if (connectionId === '' || queryAccessDatabasesByConnection[connectionId]) {
+      return
+    }
+    setLoadingQueryAccessConnections((current) => ({ ...current, [connectionId]: true }))
+    try {
+      const response = await listTicketDatabases(Number(connectionId))
+      setQueryAccessDatabasesByConnection((current) => ({
+        ...current,
+        [connectionId]: response.databases.map((item) => item.name.trim()).filter((item) => item !== ''),
+      }))
+    } catch (loadError) {
+      setError(loadError instanceof ApiError ? loadError.message : 'Failed to load query access databases.')
+    } finally {
+      setLoadingQueryAccessConnections((current) => ({ ...current, [connectionId]: false }))
+    }
   }
 
-  function toggleTableSelection(key: string) {
-    setQueryAccessTableSelections((current) =>
-      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
-    )
+  async function loadQueryAccessRuleTables(rule: QueryAccessRuleDraft) {
+    if (rule.connectionId === '' || rule.databasePattern === '*' || queryAccessTablesByRule[rule.id]) {
+      return
+    }
+    setLoadingQueryAccessRuleTables((current) => ({ ...current, [rule.id]: true }))
+    try {
+      const response = await listMetadata(Number(rule.connectionId), { database: rule.databasePattern })
+      let nextTables = normalizeTableOptions(response, rule.databasePattern)
+      if (response.level === 'schema') {
+        const schemaResponses = await Promise.all(
+          response.items
+            .filter((item) => item.kind === 'schema')
+            .map((item) => listMetadata(Number(rule.connectionId), {
+              database: rule.databasePattern,
+              schema: item.name,
+            })),
+        )
+        nextTables = schemaResponses.flatMap((item) => normalizeTableOptions(item, rule.databasePattern))
+      }
+      setQueryAccessTablesByRule((current) => ({ ...current, [rule.id]: nextTables }))
+    } catch (loadError) {
+      setQueryAccessTablesByRule((current) => ({ ...current, [rule.id]: [] }))
+      setError(loadError instanceof ApiError ? loadError.message : 'Failed to load query access tables.')
+    } finally {
+      setLoadingQueryAccessRuleTables((current) => ({ ...current, [rule.id]: false }))
+    }
+  }
+
+  function updateQueryAccessRule(ruleId: string, patch: Partial<QueryAccessRuleDraft>) {
+    setQueryAccessRules((current) => current.map((rule) => {
+      if (rule.id !== ruleId) {
+        return rule
+      }
+      const nextRule = { ...rule, ...patch }
+      if (patch.connectionId != null) {
+        nextRule.databasePattern = '*'
+        nextRule.tablePattern = '*'
+        setQueryAccessTablesByRule((tables) => {
+          const nextTables = { ...tables }
+          delete nextTables[ruleId]
+          return nextTables
+        })
+        void loadQueryAccessDatabases(patch.connectionId)
+      }
+      if (patch.databasePattern != null) {
+        nextRule.tablePattern = '*'
+        setQueryAccessTablesByRule((tables) => {
+          const nextTables = { ...tables }
+          delete nextTables[ruleId]
+          return nextTables
+        })
+        if (nextRule.connectionId !== '' && patch.databasePattern !== '*') {
+          void loadQueryAccessRuleTables(nextRule)
+        }
+      }
+      return nextRule
+    }))
   }
 
   function handleFormatSQL() {
@@ -395,28 +426,22 @@ export function NewTicketPage() {
           return
         }
 
-        const items = queryAccessScopeMode === 'database'
-          ? queryAccessDatabaseSelections.map((name) => ({
-            database_name: name,
-            table_name: null,
-          }))
-          : selectedQueryAccessItems.map((item) => ({
-            database_name: item.databaseName,
-            table_name: item.tableName,
-          }))
+        const rules = queryAccessRules.map((rule) => ({
+          effect: rule.effect,
+          connection_id: Number(rule.connectionId),
+          database_pattern: rule.databasePattern.trim() || '*',
+          table_pattern: rule.tablePattern.trim() || '*',
+        }))
 
         const created = await createTicket({
           title,
           description: description.trim() || null,
           sql_content: 'QUERY ACCESS REQUEST',
           ticket_type: ticketType,
-          db_connection_id: Number(dbConnectionId),
-          database_name: queryAccessScopeMode === 'table'
-            ? queryAccessTableDatabase.trim() || null
-            : queryAccessDatabaseSelections[0] ?? null,
+          db_connection_id: rules[0]?.connection_id ?? null,
+          database_name: rules[0]?.database_pattern === '*' ? null : rules[0]?.database_pattern ?? null,
           approved_duration_minutes: duration.minutes,
-          scope_mode: queryAccessScopeMode,
-          items,
+          rules,
         })
         navigate(`/tickets/${created.id}`, { replace: true })
         return
@@ -488,7 +513,7 @@ export function NewTicketPage() {
               />
             </label>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className={`grid gap-4 ${isQueryAccessTicket ? '' : 'sm:grid-cols-2'}`}>
               <label className="flex flex-col gap-1.5">
                 <span className="text-[12px] font-semibold text-ink">Ticket Type</span>
                 <DropdownSelect
@@ -505,24 +530,26 @@ export function NewTicketPage() {
                 />
               </label>
 
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-semibold text-ink">
-                  Target Instance <span className="text-danger">*</span>
-                </span>
-                <DropdownSelect
-                  ariaLabel="Target Instance"
-                  value={dbConnectionId}
-                  onChange={setDbConnectionId}
-                  disabled={submitting || loadingConnections}
-                  options={[
-                    { value: '', label: 'Not Selected' },
-                    ...filteredConnections.map((connection) => ({
-                      value: String(connection.id),
-                      label: formatConnectionOptionLabel(connection),
-                    })),
-                  ]}
-                />
-              </label>
+              {!isQueryAccessTicket ? (
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold text-ink">
+                    Target Instance <span className="text-danger">*</span>
+                  </span>
+                  <DropdownSelect
+                    ariaLabel="Target Instance"
+                    value={dbConnectionId}
+                    onChange={setDbConnectionId}
+                    disabled={submitting || loadingConnections}
+                    options={[
+                      { value: '', label: 'Not Selected' },
+                      ...filteredConnections.map((connection) => ({
+                        value: String(connection.id),
+                        label: formatConnectionOptionLabel(connection),
+                      })),
+                    ]}
+                  />
+                </label>
+              ) : null}
             </div>
 
             {requiresDatabaseSelection ? (
@@ -566,139 +593,126 @@ export function NewTicketPage() {
 
           {isQueryAccessTicket ? (
             <div className="grid gap-4 px-4 py-4">
-              <div className="grid gap-4 sm:grid-cols-[180px_minmax(0,1fr)] sm:items-start">
-                <div className="space-y-1.5">
-                  <p className="text-[12px] font-semibold text-ink">Scope Level</p>
-                  <p className="text-[12px] text-muted">Grant access by database or by table.</p>
-                </div>
-                <div className="inline-flex items-center rounded-lg border border-border bg-panel-soft p-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setQueryAccessScopeMode('database')
-                      setQueryAccessTableSelections([])
-                    }}
-                    className={`inline-flex h-9 items-center rounded-md px-3 text-[12px] font-semibold ${
-                      queryAccessScopeMode === 'database' ? 'bg-white text-ink shadow-soft' : 'text-muted hover:text-ink'
-                    }`}
-                  >
-                    Database
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setQueryAccessScopeMode('table')
-                      setQueryAccessDatabaseSelections([])
-                    }}
-                    className={`inline-flex h-9 items-center rounded-md px-3 text-[12px] font-semibold ${
-                      queryAccessScopeMode === 'table' ? 'bg-white text-ink shadow-soft' : 'text-muted hover:text-ink'
-                    }`}
-                  >
-                    Table
-                  </button>
-                </div>
-              </div>
-
               <label className="flex flex-col gap-1.5">
                 <span className="text-[12px] font-semibold text-ink">
-                  Approved Duration (minutes) <span className="text-danger">*</span>
+                  Access Duration <span className="text-danger">*</span>
                 </span>
-                <input
-                  type="number"
-                  min={1}
-                  max={MAX_QUERY_ACCESS_DURATION_MINUTES}
-                  step={1}
-                  inputMode="numeric"
+                <DropdownSelect
+                  ariaLabel="Query Access Duration"
                   value={queryAccessDuration}
-                  onChange={(event) => setQueryAccessDuration(event.target.value)}
-                  className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                  placeholder="60"
+                  onChange={setQueryAccessDuration}
                   disabled={submitting}
+                  options={QUERY_ACCESS_DURATION_OPTIONS}
                 />
-                <p className="text-[12px] text-muted">Maximum {MAX_QUERY_ACCESS_DURATION_MINUTES} minutes (3 days).</p>
+                <p className="text-[12px] text-muted">The maximum query access duration is 3 years.</p>
               </label>
 
-              {queryAccessScopeMode === 'database' ? (
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[12px] font-semibold text-ink">
-                    Target Databases <span className="text-danger">*</span>
-                  </span>
-                  <div className="rounded-xl border border-border bg-panel-soft p-3">
-                    {loadingDatabases ? (
-                      <p className="text-[12px] text-muted">Loading databases...</p>
-                    ) : dbConnectionId === '' ? (
-                      <p className="text-[12px] text-muted">Select instance first.</p>
-                    ) : databases.length === 0 ? (
-                      <p className="text-[12px] text-muted">No databases available.</p>
-                    ) : (
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {databases.map((name) => (
-                          <label key={name} className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink">
-                            <input
-                              type="checkbox"
-                              checked={queryAccessDatabaseSelections.includes(name)}
-                              onChange={() => toggleDatabaseSelection(name)}
-                              disabled={submitting}
-                            />
-                            <span>{name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[12px] font-semibold text-ink">Access Rules</p>
+                    <p className="text-[12px] text-muted">Use Allow rules to grant access. Use Deny rules to exclude databases or tables from a broader Allow rule.</p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setQueryAccessRules((current) => [...current, createQueryAccessRuleDraft()])}
+                    disabled={submitting}
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add Rule
+                  </button>
                 </div>
-              ) : (
-                <>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[12px] font-semibold text-ink">
-                      Target Database <span className="text-danger">*</span>
-                    </span>
-                    <DropdownSelect
-                      ariaLabel="Query Access Target Database"
-                      value={queryAccessTableDatabase}
-                      onChange={(value) => {
-                        setQueryAccessTableDatabase(value)
-                        setQueryAccessTableSelections([])
-                        setQueryAccessTablePrefillApplied(false)
-                      }}
-                      disabled={submitting || loadingDatabases || dbConnectionId === ''}
-                      placeholder={dbConnectionId === '' ? 'Select instance first' : 'Select database'}
-                      options={[
-                        { value: '', label: 'Not Selected' },
-                        ...databases.map((name) => ({ value: name, label: name })),
-                      ]}
-                    />
-                  </label>
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-[12px] font-semibold text-ink">
-                      Target Tables <span className="text-danger">*</span>
-                    </span>
-                    <div className="rounded-xl border border-border bg-panel-soft p-3">
-                      {loadingQueryAccessTables ? (
-                        <p className="text-[12px] text-muted">Loading tables...</p>
-                      ) : queryAccessTableDatabase.trim() === '' ? (
-                        <p className="text-[12px] text-muted">Select database first.</p>
-                      ) : queryAccessTables.length === 0 ? (
-                        <p className="text-[12px] text-muted">No tables available.</p>
-                      ) : (
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          {queryAccessTables.map((item) => (
-                            <label key={item.key} className="flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink">
-                              <input
-                                type="checkbox"
-                                checked={queryAccessTableSelections.includes(item.key)}
-                                onChange={() => toggleTableSelection(item.key)}
-                                disabled={submitting}
-                              />
-                              <span>{item.label}</span>
-                            </label>
-                          ))}
+
+                <div className="space-y-3">
+                  {queryAccessRules.map((rule, index) => {
+                    const ruleDatabases = queryAccessDatabasesByConnection[rule.connectionId] ?? []
+                    const ruleTables = queryAccessTablesByRule[rule.id] ?? []
+                    const selectedRuleConnection = connections.find((connection) => String(connection.id) === rule.connectionId)
+                    const tableOptions = rule.databasePattern === '*' ? [] : ruleTables
+                    return (
+                      <div key={rule.id} className="rounded-xl border border-border bg-panel-soft p-3">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <p className="text-[12px] font-semibold text-ink">Rule {index + 1}</p>
+                          <button
+                            type="button"
+                            onClick={() => setQueryAccessRules((current) => current.length === 1 ? current : current.filter((item) => item.id !== rule.id))}
+                            disabled={submitting || queryAccessRules.length === 1}
+                            className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-border bg-white px-2 text-[12px] font-semibold text-muted transition hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Remove
+                          </button>
                         </div>
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
+                        <div className="grid gap-3 lg:grid-cols-[120px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+                          <label className="flex flex-col gap-1.5">
+                            <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">Effect</span>
+                            <DropdownSelect
+                              ariaLabel={`Query Access Rule ${index + 1} Effect`}
+                              value={rule.effect}
+                              onChange={(value) => updateQueryAccessRule(rule.id, { effect: value as QueryAccessEffect })}
+                              disabled={submitting}
+                              options={[
+                                { value: 'allow', label: 'Allow' },
+                                { value: 'deny', label: 'Deny' },
+                              ]}
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1.5">
+                            <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">Instance</span>
+                            <DropdownSelect
+                              ariaLabel={`Query Access Rule ${index + 1} Instance`}
+                              value={rule.connectionId}
+                              onChange={(value) => updateQueryAccessRule(rule.id, { connectionId: value })}
+                              disabled={submitting || loadingConnections}
+                              options={[
+                                { value: '', label: 'Not Selected' },
+                                ...filteredConnections.map((connection) => ({
+                                  value: String(connection.id),
+                                  label: formatConnectionOptionLabel(connection),
+                                })),
+                              ]}
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1.5">
+                            <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">Database</span>
+                            <DropdownSelect
+                              ariaLabel={`Query Access Rule ${index + 1} Database`}
+                              value={rule.databasePattern}
+                              onChange={(value) => updateQueryAccessRule(rule.id, { databasePattern: value })}
+                              disabled={submitting || rule.connectionId === '' || loadingQueryAccessConnections[rule.connectionId]}
+                              placeholder={rule.connectionId === '' ? 'Select instance first' : 'Select database'}
+                              options={[
+                                { value: '*', label: 'All Databases' },
+                                ...ruleDatabases.map((name) => ({ value: name, label: name })),
+                              ]}
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1.5">
+                            <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">Table</span>
+                            <DropdownSelect
+                              ariaLabel={`Query Access Rule ${index + 1} Table`}
+                              value={rule.tablePattern}
+                              onChange={(value) => updateQueryAccessRule(rule.id, { tablePattern: value })}
+                              disabled={submitting || rule.connectionId === '' || rule.databasePattern === '*' || loadingQueryAccessRuleTables[rule.id]}
+                              placeholder={rule.databasePattern === '*' ? 'All tables' : 'Select table'}
+                              options={[
+                                { value: '*', label: 'All Tables' },
+                                ...tableOptions.map((item) => ({ value: item.tableName, label: item.label })),
+                              ]}
+                            />
+                          </label>
+                        </div>
+                        {selectedRuleConnection ? (
+                          <p className="mt-2 text-[11px] text-muted">
+                            {rule.effect === 'deny' ? 'Exclude' : 'Grant'} {selectedRuleConnection.name} / {rule.databasePattern === '*' ? 'all databases' : rule.databasePattern} / {rule.tablePattern === '*' ? 'all tables' : rule.tablePattern}
+                          </p>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           ) : (
             <>

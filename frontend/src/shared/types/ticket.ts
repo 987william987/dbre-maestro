@@ -19,6 +19,7 @@ export type TicketType = 'ddl' | 'dml'
   | 'query_access'
 
 export type QueryAccessScopeMode = 'database' | 'table'
+export type QueryAccessEffect = 'allow' | 'deny'
 
 export type QueryAccessTicketItem = {
   id: number
@@ -27,6 +28,9 @@ export type QueryAccessTicketItem = {
   scope_mode: QueryAccessScopeMode
   database_name: string
   table_name?: string | null
+  effect?: QueryAccessEffect
+  database_pattern?: string
+  table_pattern?: string
   created_at: string
 }
 

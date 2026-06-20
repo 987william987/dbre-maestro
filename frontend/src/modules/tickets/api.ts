@@ -2,6 +2,7 @@ import { apiClient } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type {
   QueryAccessScopeMode,
+  QueryAccessEffect,
   QueryAccessTicketItem,
   Ticket,
   TicketDetail,
@@ -39,6 +40,12 @@ type CreateTicketPayload = {
   items?: Array<{
     database_name: string
     table_name?: string | null
+  }>
+  rules?: Array<{
+    effect: QueryAccessEffect
+    connection_id: number
+    database_pattern: string
+    table_pattern: string
   }>
 }
 

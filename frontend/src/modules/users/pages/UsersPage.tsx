@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { Database, Info, Loader2, Shield, UserPlus, Users as UsersIcon, X } from 'lucide-react'
+import { Database, Info, KeyRound, Loader2, Plus, Shield, UserPlus, Users as UsersIcon, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { createAuthGroup, deleteAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
 import { getDBConnectionBindings } from '@/modules/db-connections/api'
-import { createUser, deleteUser, getUser, listUserDBConnections, listUsers, patchUser } from '@/modules/users/api'
+import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccessRules, listUserDBConnections, listUsers, patchUser, revokeQueryAccessRule } from '@/modules/users/api'
+import type { QueryAccessRule } from '@/modules/users/api'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import type { AuthGroup } from '@/shared/types/auth'
 import type { AuthGroupDetail } from '@/shared/types/authGroup'
 import type { DBConnection, DBConnectionBindings } from '@/shared/types/dbConnection'
 import type { UserDetail, UserSummary } from '@/shared/types/user'
+import type { QueryAccessEffect } from '@/shared/types/ticket'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
@@ -57,7 +59,7 @@ const PAGE_SIZE = 20
 
 const PERMISSION_INDEX = new Map(PERMISSION_METADATA.map((item) => [item.key, item] as const))
 
-type ViewMode = 'users' | 'auth-groups' | 'resources'
+type ViewMode = 'users' | 'auth-groups' | 'resources' | 'query-access'
 
 type DrawerState =
   | { mode: 'create-user' }
@@ -118,6 +120,34 @@ const EMPTY_AUTH_GROUP_DRAFT: AuthGroupDraft = {
   pendingDelete: false,
 }
 
+const QUERY_ACCESS_DURATION_OPTIONS = [
+  { value: String(24 * 60), label: '1 day' },
+  { value: String(7 * 24 * 60), label: '1 week' },
+  { value: String(30 * 24 * 60), label: '1 month' },
+  { value: String(365 * 24 * 60), label: '1 year' },
+  { value: String(3 * 365 * 24 * 60), label: '3 years' },
+]
+
+type QueryAccessRuleDraft = {
+  subjectType: 'user' | 'auth_group'
+  subjectID: string
+  effect: QueryAccessEffect
+  connectionID: string
+  databasePattern: string
+  tablePattern: string
+  durationMinutes: string
+}
+
+const EMPTY_QUERY_ACCESS_RULE_DRAFT: QueryAccessRuleDraft = {
+  subjectType: 'user',
+  subjectID: '',
+  effect: 'allow',
+  connectionID: '',
+  databasePattern: '*',
+  tablePattern: '*',
+  durationMinutes: String(24 * 60),
+}
+
 export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode }) {
   const { pushToast } = useToast()
   const navigate = useNavigate()
@@ -129,6 +159,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   const [authGroups, setAuthGroups] = useState<AuthGroupDetail[]>([])
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [connectionBindings, setConnectionBindings] = useState<Record<number, DBConnectionBindings>>({})
+  const [queryAccessRules, setQueryAccessRules] = useState<QueryAccessRule[]>([])
+  const [queryAccessOffset, setQueryAccessOffset] = useState(0)
+  const [queryAccessRuleDraft, setQueryAccessRuleDraft] = useState<QueryAccessRuleDraft>(EMPTY_QUERY_ACCESS_RULE_DRAFT)
+  const [savingQueryAccessRule, setSavingQueryAccessRule] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [drawerState, setDrawerState] = useState<DrawerState>(null)
@@ -164,6 +198,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         listUserDBConnections(),
         loadAuthGroupDetails(),
       ])
+      const queryAccessRulesResponse = await listQueryAccessRules()
       const bindingsEntries = await Promise.all(
         connectionsResponse.connections.map(async (connection) => {
           const bindings = await getDBConnectionBindings(connection.id)
@@ -173,6 +208,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       setUsers(usersResponse.users)
       setConnections(connectionsResponse.connections)
       setAuthGroups(authGroupDetails)
+      setQueryAccessRules(queryAccessRulesResponse.rules)
       setConnectionBindings(Object.fromEntries(bindingsEntries))
     } catch (loadError) {
       setError(loadError instanceof ApiError ? loadError.message : 'Failed to load the RBAC workspace.')
@@ -188,9 +224,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   }
 
   async function reloadAll() {
-    const [usersResponse, authGroupDetails] = await Promise.all([listUsers(), loadAuthGroupDetails()])
+    const [usersResponse, authGroupDetails, queryAccessRulesResponse] = await Promise.all([listUsers(), loadAuthGroupDetails(), listQueryAccessRules()])
     setUsers(usersResponse.users)
     setAuthGroups(authGroupDetails)
+    setQueryAccessRules(queryAccessRulesResponse.rules)
   }
 
   const authGroupLabelMap = useMemo(() => {
@@ -534,6 +571,53 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     }
   }
 
+  async function handleCreateQueryAccessRule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (
+      queryAccessRuleDraft.subjectID === '' ||
+      queryAccessRuleDraft.connectionID === '' ||
+      queryAccessRuleDraft.databasePattern.trim() === '' ||
+      queryAccessRuleDraft.tablePattern.trim() === ''
+    ) {
+      setError('Subject, DB connection, database pattern, and table pattern are required.')
+      return
+    }
+    setSavingQueryAccessRule(true)
+    setError('')
+    try {
+      await createQueryAccessRule({
+        subject_type: queryAccessRuleDraft.subjectType,
+        subject_id: Number(queryAccessRuleDraft.subjectID),
+        effect: queryAccessRuleDraft.effect,
+        connection_id: Number(queryAccessRuleDraft.connectionID),
+        database_pattern: queryAccessRuleDraft.databasePattern.trim(),
+        table_pattern: queryAccessRuleDraft.tablePattern.trim(),
+        duration_minutes: Number(queryAccessRuleDraft.durationMinutes),
+      })
+      await reloadAll()
+      setQueryAccessRuleDraft(EMPTY_QUERY_ACCESS_RULE_DRAFT)
+      pushToast('Query access rule created', 'success')
+    } catch (createError) {
+      setError(createError instanceof ApiError ? createError.message : 'Failed to create query access rule.')
+    } finally {
+      setSavingQueryAccessRule(false)
+    }
+  }
+
+  async function handleRevokeQueryAccessRule(ruleID: number) {
+    setSavingQueryAccessRule(true)
+    setError('')
+    try {
+      await revokeQueryAccessRule(ruleID)
+      await reloadAll()
+      pushToast('Query access rule revoked', 'success')
+    } catch (revokeError) {
+      setError(revokeError instanceof ApiError ? revokeError.message : 'Failed to revoke query access rule.')
+    } finally {
+      setSavingQueryAccessRule(false)
+    }
+  }
+
   const drawerTitle =
     drawerState?.mode === 'create-user'
       ? 'Create User'
@@ -551,6 +635,38 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     () => connections.slice(resourcesOffset, resourcesOffset + PAGE_SIZE),
     [connections, resourcesOffset],
   )
+  const pagedQueryAccessRules = useMemo(
+    () => queryAccessRules.slice(queryAccessOffset, queryAccessOffset + PAGE_SIZE),
+    [queryAccessOffset, queryAccessRules],
+  )
+  const currentPageCount = viewMode === 'users'
+    ? pagedUsers.length
+    : viewMode === 'auth-groups'
+      ? pagedAuthGroups.length
+      : viewMode === 'resources'
+        ? pagedResources.length
+        : pagedQueryAccessRules.length
+  const currentTotal = viewMode === 'users'
+    ? users.length
+    : viewMode === 'auth-groups'
+      ? authGroups.length
+      : viewMode === 'resources'
+        ? connections.length
+        : queryAccessRules.length
+  const currentOffset = viewMode === 'users'
+    ? usersOffset
+    : viewMode === 'auth-groups'
+      ? authGroupsOffset
+      : viewMode === 'resources'
+        ? resourcesOffset
+        : queryAccessOffset
+  const currentOffsetSetter = viewMode === 'users'
+    ? setUsersOffset
+    : viewMode === 'auth-groups'
+      ? setAuthGroupsOffset
+      : viewMode === 'resources'
+        ? setResourcesOffset
+        : setQueryAccessOffset
 
   useEffect(() => {
     if (usersOffset > 0 && usersOffset >= users.length) {
@@ -569,6 +685,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       setResourcesOffset(Math.max(0, Math.floor((Math.max(connections.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
     }
   }, [connections.length, resourcesOffset])
+
+  useEffect(() => {
+    if (queryAccessOffset > 0 && queryAccessOffset >= queryAccessRules.length) {
+      setQueryAccessOffset(Math.max(0, Math.floor((Math.max(queryAccessRules.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
+    }
+  }, [queryAccessOffset, queryAccessRules.length])
 
   return (
     <>
@@ -625,6 +747,15 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
             onClick: () => {
               setViewMode('resources')
               navigate('/users/resources')
+            },
+          },
+          {
+            key: 'query-access',
+            label: 'Query Access',
+            active: viewMode === 'query-access',
+            onClick: () => {
+              setViewMode('query-access')
+              navigate('/users/query-access')
             },
           },
         ]}
@@ -749,7 +880,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                 </table>
               </div>
             </section>
-          ) : (
+          ) : viewMode === 'resources' ? (
             <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
               <div className="overflow-x-auto">
                 <table className="min-w-full border-collapse">
@@ -790,14 +921,174 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                 </table>
               </div>
             </section>
+          ) : (
+            <section className="grid gap-3">
+              <form className="rounded-xl border border-border bg-panel p-4 shadow-soft" onSubmit={handleCreateQueryAccessRule}>
+                <div className="mb-4 flex items-center gap-2">
+                  <KeyRound className="h-4 w-4 text-accent" />
+                  <div>
+                    <p className="text-[13px] font-semibold text-ink">Manual Query Access Rule</p>
+                    <p className="text-[12px] text-muted">Create fallback rules for a user or auth group. Use * for all databases or all tables.</p>
+                  </div>
+                </div>
+                <div className="grid gap-3 lg:grid-cols-[150px_minmax(0,1fr)_120px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_140px_auto]">
+                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Subject Type
+                    <DropdownSelect
+                      ariaLabel="Query Access Subject Type"
+                      value={queryAccessRuleDraft.subjectType}
+                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, subjectType: value as 'user' | 'auth_group', subjectID: '' }))}
+                      disabled={savingQueryAccessRule}
+                      options={[
+                        { value: 'user', label: 'User' },
+                        { value: 'auth_group', label: 'Auth Group' },
+                      ]}
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Subject
+                    <DropdownSelect
+                      ariaLabel="Query Access Subject"
+                      value={queryAccessRuleDraft.subjectID}
+                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, subjectID: value }))}
+                      disabled={savingQueryAccessRule}
+                      options={[
+                        { value: '', label: 'Not Selected' },
+                        ...(queryAccessRuleDraft.subjectType === 'user'
+                          ? users.map((user) => ({ value: String(user.id), label: user.username }))
+                          : authGroups.map((group) => ({ value: String(group.id ?? ''), label: group.label })).filter((item) => item.value !== '')),
+                      ]}
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Effect
+                    <DropdownSelect
+                      ariaLabel="Query Access Effect"
+                      value={queryAccessRuleDraft.effect}
+                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, effect: value as QueryAccessEffect }))}
+                      disabled={savingQueryAccessRule}
+                      options={[
+                        { value: 'allow', label: 'Allow' },
+                        { value: 'deny', label: 'Deny' },
+                      ]}
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    DB Connection
+                    <DropdownSelect
+                      ariaLabel="Query Access DB Connection"
+                      value={queryAccessRuleDraft.connectionID}
+                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, connectionID: value }))}
+                      disabled={savingQueryAccessRule}
+                      options={[
+                        { value: '', label: 'Not Selected' },
+                        ...connections.map((connection) => ({ value: String(connection.id), label: getConnectionLabel(connection.id, connections) })),
+                      ]}
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Database
+                    <input
+                      value={queryAccessRuleDraft.databasePattern}
+                      onChange={(event) => setQueryAccessRuleDraft((current) => ({ ...current, databasePattern: event.target.value }))}
+                      className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] font-medium normal-case tracking-normal text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                      placeholder="*"
+                      disabled={savingQueryAccessRule}
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Table
+                    <input
+                      value={queryAccessRuleDraft.tablePattern}
+                      onChange={(event) => setQueryAccessRuleDraft((current) => ({ ...current, tablePattern: event.target.value }))}
+                      className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] font-medium normal-case tracking-normal text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                      placeholder="*"
+                      disabled={savingQueryAccessRule}
+                    />
+                  </label>
+                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Duration
+                    <DropdownSelect
+                      ariaLabel="Query Access Duration"
+                      value={queryAccessRuleDraft.durationMinutes}
+                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, durationMinutes: value }))}
+                      disabled={savingQueryAccessRule}
+                      options={QUERY_ACCESS_DURATION_OPTIONS}
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={savingQueryAccessRule}
+                    className="inline-flex h-10 items-center justify-center gap-2 self-end rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add
+                  </button>
+                </div>
+              </form>
+
+              <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-collapse">
+                    <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+                      <tr>
+                        <th className="whitespace-nowrap px-3 py-3">Subject</th>
+                        <th className="whitespace-nowrap px-3 py-3">Effect</th>
+                        <th className="whitespace-nowrap px-3 py-3">DB Scope</th>
+                        <th className="whitespace-nowrap px-3 py-3">Source</th>
+                        <th className="whitespace-nowrap px-3 py-3">Expires</th>
+                        <th className="whitespace-nowrap px-3 py-3">Status</th>
+                        <th className="whitespace-nowrap px-3 py-3">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedQueryAccessRules.map((rule) => {
+                        const active = !rule.revoked_at && (!rule.expires_at || new Date(rule.expires_at).getTime() > Date.now())
+                        return (
+                          <tr key={rule.id} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
+                            <td className="px-3 py-3">
+                              <div className="grid gap-1">
+                                <p className="font-semibold">{formatQueryAccessSubject(rule, users, authGroups)}</p>
+                                <p className="text-[11px] text-muted">{rule.subject_type}</p>
+                              </div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <Tag label={rule.effect} tone={rule.effect === 'deny' ? 'danger' : 'success'} />
+                            </td>
+                            <td className="px-3 py-3 text-muted">
+                              {getConnectionLabel(rule.connection_id, connections)} / {rule.database_pattern === '*' ? 'All databases' : rule.database_pattern} / {rule.table_pattern === '*' ? 'All tables' : rule.table_pattern}
+                            </td>
+                            <td className="px-3 py-3 text-muted">{rule.granted_via}{rule.source_ticket_id ? ` #${rule.source_ticket_id}` : ''}</td>
+                            <td className="px-3 py-3 text-muted">{rule.expires_at ? formatDateTime(rule.expires_at) : 'Never'}</td>
+                            <td className="px-3 py-3">
+                              <Tag label={active ? 'active' : rule.revoked_at ? 'revoked' : 'expired'} tone={active ? 'success' : 'default'} />
+                            </td>
+                            <td className="px-3 py-3">
+                              <button
+                                type="button"
+                                onClick={() => void handleRevokeQueryAccessRule(rule.id)}
+                                disabled={!active || savingQueryAccessRule}
+                                className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Revoke
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </section>
           )}
 
       <Pagination
-        offset={viewMode === 'users' ? usersOffset : viewMode === 'auth-groups' ? authGroupsOffset : resourcesOffset}
+        offset={currentOffset}
         pageSize={PAGE_SIZE}
-        count={viewMode === 'users' ? pagedUsers.length : viewMode === 'auth-groups' ? pagedAuthGroups.length : pagedResources.length}
-        total={viewMode === 'users' ? users.length : viewMode === 'auth-groups' ? authGroups.length : connections.length}
-        onChange={viewMode === 'users' ? setUsersOffset : viewMode === 'auth-groups' ? setAuthGroupsOffset : setResourcesOffset}
+        count={currentPageCount}
+        total={currentTotal}
+        onChange={currentOffsetSetter}
       />
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
@@ -1429,6 +1720,14 @@ function formatDBType(dbType: string) {
     default:
       return 'MySQL'
   }
+}
+
+function formatQueryAccessSubject(rule: QueryAccessRule, users: UserSummary[], authGroups: AuthGroupDetail[]) {
+  if (rule.subject_type === 'user') {
+    return users.find((user) => user.id === rule.subject_id)?.username ?? `User #${rule.subject_id}`
+  }
+  const group = authGroups.find((item) => item.id === rule.subject_id)
+  return group?.label ?? group?.name ?? `Auth Group #${rule.subject_id}`
 }
 
 function BindingTags({ items, emptyLabel }: { items: string[]; emptyLabel: string }) {

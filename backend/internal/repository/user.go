@@ -137,6 +137,25 @@ func (r *UserRepo) GetAuthGroupRecords(ctx context.Context, userID uint64) ([]Au
 	return groups, err
 }
 
+func (r *UserRepo) GetEffectiveAuthGroupIDs(ctx context.Context, userID uint64) ([]uint64, error) {
+	var ids []uint64
+	err := r.db.SelectContext(ctx, &ids, `
+		SELECT DISTINCT id FROM (
+			SELECT ag.id
+			FROM auth_groups ag
+			INNER JOIN user_auth_groups uag ON uag.auth_group_id = ag.id
+			WHERE uag.user_id = ? AND (uag.expires_at IS NULL OR uag.expires_at > ?)
+			UNION
+			SELECT ag.id
+			FROM auth_groups ag
+			INNER JOIN auth_group_memberships agm ON agm.auth_group = ag.group_key
+			WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+		) AS effective_auth_groups
+		ORDER BY id
+	`, userID, timeutil.NowUTC(), userID, timeutil.NowUTC())
+	return ids, err
+}
+
 func (r *UserRepo) GetEffectivePermissionKeys(ctx context.Context, userID uint64) ([]string, error) {
 	hasAllPermissions, err := r.HasAllPermissions(ctx, userID)
 	if err != nil {

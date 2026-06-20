@@ -99,6 +99,39 @@ func TestMatchesAnyGrantSupportsDatabaseAndTableScopes(t *testing.T) {
 	}
 }
 
+func TestIsAllowedByRulesSupportsWildcardAllowAndDenyOverride(t *testing.T) {
+	ref := ObjectRef{ConnectionID: 1, DatabaseName: "analytics", TableName: "users"}
+	rules := []model.QueryAccessRule{
+		{
+			SubjectType:     model.QueryAccessSubjectTypeAuthGroup,
+			SubjectID:       10,
+			Effect:          model.QueryAccessEffectAllow,
+			ConnectionID:    1,
+			DatabasePattern: "*",
+			TablePattern:    "*",
+		},
+		{
+			SubjectType:     model.QueryAccessSubjectTypeUser,
+			SubjectID:       7,
+			Effect:          model.QueryAccessEffectDeny,
+			ConnectionID:    1,
+			DatabasePattern: "analytics",
+			TablePattern:    "users",
+		},
+	}
+
+	if isAllowedByRules(ref, rules) {
+		t.Fatalf("expected exact deny rule to override broad auth-group allow")
+	}
+}
+
+func TestIsAllowedByRulesRequiresAllowRule(t *testing.T) {
+	ref := ObjectRef{ConnectionID: 1, DatabaseName: "analytics", TableName: "users"}
+	if isAllowedByRules(ref, nil) {
+		t.Fatalf("expected missing rules to deny query access")
+	}
+}
+
 func TestCheckSQLAllowsProtectedAdminWithoutQueryAccessGrant(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

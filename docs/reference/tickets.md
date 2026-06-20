@@ -193,8 +193,20 @@ pending_review
 
 說明：
 
-- `approved`：對應 grant 生效
-- `stopped`：已生效 grant 被 reviewer / admin / dba 提前回收，或權限被手動停止
+- `approved`：對應 Query Access rules 生效
+- `stopped`：已生效 rules 被 reviewer / admin / dba 提前回收，或權限被手動停止
+
+Query Access 使用 rule-based 授權：
+
+| 欄位 | 語義 |
+|---|---|
+| `subject_type` | `user` 或 `auth_group` |
+| `effect` | `allow` 或 `deny` |
+| `connection_id` | 目標 DB connection |
+| `database_pattern` | `*` 或指定 database |
+| `table_pattern` | `*` 或指定 table |
+
+查詢校驗時會彙總使用者 direct rules 與其有效 auth group rules。`deny` 永遠優先於 `allow`，因此可用 `allow a1.*.*` 搭配 `deny a1.secret_db.*` 表達測試環境的反向授權。
 
 ### SQL Export
 

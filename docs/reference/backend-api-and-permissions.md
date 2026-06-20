@@ -165,6 +165,9 @@
 |---|---|
 | `GET /api/users` | `requireUsersRead` |
 | `GET /api/users/db-connections` | `requireUsersRead` |
+| `GET /api/users/query-access-rules` | `requireUsersRead` |
+| `POST /api/users/query-access-rules` | `requireUsersWrite` |
+| `POST /api/users/query-access-rules/{id}/revoke` | `requireUsersWrite` |
 | `POST /api/users` | `requireUsersWrite` |
 | `GET /api/users/{id}` | `requireUsersRead` |
 | `PATCH /api/users/{id}` | `requireUsersWrite` |

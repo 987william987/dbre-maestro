@@ -285,57 +285,72 @@ status: active
 
 ## Query Access 資料模型
 
-### 1. query_access_grants
+### 1. query_access_rules
 
 ```sql
-CREATE TABLE query_access_grants (
+CREATE TABLE query_access_rules (
   id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   subject_type     VARCHAR(16)     NOT NULL,
   subject_id       BIGINT UNSIGNED NOT NULL,
+  effect           VARCHAR(16)     NOT NULL DEFAULT 'allow',
   connection_id    BIGINT UNSIGNED NOT NULL,
-  database_name    VARCHAR(255)    NULL,
-  table_name       VARCHAR(255)    NULL,
+  database_pattern VARCHAR(255)    NOT NULL DEFAULT '*',
+  table_pattern    VARCHAR(255)    NOT NULL DEFAULT '*',
   granted_via      VARCHAR(32)     NOT NULL DEFAULT 'ticket',
   source_ticket_id BIGINT UNSIGNED NULL,
   expires_at       DATETIME(6)     NULL,
   revoked_at       DATETIME(6)     NULL,
   revoked_by       BIGINT UNSIGNED NULL,
   created_by       BIGINT UNSIGNED NULL,
+  updated_by       BIGINT UNSIGNED NULL,
   created_at       DATETIME(6)     NOT NULL,
   updated_at       DATETIME(6)     NOT NULL,
   PRIMARY KEY (id),
-  KEY idx_qag_subject (subject_type, subject_id),
-  KEY idx_qag_connection (connection_id),
-  KEY idx_qag_ticket (source_ticket_id),
-  KEY idx_qag_expiry (expires_at),
-  KEY idx_qag_active (revoked_at)
+  KEY idx_qar_subject (subject_type, subject_id),
+  KEY idx_qar_connection (connection_id),
+  KEY idx_qar_ticket (source_ticket_id),
+  KEY idx_qar_expiry (expires_at),
+  KEY idx_qar_active (revoked_at)
 );
 ```
 
 ### 欄位語義
 
 - `subject_type`
-  - 第一版先支援 `user`
-  - `auth_group` 可保留給第二階段
+  - `user`
+  - `auth_group`
+- `effect`
+  - `allow`：授權命中範圍可查
+  - `deny`：排除命中範圍，且優先於 allow
 - `connection_id`
   - 必填
-- `database_name`
-  - nullable
-- `table_name`
-  - nullable
+- `database_pattern`
+  - `*` 表示所有 database
+  - 其他值表示指定 database
+- `table_pattern`
+  - `*` 表示所有 table
+  - 其他值表示指定 table
 
 ### 粒度語義
 
-- 只有 `connection_id`
+- `connection_id + database_pattern='*' + table_pattern='*'`
   - 代表整個 instance 可查
-- `connection_id + database_name`
+- `connection_id + database_pattern='A' + table_pattern='*'`
   - 代表整個 database 可查
-- `connection_id + database_name + table_name`
+- `connection_id + database_pattern='A' + table_pattern='aaa'`
   - 代表指定 table 可查
 
-### 第一版建議
+### Rule-based 授權
 
-第一版不開放 instance-level grant 由一般用戶申請；產品層面以 database / table 為主。
+一般使用者透過 Query Access Ticket 申請自己的 user rules。後台 fallback 可由 admin / DBA 對 user 或 auth group 建立 / 修改 / revoke rules。
+
+反向授權以 `deny` 表達，例如測試環境開放全部但排除少數敏感庫：
+
+```text
+allow a1 * *
+deny  a1 secret_db *
+deny  a1 test_db user_token
+```
 
 ---
 
@@ -529,21 +544,23 @@ DDL / DML / Redis Ticket 的風險控制仍然由現有流程承擔：
 
 ### 1. 基本規則
 
-查詢涉及的所有資料來源都必須命中有效 grant：
+查詢涉及的所有資料來源都必須命中有效 rule：
 
-- grant 未過期
-- grant 未 revoke
-- subject 為目前 user
+- rule 未過期
+- rule 未 revoke
+- subject 為目前 user，或使用者有效 auth group
 
-### 2. grant 匹配優先級
+### 2. rule 匹配優先級
 
 後端匹配規則：
 
-1. table-level grant
-2. database-level grant
-3. instance-level grant（若未來啟用）
+1. admin user / all-permissions auth group 直接 bypass
+2. 彙總 user direct rules 與 auth group rules
+3. 任一 `deny` 命中目標 object，拒絕
+4. 任一 `allow` 命中目標 object，允許
+5. 沒有命中 allow，拒絕
 
-只要任一層命中，即視為已授權。
+`deny` 跨 subject 生效，因此 user direct deny 可以排除 auth group broad allow，auth group deny 也不能被 user direct allow 覆蓋。
 
 ### 3. 多表查詢
 

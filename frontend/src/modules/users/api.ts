@@ -1,6 +1,7 @@
 import { apiClient } from '@/shared/api/client'
 import type { AuthGroup } from '@/shared/types/auth'
 import type { DBConnection } from '@/shared/types/dbConnection'
+import type { QueryAccessEffect } from '@/shared/types/ticket'
 import type { UserDetail, UserSummary } from '@/shared/types/user'
 
 type ListUsersResponse = {
@@ -46,6 +47,39 @@ type DirectDBConnectionPayload = {
 
 type UserDBConnectionsResponse = {
   connections: DBConnection[]
+}
+
+export type QueryAccessRule = {
+  id: number
+  subject_type: 'user' | 'auth_group'
+  subject_id: number
+  effect: QueryAccessEffect
+  connection_id: number
+  database_pattern: string
+  table_pattern: string
+  granted_via: string
+  source_ticket_id?: number | null
+  expires_at?: string | null
+  revoked_at?: string | null
+  revoked_by?: number | null
+  created_by?: number | null
+  updated_by?: number | null
+  created_at: string
+  updated_at: string
+}
+
+type QueryAccessRulesResponse = {
+  rules: QueryAccessRule[]
+}
+
+type CreateQueryAccessRulePayload = {
+  subject_type: 'user' | 'auth_group'
+  subject_id: number
+  effect: QueryAccessEffect
+  connection_id: number
+  database_pattern: string
+  table_pattern: string
+  duration_minutes: number
 }
 
 export function listUsers() {
@@ -116,4 +150,19 @@ export function listUserDBConnections() {
     ...response,
     connections: Array.isArray(response.connections) ? response.connections : [],
   }))
+}
+
+export function listQueryAccessRules() {
+  return apiClient.get<QueryAccessRulesResponse>('/users/query-access-rules').then((response) => ({
+    ...response,
+    rules: Array.isArray(response.rules) ? response.rules : [],
+  }))
+}
+
+export function createQueryAccessRule(payload: CreateQueryAccessRulePayload) {
+  return apiClient.post<QueryAccessRule>('/users/query-access-rules', payload)
+}
+
+export function revokeQueryAccessRule(id: number) {
+  return apiClient.post<{ ok: boolean }>(`/users/query-access-rules/${id}/revoke`)
 }

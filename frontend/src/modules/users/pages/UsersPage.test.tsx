@@ -11,6 +11,9 @@ vi.mock('@/modules/users/api', () => ({
   patchUser: vi.fn(),
   deleteUser: vi.fn(),
   listUserDBConnections: vi.fn(),
+  listQueryAccessRules: vi.fn(),
+  createQueryAccessRule: vi.fn(),
+  revokeQueryAccessRule: vi.fn(),
 }))
 
 vi.mock('@/modules/db-connections/api', () => ({
@@ -27,7 +30,7 @@ vi.mock('@/modules/auth-groups/api', () => ({
 
 import { createAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
 import { getDBConnectionBindings } from '@/modules/db-connections/api'
-import { createUser, deleteUser, getUser, listUserDBConnections, listUsers, patchUser } from '@/modules/users/api'
+import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccessRules, listUserDBConnections, listUsers, patchUser, revokeQueryAccessRule } from '@/modules/users/api'
 
 const mockedListUsers = vi.mocked(listUsers)
 const mockedGetUser = vi.mocked(getUser)
@@ -35,6 +38,9 @@ const mockedCreateUser = vi.mocked(createUser)
 const mockedPatchUser = vi.mocked(patchUser)
 const mockedDeleteUser = vi.mocked(deleteUser)
 const mockedListUserDBConnections = vi.mocked(listUserDBConnections)
+const mockedListQueryAccessRules = vi.mocked(listQueryAccessRules)
+const mockedCreateQueryAccessRule = vi.mocked(createQueryAccessRule)
+const mockedRevokeQueryAccessRule = vi.mocked(revokeQueryAccessRule)
 const mockedListAuthGroups = vi.mocked(listAuthGroups)
 const mockedGetAuthGroup = vi.mocked(getAuthGroup)
 const mockedCreateAuthGroup = vi.mocked(createAuthGroup)
@@ -85,6 +91,26 @@ describe('UsersPage', () => {
     vi.restoreAllMocks()
     mockedListUsers.mockResolvedValue({ users: [] })
     mockedListUserDBConnections.mockResolvedValue({ connections: [] })
+    mockedListQueryAccessRules.mockResolvedValue({ rules: [] })
+    mockedCreateQueryAccessRule.mockResolvedValue({
+      id: 1,
+      subject_type: 'user',
+      subject_id: 1,
+      effect: 'allow',
+      connection_id: 1,
+      database_pattern: '*',
+      table_pattern: '*',
+      granted_via: 'manual',
+      source_ticket_id: null,
+      expires_at: '2026-06-11T00:00:00Z',
+      revoked_at: null,
+      revoked_by: null,
+      created_by: 1,
+      updated_by: 1,
+      created_at: '2026-06-10T00:00:00Z',
+      updated_at: '2026-06-10T00:00:00Z',
+    })
+    mockedRevokeQueryAccessRule.mockResolvedValue({ ok: true })
     mockedGetDBConnectionBindings.mockResolvedValue({
       db_connection_id: 1,
       direct_users: [],

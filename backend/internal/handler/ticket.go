@@ -533,6 +533,12 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 			DatabaseName string  `json:"database_name"`
 			TableName    *string `json:"table_name"`
 		} `json:"items"`
+		Rules []struct {
+			Effect          model.QueryAccessEffect `json:"effect"`
+			ConnectionID    uint64                  `json:"connection_id"`
+			DatabasePattern string                  `json:"database_pattern"`
+			TablePattern    string                  `json:"table_pattern"`
+		} `json:"rules"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -600,31 +606,73 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.ApprovedDurationMinutes = &approvedDurationMinutes
 	}
 	if req.TicketType == model.TicketTypeQueryAccess {
-		if req.DBConnectionID == nil {
-			jsonErr(w, http.StatusUnprocessableEntity, "query_access requires db_connection_id")
-			return
-		}
-		if req.ScopeMode == nil || (*req.ScopeMode != model.QueryAccessScopeModeDatabase && *req.ScopeMode != model.QueryAccessScopeModeTable) {
-			jsonErr(w, http.StatusUnprocessableEntity, "query_access requires scope_mode=database or table")
-			return
-		}
 		if req.ApprovedDurationMinutes == nil || *req.ApprovedDurationMinutes <= 0 {
 			jsonErr(w, http.StatusUnprocessableEntity, "query_access requires approved_duration_minutes")
 			return
 		}
-		if len(req.Items) == 0 {
-			jsonErr(w, http.StatusUnprocessableEntity, "query_access requires items")
+		approvedDurationMinutes, err := normalizeQueryAccessDurationMinutes(*req.ApprovedDurationMinutes)
+		if err != nil {
+			jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-		for _, item := range req.Items {
-			if strings.TrimSpace(item.DatabaseName) == "" {
-				jsonErr(w, http.StatusUnprocessableEntity, "query_access item database_name is required")
+		req.ApprovedDurationMinutes = &approvedDurationMinutes
+
+		queryAccessConnectionIDs := make([]uint64, 0)
+		if len(req.Rules) > 0 {
+			for _, rule := range req.Rules {
+				if rule.ConnectionID == 0 {
+					jsonErr(w, http.StatusUnprocessableEntity, "query_access rule requires connection_id")
+					return
+				}
+				if strings.TrimSpace(rule.DatabasePattern) == "" || strings.TrimSpace(rule.TablePattern) == "" {
+					jsonErr(w, http.StatusUnprocessableEntity, "query_access rule requires database_pattern and table_pattern")
+					return
+				}
+				if rule.Effect != model.QueryAccessEffectAllow && rule.Effect != model.QueryAccessEffectDeny {
+					jsonErr(w, http.StatusUnprocessableEntity, "query_access rule effect must be allow or deny")
+					return
+				}
+				queryAccessConnectionIDs = append(queryAccessConnectionIDs, rule.ConnectionID)
+			}
+		} else {
+			if req.DBConnectionID == nil {
+				jsonErr(w, http.StatusUnprocessableEntity, "query_access requires db_connection_id")
 				return
 			}
-			if *req.ScopeMode == model.QueryAccessScopeModeTable && strings.TrimSpace(nullableStringValue(item.TableName)) == "" {
-				jsonErr(w, http.StatusUnprocessableEntity, "query_access table scope requires table_name")
+			if req.ScopeMode == nil || (*req.ScopeMode != model.QueryAccessScopeModeDatabase && *req.ScopeMode != model.QueryAccessScopeModeTable) {
+				jsonErr(w, http.StatusUnprocessableEntity, "query_access requires scope_mode=database or table")
 				return
 			}
+			if len(req.Items) == 0 {
+				jsonErr(w, http.StatusUnprocessableEntity, "query_access requires items")
+				return
+			}
+			for _, item := range req.Items {
+				if strings.TrimSpace(item.DatabaseName) == "" {
+					jsonErr(w, http.StatusUnprocessableEntity, "query_access item database_name is required")
+					return
+				}
+				if *req.ScopeMode == model.QueryAccessScopeModeTable && strings.TrimSpace(nullableStringValue(item.TableName)) == "" {
+					jsonErr(w, http.StatusUnprocessableEntity, "query_access table scope requires table_name")
+					return
+				}
+				queryAccessConnectionIDs = append(queryAccessConnectionIDs, *req.DBConnectionID)
+			}
+		}
+		for _, connectionID := range dedupeUint64(queryAccessConnectionIDs) {
+			hasAccess, err := userCanAccessConnection(r.Context(), h.users, userID, connectionID)
+			if err != nil {
+				jsonErr(w, http.StatusInternalServerError, "db scope check failed")
+				return
+			}
+			if !hasAccess {
+				jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
+				return
+			}
+		}
+		if req.DBConnectionID == nil && len(queryAccessConnectionIDs) > 0 {
+			firstConnectionID := queryAccessConnectionIDs[0]
+			req.DBConnectionID = &firstConnectionID
 		}
 		if strings.TrimSpace(req.Title) == "" {
 			req.Title = "Query Access Request"
@@ -658,15 +706,35 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.TicketType == model.TicketTypeQueryAccess && h.queryAccess != nil {
-		items := make([]model.QueryAccessTicketItem, 0, len(req.Items))
-		for _, item := range req.Items {
-			items = append(items, model.QueryAccessTicketItem{
-				TicketID:     created.ID,
-				ConnectionID: *req.DBConnectionID,
-				ScopeMode:    *req.ScopeMode,
-				DatabaseName: strings.TrimSpace(item.DatabaseName),
-				TableName:    optionalTrimmedString(nullableStringValue(item.TableName)),
-			})
+		items := make([]model.QueryAccessTicketItem, 0, len(req.Rules)+len(req.Items))
+		if len(req.Rules) > 0 {
+			for _, rule := range req.Rules {
+				items = append(items, model.QueryAccessTicketItem{
+					TicketID:        created.ID,
+					ConnectionID:    rule.ConnectionID,
+					Effect:          rule.Effect,
+					DatabasePattern: strings.TrimSpace(rule.DatabasePattern),
+					TablePattern:    strings.TrimSpace(rule.TablePattern),
+				})
+			}
+		} else {
+			for _, item := range req.Items {
+				tablePattern := "*"
+				tableName := optionalTrimmedString(nullableStringValue(item.TableName))
+				if tableName != nil {
+					tablePattern = *tableName
+				}
+				items = append(items, model.QueryAccessTicketItem{
+					TicketID:        created.ID,
+					ConnectionID:    *req.DBConnectionID,
+					ScopeMode:       *req.ScopeMode,
+					DatabaseName:    strings.TrimSpace(item.DatabaseName),
+					TableName:       tableName,
+					Effect:          model.QueryAccessEffectAllow,
+					DatabasePattern: strings.TrimSpace(item.DatabaseName),
+					TablePattern:    tablePattern,
+				})
+			}
 		}
 		if err := h.queryAccess.CreateTicketItems(r.Context(), created.ID, items); err != nil {
 			_ = h.tickets.Delete(r.Context(), created.ID)
@@ -1859,4 +1927,23 @@ func hasGroup(groups []model.AuthGroup, targets ...model.AuthGroup) bool {
 		}
 	}
 	return false
+}
+
+func dedupeUint64(values []uint64) []uint64 {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[uint64]struct{}, len(values))
+	result := make([]uint64, 0, len(values))
+	for _, value := range values {
+		if value == 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
