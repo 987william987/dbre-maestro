@@ -192,9 +192,15 @@ func (h *QueryHandler) ticketLink(ticketID uint64) string {
 }
 
 func (h *QueryHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body, ticketNo string) {
-	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorSensitiveRev})
+	reviewerIDs, usedPolicy, err := approvalPolicyReviewerIDs(ctx, h.settings, h.users, model.ApprovalWorkflowSensitiveQueryAccess)
 	if err != nil {
 		return
+	}
+	if !usedPolicy {
+		reviewerIDs, err = listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorSensitiveRev})
+		if err != nil {
+			return
+		}
 	}
 	for _, reviewerID := range reviewerIDs {
 		if reviewerID == submitterID {

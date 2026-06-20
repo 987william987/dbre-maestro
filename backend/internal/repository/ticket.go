@@ -20,12 +20,15 @@ type TicketRepo struct {
 }
 
 type TicketListFilter struct {
-	SubmitterID *uint64
-	Status      *model.TicketStatus
-	Type        *model.TicketType
-	Keyword     *string
-	From        *time.Time
-	To          *time.Time
+	SubmitterID           *uint64
+	VisibleToUserID       *uint64
+	VisibleToExecutorPool bool
+	ReviewWorkflowTypes   []model.ApprovalWorkflowType
+	Status                *model.TicketStatus
+	Type                  *model.TicketType
+	Keyword               *string
+	From                  *time.Time
+	To                    *time.Time
 }
 
 func NewTicketRepo(db *sqlx.DB) *TicketRepo {
@@ -131,6 +134,24 @@ func (r *TicketRepo) List(ctx context.Context, filter TicketListFilter, limit, o
 		where += ` AND t.submitter_id = ?`
 		args = append(args, *filter.SubmitterID)
 	}
+	if filter.VisibleToUserID != nil {
+		visibility := []string{`t.submitter_id = ?`}
+		visibilityArgs := []any{*filter.VisibleToUserID}
+		for _, workflowType := range filter.ReviewWorkflowTypes {
+			condition, conditionArgs := ticketWorkflowCondition(workflowType)
+			if condition == "" {
+				continue
+			}
+			visibility = append(visibility, condition)
+			visibilityArgs = append(visibilityArgs, conditionArgs...)
+		}
+		if filter.VisibleToExecutorPool {
+			visibility = append(visibility, `(t.ticket_type IN (?, ?, ?) AND t.status = ?)`)
+			visibilityArgs = append(visibilityArgs, model.TicketTypeDDL, model.TicketTypeDML, model.TicketTypeRedisCommand, model.TicketStatusPendingExecution)
+		}
+		where += ` AND (` + strings.Join(visibility, ` OR `) + `)`
+		args = append(args, visibilityArgs...)
+	}
 	if filter.Status != nil {
 		where += ` AND t.status = ?`
 		args = append(args, *filter.Status)
@@ -169,6 +190,27 @@ func (r *TicketRepo) List(ctx context.Context, filter TicketListFilter, limit, o
 		return nil, 0, err
 	}
 	return tickets, total, nil
+}
+
+func ticketWorkflowCondition(workflowType model.ApprovalWorkflowType) (string, []any) {
+	switch workflowType {
+	case model.ApprovalWorkflowDDL:
+		return `t.ticket_type = ?`, []any{model.TicketTypeDDL}
+	case model.ApprovalWorkflowDML:
+		return `t.ticket_type = ?`, []any{model.TicketTypeDML}
+	case model.ApprovalWorkflowRedisCommand:
+		return `t.ticket_type = ?`, []any{model.TicketTypeRedisCommand}
+	case model.ApprovalWorkflowQueryAccess:
+		return `t.ticket_type = ?`, []any{model.TicketTypeQueryAccess}
+	case model.ApprovalWorkflowSensitiveQueryAccess:
+		return `t.ticket_type = ?`, []any{model.TicketTypeSensitiveQueryAccess}
+	case model.ApprovalWorkflowSQLExportNormal:
+		return `(t.ticket_type = ? AND (t.contains_sensitive IS NULL OR t.contains_sensitive = 0))`, []any{model.TicketTypeSQLExport}
+	case model.ApprovalWorkflowSQLExportSensitive:
+		return `(t.ticket_type = ? AND t.contains_sensitive = 1)`, []any{model.TicketTypeSQLExport}
+	default:
+		return "", nil
+	}
 }
 
 func (r *TicketRepo) UpdateStatus(ctx context.Context, id uint64, fromStatus, toStatus model.TicketStatus, reviewerID *uint64, comment *string, rejectionReason *string) (bool, error) {

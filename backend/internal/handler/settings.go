@@ -3,7 +3,11 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"strings"
+	"time"
+	_ "time/tzdata"
 
+	"github.com/dbre-maestro/maestro/internal/job"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/repository"
@@ -12,14 +16,16 @@ import (
 type SettingsHandler struct {
 	settings *repository.SettingsRepo
 	users    *repository.UserRepo
+	auths    *repository.AuthGroupRepo
 	dbConns  *repository.DBConnectionRepo
 	audit    *repository.AuditRepo
 }
 
-func NewSettingsHandler(settings *repository.SettingsRepo, users *repository.UserRepo, dbConns *repository.DBConnectionRepo, audit *repository.AuditRepo) *SettingsHandler {
+func NewSettingsHandler(settings *repository.SettingsRepo, users *repository.UserRepo, auths *repository.AuthGroupRepo, dbConns *repository.DBConnectionRepo, audit *repository.AuditRepo) *SettingsHandler {
 	return &SettingsHandler{
 		settings: settings,
 		users:    users,
+		auths:    auths,
 		dbConns:  dbConns,
 		audit:    audit,
 	}
@@ -94,6 +100,20 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	for _, policy := range req.ApprovalPolicies {
+		for _, userID := range policy.ReviewerUserIDs {
+			if err := h.validateUserExists(r, userID); err != nil {
+				jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+				return
+			}
+		}
+		for _, authGroup := range policy.ReviewerAuthGroups {
+			if err := h.validateAuthGroupExists(r, authGroup); err != nil {
+				jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+				return
+			}
+		}
+	}
 	if req.SQLEditorAppTimeoutSeconds <= 0 {
 		jsonErr(w, http.StatusUnprocessableEntity, "sql_editor_app_timeout_seconds must be greater than 0")
 		return
@@ -110,8 +130,24 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "db_metadata_inventory_sync_interval_minutes must be greater than 0")
 		return
 	}
+	if err := job.ValidateCronExpression(req.DBMetadataInventoryCron); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "db_metadata_inventory_cron is invalid: "+err.Error())
+		return
+	}
 	if req.DBMetadataObjectSyncIntervalMins <= 0 {
 		jsonErr(w, http.StatusUnprocessableEntity, "db_metadata_object_sync_interval_minutes must be greater than 0")
+		return
+	}
+	if err := job.ValidateCronExpression(req.DBMetadataObjectCron); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "db_metadata_object_cron is invalid: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(req.DBMetadataCronTimezone) == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "db_metadata_cron_timezone is required")
+		return
+	}
+	if _, err := time.LoadLocation(strings.TrimSpace(req.DBMetadataCronTimezone)); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "db_metadata_cron_timezone is invalid")
 		return
 	}
 
@@ -138,10 +174,14 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			"db_metadata_inventory_enabled":               req.DBMetadataInventoryEnabled,
 			"db_metadata_inventory_regions":               req.DBMetadataInventoryRegions,
 			"db_metadata_inventory_engines":               req.DBMetadataInventoryEngines,
+			"db_metadata_inventory_cron":                  req.DBMetadataInventoryCron,
 			"db_metadata_inventory_sync_interval_minutes": req.DBMetadataInventorySyncIntervalMins,
 			"db_metadata_object_enabled":                  req.DBMetadataObjectEnabled,
 			"db_metadata_object_enabled_connection_ids":   req.DBMetadataObjectEnabledConnectionIDs,
+			"db_metadata_object_cron":                     req.DBMetadataObjectCron,
 			"db_metadata_object_sync_interval_minutes":    req.DBMetadataObjectSyncIntervalMins,
+			"db_metadata_cron_timezone":                   req.DBMetadataCronTimezone,
+			"approval_policies":                           req.ApprovalPolicies,
 		},
 		IPAddress: clientIP(r),
 	})
@@ -167,6 +207,20 @@ func (h *SettingsHandler) validateConnectionExists(r *http.Request, connectionID
 	}
 	if conn == nil {
 		return fmt.Errorf("db connection %d does not exist", connectionID)
+	}
+	return nil
+}
+
+func (h *SettingsHandler) validateAuthGroupExists(r *http.Request, authGroup model.AuthGroup) error {
+	if h.auths == nil {
+		return fmt.Errorf("auth group validation is not configured")
+	}
+	group, err := h.auths.GetByKey(r.Context(), string(authGroup))
+	if err != nil {
+		return err
+	}
+	if group == nil {
+		return fmt.Errorf("auth group %s does not exist", authGroup)
 	}
 	return nil
 }

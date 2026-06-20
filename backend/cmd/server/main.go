@@ -136,7 +136,7 @@ func main() {
 
 	healthH := handler.NewHealthHandler(metaDB)
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret)
-	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL)
+	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL)
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo)
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
 	auditH := handler.NewAuditHandler(auditRepo)
@@ -150,7 +150,7 @@ func main() {
 	notifH := handler.NewNotificationHandler(notifRepo)
 	eventStreamH := handler.NewEventStreamHandler(eventBroker)
 	whitelistH := handler.NewMaskingWhitelistHandler(dbConnRepo, whitelistRepo, auditRepo)
-	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, dbConnRepo, auditRepo)
+	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, authGroupRepo, dbConnRepo, auditRepo)
 	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo, settingsRepo)
 	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
 	objectJob := job.NewDBMetadataObjectJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
@@ -329,16 +329,16 @@ func main() {
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 
-			r.With(requireTicketsWorkspaceRead).Get("/", ticketH.List)
+			r.Get("/", ticketH.List)
 			r.With(requireTicketsApply).Get("/connections", ticketH.ListConnections)
 			r.With(requireTicketsApply).Get("/connections/{id}/databases", ticketH.ListDatabases)
 			r.With(requireTicketsApply).Post("/review", ticketH.ReviewSQL)
 			r.With(requireTicketsApply).Post("/", ticketH.Create)
 
 			r.Route("/{id}", func(r chi.Router) {
-				r.With(requireTicketsWorkspaceRead).Get("/", ticketH.Get)
-				r.With(requireTicketWorkflowReview).Post("/approve", ticketH.Approve)
-				r.With(requireTicketWorkflowReject).Post("/reject", ticketH.Reject)
+				r.Get("/", ticketH.Get)
+				r.Post("/approve", ticketH.Approve)
+				r.Post("/reject", ticketH.Reject)
 				r.With(requireTicketsApply).Post("/withdraw", ticketH.Withdraw)
 				r.With(requireSensitiveReview).Post("/revoke", ticketH.Revoke)
 				r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)

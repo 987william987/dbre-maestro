@@ -238,10 +238,16 @@ func (h *ExportHandler) sendInApp(ctx context.Context, userID uint64, notifType,
 	publishNotificationCreated(ctx, h.broker, h.notifRepo, userID, notificationID)
 }
 
-func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body, ticketNo string) {
-	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorExportReview})
+func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, workflowType model.ApprovalWorkflowType, title, body, ticketNo string) {
+	reviewerIDs, usedPolicy, err := approvalPolicyReviewerIDs(ctx, h.settings, h.users, workflowType)
 	if err != nil {
 		return
+	}
+	if !usedPolicy {
+		reviewerIDs, err = listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorExportReview})
+		if err != nil {
+			return
+		}
 	}
 	for _, reviewerID := range reviewerIDs {
 		if reviewerID == submitterID {
@@ -394,7 +400,11 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			h.ticketLink(ticket.ID),
 		)
 		h.sendInApp(r.Context(), userID, "ticket_submitted", fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
-		h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
+		workflowType := model.ApprovalWorkflowSQLExportNormal
+		if containsSensitive {
+			workflowType = model.ApprovalWorkflowSQLExportSensitive
+		}
+		h.notifyReviewers(r.Context(), ticket.ID, userID, workflowType, exportPendingReviewTitle(), body, ticket.TicketNo)
 	} else {
 		body := buildTicketNotificationBody(
 			ticket,

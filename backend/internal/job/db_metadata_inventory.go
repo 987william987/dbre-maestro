@@ -19,6 +19,7 @@ import (
 )
 
 const inventorySchedulerPollInterval = time.Minute
+const inventoryJobName = "db_metadata_inventory"
 
 type DBMetadataInventoryJob struct {
 	settings  *repository.SettingsRepo
@@ -26,7 +27,6 @@ type DBMetadataInventoryJob struct {
 	logger    *slog.Logger
 
 	mu        sync.Mutex
-	lastRunAt time.Time
 	isRunning bool
 }
 
@@ -45,7 +45,6 @@ func (j *DBMetadataInventoryJob) Start(ctx context.Context) {
 	ticker := time.NewTicker(inventorySchedulerPollInterval)
 	defer ticker.Stop()
 
-	j.runIfDue(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -66,17 +65,32 @@ func (j *DBMetadataInventoryJob) runIfDue(ctx context.Context) {
 		return
 	}
 
-	intervalMinutes := settings.DBMetadataInventorySyncIntervalMins
-	if intervalMinutes <= 0 {
-		intervalMinutes = 5
+	schedule, err := parseCronSchedule(settings.DBMetadataInventoryCron)
+	if err != nil {
+		j.logger.Warn("db metadata inventory: invalid cron", "cron", settings.DBMetadataInventoryCron, "err", err)
+		return
+	}
+	location, err := time.LoadLocation(strings.TrimSpace(settings.DBMetadataCronTimezone))
+	if err != nil {
+		j.logger.Warn("db metadata inventory: invalid timezone", "timezone", settings.DBMetadataCronTimezone, "err", err)
+		return
+	}
+	now := time.Now().In(location)
+	if !schedule.matches(now) {
+		return
+	}
+	scheduledAt := scheduledMinute(now).UTC()
+	state, err := j.snapshots.GetJobRun(ctx, inventoryJobName)
+	if err != nil {
+		j.logger.Warn("db metadata inventory: load job state failed", "err", err)
+		return
+	}
+	if state != nil && state.LastScheduledAt != nil && state.LastScheduledAt.Equal(scheduledAt) {
+		return
 	}
 
 	j.mu.Lock()
 	if j.isRunning {
-		j.mu.Unlock()
-		return
-	}
-	if !j.lastRunAt.IsZero() && time.Since(j.lastRunAt) < time.Duration(intervalMinutes)*time.Minute {
 		j.mu.Unlock()
 		return
 	}
@@ -86,13 +100,20 @@ func (j *DBMetadataInventoryJob) runIfDue(ctx context.Context) {
 	defer func() {
 		j.mu.Lock()
 		j.isRunning = false
-		j.lastRunAt = time.Now()
 		j.mu.Unlock()
 	}()
 
+	if err := j.snapshots.MarkJobStarted(ctx, inventoryJobName, scheduledAt); err != nil {
+		j.logger.Warn("db metadata inventory: mark start failed", "err", err)
+		return
+	}
 	if err := j.RunOnce(ctx, settings); err != nil {
+		_ = j.snapshots.MarkJobFinished(ctx, inventoryJobName, false, err.Error())
 		j.logger.Warn("db metadata inventory: run failed", "err", err)
 		return
+	}
+	if err := j.snapshots.MarkJobFinished(ctx, inventoryJobName, true, ""); err != nil {
+		j.logger.Warn("db metadata inventory: mark finish failed", "err", err)
 	}
 }
 

@@ -13,6 +13,14 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     require_non_sensitive_export_review: typeof settings.require_non_sensitive_export_review === 'boolean'
       ? settings.require_non_sensitive_export_review
       : true,
+    approval_policies: Array.isArray(settings.approval_policies)
+      ? settings.approval_policies.map((policy) => ({
+          workflow_type: policy.workflow_type,
+          reviewer_user_ids: Array.isArray(policy.reviewer_user_ids) ? policy.reviewer_user_ids : [],
+          reviewer_auth_groups: Array.isArray(policy.reviewer_auth_groups) ? policy.reviewer_auth_groups : [],
+          enabled: typeof policy.enabled === 'boolean' ? policy.enabled : true,
+        }))
+      : [],
     lark_app_id: typeof settings.lark_app_id === 'string' ? settings.lark_app_id : '',
     lark_app_secret: typeof settings.lark_app_secret === 'string' ? settings.lark_app_secret : '',
     lark_app_secret_configured: typeof settings.lark_app_secret_configured === 'boolean' ? settings.lark_app_secret_configured : false,
@@ -25,14 +33,17 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     db_metadata_inventory_enabled: typeof settings.db_metadata_inventory_enabled === 'boolean' ? settings.db_metadata_inventory_enabled : true,
     db_metadata_inventory_regions: Array.isArray(settings.db_metadata_inventory_regions) ? settings.db_metadata_inventory_regions : [],
     db_metadata_inventory_engines: Array.isArray(settings.db_metadata_inventory_engines) ? settings.db_metadata_inventory_engines : ['aurora-mysql', 'aurora-postgresql', 'redis'],
+    db_metadata_inventory_cron: typeof settings.db_metadata_inventory_cron === 'string' ? settings.db_metadata_inventory_cron : '0 9 * * *',
     db_metadata_inventory_sync_interval_minutes:
       typeof settings.db_metadata_inventory_sync_interval_minutes === 'number' ? settings.db_metadata_inventory_sync_interval_minutes : 5,
     db_metadata_object_enabled: typeof settings.db_metadata_object_enabled === 'boolean' ? settings.db_metadata_object_enabled : true,
     db_metadata_object_enabled_connection_ids: Array.isArray(settings.db_metadata_object_enabled_connection_ids)
       ? settings.db_metadata_object_enabled_connection_ids
       : [],
+    db_metadata_object_cron: typeof settings.db_metadata_object_cron === 'string' ? settings.db_metadata_object_cron : '0 10 * * *',
     db_metadata_object_sync_interval_minutes:
       typeof settings.db_metadata_object_sync_interval_minutes === 'number' ? settings.db_metadata_object_sync_interval_minutes : 60,
+    db_metadata_cron_timezone: typeof settings.db_metadata_cron_timezone === 'string' ? settings.db_metadata_cron_timezone : 'Asia/Taipei',
   }
 }
 

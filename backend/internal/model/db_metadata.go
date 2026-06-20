@@ -39,3 +39,14 @@ type DBObjectSnapshot struct {
 	DataSizeBytes  int64     `db:"data_size_bytes"        json:"data_size_bytes"`
 	IndexSizeBytes int64     `db:"index_size_bytes"       json:"index_size_bytes"`
 }
+
+type DBMetadataJobRun struct {
+	JobName         string     `db:"job_name" json:"job_name"`
+	LastScheduledAt *time.Time `db:"last_scheduled_at" json:"last_scheduled_at,omitempty"`
+	LastStartedAt   *time.Time `db:"last_started_at" json:"last_started_at,omitempty"`
+	LastFinishedAt  *time.Time `db:"last_finished_at" json:"last_finished_at,omitempty"`
+	LastSuccessAt   *time.Time `db:"last_success_at" json:"last_success_at,omitempty"`
+	Status          string     `db:"status" json:"status"`
+	ErrorMessage    *string    `db:"error_message" json:"error_message,omitempty"`
+	UpdatedAt       time.Time  `db:"updated_at" json:"updated_at"`
+}

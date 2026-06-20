@@ -21,6 +21,56 @@ func NewDBMetadataRepo(db *sqlx.DB) *DBMetadataRepo {
 	return &DBMetadataRepo{db: db}
 }
 
+func (r *DBMetadataRepo) GetJobRun(ctx context.Context, jobName string) (*model.DBMetadataJobRun, error) {
+	var run model.DBMetadataJobRun
+	err := r.db.GetContext(ctx, &run, `SELECT job_name, last_scheduled_at, last_started_at, last_finished_at, last_success_at, status, error_message, updated_at FROM db_metadata_job_runs WHERE job_name = ?`, jobName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get db metadata job run %s: %w", jobName, err)
+	}
+	return &run, nil
+}
+
+func (r *DBMetadataRepo) MarkJobStarted(ctx context.Context, jobName string, scheduledAt time.Time) error {
+	now := timeutil.NowUTC()
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO db_metadata_job_runs (job_name, last_scheduled_at, last_started_at, last_finished_at, last_success_at, status, error_message, updated_at)
+		 VALUES (?, ?, ?, NULL, NULL, 'running', NULL, ?)
+		 ON DUPLICATE KEY UPDATE last_scheduled_at = VALUES(last_scheduled_at), last_started_at = VALUES(last_started_at), status = 'running', error_message = NULL, updated_at = VALUES(updated_at)`,
+		jobName, scheduledAt.UTC(), now, now,
+	)
+	if err != nil {
+		return fmt.Errorf("mark db metadata job started %s: %w", jobName, err)
+	}
+	return nil
+}
+
+func (r *DBMetadataRepo) MarkJobFinished(ctx context.Context, jobName string, success bool, message string) error {
+	now := timeutil.NowUTC()
+	status := "success"
+	var successAt *time.Time = &now
+	var errorMessage *string
+	if !success {
+		status = "failed"
+		successAt = nil
+		if strings.TrimSpace(message) != "" {
+			errorMessage = &message
+		}
+	}
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE db_metadata_job_runs
+		 SET last_finished_at = ?, last_success_at = COALESCE(?, last_success_at), status = ?, error_message = ?, updated_at = ?
+		 WHERE job_name = ?`,
+		now, successAt, status, errorMessage, now, jobName,
+	)
+	if err != nil {
+		return fmt.Errorf("mark db metadata job finished %s: %w", jobName, err)
+	}
+	return nil
+}
+
 func (r *DBMetadataRepo) ListInventorySnapshots(ctx context.Context, engine string, limit int) ([]model.CloudDBInventorySnapshot, error) {
 	if limit <= 0 {
 		limit = 200

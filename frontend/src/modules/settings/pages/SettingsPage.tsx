@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Save } from 'lucide-react'
+import { listAuthGroups } from '@/modules/auth-groups/api'
 import { getSettings, listSettingsDBConnections, patchSettings } from '@/modules/settings/api'
+import { listUsers } from '@/modules/users/api'
 import { ApiError } from '@/shared/api/client'
+import type { AuthGroupSummary } from '@/shared/types/authGroup'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { PlatformSettings } from '@/shared/types/settings'
+import type { ApprovalPolicy, ApprovalWorkflowType, PlatformSettings } from '@/shared/types/settings'
+import type { UserSummary } from '@/shared/types/user'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
@@ -22,10 +26,32 @@ type SettingsForm = {
   inventoryEnabled: boolean
   inventoryRegions: string
   inventoryEngines: string
-  inventoryIntervalMinutes: string
+  inventoryCron: string
   objectEnabled: boolean
   objectConnectionIDs: number[]
-  objectIntervalMinutes: string
+  objectCron: string
+  cronTimezone: string
+  approvalPolicies: ApprovalPolicy[]
+}
+
+const APPROVAL_WORKFLOW_LABELS: Record<ApprovalWorkflowType, string> = {
+  ddl: 'DDL',
+  dml: 'DML',
+  redis_command: 'Redis Command',
+  query_access: 'Query Access',
+  sql_export_normal: 'Normal SQL Export',
+  sql_export_sensitive: 'Sensitive SQL Export',
+  sensitive_query_access: 'Sensitive Query Access',
+}
+
+const APPROVAL_WORKFLOW_PERMISSIONS: Record<ApprovalWorkflowType, string[]> = {
+  ddl: ['tickets.review'],
+  dml: ['tickets.review'],
+  redis_command: ['tickets.review'],
+  query_access: ['tickets.review'],
+  sql_export_normal: ['sql_editor.export_review'],
+  sql_export_sensitive: ['sql_editor.export_review'],
+  sensitive_query_access: ['sql_editor.sensitive_review'],
 }
 
 export function SettingsPage() {
@@ -33,6 +59,8 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<PlatformSettings | null>(null)
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [connections, setConnections] = useState<Array<Pick<DBConnection, 'id' | 'name' | 'db_type' | 'host' | 'port'>>>([])
+  const [users, setUsers] = useState<UserSummary[]>([])
+  const [authGroups, setAuthGroups] = useState<AuthGroupSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -44,14 +72,18 @@ export function SettingsPage() {
       setLoading(true)
       setError('')
       try {
-        const [settingsResponse, connectionsResponse] = await Promise.all([
+        const [settingsResponse, connectionsResponse, usersResponse, authGroupsResponse] = await Promise.all([
           getSettings(),
           listSettingsDBConnections(),
+          listUsers(),
+          listAuthGroups(),
         ])
         if (active) {
           setSettings(settingsResponse)
           setForm(toForm(settingsResponse))
           setConnections(connectionsResponse.connections)
+          setUsers(usersResponse.users)
+          setAuthGroups(authGroupsResponse.auth_groups)
         }
       } catch (loadError) {
         if (active) {
@@ -90,6 +122,20 @@ export function SettingsPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  function updateApprovalPolicy(workflowType: ApprovalWorkflowType, patch: Partial<ApprovalPolicy>) {
+    setForm((current) => {
+      if (!current) {
+        return current
+      }
+      return {
+        ...current,
+        approvalPolicies: current.approvalPolicies.map((policy) =>
+          policy.workflow_type === workflowType ? { ...policy, ...patch } : policy,
+        ),
+      }
+    })
   }
 
   return (
@@ -176,7 +222,7 @@ export function SettingsPage() {
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Inventory Scan</p>
-              <p className="mt-1 text-[12px] leading-5 text-muted">Pull a cloud inventory snapshot from AWS APIs on a recurring interval. This view is not intended for real-time status.</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Pull a cloud inventory snapshot from AWS APIs on a cron schedule. Use 5-field cron syntax, for example 0 9 * * *.</p>
             </div>
             <div className="grid gap-4 px-4 py-4 md:grid-cols-2">
               <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
@@ -188,9 +234,10 @@ export function SettingsPage() {
                 Enable inventory scan
               </label>
               <Field
-                label="Sync interval (minutes)"
-                value={form.inventoryIntervalMinutes}
-                onChange={(value) => setForm((current) => current ? { ...current, inventoryIntervalMinutes: value } : current)}
+                label="Inventory cron"
+                value={form.inventoryCron}
+                onChange={(value) => setForm((current) => current ? { ...current, inventoryCron: value } : current)}
+                placeholder="0 9 * * *"
               />
               <Field
                 label="Regions"
@@ -210,7 +257,7 @@ export function SettingsPage() {
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Object Scan</p>
-              <p className="mt-1 text-[12px] leading-5 text-muted">Capture object snapshots on a recurring interval for the selected DB connections.</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Capture object snapshots on a cron schedule for the selected DB connections.</p>
             </div>
             <div className="grid gap-4 px-4 py-4 md:grid-cols-2">
               <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
@@ -222,9 +269,16 @@ export function SettingsPage() {
                 Enable object scan
               </label>
               <Field
-                label="Sync interval (minutes)"
-                value={form.objectIntervalMinutes}
-                onChange={(value) => setForm((current) => current ? { ...current, objectIntervalMinutes: value } : current)}
+                label="Object cron"
+                value={form.objectCron}
+                onChange={(value) => setForm((current) => current ? { ...current, objectCron: value } : current)}
+                placeholder="0 10 * * *"
+              />
+              <Field
+                label="Cron timezone"
+                value={form.cronTimezone}
+                onChange={(value) => setForm((current) => current ? { ...current, cronTimezone: value } : current)}
+                placeholder="Asia/Taipei"
               />
             </div>
             <div className="border-t border-border/80 px-4 py-4">
@@ -287,6 +341,46 @@ export function SettingsPage() {
             </div>
           </section>
 
+          <section className="rounded-xl border border-border bg-panel shadow-soft">
+            <div className="border-b border-border/80 px-4 py-3">
+              <p className="text-[14px] font-semibold text-ink">Approval Routing</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Configure reviewer pools by workflow. These routing rules are separate from execution permissions.</p>
+            </div>
+            <div className="divide-y divide-border/80">
+              {form.approvalPolicies.map((policy) => (
+                <div key={policy.workflow_type} className="grid gap-4 px-4 py-4 lg:grid-cols-[220px_1fr_1fr]">
+                  <label className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+                    <Switch
+                      ariaLabel={`${APPROVAL_WORKFLOW_LABELS[policy.workflow_type]} approval routing enabled`}
+                      checked={policy.enabled}
+                      onChange={(checked) => updateApprovalPolicy(policy.workflow_type, { enabled: checked })}
+                    />
+                    {APPROVAL_WORKFLOW_LABELS[policy.workflow_type]}
+                  </label>
+                  <Checklist
+                    title="Reviewer users"
+                    emptyMessage="No active users available."
+                    items={users.filter((user) => user.is_active).map((user) => ({ id: user.id, label: user.username }))}
+                    selectedIDs={policy.reviewer_user_ids}
+                    onChange={(selectedIDs) => updateApprovalPolicy(policy.workflow_type, { reviewer_user_ids: selectedIDs })}
+                  />
+                  <Checklist
+                    title="Reviewer auth groups"
+                    emptyMessage="No auth groups available."
+                    items={authGroups.map((group) => ({ id: group.name, label: group.label }))}
+                    selectedIDs={policy.reviewer_auth_groups}
+                    onChange={(selectedIDs) => updateApprovalPolicy(policy.workflow_type, { reviewer_auth_groups: selectedIDs })}
+                  />
+                  <EffectiveReviewersPreview
+                    policy={policy}
+                    users={users}
+                    authGroups={authGroups}
+                  />
+                </div>
+              ))}
+            </div>
+          </section>
+
           <div className="flex justify-end">
             <button
               type="submit"
@@ -301,6 +395,82 @@ export function SettingsPage() {
       )}
     </div>
   )
+}
+
+function EffectiveReviewersPreview({
+  policy,
+  users,
+  authGroups,
+}: {
+  policy: ApprovalPolicy
+  users: UserSummary[]
+  authGroups: AuthGroupSummary[]
+}) {
+  const requiredPermissions = APPROVAL_WORKFLOW_PERMISSIONS[policy.workflow_type] ?? []
+  if (!policy.enabled) {
+    return (
+      <div className="lg:col-start-2 lg:col-span-2 rounded-lg border border-border bg-panel-soft px-3 py-3">
+        <p className="text-[12px] font-semibold text-muted">Effective reviewers</p>
+        <p className="mt-2 text-[12px] leading-5 text-muted">Routing is disabled for this workflow.</p>
+      </div>
+    )
+  }
+
+  const reviewerIDs = new Set<number>()
+  for (const userID of policy.reviewer_user_ids) {
+    reviewerIDs.add(userID)
+  }
+  for (const groupName of policy.reviewer_auth_groups) {
+    for (const user of users) {
+      if (user.auth_groups.includes(groupName)) {
+        reviewerIDs.add(user.id)
+      }
+    }
+  }
+
+  const effectiveReviewers = users
+    .filter((user) => user.is_active && reviewerIDs.has(user.id))
+    .filter((user) => hasAnyRequiredPermission(user, authGroups, requiredPermissions))
+    .map((user) => user.username)
+    .sort((left, right) => left.localeCompare(right))
+
+  return (
+    <div className="lg:col-start-2 lg:col-span-2 rounded-lg border border-border bg-panel-soft px-3 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[12px] font-semibold text-muted">Effective reviewers</span>
+        <span className="rounded-full border border-border bg-white px-2 py-0.5 text-[10px] font-semibold text-muted">
+          Requires {requiredPermissions.join(' or ')}
+        </span>
+      </div>
+      {effectiveReviewers.length === 0 ? (
+        <p className="mt-2 text-[12px] leading-5 text-danger">
+          No effective reviewers. Add users or groups that also have the required permission.
+        </p>
+      ) : (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {effectiveReviewers.map((username) => (
+            <span key={username} className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-ink">
+              {username}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function hasAnyRequiredPermission(user: UserSummary, authGroups: AuthGroupSummary[], requiredPermissions: string[]) {
+  if (requiredPermissions.length === 0) {
+    return false
+  }
+  const permissions = new Set(user.permissions ?? [])
+  for (const groupName of user.auth_groups) {
+    const group = authGroups.find((item) => item.name === groupName)
+    for (const permission of group?.permissions ?? []) {
+      permissions.add(permission)
+    }
+  }
+  return requiredPermissions.some((permission) => permissions.has(permission))
 }
 
 function Field({
@@ -330,6 +500,51 @@ function Field({
   )
 }
 
+function Checklist<T extends string | number>({
+  title,
+  emptyMessage,
+  items,
+  selectedIDs,
+  onChange,
+}: {
+  title: string
+  emptyMessage: string
+  items: Array<{ id: T; label: string }>
+  selectedIDs: T[]
+  onChange: (selectedIDs: T[]) => void
+}) {
+  return (
+    <div className="grid gap-2">
+      <p className="text-[12px] font-semibold text-muted">{title}</p>
+      {items.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border bg-panel-soft px-3 py-2 text-[12px] text-muted">{emptyMessage}</p>
+      ) : (
+        <div className="grid max-h-40 gap-2 overflow-y-auto rounded-lg border border-border bg-white p-2">
+          {items.map((item) => {
+            const checked = selectedIDs.includes(item.id)
+            return (
+              <label key={String(item.id)} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-panel-soft">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() =>
+                    onChange(
+                      checked
+                        ? selectedIDs.filter((selectedID) => selectedID !== item.id)
+                        : [...selectedIDs, item.id],
+                    )
+                  }
+                />
+                <span className="truncate">{item.label}</span>
+              </label>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function toForm(settings: PlatformSettings): SettingsForm {
   return {
     larkAppID: settings.lark_app_id,
@@ -342,10 +557,12 @@ function toForm(settings: PlatformSettings): SettingsForm {
     inventoryEnabled: settings.db_metadata_inventory_enabled,
     inventoryRegions: settings.db_metadata_inventory_regions.join(', '),
     inventoryEngines: settings.db_metadata_inventory_engines.join(', '),
-    inventoryIntervalMinutes: String(settings.db_metadata_inventory_sync_interval_minutes),
+    inventoryCron: settings.db_metadata_inventory_cron,
     objectEnabled: settings.db_metadata_object_enabled,
     objectConnectionIDs: settings.db_metadata_object_enabled_connection_ids,
-    objectIntervalMinutes: String(settings.db_metadata_object_sync_interval_minutes),
+    objectCron: settings.db_metadata_object_cron,
+    cronTimezone: settings.db_metadata_cron_timezone,
+    approvalPolicies: settings.approval_policies,
   }
 }
 
@@ -363,10 +580,14 @@ function toPayload(current: PlatformSettings | null, form: SettingsForm): Platfo
     db_metadata_inventory_enabled: form.inventoryEnabled,
     db_metadata_inventory_regions: splitCSV(form.inventoryRegions),
     db_metadata_inventory_engines: splitCSV(form.inventoryEngines),
-    db_metadata_inventory_sync_interval_minutes: parsePositiveInt(form.inventoryIntervalMinutes, 5),
+    db_metadata_inventory_cron: form.inventoryCron.trim(),
+    db_metadata_inventory_sync_interval_minutes: current?.db_metadata_inventory_sync_interval_minutes ?? 5,
     db_metadata_object_enabled: form.objectEnabled,
     db_metadata_object_enabled_connection_ids: form.objectConnectionIDs,
-    db_metadata_object_sync_interval_minutes: parsePositiveInt(form.objectIntervalMinutes, 60),
+    db_metadata_object_cron: form.objectCron.trim(),
+    db_metadata_object_sync_interval_minutes: current?.db_metadata_object_sync_interval_minutes ?? 60,
+    db_metadata_cron_timezone: form.cronTimezone.trim(),
+    approval_policies: form.approvalPolicies,
   }
 }
 

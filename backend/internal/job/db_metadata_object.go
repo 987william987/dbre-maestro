@@ -17,6 +17,7 @@ const (
 	objectSchedulerPollInterval      = time.Minute
 	objectJobConnectionWorkers       = 4
 	postgresReservedDatabaseRDSAdmin = "rdsadmin"
+	objectJobName                    = "db_metadata_object"
 )
 
 func shouldSkipPostgresMetadataDatabase(name string) bool {
@@ -30,7 +31,6 @@ type DBMetadataObjectJob struct {
 	logger    *slog.Logger
 
 	mu        sync.Mutex
-	lastRunAt time.Time
 	isRunning bool
 }
 
@@ -55,7 +55,6 @@ func (j *DBMetadataObjectJob) Start(ctx context.Context) {
 	ticker := time.NewTicker(objectSchedulerPollInterval)
 	defer ticker.Stop()
 
-	j.runIfDue(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -76,17 +75,32 @@ func (j *DBMetadataObjectJob) runIfDue(ctx context.Context) {
 		return
 	}
 
-	intervalMinutes := settings.DBMetadataObjectSyncIntervalMins
-	if intervalMinutes <= 0 {
-		intervalMinutes = 60
+	schedule, err := parseCronSchedule(settings.DBMetadataObjectCron)
+	if err != nil {
+		j.logger.Warn("db metadata objects: invalid cron", "cron", settings.DBMetadataObjectCron, "err", err)
+		return
+	}
+	location, err := time.LoadLocation(strings.TrimSpace(settings.DBMetadataCronTimezone))
+	if err != nil {
+		j.logger.Warn("db metadata objects: invalid timezone", "timezone", settings.DBMetadataCronTimezone, "err", err)
+		return
+	}
+	now := time.Now().In(location)
+	if !schedule.matches(now) {
+		return
+	}
+	scheduledAt := scheduledMinute(now).UTC()
+	state, err := j.snapshots.GetJobRun(ctx, objectJobName)
+	if err != nil {
+		j.logger.Warn("db metadata objects: load job state failed", "err", err)
+		return
+	}
+	if state != nil && state.LastScheduledAt != nil && state.LastScheduledAt.Equal(scheduledAt) {
+		return
 	}
 
 	j.mu.Lock()
 	if j.isRunning {
-		j.mu.Unlock()
-		return
-	}
-	if !j.lastRunAt.IsZero() && time.Since(j.lastRunAt) < time.Duration(intervalMinutes)*time.Minute {
 		j.mu.Unlock()
 		return
 	}
@@ -96,13 +110,20 @@ func (j *DBMetadataObjectJob) runIfDue(ctx context.Context) {
 	defer func() {
 		j.mu.Lock()
 		j.isRunning = false
-		j.lastRunAt = time.Now()
 		j.mu.Unlock()
 	}()
 
+	if err := j.snapshots.MarkJobStarted(ctx, objectJobName, scheduledAt); err != nil {
+		j.logger.Warn("db metadata objects: mark start failed", "err", err)
+		return
+	}
 	if err := j.RunOnce(ctx, settings); err != nil {
+		_ = j.snapshots.MarkJobFinished(ctx, objectJobName, false, err.Error())
 		j.logger.Warn("db metadata objects: run failed", "err", err)
 		return
+	}
+	if err := j.snapshots.MarkJobFinished(ctx, objectJobName, true, ""); err != nil {
+		j.logger.Warn("db metadata objects: mark finish failed", "err", err)
 	}
 }
 

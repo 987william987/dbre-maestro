@@ -29,6 +29,7 @@ type TicketHandler struct {
 	queryAccess        *repository.QueryAccessRepo
 	exports            *repository.ExportRepo
 	audit              *repository.AuditRepo
+	settings           *repository.SettingsRepo
 	dbConns            *repository.DBConnectionRepo
 	users              *repository.UserRepo
 	masking            *maskingRuntime
@@ -174,6 +175,7 @@ func NewTicketHandler(
 	queryAccess *repository.QueryAccessRepo,
 	exports *repository.ExportRepo,
 	audit *repository.AuditRepo,
+	settings *repository.SettingsRepo,
 	dbConns *repository.DBConnectionRepo,
 	users *repository.UserRepo,
 	maskingRules *repository.MaskingRuleRepo,
@@ -191,6 +193,7 @@ func NewTicketHandler(
 		queryAccess:        queryAccess,
 		exports:            exports,
 		audit:              audit,
+		settings:           settings,
 		dbConns:            dbConns,
 		users:              users,
 		masking:            newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
@@ -273,6 +276,35 @@ func (h *TicketHandler) ticketTypeLabel(ticketType model.TicketType) string {
 	}
 }
 
+func approvalWorkflowForTicket(ticket *model.Ticket) model.ApprovalWorkflowType {
+	if ticket == nil {
+		return ""
+	}
+	switch ticket.TicketType {
+	case model.TicketTypeDDL:
+		return model.ApprovalWorkflowDDL
+	case model.TicketTypeDML:
+		return model.ApprovalWorkflowDML
+	case model.TicketTypeRedisCommand:
+		return model.ApprovalWorkflowRedisCommand
+	case model.TicketTypeQueryAccess:
+		return model.ApprovalWorkflowQueryAccess
+	case model.TicketTypeSQLExport:
+		if ticket.ContainsSensitive != nil && *ticket.ContainsSensitive {
+			return model.ApprovalWorkflowSQLExportSensitive
+		}
+		return model.ApprovalWorkflowSQLExportNormal
+	case model.TicketTypeSensitiveQueryAccess:
+		return model.ApprovalWorkflowSensitiveQueryAccess
+	default:
+		return ""
+	}
+}
+
+func (h *TicketHandler) approvalPolicyReviewerIDs(ctx context.Context, ticket *model.Ticket) ([]uint64, bool, error) {
+	return approvalPolicyReviewerIDs(ctx, h.settings, h.users, approvalWorkflowForTicket(ticket))
+}
+
 func (h *TicketHandler) buildTicketNotificationBody(ticket *model.Ticket, currentStatus model.TicketStatus, nextAction string, detail string) string {
 	parts := []string{
 		fmt.Sprintf("工單類型：%s", h.ticketTypeLabel(ticket.TicketType)),
@@ -346,9 +378,15 @@ func (h *TicketHandler) resolveTicketNotificationRecipients(
 		case ticketRoleSubmitter:
 			addRecipient(ticket.SubmitterID)
 		case ticketRoleReviewer:
-			reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, reviewPermissionsForTicket(ticket.TicketType))
+			reviewerIDs, usedPolicy, err := h.approvalPolicyReviewerIDs(ctx, ticket)
 			if err != nil {
 				return nil, err
+			}
+			if !usedPolicy {
+				reviewerIDs, err = listActiveUserIDsByPermissions(ctx, h.users, reviewPermissionsForTicket(ticket.TicketType))
+				if err != nil {
+					return nil, err
+				}
 			}
 			for _, reviewerID := range reviewerIDs {
 				addRecipient(reviewerID)
@@ -821,14 +859,17 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// T5: IDOR — only reviewers/executors can see the full queue.
-	canViewAll, err := h.canViewAllTickets(r.Context(), userID)
+	// T5: IDOR — ticket workspace permissions open the page, while approval
+	// policies narrow the review queue to assigned workflows.
+	filter.VisibleToUserID = &userID
+	workflows, err := h.reviewableApprovalWorkflows(r.Context(), userID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "ticket access check failed")
 		return
 	}
-	if !canViewAll {
-		filter.SubmitterID = &userID
+	filter.ReviewWorkflowTypes = workflows
+	if middleware.HasPermission(r.Context(), permissionTicketExecute) {
+		filter.VisibleToExecutorPool = true
 	}
 
 	tickets, total, err := h.tickets.List(r.Context(), filter, limit, offset)
@@ -870,18 +911,17 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// T5: IDOR — only reviewers/executors can view arbitrary tickets.
+	// T5: IDOR — only submitters, ticket-wide roles, or policy reviewers for this
+	// workflow can view a ticket.
 	userID := middleware.UserIDFromCtx(r.Context())
-	canViewAll, err := h.canViewAllTickets(r.Context(), userID)
+	canView, err := h.canViewTicket(r.Context(), ticket, userID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "ticket access check failed")
 		return
 	}
-	if !canViewAll {
-		if ticket.SubmitterID != userID {
-			jsonErr(w, http.StatusForbidden, "forbidden")
-			return
-		}
+	if !canView {
+		jsonErr(w, http.StatusForbidden, "forbidden")
+		return
 	}
 
 	executions, _ := h.tickets.ListExecutions(r.Context(), id)
@@ -991,9 +1031,15 @@ func (h *TicketHandler) loadWorkflowParticipants(ctx context.Context, ticket *mo
 		return participants, nil
 	}
 
-	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, reviewPermissionsForTicket(ticket.TicketType))
+	reviewerIDs, usedPolicy, err := h.approvalPolicyReviewerIDs(ctx, ticket)
 	if err != nil {
 		return participants, err
+	}
+	if !usedPolicy {
+		reviewerIDs, err = listActiveUserIDsByPermissions(ctx, h.users, reviewPermissionsForTicket(ticket.TicketType))
+		if err != nil {
+			return participants, err
+		}
 	}
 	participants.Reviewers, err = h.lookupUsernamesByIDs(ctx, reviewerIDs)
 	if err != nil {
@@ -1626,21 +1672,114 @@ func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, updated)
 }
 
-func (h *TicketHandler) canViewAllTickets(ctx context.Context, userID uint64) (bool, error) {
+func (h *TicketHandler) canViewFullTicketQueue(ctx context.Context) (bool, error) {
 	if middleware.HasPermission(ctx, permissionTicketReview, permissionTicketExecute, permissionSQLEditorExportReview, permissionSQLEditorSensitiveRev) {
 		return true, nil
 	}
 	return false, nil
 }
 
+func (h *TicketHandler) canViewTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
+	if ticket == nil {
+		return false, nil
+	}
+	if ticket.SubmitterID == userID {
+		return true, nil
+	}
+	if allowed, err := h.canReviewTicket(ctx, ticket, userID); err != nil || allowed {
+		return allowed, err
+	}
+	if middleware.HasPermission(ctx, permissionTicketExecute) &&
+		isExecutableTicketType(ticket.TicketType) &&
+		ticket.Status == model.TicketStatusPendingExecution {
+		return true, nil
+	}
+	return false, nil
+}
+
+func (h *TicketHandler) reviewableApprovalWorkflows(ctx context.Context, userID uint64) ([]model.ApprovalWorkflowType, error) {
+	workflows := []model.ApprovalWorkflowType{}
+	if h.settings != nil && h.users != nil {
+		policies, err := h.settings.ListApprovalPolicies(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, policy := range policies {
+			if !policy.Enabled {
+				continue
+			}
+			if !h.canReviewWorkflowByPermission(ctx, policy.WorkflowType) {
+				continue
+			}
+			matches := false
+			for _, reviewerID := range policy.ReviewerUserIDs {
+				if reviewerID == userID {
+					matches = true
+					break
+				}
+			}
+			if matches {
+				workflows = append(workflows, policy.WorkflowType)
+				continue
+			}
+			for _, authGroup := range policy.ReviewerAuthGroups {
+				users, err := h.users.ListUsersByAuthGroup(ctx, authGroup)
+				if err != nil {
+					return nil, err
+				}
+				for _, user := range users {
+					if user.ID == userID && user.IsActive {
+						matches = true
+						break
+					}
+				}
+				if matches {
+					break
+				}
+			}
+			if matches {
+				workflows = append(workflows, policy.WorkflowType)
+			}
+		}
+	}
+	return workflows, nil
+}
+
 func (h *TicketHandler) canReviewTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
-	_ = userID
+	if !h.canReviewWorkflowByPermission(ctx, approvalWorkflowForTicket(ticket)) {
+		return false, nil
+	}
+	reviewerIDs, usedPolicy, err := h.approvalPolicyReviewerIDs(ctx, ticket)
+	if err != nil {
+		return false, err
+	}
+	if usedPolicy {
+		for _, reviewerID := range reviewerIDs {
+			if reviewerID == userID {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
 	for _, permissionKey := range reviewPermissionsForTicket(ticket.TicketType) {
 		if middleware.HasPermission(ctx, permissionKey) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func (h *TicketHandler) canReviewWorkflowByPermission(ctx context.Context, workflowType model.ApprovalWorkflowType) bool {
+	for _, permissionKey := range reviewPermissionsForWorkflow(workflowType) {
+		if middleware.HasPermission(ctx, permissionKey) {
+			return true
+		}
+	}
+	return false
+}
+
+func isExecutableTicketType(ticketType model.TicketType) bool {
+	return ticketType == model.TicketTypeDDL || ticketType == model.TicketTypeDML || ticketType == model.TicketTypeRedisCommand
 }
 
 func (h *TicketHandler) canRejectTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
