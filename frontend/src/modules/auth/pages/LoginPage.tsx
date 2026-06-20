@@ -123,18 +123,18 @@ export function LoginPage() {
         </form>
 
         {setupCompleted === false ? (
-          <div className="mt-6 rounded-card border border-border bg-panel-soft px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-faint">First time?</p>
-            <p className="mt-1 text-sm text-muted">
-              The platform has not been initialized yet. Please complete the
+          <div className="mt-6 rounded-card border border-border bg-panel-soft px-4 py-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-faint">First time?</p>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              The platform has not been initialized yet. Please complete the{' '}
               <button
                 type="button"
                 onClick={() => navigate('/setup')}
-                className="ml-1 font-semibold text-accent transition hover:text-blue-700"
+                className="font-semibold text-ink underline decoration-border underline-offset-4 transition hover:text-accent hover:decoration-accent"
               >
                 Setup Wizard
-              </button>
-              {' '}first.
+              </button>{' '}
+              first.
             </p>
           </div>
         ) : null}
