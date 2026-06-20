@@ -759,6 +759,27 @@ describe('SQLEditorPage', () => {
     })
   })
 
+  it('缺 Query Access 時只保留常駐 Query Access 入口', async () => {
+    mockedExecuteQuery.mockRejectedValue(new ApiError(422, 'You do not have query access to maestro.tickets', null))
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(screen.getByText('Run Query'))
+
+    expect(await screen.findByText('You do not have query access to maestro.tickets')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Query Access' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Apply Query Access' })).not.toBeInTheDocument()
+  })
+
   it('點擊資料表後會切到 Object Meta 分頁並顯示表結構', async () => {
     mockedListMetadata.mockReset()
     mockedListMetadata

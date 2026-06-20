@@ -281,10 +281,6 @@ function formatMetadataError(error: unknown): string {
   return METADATA_ERROR_MESSAGE
 }
 
-function isQueryAccessDeniedMessage(message: string) {
-  return /query access/i.test(message)
-}
-
 function buildQueryAccessTicketURL(params: {
   connectionId: number
   database?: string
@@ -2250,18 +2246,6 @@ export function SQLEditorPage() {
                 {activeTab.error ? (
                   <div className="mt-3 space-y-2">
                     <InlineAlert>{activeTab.error}</InlineAlert>
-                    {isQueryAccessDeniedMessage(activeTab.error) ? (
-                      <div className="flex justify-start">
-                        <button
-                          type="button"
-                          onClick={openQueryAccessTicket}
-                          disabled={!activeTab.connectionId}
-                          className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          Apply Query Access
-                        </button>
-                      </div>
-                    ) : null}
                   </div>
                 ) : null}
 
