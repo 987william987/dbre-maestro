@@ -25,6 +25,7 @@ export type QueryAccessTicketItem = {
   id: number
   ticket_id: number
   connection_id: number
+  db_connection_name?: string | null
   scope_mode: QueryAccessScopeMode
   database_name: string
   table_name?: string | null

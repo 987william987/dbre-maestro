@@ -1709,6 +1709,19 @@ func (h *TicketHandler) mustListQueryAccessItems(ctx context.Context, ticketID u
 	if err != nil || items == nil {
 		return []model.QueryAccessTicketItem{}
 	}
+	connectionNames := make(map[uint64]*string)
+	for i := range items {
+		connectionID := items[i].ConnectionID
+		if _, ok := connectionNames[connectionID]; !ok {
+			connectionNames[connectionID] = nil
+			conn, err := h.dbConns.GetByID(ctx, connectionID)
+			if err == nil && conn != nil {
+				name := conn.Name
+				connectionNames[connectionID] = &name
+			}
+		}
+		items[i].DBConnectionName = connectionNames[connectionID]
+	}
 	return items
 }
 

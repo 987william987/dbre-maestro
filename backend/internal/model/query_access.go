@@ -24,16 +24,17 @@ const (
 )
 
 type QueryAccessTicketItem struct {
-	ID              uint64               `db:"id"            json:"id"`
-	TicketID        uint64               `db:"ticket_id"     json:"ticket_id"`
-	ConnectionID    uint64               `db:"connection_id" json:"connection_id"`
-	ScopeMode       QueryAccessScopeMode `db:"scope_mode"    json:"scope_mode"`
-	DatabaseName    string               `db:"database_name" json:"database_name"`
-	TableName       *string              `db:"table_name"    json:"table_name,omitempty"`
-	Effect          QueryAccessEffect    `db:"effect"        json:"effect"`
-	DatabasePattern string               `db:"database_pattern" json:"database_pattern"`
-	TablePattern    string               `db:"table_pattern"    json:"table_pattern"`
-	CreatedAt       time.Time            `db:"created_at"    json:"created_at"`
+	ID               uint64               `db:"id"            json:"id"`
+	TicketID         uint64               `db:"ticket_id"     json:"ticket_id"`
+	ConnectionID     uint64               `db:"connection_id" json:"connection_id"`
+	DBConnectionName *string              `db:"-"             json:"db_connection_name,omitempty"`
+	ScopeMode        QueryAccessScopeMode `db:"scope_mode"    json:"scope_mode"`
+	DatabaseName     string               `db:"database_name" json:"database_name"`
+	TableName        *string              `db:"table_name"    json:"table_name,omitempty"`
+	Effect           QueryAccessEffect    `db:"effect"        json:"effect"`
+	DatabasePattern  string               `db:"database_pattern" json:"database_pattern"`
+	TablePattern     string               `db:"table_pattern"    json:"table_pattern"`
+	CreatedAt        time.Time            `db:"created_at"    json:"created_at"`
 }
 
 type QueryAccessGrant struct {

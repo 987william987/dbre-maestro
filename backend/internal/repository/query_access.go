@@ -119,6 +119,10 @@ func (r *QueryAccessRepo) ApproveTicket(ctx context.Context, ticketID uint64, fr
 		query += `, review_comment = ?`
 		args = append(args, *comment)
 	}
+	if expiresAt != nil {
+		query += `, approved_until = ?`
+		args = append(args, expiresAt.UTC())
+	}
 	query += ` WHERE id = ? AND status = ? AND ticket_type = ?`
 	args = append(args, ticketID, fromStatus, model.TicketTypeQueryAccess)
 

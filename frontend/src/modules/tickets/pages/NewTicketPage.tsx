@@ -479,7 +479,7 @@ export function NewTicketPage() {
         }
       />
 
-      <form className="grid items-start gap-3 xl:grid-cols-[0.95fr_1.05fr]" onSubmit={handleSubmit}>
+      <form className="grid items-start gap-3" onSubmit={handleSubmit}>
         <section className="rounded-xl border border-border bg-panel shadow-soft">
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center gap-2">
@@ -488,7 +488,11 @@ export function NewTicketPage() {
             </div>
           </div>
 
-          <div className="grid gap-4 px-4 py-4">
+          <div className={`grid gap-3 px-4 py-4 ${
+            isQueryAccessTicket
+              ? 'lg:grid-cols-[minmax(220px,1.2fr)_minmax(260px,2fr)_220px]'
+              : 'lg:grid-cols-[minmax(220px,1.2fr)_minmax(260px,2fr)_190px_minmax(220px,1fr)_minmax(220px,1fr)]'
+          }`}>
             <label className="flex flex-col gap-1.5">
               <span className="text-[12px] font-semibold text-ink">
                 Title <span className="text-danger">*</span>
@@ -504,53 +508,51 @@ export function NewTicketPage() {
 
             <label className="flex flex-col gap-1.5">
               <span className="text-[12px] font-semibold text-ink">Description</span>
-              <textarea
+              <input
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
-                className="min-h-28 rounded-lg border border-border bg-panel-soft px-3 py-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 placeholder="Add context, affected scope, rollback plan, and execution considerations."
                 disabled={submitting}
               />
             </label>
 
-            <div className={`grid gap-4 ${isQueryAccessTicket ? '' : 'sm:grid-cols-2'}`}>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[12px] font-semibold text-ink">Ticket Type</span>
+              <DropdownSelect
+                ariaLabel="Ticket Type"
+                value={ticketType}
+                onChange={(value) => setTicketType(value as TicketType)}
+                disabled={submitting}
+                options={[
+                  { value: 'ddl', label: 'DDL' },
+                  { value: 'dml', label: 'DML' },
+                  { value: 'redis_command', label: 'Redis' },
+                  { value: 'query_access', label: 'Query Access' },
+                ]}
+              />
+            </label>
+
+            {!isQueryAccessTicket ? (
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-semibold text-ink">Ticket Type</span>
+                <span className="text-[12px] font-semibold text-ink">
+                  Target Instance <span className="text-danger">*</span>
+                </span>
                 <DropdownSelect
-                  ariaLabel="Ticket Type"
-                  value={ticketType}
-                  onChange={(value) => setTicketType(value as TicketType)}
-                  disabled={submitting}
+                  ariaLabel="Target Instance"
+                  value={dbConnectionId}
+                  onChange={setDbConnectionId}
+                  disabled={submitting || loadingConnections}
                   options={[
-                    { value: 'ddl', label: 'DDL' },
-                    { value: 'dml', label: 'DML' },
-                    { value: 'redis_command', label: 'Redis' },
-                    { value: 'query_access', label: 'Query Access' },
+                    { value: '', label: 'Not Selected' },
+                    ...filteredConnections.map((connection) => ({
+                      value: String(connection.id),
+                      label: formatConnectionOptionLabel(connection),
+                    })),
                   ]}
                 />
               </label>
-
-              {!isQueryAccessTicket ? (
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-[12px] font-semibold text-ink">
-                    Target Instance <span className="text-danger">*</span>
-                  </span>
-                  <DropdownSelect
-                    ariaLabel="Target Instance"
-                    value={dbConnectionId}
-                    onChange={setDbConnectionId}
-                    disabled={submitting || loadingConnections}
-                    options={[
-                      { value: '', label: 'Not Selected' },
-                      ...filteredConnections.map((connection) => ({
-                        value: String(connection.id),
-                        label: formatConnectionOptionLabel(connection),
-                      })),
-                    ]}
-                  />
-                </label>
-              ) : null}
-            </div>
+            ) : null}
 
             {requiresDatabaseSelection ? (
               <label className="flex flex-col gap-1.5">
@@ -581,7 +583,7 @@ export function NewTicketPage() {
           </div>
         </section>
 
-        <section className="flex h-full flex-col rounded-xl border border-border bg-panel shadow-soft">
+        <section className="flex flex-col rounded-xl border border-border bg-panel shadow-soft">
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center gap-2">
               <ScrollText className="h-4 w-4 text-muted" />
@@ -633,7 +635,14 @@ export function NewTicketPage() {
                     return (
                       <div key={rule.id} className="rounded-xl border border-border bg-panel-soft p-3">
                         <div className="mb-3 flex items-center justify-between gap-3">
-                          <p className="text-[12px] font-semibold text-ink">Rule {index + 1}</p>
+                          <div className="flex min-w-0 items-center gap-3">
+                            <p className="shrink-0 text-[12px] font-semibold text-ink">Rule {index + 1}</p>
+                            {selectedRuleConnection ? (
+                              <p className="truncate text-[11px] text-muted">
+                                {rule.effect === 'deny' ? 'Exclude' : 'Grant'} {selectedRuleConnection.name} / {rule.databasePattern === '*' ? 'all databases' : rule.databasePattern} / {rule.tablePattern === '*' ? 'all tables' : rule.tablePattern}
+                              </p>
+                            ) : null}
+                          </div>
                           <button
                             type="button"
                             onClick={() => setQueryAccessRules((current) => current.length === 1 ? current : current.filter((item) => item.id !== rule.id))}
@@ -703,11 +712,6 @@ export function NewTicketPage() {
                             />
                           </label>
                         </div>
-                        {selectedRuleConnection ? (
-                          <p className="mt-2 text-[11px] text-muted">
-                            {rule.effect === 'deny' ? 'Exclude' : 'Grant'} {selectedRuleConnection.name} / {rule.databasePattern === '*' ? 'all databases' : rule.databasePattern} / {rule.tablePattern === '*' ? 'all tables' : rule.tablePattern}
-                          </p>
-                        ) : null}
                       </div>
                     )
                   })}
@@ -721,7 +725,7 @@ export function NewTicketPage() {
                 <textarea
                   value={sqlContent}
                   onChange={(event) => setSqlContent(event.target.value)}
-                  className="block min-h-[280px] w-full resize-y rounded-xl border border-border bg-panel-soft px-4 py-4 font-mono text-[13px] leading-7 text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 lg:min-h-[320px]"
+                  className="block min-h-[360px] w-full resize-y rounded-xl border border-border bg-panel-soft px-4 py-4 font-mono text-[13px] leading-7 text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 lg:min-h-[420px]"
                   placeholder={ticketType === 'redis_command' ? 'SET my:key "value"\nEXPIRE my:key 60' : 'ALTER TABLE ...;\nUPDATE ...;'}
                   disabled={submitting}
                 />
@@ -753,7 +757,7 @@ export function NewTicketPage() {
           )}
         </section>
 
-        <div className="xl:col-span-2">
+        <div>
           {error ? (
             <div className="mb-4 rounded-lg border border-danger/20 bg-red-50 px-4 py-3 text-[13px] text-danger">
               {error}

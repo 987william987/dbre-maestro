@@ -6,7 +6,7 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
-import type { Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants } from '@/shared/types/ticket'
+import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants } from '@/shared/types/ticket'
 import type { AuditLog } from '@/shared/types/audit'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
@@ -105,6 +105,68 @@ function formatTicketTypeLabel(ticketType: string) {
     default:
       return ticketType
   }
+}
+
+function formatQueryAccessDuration(minutes?: number | null) {
+  switch (minutes) {
+    case 1440:
+      return '1 day'
+    case 10080:
+      return '1 week'
+    case 43200:
+      return '1 month'
+    case 525600:
+      return '1 year'
+    case 1576800:
+      return '3 years'
+    default:
+      return minutes != null ? `${minutes} minutes` : '—'
+  }
+}
+
+function formatQueryAccessPattern(value?: string | null, allLabel = 'All') {
+  if (!value || value === '*') {
+    return allLabel
+  }
+  return value
+}
+
+function formatQueryAccessConnection(item: QueryAccessTicketItem) {
+  return item.db_connection_name || `Connection #${item.connection_id}`
+}
+
+function formatQueryAccessRuleSummary(item: QueryAccessTicketItem) {
+  const action = item.effect === 'deny' ? 'Exclude' : 'Grant'
+  const database = formatQueryAccessPattern(item.database_pattern || item.database_name, 'all databases')
+  const table = formatQueryAccessPattern(item.table_pattern || item.table_name, 'all tables')
+  return `${action} ${formatQueryAccessConnection(item)} / ${database} / ${table}`
+}
+
+function summarizeQueryAccessConnections(items: QueryAccessTicketItem[]) {
+  const names = Array.from(new Set(items.map(formatQueryAccessConnection)))
+  if (names.length === 0) {
+    return '—'
+  }
+  if (names.length === 1) {
+    return names[0]
+  }
+  return `${names[0]} + ${names.length - 1} more`
+}
+
+function summarizeQueryAccessScope(items: QueryAccessTicketItem[]) {
+  if (items.length === 0) {
+    return '—'
+  }
+  const allowInstanceCount = items.filter((item) => item.effect !== 'deny' && (item.database_pattern || item.database_name) === '*' && (item.table_pattern || item.table_name || '*') === '*').length
+  const denyCount = items.filter((item) => item.effect === 'deny').length
+  const parts = [`${items.length} rule${items.length > 1 ? 's' : ''}`]
+  if (allowInstanceCount > 0) {
+    parts.push(`${allowInstanceCount} instance-level grant${allowInstanceCount > 1 ? 's' : ''}`)
+  }
+  if (denyCount > 0) {
+    parts.push(`${denyCount} exclusion${denyCount > 1 ? 's' : ''}`)
+  }
+  return parts.join(', ')
 }
 
 function formatActivityAction(actionType: string) {
@@ -555,6 +617,9 @@ export function TicketDetailPage() {
   const canRevoke = detail?.capabilities?.can_revoke ?? false
   const exportDownloadURL = detail?.export_request?.download_url ?? null
   const statementResults = detail ? buildStatementResults(detail) : []
+  const queryAccessItems = detail?.query_access_items ?? []
+  const queryAccessConnections = summarizeQueryAccessConnections(queryAccessItems)
+  const queryAccessScopeSummary = summarizeQueryAccessScope(queryAccessItems)
   const hasActionPanel = canReview || canWithdraw || canExecute || canReject || canRevoke || (ticket?.ticket_type === 'sql_export' && detail?.capabilities.can_download_export && exportDownloadURL)
   const shouldShowActionPanel = hasActionPanel && !['completed', 'failed', 'rejected', 'withdrawn', 'stopped', 'interrupted'].includes(ticket?.status ?? '')
   const showExecutionActions = (ticket?.status === 'approved' && canReject) ||
@@ -684,8 +749,8 @@ export function TicketDetailPage() {
                 headers={['Ticket Type', 'DB Connection', 'Database', 'Submitter', 'Reviewer', 'Executor', 'Description', 'Current Status']}
                 rows={[[
                   formatTicketTypeLabel(ticket.ticket_type),
-                  ticket.db_connection_name || ticket.db_connection_id || 'Not specified',
-                  ticket.database_name || '—',
+                  ticket.ticket_type === 'query_access' ? queryAccessConnections : ticket.db_connection_name || ticket.db_connection_id || 'Not specified',
+                  ticket.ticket_type === 'query_access' ? queryAccessScopeSummary : ticket.database_name || '—',
                   formatTicketActor(ticket.submitter_name, ticket.submitter_id),
                   formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null),
                   formatTicketActor(ticket.executor_name, ticket.executor_id ?? null),
@@ -699,10 +764,10 @@ export function TicketDetailPage() {
               <div className="px-4 pb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Query Access Details</p>
                 <DetailTable
-                  headers={['Scope Mode', 'Approved Duration', 'Approved Until', 'Revoked At', 'Revoked By']}
+                  headers={['Rule Count', 'Access Duration', 'Approved Until', 'Revoked At', 'Revoked By']}
                   rows={[[
-                    detail.query_access_items[0]?.scope_mode ?? '—',
-                    ticket.approved_duration_minutes != null ? `${ticket.approved_duration_minutes} minutes` : '—',
+                    queryAccessItems.length,
+                    formatQueryAccessDuration(ticket.approved_duration_minutes),
                     ticket.approved_until ? formatDateTime(ticket.approved_until, true) : '—',
                     ticket.revoked_at ? formatDateTime(ticket.revoked_at, true) : '—',
                     formatTicketActor(ticket.revoked_by_name, ticket.revoked_by ?? null),
@@ -717,10 +782,11 @@ export function TicketDetailPage() {
                         <th className="px-4 py-3">Connection</th>
                         <th className="px-4 py-3">Database</th>
                         <th className="px-4 py-3">Table</th>
+                        <th className="px-4 py-3">Summary</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border bg-white text-[13px] text-ink">
-                      {detail.query_access_items.map((item) => (
+                      {queryAccessItems.map((item) => (
                         <tr key={item.id}>
                           <td className="px-4 py-3 align-top">{item.id}</td>
                           <td className="px-4 py-3 align-top">
@@ -730,9 +796,10 @@ export function TicketDetailPage() {
                               {item.effect === 'deny' ? 'Deny' : 'Allow'}
                             </span>
                           </td>
-                          <td className="px-4 py-3 align-top">{item.connection_id}</td>
+                          <td className="px-4 py-3 align-top">{formatQueryAccessConnection(item)}</td>
                           <td className="px-4 py-3 align-top">{item.database_pattern === '*' ? 'All Databases' : item.database_pattern || item.database_name}</td>
                           <td className="px-4 py-3 align-top">{item.table_pattern === '*' ? 'All Tables' : item.table_pattern || item.table_name || '—'}</td>
+                          <td className="px-4 py-3 align-top">{formatQueryAccessRuleSummary(item)}</td>
                         </tr>
                       ))}
                     </tbody>
