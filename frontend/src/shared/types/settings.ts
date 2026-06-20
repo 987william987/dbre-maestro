@@ -36,3 +36,22 @@ export type ApprovalPolicy = {
   reviewer_auth_groups: string[]
   enabled: boolean
 }
+
+export type ApprovalResolutionUser = {
+  id: number
+  username: string
+  sources?: string[]
+  reason?: string
+}
+
+export type ApprovalResolutionWorkflow = {
+  workflow_type: ApprovalWorkflowType
+  enabled: boolean
+  required_permissions: string[]
+  reviewer_user_ids: number[]
+  reviewer_auth_groups: string[]
+  candidate_reviewers: ApprovalResolutionUser[]
+  effective_reviewers: ApprovalResolutionUser[]
+  excluded_reviewers: ApprovalResolutionUser[]
+  missing_reviewer_user_ids: number[]
+}

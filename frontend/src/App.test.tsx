@@ -58,7 +58,7 @@ describe('App routing', () => {
           id: 1,
           username: 'admin',
           auth_groups: null,
-          permissions: ['tickets.apply'],
+          permissions: ['tickets.read', 'tickets.apply'],
           db_connection_ids: [],
         })
       }

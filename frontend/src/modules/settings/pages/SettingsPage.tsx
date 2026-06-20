@@ -64,6 +64,7 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const approvalIssues = form ? findApprovalPolicyIssues(form.approvalPolicies, users, authGroups) : []
 
   useEffect(() => {
     let active = true
@@ -112,6 +113,11 @@ export function SettingsPage() {
     setSaving(true)
     setError('')
     try {
+      const issues = findApprovalPolicyIssues(form.approvalPolicies, users, authGroups)
+      if (issues.length > 0) {
+        setError(`Approval routing has no effective reviewers: ${issues.join(', ')}`)
+        return
+      }
       const payload = toPayload(settings, form)
       const saved = await patchSettings(payload)
       setSettings(saved)
@@ -346,6 +352,11 @@ export function SettingsPage() {
               <p className="text-[14px] font-semibold text-ink">Approval Routing</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Configure reviewer pools by workflow. These routing rules are separate from execution permissions.</p>
             </div>
+            {approvalIssues.length > 0 ? (
+              <div className="border-b border-danger/20 bg-red-50 px-4 py-3 text-[12px] font-medium leading-5 text-danger">
+                No effective reviewers for {approvalIssues.join(', ')}. Add reviewer users or groups that also have the required permission before saving.
+              </div>
+            ) : null}
             <div className="divide-y divide-border/80">
               {form.approvalPolicies.map((policy) => (
                 <div key={policy.workflow_type} className="grid gap-4 px-4 py-4 lg:grid-cols-[220px_1fr_1fr]">
@@ -384,7 +395,7 @@ export function SettingsPage() {
           <div className="flex justify-end">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || approvalIssues.length > 0}
               className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Save className="h-4 w-4" />
@@ -416,23 +427,8 @@ function EffectiveReviewersPreview({
     )
   }
 
-  const reviewerIDs = new Set<number>()
-  for (const userID of policy.reviewer_user_ids) {
-    reviewerIDs.add(userID)
-  }
-  for (const groupName of policy.reviewer_auth_groups) {
-    for (const user of users) {
-      if (user.auth_groups.includes(groupName)) {
-        reviewerIDs.add(user.id)
-      }
-    }
-  }
-
-  const effectiveReviewers = users
-    .filter((user) => user.is_active && reviewerIDs.has(user.id))
-    .filter((user) => hasAnyRequiredPermission(user, authGroups, requiredPermissions))
-    .map((user) => user.username)
-    .sort((left, right) => left.localeCompare(right))
+  const resolution = resolveApprovalPolicy(policy, users, authGroups)
+  const excludedReviewers = resolution.excludedReviewers.map((user) => `${user.username} (${user.reason})`)
 
   return (
     <div className="lg:col-start-2 lg:col-span-2 rounded-lg border border-border bg-panel-soft px-3 py-3">
@@ -442,21 +438,81 @@ function EffectiveReviewersPreview({
           Requires {requiredPermissions.join(' or ')}
         </span>
       </div>
-      {effectiveReviewers.length === 0 ? (
+      {resolution.effectiveReviewers.length === 0 ? (
         <p className="mt-2 text-[12px] leading-5 text-danger">
           No effective reviewers. Add users or groups that also have the required permission.
         </p>
       ) : (
         <div className="mt-2 flex flex-wrap gap-2">
-          {effectiveReviewers.map((username) => (
-            <span key={username} className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-ink">
-              {username}
+          {resolution.effectiveReviewers.map((user) => (
+            <span key={user.id} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-ink">
+              <span>{user.username}</span>
+              <span className="text-[10px] font-medium text-muted">
+                {user.sources.join(', ')}
+              </span>
             </span>
           ))}
         </div>
       )}
+      {excludedReviewers.length > 0 ? (
+        <p className="mt-2 text-[11px] leading-5 text-muted">
+          Excluded: {excludedReviewers.join(', ')}
+        </p>
+      ) : null}
     </div>
   )
+}
+
+type LocalApprovalResolutionUser = {
+  id: number
+  username: string
+  sources: string[]
+  reason?: string
+}
+
+function findApprovalPolicyIssues(policies: ApprovalPolicy[], users: UserSummary[], authGroups: AuthGroupSummary[]) {
+  return policies
+    .filter((policy) => policy.enabled)
+    .filter((policy) => resolveApprovalPolicy(policy, users, authGroups).effectiveReviewers.length === 0)
+    .map((policy) => APPROVAL_WORKFLOW_LABELS[policy.workflow_type])
+}
+
+function resolveApprovalPolicy(policy: ApprovalPolicy, users: UserSummary[], authGroups: AuthGroupSummary[]) {
+  const requiredPermissions = APPROVAL_WORKFLOW_PERMISSIONS[policy.workflow_type] ?? []
+  const reviewerSources = new Map<number, Set<string>>()
+  function addReviewerSource(userID: number, source: string) {
+    const sources = reviewerSources.get(userID) ?? new Set<string>()
+    sources.add(source)
+    reviewerSources.set(userID, sources)
+  }
+  for (const userID of policy.reviewer_user_ids) {
+    addReviewerSource(userID, 'user')
+  }
+  for (const groupName of policy.reviewer_auth_groups) {
+    for (const user of users) {
+      if (user.auth_groups.includes(groupName)) {
+        addReviewerSource(user.id, `group:${groupName}`)
+      }
+    }
+  }
+
+  const effectiveReviewers: LocalApprovalResolutionUser[] = []
+  const excludedReviewers: LocalApprovalResolutionUser[] = []
+  for (const user of users.filter((item) => reviewerSources.has(item.id))) {
+    const sources = Array.from(reviewerSources.get(user.id) ?? []).sort()
+    if (!user.is_active) {
+      excludedReviewers.push({ id: user.id, username: user.username, sources, reason: 'inactive' })
+      continue
+    }
+    if (!hasAnyRequiredPermission(user, authGroups, requiredPermissions)) {
+      excludedReviewers.push({ id: user.id, username: user.username, sources, reason: 'missing permission' })
+      continue
+    }
+    effectiveReviewers.push({ id: user.id, username: user.username, sources })
+  }
+  effectiveReviewers.sort((left, right) => left.username.localeCompare(right.username))
+  excludedReviewers.sort((left, right) => left.username.localeCompare(right.username))
+  return { effectiveReviewers, excludedReviewers }
 }
 
 function hasAnyRequiredPermission(user: UserSummary, authGroups: AuthGroupSummary[], requiredPermissions: string[]) {

@@ -14,6 +14,7 @@ type NavLeafItem = {
   to: string
   label: string
   icon: typeof Ticket
+  allowed?: (permissions: string[]) => boolean
 }
 
 type NavItem = {
@@ -34,14 +35,14 @@ const NAV_ITEMS: NavItem[] = [
     to: '/tickets',
     children: [
       { to: '/tickets', label: 'All Tickets', icon: Ticket },
-      { to: '/tickets/new', label: 'New Ticket', icon: FilePlus2 },
+      { to: '/tickets/new', label: 'New Ticket', icon: FilePlus2, allowed: (permissions) => permissions.includes('tickets.apply') },
     ],
   },
   {
     key: 'sql-editor',
     label: 'SQL Editor',
     icon: SquareTerminal,
-    allowed: (permissions) => permissions.includes('sql_editor.query'),
+    allowed: (permissions) => permissions.includes('sql_editor.read'),
     to: '/sql-editor',
   },
   {
@@ -296,7 +297,13 @@ export function AppShell() {
   }
 
   const navItems = useMemo(
-    () => NAV_ITEMS.filter((item) => item.allowed(user.permissions)),
+    () =>
+      NAV_ITEMS
+        .filter((item) => item.allowed(user.permissions))
+        .map((item) => ({
+          ...item,
+          children: item.children?.filter((child) => child.allowed == null || child.allowed(user.permissions)),
+        })),
     [user.permissions],
   )
   const activeNavItem = useMemo(

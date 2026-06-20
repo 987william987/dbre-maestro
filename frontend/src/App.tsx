@@ -59,7 +59,7 @@ export default function App() {
                 <Route path="/users/resources" element={<UsersPage initialView="resources" />} />
                 <Route path="/users/query-access" element={<UsersPage initialView="query-access" />} />
               </Route>
-              <Route element={<RoleRoute allowedPermissions={['sql_editor.query']} />}>
+              <Route element={<RoleRoute allowedPermissions={['sql_editor.read']} />}>
                 <Route path="/sql-editor" element={<SQLEditorPage />} />
               </Route>
               <Route element={<RoleRoute allowedPermissions={['db_connections.read', 'db_connections.write']} />}>

@@ -713,6 +713,8 @@ export function SQLEditorPage() {
   const { user } = useAuth()
   const { pushToast } = useToast()
   const hasSensitiveOverride = Boolean(user?.permissions.includes('global.sensitive'))
+  const canQuery = Boolean(user?.permissions.includes('sql_editor.query'))
+  const canExport = Boolean(user?.permissions.includes('sql_editor.export'))
   const canApplySensitiveAccess = Boolean(user?.permissions.includes('sql_editor.sensitive_apply'))
   const accessibleConnectionIDs = user?.dbConnectionIds ?? []
   const [connections, setConnections] = useState<DBConnection[]>([])
@@ -736,6 +738,12 @@ export function SQLEditorPage() {
     let active = true
 
     async function loadConnections() {
+      if (!canQuery) {
+        setConnections([])
+        setConnectionsLoading(false)
+        setConnectionsError('')
+        return
+      }
       setConnectionsLoading(true)
       setConnectionsError('')
       try {
@@ -761,10 +769,17 @@ export function SQLEditorPage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [canQuery])
 
   useEffect(() => {
     let active = true
+    if (!canQuery) {
+      setHistory([])
+      setSavedQueries([])
+      return () => {
+        active = false
+      }
+    }
 
     async function loadQueryConstraints() {
       try {
@@ -784,7 +799,7 @@ export function SQLEditorPage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [canQuery, pushToast])
 
   useEffect(() => {
     let active = true
@@ -1260,6 +1275,10 @@ export function SQLEditorPage() {
   }
 
   async function executeEditorSQL(mode: 'run' | 'explain') {
+    if (!canQuery) {
+      updateActiveTab({ error: 'SQL query permission is required to run queries.' })
+      return
+    }
     const sqlToExecute = activeExecutionSQL
     if (!activeTab?.connectionId || !sqlToExecute) {
       updateActiveTab({ error: 'Select a database connection and enter a query first.' })
@@ -1422,6 +1441,9 @@ export function SQLEditorPage() {
   }
 
   function openExportConfirm() {
+    if (!canExport) {
+      return
+    }
     const state = buildRequestConfirmState('export')
     if (!state) {
       return
@@ -2075,7 +2097,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={handleExplainQuery}
-                      disabled={activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
+                      disabled={!canQuery || activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
                       className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {activeTabRunning ? 'Running...' : 'Explain'}
@@ -2083,7 +2105,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={handleRunQuery}
-                      disabled={activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
+                      disabled={!canQuery || activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
                       className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Play className="h-4 w-4" />
@@ -2237,7 +2259,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={openExportConfirm}
-                      disabled={activeTabExporting || !activeTab.connectionId || !activeExecutionSQL}
+                      disabled={!canExport || activeTabExporting || !activeTab.connectionId || !activeExecutionSQL}
                       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Download className="h-4 w-4" />

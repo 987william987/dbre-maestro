@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 	_ "time/tzdata"
@@ -69,6 +71,20 @@ func (h *SettingsHandler) ListDBConnections(w http.ResponseWriter, r *http.Reque
 	jsonOK(w, map[string]any{
 		"connections": items,
 	})
+}
+
+func (h *SettingsHandler) ApprovalResolution(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.settings.Get(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load settings failed")
+		return
+	}
+	resolution, err := h.resolveApprovalPolicies(r.Context(), settings.ApprovalPolicies)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "resolve approval policies failed")
+		return
+	}
+	jsonOK(w, map[string]any{"workflows": resolution})
 }
 
 func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +166,25 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "db_metadata_cron_timezone is invalid")
 		return
 	}
+	if len(req.ApprovalPolicies) == 0 {
+		current, err := h.settings.Get(r.Context())
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load approval policies failed")
+			return
+		}
+		req.ApprovalPolicies = current.ApprovalPolicies
+	}
+	resolution, err := h.resolveApprovalPolicies(r.Context(), req.ApprovalPolicies)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "resolve approval policies failed")
+		return
+	}
+	for _, item := range resolution {
+		if item.Enabled && len(item.EffectiveReviewers) == 0 {
+			jsonErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("approval policy %s has no effective reviewers", item.WorkflowType))
+			return
+		}
+	}
 
 	if err := h.settings.Replace(r.Context(), &req); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "update settings failed")
@@ -165,6 +200,7 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		Details: map[string]any{
 			"sensitive_export_reviewer_user_ids":          req.SensitiveExportReviewerUserIDs,
 			"sensitive_query_access_reviewer_user_ids":    req.SensitiveQueryAccessReviewerUserIDs,
+			"deprecated_reviewer_settings":                true,
 			"require_non_sensitive_export_review":         req.RequireNonSensitiveExportReview,
 			"lark_app_id":                                 req.LarkAppID,
 			"lark_app_secret_configured":                  req.LarkAppSecretConfigured || req.LarkAppSecret != "",
@@ -198,6 +234,138 @@ func (h *SettingsHandler) validateUserExists(r *http.Request, userID uint64) err
 		return fmt.Errorf("user %d does not exist", userID)
 	}
 	return nil
+}
+
+type approvalResolutionUser struct {
+	ID       uint64   `json:"id"`
+	Username string   `json:"username"`
+	Sources  []string `json:"sources,omitempty"`
+	Reason   string   `json:"reason,omitempty"`
+}
+
+type approvalResolutionWorkflow struct {
+	WorkflowType           model.ApprovalWorkflowType `json:"workflow_type"`
+	Enabled                bool                       `json:"enabled"`
+	RequiredPermissions    []string                   `json:"required_permissions"`
+	ReviewerUserIDs        []uint64                   `json:"reviewer_user_ids"`
+	ReviewerAuthGroups     []model.AuthGroup          `json:"reviewer_auth_groups"`
+	CandidateReviewers     []approvalResolutionUser   `json:"candidate_reviewers"`
+	EffectiveReviewers     []approvalResolutionUser   `json:"effective_reviewers"`
+	ExcludedReviewers      []approvalResolutionUser   `json:"excluded_reviewers"`
+	MissingReviewerUserIDs []uint64                   `json:"missing_reviewer_user_ids"`
+}
+
+func (h *SettingsHandler) resolveApprovalPolicies(ctx context.Context, policies []model.ApprovalPolicy) ([]approvalResolutionWorkflow, error) {
+	items := make([]approvalResolutionWorkflow, 0, len(policies))
+	for _, policy := range policies {
+		requiredPermissions := reviewPermissionsForWorkflow(policy.WorkflowType)
+		candidatesByID := make(map[uint64]approvalResolutionUser)
+		missingUserIDs := []uint64{}
+		addSource := func(user model.User, source string) {
+			item := candidatesByID[user.ID]
+			if item.ID == 0 {
+				item = approvalResolutionUser{ID: user.ID, Username: user.Username}
+			}
+			if !containsString(item.Sources, source) {
+				item.Sources = append(item.Sources, source)
+			}
+			candidatesByID[user.ID] = item
+		}
+
+		for _, userID := range policy.ReviewerUserIDs {
+			user, err := h.users.GetByID(ctx, userID)
+			if err != nil {
+				return nil, err
+			}
+			if user == nil {
+				missingUserIDs = append(missingUserIDs, userID)
+				continue
+			}
+			addSource(*user, "user")
+		}
+		for _, authGroup := range policy.ReviewerAuthGroups {
+			users, err := h.users.ListUsersByAuthGroup(ctx, authGroup)
+			if err != nil {
+				return nil, err
+			}
+			for _, user := range users {
+				addSource(user, "group:"+string(authGroup))
+			}
+		}
+
+		candidateIDs := make([]uint64, 0, len(candidatesByID))
+		for userID := range candidatesByID {
+			candidateIDs = append(candidateIDs, userID)
+		}
+		sort.Slice(candidateIDs, func(i, j int) bool { return candidateIDs[i] < candidateIDs[j] })
+
+		candidates := make([]approvalResolutionUser, 0, len(candidateIDs))
+		effective := []approvalResolutionUser{}
+		excluded := []approvalResolutionUser{}
+		for _, userID := range candidateIDs {
+			item := candidatesByID[userID]
+			sort.Strings(item.Sources)
+			candidates = append(candidates, item)
+
+			user, err := h.users.GetByID(ctx, userID)
+			if err != nil {
+				return nil, err
+			}
+			if user == nil {
+				item.Reason = "missing"
+				excluded = append(excluded, item)
+				continue
+			}
+			if !user.IsActive {
+				item.Reason = "inactive"
+				excluded = append(excluded, item)
+				continue
+			}
+			permissions, err := h.users.GetEffectivePermissionKeys(ctx, userID)
+			if err != nil {
+				return nil, err
+			}
+			if !hasAnyString(permissions, requiredPermissions) {
+				item.Reason = "missing_required_permission"
+				excluded = append(excluded, item)
+				continue
+			}
+			effective = append(effective, item)
+		}
+
+		items = append(items, approvalResolutionWorkflow{
+			WorkflowType:           policy.WorkflowType,
+			Enabled:                policy.Enabled,
+			RequiredPermissions:    requiredPermissions,
+			ReviewerUserIDs:        policy.ReviewerUserIDs,
+			ReviewerAuthGroups:     policy.ReviewerAuthGroups,
+			CandidateReviewers:     candidates,
+			EffectiveReviewers:     effective,
+			ExcludedReviewers:      excluded,
+			MissingReviewerUserIDs: missingUserIDs,
+		})
+	}
+	return items, nil
+}
+
+func containsString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAnyString(items []string, targets []string) bool {
+	for _, item := range items {
+		for _, target := range targets {
+			if item == target {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (h *SettingsHandler) validateConnectionExists(r *http.Request, connectionID uint64) error {

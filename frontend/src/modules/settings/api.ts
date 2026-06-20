@@ -1,6 +1,6 @@
 import { apiClient } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { PlatformSettings } from '@/shared/types/settings'
+import type { ApprovalResolutionWorkflow, PlatformSettings } from '@/shared/types/settings'
 
 function normalizeSettings(settings: PlatformSettings): PlatformSettings {
   return {
@@ -53,6 +53,12 @@ export function getSettings() {
 
 export function patchSettings(payload: PlatformSettings) {
   return apiClient.patch<PlatformSettings>('/settings', payload).then(normalizeSettings)
+}
+
+export function getApprovalResolution() {
+  return apiClient.get<{ workflows: ApprovalResolutionWorkflow[] }>('/settings/approval-resolution').then((response) => ({
+    workflows: Array.isArray(response.workflows) ? response.workflows : [],
+  }))
 }
 
 type SettingsDBConnectionsResponse = {

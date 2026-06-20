@@ -244,6 +244,7 @@ func main() {
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSettingsRead).Get("/", settingsH.Get)
 			r.With(requireSettingsRead).Get("/db-connections", settingsH.ListDBConnections)
+			r.With(requireSettingsRead).Get("/approval-resolution", settingsH.ApprovalResolution)
 			r.With(requireSettingsWrite).Patch("/", settingsH.Patch)
 		})
 
@@ -306,7 +307,7 @@ func main() {
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSQLEditorQuery).Get("/connections", queryH.ListConnections)
-			r.With(requireSQLEditorQuery).Get("/constraints", queryH.Constraints)
+			r.With(requireSQLEditorRead).Get("/constraints", queryH.Constraints)
 			r.With(requireSQLEditorQuery).Post("/", queryH.Execute)
 			r.With(requireSQLEditorSensitiveApply).Post("/sensitive-access", queryH.CreateSensitiveAccessTicket)
 			r.With(requireSQLEditorQuery).Get("/history", queryH.ListHistory)
@@ -329,16 +330,16 @@ func main() {
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 
-			r.Get("/", ticketH.List)
+			r.With(requireTicketsRead).Get("/", ticketH.List)
 			r.With(requireTicketsApply).Get("/connections", ticketH.ListConnections)
 			r.With(requireTicketsApply).Get("/connections/{id}/databases", ticketH.ListDatabases)
 			r.With(requireTicketsApply).Post("/review", ticketH.ReviewSQL)
 			r.With(requireTicketsApply).Post("/", ticketH.Create)
 
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", ticketH.Get)
-				r.Post("/approve", ticketH.Approve)
-				r.Post("/reject", ticketH.Reject)
+				r.With(requireTicketsRead).Get("/", ticketH.Get)
+				r.With(requireTicketWorkflowReview).Post("/approve", ticketH.Approve)
+				r.With(requireTicketWorkflowReject).Post("/reject", ticketH.Reject)
 				r.With(requireTicketsApply).Post("/withdraw", ticketH.Withdraw)
 				r.With(requireSensitiveReview).Post("/revoke", ticketH.Revoke)
 				r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)
@@ -453,6 +454,9 @@ func requireSQLReviewWrite(next http.Handler) http.Handler {
 func requireSQLEditorQuery(next http.Handler) http.Handler {
 	return middleware.RequirePermission("sql_editor.query")(next)
 }
+func requireSQLEditorRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission("sql_editor.read")(next)
+}
 func requireSQLEditorSensitiveApply(next http.Handler) http.Handler {
 	return middleware.RequirePermission("sql_editor.sensitive_apply")(next)
 }
@@ -465,6 +469,9 @@ func requireSQLEditorExportReview(next http.Handler) http.Handler {
 func requireTicketsApply(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.apply")(next)
 }
+func requireTicketsRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission("tickets.read")(next)
+}
 func requireTicketsReview(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.review")(next)
 }
@@ -472,15 +479,7 @@ func requireTicketsExecute(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.execute")(next)
 }
 func requireTicketsWorkspaceRead(next http.Handler) http.Handler {
-	return middleware.RequirePermission(
-		"tickets.apply",
-		"tickets.review",
-		"tickets.execute",
-		"sql_editor.export",
-		"sql_editor.export_review",
-		"sql_editor.sensitive_apply",
-		"sql_editor.sensitive_review",
-	)(next)
+	return middleware.RequirePermission("tickets.read")(next)
 }
 func requireTicketWorkflowReview(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.review", "sql_editor.export_review", "sql_editor.sensitive_review")(next)

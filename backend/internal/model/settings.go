@@ -1,7 +1,9 @@
 package model
 
 type PlatformSettings struct {
-	SensitiveExportReviewerUserIDs       []uint64         `json:"sensitive_export_reviewer_user_ids"`
+	// Deprecated: reviewer routing is now controlled by ApprovalPolicies.
+	SensitiveExportReviewerUserIDs []uint64 `json:"sensitive_export_reviewer_user_ids"`
+	// Deprecated: reviewer routing is now controlled by ApprovalPolicies.
 	SensitiveQueryAccessReviewerUserIDs  []uint64         `json:"sensitive_query_access_reviewer_user_ids"`
 	RequireNonSensitiveExportReview      bool             `json:"require_non_sensitive_export_review"`
 	ApprovalPolicies                     []ApprovalPolicy `json:"approval_policies"`
