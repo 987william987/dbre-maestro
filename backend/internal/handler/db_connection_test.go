@@ -274,7 +274,7 @@ func TestDBConnectionHandlerCreatePostgresDefaultsDatabaseNameToPostgres(t *test
 	}
 }
 
-func TestTicketHandlerCreateRejectsConnectionOutsideScope(t *testing.T) {
+func TestTicketHandlerCreateRejectsSQLEditorTicketTypes(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -301,27 +301,6 @@ func TestTicketHandlerCreateRejectsConnectionOutsideScope(t *testing.T) {
 		"",
 	)
 
-	now := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
-		WithArgs(uint64(99)).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id",
-			"username",
-			"email",
-			"password",
-			"is_setup",
-			"is_protected",
-			"is_active",
-			"created_at",
-			"updated_at",
-		}).AddRow(99, "alan", "alan@example.com", "hash", true, false, true, now, now))
-	mock.ExpectQuery(`SELECT EXISTS \(`).
-		WithArgs(uint64(99), sqlmock.AnyArg(), uint64(99), sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-	mock.ExpectQuery(`SELECT DISTINCT db_connection_id FROM`).
-		WithArgs(uint64(99), uint64(99), sqlmock.AnyArg(), uint64(99), sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"db_connection_id"}).AddRow(uint64(1)))
-
 	req := httptest.NewRequest(http.MethodPost, "/tickets", strings.NewReader(`{
 		"title":"Export users",
 		"sql_content":"SELECT * FROM users",
@@ -336,10 +315,10 @@ func TestTicketHandlerCreateRejectsConnectionOutsideScope(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.Create(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "access to this connection is not allowed") {
+	if !strings.Contains(rec.Body.String(), "must be created from SQL Editor") {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

@@ -587,8 +587,11 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch req.TicketType {
-	case model.TicketTypeDDL, model.TicketTypeDML, model.TicketTypeRedisCommand, model.TicketTypeSQLExport, model.TicketTypeSensitiveQueryAccess, model.TicketTypeQueryAccess:
-	default:
+	case model.TicketTypeSQLExport, model.TicketTypeSensitiveQueryAccess:
+		jsonErr(w, http.StatusUnprocessableEntity, "sql_export and sensitive_query_access tickets must be created from SQL Editor")
+		return
+	}
+	if !isGeneralTicketApplyType(req.TicketType) {
 		jsonErr(w, http.StatusUnprocessableEntity, "invalid ticket_type")
 		return
 	}
@@ -1780,6 +1783,13 @@ func (h *TicketHandler) canReviewWorkflowByPermission(ctx context.Context, workf
 
 func isExecutableTicketType(ticketType model.TicketType) bool {
 	return ticketType == model.TicketTypeDDL || ticketType == model.TicketTypeDML || ticketType == model.TicketTypeRedisCommand
+}
+
+func isGeneralTicketApplyType(ticketType model.TicketType) bool {
+	return ticketType == model.TicketTypeDDL ||
+		ticketType == model.TicketTypeDML ||
+		ticketType == model.TicketTypeRedisCommand ||
+		ticketType == model.TicketTypeQueryAccess
 }
 
 func (h *TicketHandler) canRejectTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
