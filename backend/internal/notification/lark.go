@@ -140,6 +140,11 @@ func (c *Client) SendToRecipient(ctx context.Context, recipient string, msg Mess
 		if err != nil {
 			var apiErr *larkAPIError
 			if errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 {
+				if apiErr.isInvalidAccessToken() {
+					c.invalidateTenantAccessToken()
+					lastErr = fmt.Errorf("attempt %d invalid access token: %w", attempt, err)
+					continue
+				}
 				return SendResult{
 					Attempts: attempt,
 					Err:      err,
@@ -217,6 +222,7 @@ type larkSendMessageResponse struct {
 
 type larkAPIError struct {
 	Status int
+	Code   int
 	Body   string
 }
 
@@ -284,6 +290,7 @@ func (c *Client) postAppMessage(ctx context.Context, receiveIDType, receiveID st
 			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 				return resp.StatusCode, &larkAPIError{
 					Status: resp.StatusCode,
+					Code:   parsed.Code,
 					Body:   fmt.Sprintf("lark send message http %d: %s", resp.StatusCode, strings.TrimSpace(string(body))),
 				}
 			}
@@ -300,12 +307,14 @@ func (c *Client) postAppMessage(ctx context.Context, receiveIDType, receiveID st
 		}
 		return resp.StatusCode, &larkAPIError{
 			Status: resp.StatusCode,
+			Code:   parsed.Code,
 			Body:   fmt.Sprintf("lark send message http %d code=%d msg=%s", resp.StatusCode, parsed.Code, msg),
 		}
 	}
 	if parsed.Code != 0 {
 		return http.StatusBadRequest, &larkAPIError{
 			Status: http.StatusBadRequest,
+			Code:   parsed.Code,
 			Body:   fmt.Sprintf("lark app error code %d: %s", parsed.Code, parsed.Msg),
 		}
 	}
@@ -370,4 +379,15 @@ func (c *Client) getTenantAccessToken(ctx context.Context) (string, error) {
 	c.tokenExpiry = expiry
 	c.tokenMu.Unlock()
 	return parsed.TenantAccessToken, nil
+}
+
+func (c *Client) invalidateTenantAccessToken() {
+	c.tokenMu.Lock()
+	c.accessToken = ""
+	c.tokenExpiry = time.Time{}
+	c.tokenMu.Unlock()
+}
+
+func (e *larkAPIError) isInvalidAccessToken() bool {
+	return e.Code == 99991663 || strings.Contains(strings.ToLower(e.Body), "invalid access token")
 }
