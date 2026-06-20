@@ -17,6 +17,7 @@ import (
 const (
 	settingSensitiveExportReviewers      = "sensitive_export_reviewer_user_ids"
 	settingSensitiveQueryAccessReviewers = "sensitive_query_access_reviewer_user_ids"
+	settingRequireNonSensitiveExportRev  = "require_non_sensitive_export_review"
 	settingLarkAppID                     = "lark_app_id"
 	settingLarkAppSecret                 = "lark_app_secret"
 	settingSQLEditorAppTimeoutSeconds    = "sql_editor_app_timeout_seconds"
@@ -43,6 +44,7 @@ func NewSettingsRepo(db *sqlx.DB, encKey []byte) *SettingsRepo {
 func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error) {
 	settings := &model.PlatformSettings{
 		SQLEditorAppTimeoutSeconds:           30,
+		RequireNonSensitiveExportReview:      true,
 		SQLEditorMySQLMaxExecutionTimeMs:     25000,
 		SQLEditorPostgresStatementTimeoutMs:  25000,
 		DBMetadataInventoryEnabled:           true,
@@ -63,6 +65,13 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	}
 	settings.SensitiveExportReviewerUserIDs = exportReviewerIDs
 	settings.SensitiveQueryAccessReviewerUserIDs = sensitiveReviewerIDs
+	requireNonSensitiveExportReview, err := r.getBool(ctx, settingRequireNonSensitiveExportRev)
+	if err != nil {
+		return nil, err
+	}
+	if requireNonSensitiveExportReview != nil {
+		settings.RequireNonSensitiveExportReview = *requireNonSensitiveExportReview
+	}
 	larkAppID, err := r.getString(ctx, settingLarkAppID)
 	if err != nil {
 		return nil, err
@@ -170,6 +179,9 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 	if err := upsertUint64List(ctx, tx, settingSensitiveQueryAccessReviewers, settings.SensitiveQueryAccessReviewerUserIDs); err != nil {
 		return err
 	}
+	if err := upsertBool(ctx, tx, settingRequireNonSensitiveExportRev, settings.RequireNonSensitiveExportReview); err != nil {
+		return err
+	}
 	if err := upsertString(ctx, tx, settingLarkAppID, settings.LarkAppID); err != nil {
 		return err
 	}
@@ -221,6 +233,17 @@ func (r *SettingsRepo) IsSensitiveExportReviewer(ctx context.Context, userID uin
 
 func (r *SettingsRepo) IsSensitiveQueryAccessReviewer(ctx context.Context, userID uint64) (bool, error) {
 	return r.containsUserID(ctx, settingSensitiveQueryAccessReviewers, userID)
+}
+
+func (r *SettingsRepo) RequireNonSensitiveExportReview(ctx context.Context) (bool, error) {
+	value, err := r.getBool(ctx, settingRequireNonSensitiveExportRev)
+	if err != nil {
+		return true, err
+	}
+	if value == nil {
+		return true, nil
+	}
+	return *value, nil
 }
 
 func (r *SettingsRepo) GetLarkAppSecret(ctx context.Context) (string, error) {

@@ -56,9 +56,12 @@ func TestBuildTicketNotificationBodyIncludesExportContext(t *testing.T) {
 	databaseName := "analytics"
 	description := "submitter already sent the ticket, waiting for reviewer action."
 	connName := "warehouse-prod"
+	containsSensitive := false
 	ticket := &model.Ticket{
-		ID:           42,
-		DatabaseName: &databaseName,
+		ID:                42,
+		TicketType:        model.TicketTypeSQLExport,
+		ContainsSensitive: &containsSensitive,
+		DatabaseName:      &databaseName,
 	}
 
 	body := buildTicketNotificationBody(
@@ -71,6 +74,8 @@ func TestBuildTicketNotificationBodyIncludesExportContext(t *testing.T) {
 	)
 
 	for _, part := range []string{
+		"工單類型：SQL_EXPORT",
+		"導出類型：普通數據導出",
 		"目前狀態：待審核",
 		"待執行操作：請審核是否通過此工單",
 		"資料來源：warehouse-prod",
@@ -81,6 +86,28 @@ func TestBuildTicketNotificationBodyIncludesExportContext(t *testing.T) {
 		if !strings.Contains(body, part) {
 			t.Fatalf("body missing %q: %s", part, body)
 		}
+	}
+}
+
+func TestBuildTicketNotificationBodyIncludesSensitiveExportType(t *testing.T) {
+	containsSensitive := true
+	ticket := &model.Ticket{
+		ID:                42,
+		TicketType:        model.TicketTypeSQLExport,
+		ContainsSensitive: &containsSensitive,
+	}
+
+	body := buildTicketNotificationBody(
+		ticket,
+		nil,
+		exportTicketStateLabel(model.TicketStatusPendingReview),
+		"請審核是否通過此工單",
+		"",
+		"",
+	)
+
+	if !strings.Contains(body, "導出類型：敏感數據導出") {
+		t.Fatalf("body missing sensitive export type: %s", body)
 	}
 }
 

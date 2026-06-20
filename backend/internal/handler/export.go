@@ -30,6 +30,7 @@ type ExportHandler struct {
 	dbConns             *repository.DBConnectionRepo
 	users               *repository.UserRepo
 	audit               *repository.AuditRepo
+	settings            *repository.SettingsRepo
 	queryAccess         *queryaccess.Service
 	masking             *maskingRuntime
 	notifRepo           *repository.NotificationRepo
@@ -45,6 +46,7 @@ func NewExportHandler(
 	dbConns *repository.DBConnectionRepo,
 	users *repository.UserRepo,
 	audit *repository.AuditRepo,
+	settings *repository.SettingsRepo,
 	queryAccessRepo *repository.QueryAccessRepo,
 	maskingRules *repository.MaskingRuleRepo,
 	whitelist *repository.MaskingWhitelistRepo,
@@ -60,6 +62,7 @@ func NewExportHandler(
 		dbConns:             dbConns,
 		users:               users,
 		audit:               audit,
+		settings:            settings,
 		queryAccess:         queryaccess.NewService(queryAccessRepo, users),
 		masking:             newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:           notifRepo,
@@ -113,7 +116,11 @@ func (l *requestRateLimiter) Allow(key string, now time.Time) bool {
 
 func buildTicketNotificationBody(ticket *model.Ticket, connName *string, currentStatus, nextAction, detail, link string) string {
 	parts := []string{
+		fmt.Sprintf("工單類型：%s", exportTicketTypeLabel(ticket.TicketType)),
 		fmt.Sprintf("目前狀態：%s", currentStatus),
+	}
+	if ticket.TicketType == model.TicketTypeSQLExport && ticket.ContainsSensitive != nil {
+		parts = append(parts, fmt.Sprintf("導出類型：%s", exportSensitivityLabel(*ticket.ContainsSensitive)))
 	}
 	if nextAction != "" {
 		parts = append(parts, fmt.Sprintf("待執行操作：%s", nextAction))
@@ -131,6 +138,32 @@ func buildTicketNotificationBody(ticket *model.Ticket, connName *string, current
 		parts = append(parts, fmt.Sprintf("工單連結：%s", strings.TrimSpace(link)))
 	}
 	return strings.Join(parts, "\n")
+}
+
+func exportSensitivityLabel(containsSensitive bool) string {
+	if containsSensitive {
+		return "敏感數據導出"
+	}
+	return "普通數據導出"
+}
+
+func exportTicketTypeLabel(ticketType model.TicketType) string {
+	switch ticketType {
+	case model.TicketTypeDDL:
+		return "DDL"
+	case model.TicketTypeDML:
+		return "DML"
+	case model.TicketTypeRedisCommand:
+		return "REDIS_COMMAND"
+	case model.TicketTypeQueryAccess:
+		return "QUERY_ACCESS"
+	case model.TicketTypeSQLExport:
+		return "SQL_EXPORT"
+	case model.TicketTypeSensitiveQueryAccess:
+		return "SENSITIVE_QUERY_ACCESS"
+	default:
+		return strings.ToUpper(string(ticketType))
+	}
 }
 
 func exportTicketStateLabel(status model.TicketStatus) string {
@@ -276,20 +309,65 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "analyze export query failed: "+err.Error())
 		return
 	}
+	containsSensitive := analysis.ContainsSensitive
+	requireReview := true
+	if !containsSensitive {
+		requireReview, err = h.settings.RequireNonSensitiveExportReview(r.Context())
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load export approval setting failed")
+			return
+		}
+	}
 	title := fmt.Sprintf("SQL Export / %s", conn.Name)
-	description := fmt.Sprintf("由 SQL Editor 建立的導出申請。Sensitive=%t", analysis.ContainsSensitive)
+	description := fmt.Sprintf("由 SQL Editor 建立的導出申請。Sensitive=%t", containsSensitive)
 	ticket, err := h.tickets.CreateWithScopes(r.Context(), &model.Ticket{
-		Title:          title,
-		Description:    &description,
-		SQLContent:     req.SQLContent,
-		TicketType:     model.TicketTypeSQLExport,
-		DBConnectionID: &req.DBConnectionID,
-		DatabaseName:   nullableTrimmedString(req.DatabaseName),
-		SubmitterID:    userID,
+		Title:             title,
+		Description:       &description,
+		SQLContent:        req.SQLContent,
+		TicketType:        model.TicketTypeSQLExport,
+		ContainsSensitive: &containsSensitive,
+		DBConnectionID:    &req.DBConnectionID,
+		DatabaseName:      nullableTrimmedString(req.DatabaseName),
+		SubmitterID:       userID,
 	}, analysis.Scopes)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "create export ticket failed")
 		return
+	}
+	if !containsSensitive && !requireReview {
+		comment := "Auto-approved because non-sensitive export approval is disabled."
+		ok, err := h.tickets.UpdateStatus(r.Context(), ticket.ID, model.TicketStatusPendingReview, model.TicketStatusApproved, nil, &comment, nil)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "auto-approve export ticket failed")
+			return
+		}
+		if !ok {
+			jsonErr(w, http.StatusConflict, "ticket status changed concurrently")
+			return
+		}
+		updated, err := h.tickets.GetByID(r.Context(), ticket.ID)
+		if err != nil || updated == nil {
+			jsonErr(w, http.StatusInternalServerError, "load auto-approved export ticket failed")
+			return
+		}
+		ticket = updated
+		if _, err := h.ensureReadyExportRequest(r.Context(), ticket); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "create ready export failed")
+			return
+		}
+		h.audit.Log(r.Context(), repository.AuditEntry{
+			ActorID:      &userID,
+			ActorName:    middleware.UsernameFromCtx(r.Context()),
+			ActionType:   "ticket_auto_approve",
+			ResourceType: "ticket",
+			ResourceID:   &ticket.ID,
+			Details: map[string]any{
+				"ticket_type":                         ticket.TicketType,
+				"contains_sensitive":                  containsSensitive,
+				"require_non_sensitive_export_review": requireReview,
+			},
+			IPAddress: clientIP(r),
+		})
 	}
 
 	h.audit.Log(r.Context(), repository.AuditEntry{
@@ -298,29 +376,77 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "ticket_submit",
 		ResourceType: "ticket",
 		ResourceID:   &ticket.ID,
-		Details:      map[string]any{"ticket_type": ticket.TicketType, "contains_sensitive": analysis.ContainsSensitive},
-		IPAddress:    clientIP(r),
+		Details: map[string]any{
+			"ticket_type":                         ticket.TicketType,
+			"contains_sensitive":                  containsSensitive,
+			"require_non_sensitive_export_review": requireReview,
+		},
+		IPAddress: clientIP(r),
 	})
 	connName := h.loadTicketNotificationContext(r.Context(), ticket)
-	body := buildTicketNotificationBody(
-		ticket,
-		connName,
-		exportTicketStateLabel(ticket.Status),
-		"請審核是否通過此工單",
-		"提交人已送出工單，等待 reviewer 處理。",
-		h.ticketLink(ticket.ID),
-	)
-	h.sendInApp(r.Context(), userID, "ticket_submitted", fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
-	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
+	if requireReview || containsSensitive {
+		body := buildTicketNotificationBody(
+			ticket,
+			connName,
+			exportTicketStateLabel(ticket.Status),
+			"請審核是否通過此工單",
+			"提交人已送出工單，等待 reviewer 處理。",
+			h.ticketLink(ticket.ID),
+		)
+		h.sendInApp(r.Context(), userID, "ticket_submitted", fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
+		h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
+	} else {
+		body := buildTicketNotificationBody(
+			ticket,
+			connName,
+			exportTicketStateLabel(ticket.Status),
+			"普通導出已自動通過",
+			"此導出不包含敏感欄位，且目前設定不要求普通導出審批。",
+			h.ticketLink(ticket.ID),
+		)
+		h.sendInApp(r.Context(), userID, "ticket_auto_approved", fmt.Sprintf("普通匯出已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
+	}
 	publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":          ticket.ID,
 		"ticket_no":          ticket.TicketNo,
 		"status":             string(ticket.Status),
-		"contains_sensitive": analysis.ContainsSensitive,
+		"contains_sensitive": containsSensitive,
 		"scope_count":        len(analysis.Scopes),
 	})
+}
+
+func (h *ExportHandler) ensureReadyExportRequest(ctx context.Context, ticket *model.Ticket) (*model.ExportRequest, error) {
+	if ticket.DBConnectionID == nil {
+		return nil, fmt.Errorf("export ticket has no db connection")
+	}
+	existing, err := h.exports.GetByTicketID(ctx, ticket.ID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return existing, nil
+	}
+
+	exportTicketID := ticket.ID
+	id, token, err := h.exports.Create(ctx, &model.ExportRequest{
+		TicketID:       &exportTicketID,
+		RequesterID:    ticket.SubmitterID,
+		SQLContent:     ticket.SQLContent,
+		DBConnectionID: *ticket.DBConnectionID,
+	}, model.ExportStatusReady)
+	if err != nil {
+		return nil, err
+	}
+	req, err := h.exports.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if req != nil && req.DownloadToken == "" {
+		req.DownloadToken = token
+	}
+	return req, nil
 }
 
 // GET /exports

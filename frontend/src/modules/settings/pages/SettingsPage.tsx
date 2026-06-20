@@ -15,6 +15,7 @@ type SettingsForm = {
   larkAppID: string
   larkAppSecret: string
   larkAppSecretConfigured: boolean
+  requireNonSensitiveExportReview: boolean
   sqlEditorAppTimeoutSeconds: string
   sqlEditorMySQLMaxExecutionTimeMs: string
   sqlEditorPostgresStatementTimeoutMs: string
@@ -147,6 +148,28 @@ export function SettingsPage() {
                 value={form.sqlEditorPostgresStatementTimeoutMs}
                 onChange={(value) => setForm((current) => current ? { ...current, sqlEditorPostgresStatementTimeoutMs: value } : current)}
               />
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-border bg-panel shadow-soft">
+            <div className="border-b border-border/80 px-4 py-3">
+              <p className="text-[14px] font-semibold text-ink">Export Approval</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Sensitive exports always require approval. This setting only controls non-sensitive SQL Editor exports.</p>
+            </div>
+            <div className="px-4 py-4">
+              <label className="flex items-start gap-3 text-[13px] font-medium text-ink">
+                <span className="pt-0.5">
+                  <Switch
+                    ariaLabel="Require approval for non-sensitive exports"
+                    checked={form.requireNonSensitiveExportReview}
+                    onChange={(checked) => setForm((current) => current ? { ...current, requireNonSensitiveExportReview: checked } : current)}
+                  />
+                </span>
+                <span>
+                  <span className="block">Require approval for non-sensitive exports</span>
+                  <span className="mt-1 block text-[12px] font-normal leading-5 text-muted">When disabled, non-sensitive exports are auto-approved but still create export tickets for audit records.</span>
+                </span>
+              </label>
             </div>
           </section>
 
@@ -312,6 +335,7 @@ function toForm(settings: PlatformSettings): SettingsForm {
     larkAppID: settings.lark_app_id,
     larkAppSecret: '',
     larkAppSecretConfigured: settings.lark_app_secret_configured,
+    requireNonSensitiveExportReview: settings.require_non_sensitive_export_review,
     sqlEditorAppTimeoutSeconds: String(settings.sql_editor_app_timeout_seconds),
     sqlEditorMySQLMaxExecutionTimeMs: String(settings.sql_editor_mysql_max_execution_time_ms),
     sqlEditorPostgresStatementTimeoutMs: String(settings.sql_editor_postgres_statement_timeout_ms),
@@ -329,6 +353,7 @@ function toPayload(current: PlatformSettings | null, form: SettingsForm): Platfo
   return {
     sensitive_export_reviewer_user_ids: current?.sensitive_export_reviewer_user_ids ?? [],
     sensitive_query_access_reviewer_user_ids: current?.sensitive_query_access_reviewer_user_ids ?? [],
+    require_non_sensitive_export_review: form.requireNonSensitiveExportReview,
     lark_app_id: form.larkAppID.trim(),
     lark_app_secret: form.larkAppSecret,
     lark_app_secret_configured: form.larkAppSecretConfigured,

@@ -3,6 +3,7 @@ package model
 type PlatformSettings struct {
 	SensitiveExportReviewerUserIDs       []uint64 `json:"sensitive_export_reviewer_user_ids"`
 	SensitiveQueryAccessReviewerUserIDs  []uint64 `json:"sensitive_query_access_reviewer_user_ids"`
+	RequireNonSensitiveExportReview      bool     `json:"require_non_sensitive_export_review"`
 	LarkAppID                            string   `json:"lark_app_id"`
 	LarkAppSecret                        string   `json:"lark_app_secret,omitempty"`
 	LarkAppSecretConfigured              bool     `json:"lark_app_secret_configured"`

@@ -7,6 +7,7 @@ import { ToastProvider } from '@/shared/ui/ToastContext'
 vi.mock('@/modules/settings/api', () => ({
   getSettings: vi.fn(),
   listSettingsDBConnections: vi.fn(),
+  patchSettings: vi.fn(),
 }))
 
 import { getSettings, listSettingsDBConnections } from '@/modules/settings/api'
@@ -26,6 +27,7 @@ describe('SettingsPage', () => {
       lark_app_secret_configured: false,
       sensitive_export_reviewer_user_ids: [],
       sensitive_query_access_reviewer_user_ids: [],
+      require_non_sensitive_export_review: true,
       sql_editor_app_timeout_seconds: 30,
       sql_editor_mysql_max_execution_time_ms: 25000,
       sql_editor_postgres_statement_timeout_ms: 25000,
@@ -58,6 +60,7 @@ describe('SettingsPage', () => {
     expect(screen.getByText('analytics-ro')).toBeInTheDocument()
     expect(screen.getByText('warehouse-ro')).toBeInTheDocument()
     expect(screen.getByText('2 selected')).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Require approval for non-sensitive exports' })).toBeChecked()
     expect(screen.getByRole('switch', { name: 'analytics-ro selected for object scan' })).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: 'warehouse-ro selected for object scan' })).toBeInTheDocument()
     expect(screen.queryByText('ID 12')).not.toBeInTheDocument()

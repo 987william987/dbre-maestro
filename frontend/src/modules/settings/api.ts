@@ -10,6 +10,9 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     sensitive_query_access_reviewer_user_ids: Array.isArray(settings.sensitive_query_access_reviewer_user_ids)
       ? settings.sensitive_query_access_reviewer_user_ids
       : [],
+    require_non_sensitive_export_review: typeof settings.require_non_sensitive_export_review === 'boolean'
+      ? settings.require_non_sensitive_export_review
+      : true,
     lark_app_id: typeof settings.lark_app_id === 'string' ? settings.lark_app_id : '',
     lark_app_secret: typeof settings.lark_app_secret === 'string' ? settings.lark_app_secret : '',
     lark_app_secret_configured: typeof settings.lark_app_secret_configured === 'boolean' ? settings.lark_app_secret_configured : false,

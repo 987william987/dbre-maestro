@@ -1,6 +1,7 @@
 export type PlatformSettings = {
   sensitive_export_reviewer_user_ids: number[]
   sensitive_query_access_reviewer_user_ids: number[]
+  require_non_sensitive_export_review: boolean
   lark_app_id: string
   lark_app_secret?: string
   lark_app_secret_configured: boolean

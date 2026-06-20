@@ -129,6 +129,7 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		Details: map[string]any{
 			"sensitive_export_reviewer_user_ids":          req.SensitiveExportReviewerUserIDs,
 			"sensitive_query_access_reviewer_user_ids":    req.SensitiveQueryAccessReviewerUserIDs,
+			"require_non_sensitive_export_review":         req.RequireNonSensitiveExportReview,
 			"lark_app_id":                                 req.LarkAppID,
 			"lark_app_secret_configured":                  req.LarkAppSecretConfigured || req.LarkAppSecret != "",
 			"sql_editor_app_timeout_seconds":              req.SQLEditorAppTimeoutSeconds,

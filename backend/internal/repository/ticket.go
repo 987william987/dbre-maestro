@@ -53,9 +53,9 @@ func (r *TicketRepo) CreateWithScopes(ctx context.Context, t *model.Ticket, scop
 	}
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO tickets (ticket_no, title, description, sql_content, ticket_type, db_connection_id, database_name, status, submitter_id, approved_duration_minutes, approved_until, revoked_at, revoked_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_review', ?, ?, ?, ?, ?, ?, ?)`,
-		ticketNo, t.Title, t.Description, t.SQLContent, t.TicketType, t.DBConnectionID, t.DatabaseName, t.SubmitterID,
+		`INSERT INTO tickets (ticket_no, title, description, sql_content, ticket_type, contains_sensitive, db_connection_id, database_name, status, submitter_id, approved_duration_minutes, approved_until, revoked_at, revoked_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending_review', ?, ?, ?, ?, ?, ?, ?)`,
+		ticketNo, t.Title, t.Description, t.SQLContent, t.TicketType, t.ContainsSensitive, t.DBConnectionID, t.DatabaseName, t.SubmitterID,
 		t.ApprovedDurationMinutes, t.ApprovedUntil, t.RevokedAt, t.RevokedBy, timeutil.NowUTC(), timeutil.NowUTC(),
 	)
 	if err != nil {

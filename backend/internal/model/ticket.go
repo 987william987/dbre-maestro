@@ -35,6 +35,7 @@ type Ticket struct {
 	Description             *string      `db:"description"      json:"description,omitempty"`
 	SQLContent              string       `db:"sql_content"      json:"sql_content"`
 	TicketType              TicketType   `db:"ticket_type"      json:"ticket_type"`
+	ContainsSensitive       *bool        `db:"contains_sensitive" json:"contains_sensitive,omitempty"`
 	DBConnectionID          *uint64      `db:"db_connection_id" json:"db_connection_id,omitempty"`
 	DatabaseName            *string      `db:"database_name"    json:"database_name,omitempty"`
 	Status                  TicketStatus `db:"status"           json:"status"`
