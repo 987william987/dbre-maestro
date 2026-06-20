@@ -46,9 +46,8 @@ func RunMigrations(dsn string, migrationsPath string) error {
 	}
 	defer rawDB.Close()
 
-	// Clear dirty or version-0 state directly via SQL rather than using
-	// golang-migrate's Force(), which fails when the target version has no file.
-	// All our migrations use IF NOT EXISTS so re-running from scratch is safe.
+	// Clear version-0 state directly via SQL rather than using golang-migrate's
+	// Force(), which fails when the target version has no file.
 	if err := resetMigrationState(rawDB); err != nil {
 		return fmt.Errorf("reset migration state: %w", err)
 	}
@@ -73,8 +72,9 @@ func RunMigrations(dsn string, migrationsPath string) error {
 	return nil
 }
 
-// resetMigrationState clears dirty or version=0 rows from schema_migrations so
-// golang-migrate can re-run from version 1. Safe because all migrations use IF NOT EXISTS.
+// resetMigrationState clears version=0 rows from schema_migrations so
+// golang-migrate can run from version 1. Dirty states must fail loudly because
+// MySQL DDL is not transactional and old migrations are not fully idempotent.
 func resetMigrationState(db *sql.DB) error {
 	var exists int
 	err := db.QueryRow(`
@@ -95,7 +95,10 @@ func resetMigrationState(db *sql.DB) error {
 		return err
 	}
 
-	if dirty || version == 0 {
+	if dirty {
+		return fmt.Errorf("dirty migration state at version %d", version)
+	}
+	if version == 0 {
 		_, err = db.Exec(`DELETE FROM schema_migrations`)
 		return err
 	}

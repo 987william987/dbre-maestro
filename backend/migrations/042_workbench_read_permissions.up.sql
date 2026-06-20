@@ -1,3 +1,6 @@
+ALTER TABLE auth_group_permissions
+    ADD COLUMN created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6);
+
 INSERT IGNORE INTO permissions (permission_key, name, description, category)
 VALUES
     ('tickets.read', 'Read Tickets', 'Enter the Tickets workspace and view tickets within the allowed visibility scope.', 'tickets'),
