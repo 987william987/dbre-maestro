@@ -34,6 +34,7 @@ import { formatDateTime } from '@/shared/lib/format'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataColumn, MetadataDefinition, MetadataItem, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
+import { AttentionPulse } from '@/shared/ui/AttentionPulse'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
@@ -279,6 +280,10 @@ function formatMetadataError(error: unknown): string {
     return error.message
   }
   return METADATA_ERROR_MESSAGE
+}
+
+function isQueryAccessDeniedMessage(message: string) {
+  return /query access/i.test(message)
 }
 
 function buildQueryAccessTicketURL(params: {
@@ -725,6 +730,7 @@ export function SQLEditorPage() {
   const [requestConfirmState, setRequestConfirmState] = useState<QueryRequestConfirmState | null>(null)
   const [sensitiveAccessDurationDialog, setSensitiveAccessDurationDialog] = useState<SensitiveAccessDurationDialogState | null>(null)
   const [editorHeights, setEditorHeights] = useState<Record<string, string>>({})
+  const [queryAccessAttentionKeys, setQueryAccessAttentionKeys] = useState<Record<string, number>>({})
 
   useEffect(() => {
     let active = true
@@ -872,6 +878,7 @@ export function SQLEditorPage() {
   const activeTabRunning = activeTab ? runningTabIDs.includes(activeTab.id) : false
   const activeTabExporting = activeTab ? exportingTabIDs.includes(activeTab.id) : false
   const activeTabCreatingSensitiveAccess = activeTab ? sensitiveAccessTabIDs.includes(activeTab.id) : false
+  const activeQueryAccessAttentionKey = activeTab ? queryAccessAttentionKeys[activeTab.id] : undefined
   const activeEditorHeight = activeTab ? (editorHeights[activeTab.id] ?? `${EDITOR_MIN_HEIGHT}px`) : `${EDITOR_MIN_HEIGHT}px`
   const queryConstraintBadges = useMemo(() => {
     const effectiveTimeoutSeconds = Math.min(
@@ -1284,6 +1291,12 @@ export function SQLEditorPage() {
         error: message,
         result: null,
       })
+      if (tabSnapshot.connectionId && isQueryAccessDeniedMessage(message)) {
+        setQueryAccessAttentionKeys((current) => ({
+          ...current,
+          [tabID]: (current[tabID] ?? 0) + 1,
+        }))
+      }
     } finally {
       setRunningTabIDs((current) => current.filter((id) => id !== tabID))
     }
@@ -2171,14 +2184,16 @@ export function SQLEditorPage() {
                     >
                       {activeTabCreatingSensitiveAccess ? 'Submitting...' : 'Sensitive Access'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={openQueryAccessTicket}
-                      disabled={!activeTab.connectionId}
-                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Query Access
-                    </button>
+                    <AttentionPulse activeKey={activeQueryAccessAttentionKey} disabled={!activeTab.connectionId}>
+                      <button
+                        type="button"
+                        onClick={openQueryAccessTicket}
+                        disabled={!activeTab.connectionId}
+                        className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Query Access
+                      </button>
+                    </AttentionPulse>
                     <div className="relative">
                       <button
                         type="button"

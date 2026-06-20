@@ -757,6 +757,7 @@ describe('SQLEditorPage', () => {
     await waitFor(() => {
       expect(screen.getAllByText('query failed: syntax error')).toHaveLength(1)
     })
+    expect(screen.getByRole('button', { name: 'Query Access' }).parentElement).not.toHaveAttribute('data-attention-active')
   })
 
   it('缺 Query Access 時只保留常駐 Query Access 入口', async () => {
@@ -778,6 +779,9 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByText('You do not have query access to maestro.tickets')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Query Access' })).toHaveLength(1)
     expect(screen.queryByRole('button', { name: 'Apply Query Access' })).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Query Access' }).parentElement).toHaveAttribute('data-attention-active', 'true')
+    })
   })
 
   it('點擊資料表後會切到 Object Meta 分頁並顯示表結構', async () => {
