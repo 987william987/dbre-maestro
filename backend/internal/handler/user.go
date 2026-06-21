@@ -120,12 +120,32 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
 	if req.Username == "" || req.Email == "" || req.Password == "" {
 		jsonErr(w, http.StatusUnprocessableEntity, "username, email, and password are required")
 		return
 	}
 	if err := validatePassword(req.Password); err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	existingUsername, err := h.users.GetByUsername(r.Context(), req.Username)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "check username failed")
+		return
+	}
+	if existingUsername != nil {
+		jsonErr(w, http.StatusConflict, "username already exists")
+		return
+	}
+	existingEmail, err := h.users.GetByEmail(r.Context(), req.Email)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "check email failed")
+		return
+	}
+	if existingEmail != nil {
+		jsonErr(w, http.StatusConflict, "email already exists")
 		return
 	}
 
