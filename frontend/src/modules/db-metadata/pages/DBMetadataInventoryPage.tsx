@@ -346,7 +346,7 @@ export function DBMetadataInventoryPage() {
               <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
                 <tr>
                   {visibleColumns.includes('identifier') ? <th className="w-[240px] px-3 py-3">Identifier</th> : null}
-                  {visibleColumns.includes('engine') ? <th className="w-[110px] px-3 py-3">Engine</th> : null}
+                  {visibleColumns.includes('engine') ? <th className="w-[150px] px-3 py-3">Engine</th> : null}
                   {visibleColumns.includes('version') ? <th className="w-[130px] px-3 py-3">Version</th> : null}
                   {visibleColumns.includes('regionAz') ? <th className="w-[150px] px-3 py-3">Region / AZ</th> : null}
                   {visibleColumns.includes('role') ? <th className="w-[90px] px-3 py-3">Role</th> : null}
@@ -363,42 +363,47 @@ export function DBMetadataInventoryPage() {
                 {pagedItems.map((item) => (
                   <tr key={item.id} className="border-t border-border text-sm text-ink hover:bg-slate-50/70">
                     {visibleColumns.includes('identifier') ? (
-                      <td className="w-[240px] px-3 py-2.5 align-top">
-                        <p className="font-semibold">{item.db_identifier}</p>
+                      <td className="w-[240px] px-3 py-2 align-middle">
+                        <SingleLineValue value={item.db_identifier} className="font-semibold text-ink" />
                       </td>
                     ) : null}
-                    {visibleColumns.includes('engine') ? <td className="w-[110px] px-3 py-2.5 align-top text-[12px]">{item.engine}</td> : null}
-                    {visibleColumns.includes('version') ? <td className="w-[130px] px-3 py-2.5 align-top text-[12px]">{item.engine_version ?? '-'}</td> : null}
+                    {visibleColumns.includes('engine') ? <td className="w-[150px] px-3 py-2 align-middle whitespace-nowrap text-[12px]">{item.engine}</td> : null}
+                    {visibleColumns.includes('version') ? <td className="w-[130px] px-3 py-2 align-middle text-[12px]">{item.engine_version ?? '-'}</td> : null}
                     {visibleColumns.includes('regionAz') ? (
-                      <td className="w-[150px] px-3 py-2.5 align-top text-[12px]">
-                        {item.region}
-                        {item.az ? ` / ${item.az}` : ''}
+                      <td className="w-[150px] max-w-[150px] px-3 py-2 align-middle text-[12px]">
+                        <ExpandableValue value={formatRegionAz(item.region, item.az)} />
                       </td>
                     ) : null}
-                    {visibleColumns.includes('role') ? <td className="w-[90px] px-3 py-2.5 align-top text-[12px]">{item.role ?? '-'}</td> : null}
-                    {visibleColumns.includes('size') ? <td className="w-[130px] px-3 py-2.5 align-top text-[12px]">{item.instance_class ?? '-'}</td> : null}
+                    {visibleColumns.includes('role') ? <td className="w-[90px] px-3 py-2 align-middle text-[12px]">{item.role ?? '-'}</td> : null}
+                    {visibleColumns.includes('size') ? <td className="w-[130px] px-3 py-2 align-middle text-[12px]">{item.instance_class ?? '-'}</td> : null}
                     {visibleColumns.includes('clusterEndpoint') ? (
-                      <td className="w-[260px] break-all px-3 py-2.5 align-top font-mono text-[11px] leading-5 text-muted">{item.cluster_endpoint ?? '-'}</td>
+                      <td className="w-[260px] max-w-[260px] px-3 py-2 align-middle">
+                        <ExpandableValue value={item.cluster_endpoint} className="font-mono text-[11px] text-muted" />
+                      </td>
                     ) : null}
                     {visibleColumns.includes('clusterReaderEndpoint') ? (
-                      <td className="w-[260px] break-all px-3 py-2.5 align-top font-mono text-[11px] leading-5 text-muted">{item.cluster_reader_endpoint ?? '-'}</td>
+                      <td className="w-[260px] max-w-[260px] px-3 py-2 align-middle">
+                        <ExpandableValue value={item.cluster_reader_endpoint} className="font-mono text-[11px] text-muted" />
+                      </td>
                     ) : null}
                     {visibleColumns.includes('instanceEndpoint') ? (
-                      <td className="w-[300px] break-all px-3 py-2.5 align-top font-mono text-[11px] leading-5 text-muted">{item.instance_endpoint ?? '-'}</td>
+                      <td className="w-[300px] max-w-[300px] px-3 py-2 align-middle">
+                        <ExpandableValue value={item.instance_endpoint} className="font-mono text-[11px] text-muted" />
+                      </td>
                     ) : null}
                     {visibleColumns.includes('tags') ? (
-                      <td className="w-[240px] px-3 py-2.5 align-top">
+                      <td className="w-[240px] max-w-[240px] px-3 py-2 align-middle">
                         <InventoryTags tags={item.tags} />
                       </td>
                     ) : null}
                     {visibleColumns.includes('mapping') ? (
-                      <td className="w-[120px] px-3 py-2.5 align-top text-[12px]">
+                      <td className="w-[120px] px-3 py-2 align-middle text-[12px]">
                         <p className="font-semibold">{item.mapping_status}</p>
                         {item.mapping_status === 'ambiguous' ? <p className="mt-1 text-muted">{item.mapping_connections?.join(', ') || '-'}</p> : null}
                       </td>
                     ) : null}
                     {visibleColumns.includes('lastSynced') ? (
-                      <td className="w-[120px] px-3 py-2.5 align-top whitespace-nowrap text-[12px] text-muted">{formatDateTime(item.snapshot_at)}</td>
+                      <td className="w-[120px] px-3 py-2 align-middle whitespace-nowrap text-[12px] text-muted">{formatDateTime(item.snapshot_at)}</td>
                     ) : null}
                   </tr>
                 ))}
@@ -432,20 +437,63 @@ function inventoryTagSearchValues(item: InventorySnapshot) {
   return Object.entries(item.tags ?? {}).map(([key, value]) => `${key}:${value}`)
 }
 
+function formatRegionAz(region: string, az?: string | null) {
+  if (!az) {
+    return region
+  }
+  const displayAz = az.startsWith(region) ? az.slice(region.length) : az
+  return `${region} / ${displayAz || az}`
+}
+
+function SingleLineValue({ value, className }: { value?: string | null; className?: string }) {
+  const displayValue = value || '-'
+  return (
+    <span title={displayValue} className={cn('block max-w-full truncate whitespace-nowrap text-[12px]', className)}>
+      {displayValue}
+    </span>
+  )
+}
+
+function ExpandableValue({ value, className }: { value?: string | null; className?: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const displayValue = value || '-'
+  if (!value) {
+    return <span className={cn('block max-w-full truncate whitespace-nowrap text-[12px]', className)}>-</span>
+  }
+  return (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      onClick={() => setExpanded((current) => !current)}
+      className={cn(
+        'block max-w-full bg-transparent p-0 text-left text-[12px] outline-none transition hover:text-ink focus-visible:rounded focus-visible:ring-2 focus-visible:ring-slate-300',
+        expanded ? 'whitespace-normal break-all' : 'truncate whitespace-nowrap',
+        className,
+      )}
+    >
+      {displayValue}
+    </button>
+  )
+}
+
 function InventoryTags({ tags }: { tags?: Record<string, string> }) {
+  const [expanded, setExpanded] = useState(false)
   const entries = Object.entries(tags ?? {}).sort(([left], [right]) => left.localeCompare(right))
   if (entries.length === 0) {
     return <span className="text-[12px] text-muted">-</span>
   }
+  const fullText = entries.map(([key, value]) => `${key}=${value || '-'}`).join(', ')
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {entries.map(([key, value]) => (
-        <span key={key} className="inline-flex max-w-full items-center rounded-md border border-border bg-panel-soft px-2 py-1 text-[11px] leading-4 text-ink">
-          <span className="truncate font-semibold">{key}</span>
-          <span className="mx-1 text-faint">=</span>
-          <span className="truncate text-muted">{value || '-'}</span>
-        </span>
-      ))}
-    </div>
+    <button
+      type="button"
+      aria-expanded={expanded}
+      onClick={() => setExpanded((current) => !current)}
+      className={cn(
+        'block max-w-full bg-transparent p-0 text-left text-[12px] text-muted outline-none transition hover:text-ink focus-visible:rounded focus-visible:ring-2 focus-visible:ring-slate-300',
+        expanded ? 'whitespace-normal break-words' : 'truncate whitespace-nowrap',
+      )}
+    >
+      {fullText}
+    </button>
   )
 }

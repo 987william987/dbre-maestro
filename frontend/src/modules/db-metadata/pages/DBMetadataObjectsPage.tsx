@@ -320,7 +320,7 @@ export function DBMetadataObjectsPage() {
                       ) : null}
                       {visibleColumns.includes('databaseSchema') ? (
                         <td className="px-3 py-2.5 align-top text-[12px]">
-                          {item.database_name} / {item.schema_name}
+                          {formatDatabaseSchema(item)}
                         </td>
                       ) : null}
                       {visibleColumns.includes('table') ? (
@@ -417,6 +417,13 @@ function getSortValue(item: DBObjectSnapshot, key: SortKey) {
 
 function getTotalSize(item: DBObjectSnapshot) {
   return item.data_size_bytes + item.index_size_bytes
+}
+
+function formatDatabaseSchema(item: DBObjectSnapshot) {
+  if (item.engine === 'mysql' && item.database_name === item.schema_name) {
+    return item.database_name
+  }
+  return `${item.database_name} / ${item.schema_name}`
 }
 
 function formatRows(rows: number) {
