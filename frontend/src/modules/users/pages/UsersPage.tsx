@@ -553,7 +553,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         await openEditAuthGroupDrawer(drawerState.authGroupKey)
       }
     } catch (saveError) {
-      setDrawerError(
+      const message =
         saveError instanceof ApiError
           ? saveError.message
           : confirmState.kind === 'create-user'
@@ -567,7 +567,9 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                   : confirmState.kind === 'update-auth-group'
                     ? 'Failed to update the auth group.'
                     : 'Failed to delete the auth group.'
-      )
+      setConfirmState(null)
+      setDrawerError(message)
+      pushToast(message, 'error', { placement: 'center', durationMs: 4200 })
     } finally {
       setSaving(false)
     }

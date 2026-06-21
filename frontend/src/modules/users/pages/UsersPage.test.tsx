@@ -461,6 +461,89 @@ describe('UsersPage', () => {
     })
   })
 
+  it('auth group 編輯新增 DB scope 後會送出 patch', async () => {
+    mockedListUserDBConnections.mockResolvedValue({
+      connections: [
+        {
+          id: 11,
+          name: 'analytics',
+          db_type: 'mysql',
+          host: 'db.internal',
+          port: 3306,
+          username: 'readonly',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          created_by: 1,
+          created_at: '2026-06-10T00:00:00Z',
+          updated_at: '2026-06-10T00:00:00Z',
+        },
+      ],
+    })
+    mockedGetAuthGroup.mockImplementation(async (group) => ({
+      id: 4,
+      name: String(group),
+      label: 'Developer',
+      description: '',
+      system_defined: true,
+      protected: false,
+      users: [],
+      permissions: [],
+      db_connection_ids: [],
+      created_at: '2026-06-10T00:00:00Z',
+      updated_at: '2026-06-11T00:00:00Z',
+    }))
+
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Auth Groups' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Manage' }))[0])
+    fireEvent.change(await screen.findByPlaceholderText('Search connection name, type, database'), { target: { value: 'analytics' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add' }).at(-1) as HTMLElement)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Auth Group' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Save Changes' }))[0])
+
+    await waitFor(() => {
+      expect(mockedPatchAuthGroup).toHaveBeenCalledWith('developer', {
+        name: 'Developer',
+        description: '',
+        user_ids: [],
+        permissions: [],
+        db_connection_ids: [11],
+      })
+    })
+  })
+
+  it('auth group 儲存失敗時會關閉確認彈窗並顯示錯誤', async () => {
+    mockedPatchAuthGroup.mockRejectedValue(new Error('network down'))
+    mockedGetAuthGroup.mockImplementation(async (group) => ({
+      id: 4,
+      name: String(group),
+      label: 'Developer',
+      description: '',
+      system_defined: true,
+      protected: false,
+      users: [],
+      permissions: ['tickets.apply'],
+      db_connection_ids: [],
+      created_at: '2026-06-10T00:00:00Z',
+      updated_at: '2026-06-11T00:00:00Z',
+    }))
+
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Auth Groups' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Manage' }))[0])
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Tickets Apply' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Auth Group' }))
+    expect(await screen.findByText('Confirm Save Auth Group Changes')).toBeInTheDocument()
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Save Changes' }))[0])
+
+    await waitFor(() => {
+      expect(screen.queryByText('Confirm Save Auth Group Changes')).not.toBeInTheDocument()
+    })
+    expect(screen.getAllByText('Failed to update the auth group.')).toHaveLength(2)
+  })
+
   it('使用者刪除會先標記，最後儲存才真的送出', async () => {
     mockedListUsers.mockResolvedValue({
       users: [
