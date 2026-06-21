@@ -208,6 +208,10 @@ func collectRDSInventory(ctx context.Context, client *rds.Client, region string,
 				Instance rdstypes.DBInstance `json:"instance"`
 			}{Cluster: cluster, Instance: instance})
 			rawPayloadString := string(rawPayload)
+			tags := mergeStringMaps(
+				rdsResourceTags(ctx, client, valueString(cluster.DBClusterArn)),
+				rdsResourceTags(ctx, client, valueString(instance.DBInstanceArn)),
+			)
 
 			items = append(items, model.CloudDBInventorySnapshot{
 				Provider:              "aws",
@@ -225,6 +229,7 @@ func collectRDSInventory(ctx context.Context, client *rds.Client, region string,
 				ClusterReaderEndpoint: stringPtr(valueString(cluster.ReaderEndpoint)),
 				InstanceEndpoint:      stringPtr(valueRDSEndpointAddress(instance.Endpoint)),
 				RawPayloadJSON:        &rawPayloadString,
+				Tags:                  tags,
 			})
 		}
 	}
@@ -257,6 +262,7 @@ func collectRedisInventory(ctx context.Context, client *elasticache.Client, regi
 			}
 			rawPayload, _ := json.Marshal(cluster)
 			rawPayloadString := string(rawPayload)
+			tags := elasticacheResourceTags(ctx, client, valueString(cluster.ARN))
 			items = append(items, model.CloudDBInventorySnapshot{
 				Provider:           "aws",
 				Engine:             engine,
@@ -269,10 +275,62 @@ func collectRedisInventory(ctx context.Context, client *elasticache.Client, regi
 				InstanceClass:      stringPtr(valueString(cluster.CacheNodeType)),
 				InstanceEndpoint:   stringPtr(instanceEndpoint),
 				RawPayloadJSON:     &rawPayloadString,
+				Tags:               tags,
 			})
 		}
 	}
 	return items, nil
+}
+
+func rdsResourceTags(ctx context.Context, client *rds.Client, arn string) map[string]string {
+	if strings.TrimSpace(arn) == "" {
+		return nil
+	}
+	out, err := client.ListTagsForResource(ctx, &rds.ListTagsForResourceInput{ResourceName: &arn})
+	if err != nil {
+		return nil
+	}
+	tags := make(map[string]string, len(out.TagList))
+	for _, tag := range out.TagList {
+		key := strings.TrimSpace(valueString(tag.Key))
+		if key == "" {
+			continue
+		}
+		tags[key] = valueString(tag.Value)
+	}
+	return tags
+}
+
+func elasticacheResourceTags(ctx context.Context, client *elasticache.Client, arn string) map[string]string {
+	if strings.TrimSpace(arn) == "" {
+		return nil
+	}
+	out, err := client.ListTagsForResource(ctx, &elasticache.ListTagsForResourceInput{ResourceName: &arn})
+	if err != nil {
+		return nil
+	}
+	tags := make(map[string]string, len(out.TagList))
+	for _, tag := range out.TagList {
+		key := strings.TrimSpace(valueString(tag.Key))
+		if key == "" {
+			continue
+		}
+		tags[key] = valueString(tag.Value)
+	}
+	return tags
+}
+
+func mergeStringMaps(maps ...map[string]string) map[string]string {
+	merged := map[string]string{}
+	for _, items := range maps {
+		for key, value := range items {
+			merged[key] = value
+		}
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
 }
 
 func normalizeRegions(regions []string) []string {

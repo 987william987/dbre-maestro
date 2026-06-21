@@ -15,6 +15,7 @@ export type InventorySnapshot = {
   cluster_endpoint?: string | null
   cluster_reader_endpoint?: string | null
   instance_endpoint?: string | null
+  tags?: Record<string, string>
   mapping_status: 'matched' | 'unmatched' | 'ambiguous' | string
   mapping_connections?: string[]
 }
@@ -30,6 +31,13 @@ export type DBObjectSnapshot = {
   database_name: string
   schema_name: string
   table_name: string
+  row_count: number
   data_size_bytes: number
   index_size_bytes: number
+}
+
+export type DBObjectConnectionOption = {
+  id: number
+  name: string
+  db_type: string
 }

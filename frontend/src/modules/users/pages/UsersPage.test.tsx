@@ -498,7 +498,8 @@ describe('UsersPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Auth Groups' }))
     fireEvent.click((await screen.findAllByRole('button', { name: 'Manage' }))[0])
     fireEvent.change(await screen.findByPlaceholderText('Search connection name, type, database'), { target: { value: 'analytics' } })
-    fireEvent.click(screen.getAllByRole('button', { name: 'Add' }).at(-1) as HTMLElement)
+    const addButtons = screen.getAllByRole('button', { name: 'Add' })
+    fireEvent.click(addButtons[addButtons.length - 1])
     fireEvent.click(screen.getByRole('button', { name: 'Save Auth Group' }))
     fireEvent.click((await screen.findAllByRole('button', { name: 'Save Changes' }))[0])
 

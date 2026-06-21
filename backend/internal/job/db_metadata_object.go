@@ -270,6 +270,7 @@ func (j *DBMetadataObjectJob) collectMySQLObjects(
 	rows, err := db.QueryContext(queryCtx, `SELECT
 		TABLE_SCHEMA,
 		TABLE_NAME,
+		IFNULL(TABLE_ROWS, 0) AS TABLE_ROWS,
 		IFNULL(DATA_LENGTH, 0) AS DATA_LENGTH,
 		IFNULL(INDEX_LENGTH, 0) AS INDEX_LENGTH
 	FROM information_schema.TABLES
@@ -285,9 +286,10 @@ func (j *DBMetadataObjectJob) collectMySQLObjects(
 	for rows.Next() {
 		var databaseName string
 		var tableName string
+		var rowCount int64
 		var dataSize int64
 		var indexSize int64
-		if err := rows.Scan(&databaseName, &tableName, &dataSize, &indexSize); err != nil {
+		if err := rows.Scan(&databaseName, &tableName, &rowCount, &dataSize, &indexSize); err != nil {
 			return nil, fmt.Errorf("scan mysql object row for connection %d: %w", conn.ID, err)
 		}
 		items = append(items, model.DBObjectSnapshot{
@@ -300,6 +302,7 @@ func (j *DBMetadataObjectJob) collectMySQLObjects(
 			DatabaseName:   databaseName,
 			SchemaName:     databaseName,
 			TableName:      tableName,
+			RowCount:       rowCount,
 			DataSizeBytes:  dataSize,
 			IndexSizeBytes: indexSize,
 		})
@@ -367,6 +370,7 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 		rows, err := targetDB.QueryContext(queryCtx, `SELECT
 			schemaname,
 			relname,
+			COALESCE(n_live_tup, 0) AS row_count,
 			pg_relation_size(format('%I.%I', schemaname, relname)::regclass) AS data_size_bytes,
 			pg_indexes_size(format('%I.%I', schemaname, relname)::regclass) AS index_size_bytes
 		FROM pg_stat_user_tables
@@ -380,9 +384,10 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 		for rows.Next() {
 			var schemaName string
 			var tableName string
+			var rowCount int64
 			var dataSize int64
 			var indexSize int64
-			if err := rows.Scan(&schemaName, &tableName, &dataSize, &indexSize); err != nil {
+			if err := rows.Scan(&schemaName, &tableName, &rowCount, &dataSize, &indexSize); err != nil {
 				rows.Close()
 				cancel()
 				_ = targetDB.Close()
@@ -398,6 +403,7 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 				DatabaseName:   databaseName,
 				SchemaName:     schemaName,
 				TableName:      tableName,
+				RowCount:       rowCount,
 				DataSizeBytes:  dataSize,
 				IndexSizeBytes: indexSize,
 			})

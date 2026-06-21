@@ -29,6 +29,7 @@ func TestListObjectSnapshotsWithoutLimitReturnsAllRows(t *testing.T) {
 		"database_name",
 		"schema_name",
 		"table_name",
+		"row_count",
 		"data_size_bytes",
 		"index_size_bytes",
 	}).AddRow(
@@ -42,6 +43,7 @@ func TestListObjectSnapshotsWithoutLimitReturnsAllRows(t *testing.T) {
 		"capy_indexer",
 		"public",
 		"watches",
+		int64(42),
 		int64(16384),
 		int64(8192),
 	)
@@ -57,6 +59,7 @@ func TestListObjectSnapshotsWithoutLimitReturnsAllRows(t *testing.T) {
 		database_name,
 		schema_name,
 		table_name,
+		row_count,
 		data_size_bytes,
 		index_size_bytes
 	FROM db_object_snapshots ORDER BY snapshot_at DESC, id DESC`)).
@@ -71,6 +74,9 @@ func TestListObjectSnapshotsWithoutLimitReturnsAllRows(t *testing.T) {
 	}
 	if items[0].ConnectionName != "aws-sg-bot-pg-nonprod" {
 		t.Fatalf("items[0].ConnectionName = %q, want %q", items[0].ConnectionName, "aws-sg-bot-pg-nonprod")
+	}
+	if items[0].RowCount != 42 {
+		t.Fatalf("items[0].RowCount = %d, want 42", items[0].RowCount)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("mock expectations not met: %v", err)
@@ -96,6 +102,7 @@ func TestListObjectSnapshotsWithLimitKeepsLimitClause(t *testing.T) {
 		"database_name",
 		"schema_name",
 		"table_name",
+		"row_count",
 		"data_size_bytes",
 		"index_size_bytes",
 	})
@@ -111,6 +118,7 @@ func TestListObjectSnapshotsWithLimitKeepsLimitClause(t *testing.T) {
 		database_name,
 		schema_name,
 		table_name,
+		row_count,
 		data_size_bytes,
 		index_size_bytes
 	FROM db_object_snapshots WHERE db_connection_id = ? ORDER BY snapshot_at DESC, id DESC LIMIT ?`)).

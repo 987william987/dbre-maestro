@@ -33,12 +33,16 @@ describe('DBMetadata pages', () => {
     expect(screen.getByRole('link', { name: 'Inventory' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Objects' })).toBeInTheDocument()
     expect(screen.getByLabelText('Engine')).toBeInTheDocument()
-    expect(screen.getByLabelText('Identifier Search')).toBeInTheDocument()
+    expect(screen.getByLabelText('Inventory endpoint search')).toBeInTheDocument()
+    expect(screen.getByLabelText('Version Search')).toBeInTheDocument()
+    expect(screen.getByLabelText('Size Search')).toBeInTheDocument()
+    expect(screen.getByLabelText('Tags Search')).toBeInTheDocument()
     expect(screen.getByLabelText('Role')).toBeInTheDocument()
+    expect(screen.getByLabelText('Mapping')).toBeInTheDocument()
     expect(screen.getByText('No inventory snapshots match the current filters.')).toBeInTheDocument()
   })
 
-  it('inventory page supports identifier and column filters', async () => {
+  it('inventory page supports inventory filters and column filters', async () => {
     mockedListInventorySnapshots.mockResolvedValue({
       items: [
         {
@@ -53,7 +57,9 @@ describe('DBMetadata pages', () => {
           instance_class: 'db.r6g.large',
           db_identifier: 'orders-primary',
           instance_endpoint: 'orders-primary.cluster.local',
+          cluster_reader_endpoint: 'orders-reader.cluster.local',
           cluster_endpoint: null,
+          tags: { env: 'prod' },
           mapping_status: 'mapped',
           mapping_connections: ['orders-prod'],
         },
@@ -69,7 +75,9 @@ describe('DBMetadata pages', () => {
           instance_class: 'db.r6g.xlarge',
           db_identifier: 'ledger-replica',
           instance_endpoint: 'ledger-replica.cluster.local',
+          cluster_reader_endpoint: 'ledger-reader.cluster.local',
           cluster_endpoint: null,
+          tags: { env: 'stage' },
           mapping_status: 'unmapped',
           mapping_connections: [],
         },
@@ -86,9 +94,15 @@ describe('DBMetadata pages', () => {
     await waitFor(() => expect(screen.getByText('orders-primary')).toBeInTheDocument())
     expect(screen.getByText('ledger-replica')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('Identifier Search'), { target: { value: 'ledger' } })
+    fireEvent.change(screen.getByLabelText('Inventory endpoint search'), { target: { value: 'ledger-reader' } })
 
     expect(screen.queryByText('orders-primary')).not.toBeInTheDocument()
+    expect(screen.getAllByText('ledger-replica').length).toBeGreaterThan(0)
+
+    fireEvent.change(screen.getByLabelText('Version Search'), { target: { value: '16' } })
+    fireEvent.change(screen.getByLabelText('Size Search'), { target: { value: 'xlarge' } })
+    fireEvent.change(screen.getByLabelText('Tags Search'), { target: { value: 'stage' } })
+
     expect(screen.getAllByText('ledger-replica').length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('button', { name: 'Visible Columns' }))
@@ -98,7 +112,7 @@ describe('DBMetadata pages', () => {
   })
 
   it('objects page shows the empty state', async () => {
-    mockedListDBObjectSnapshots.mockResolvedValue({ items: [], total: 0 })
+    mockedListDBObjectSnapshots.mockResolvedValue({ items: [], total: 0, connection_options: [] })
 
     render(
       <MemoryRouter>
@@ -126,6 +140,7 @@ describe('DBMetadata pages', () => {
           database_name: 'analytics',
           schema_name: 'analytics',
           table_name: 'orders',
+          row_count: 120,
           data_size_bytes: 1024,
           index_size_bytes: 512,
         },
@@ -140,11 +155,16 @@ describe('DBMetadata pages', () => {
           database_name: 'warehouse',
           schema_name: 'public',
           table_name: 'customers',
+          row_count: 240,
           data_size_bytes: 2048,
           index_size_bytes: 256,
         },
       ],
       total: 2,
+      connection_options: [
+        { id: 12, name: 'analytics-mysql-ro', db_type: 'mysql' },
+        { id: 18, name: 'analytics-pg-ro', db_type: 'postgres' },
+      ],
     })
 
     render(
@@ -155,6 +175,12 @@ describe('DBMetadata pages', () => {
 
     await waitFor(() => expect(screen.getByText('analytics-mysql-ro')).toBeInTheDocument())
     expect(screen.getByText('analytics-pg-ro')).toBeInTheDocument()
+    expect(screen.getByText('customers').compareDocumentPosition(screen.getByText('orders')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Data Size' }))
+    expect(screen.getByText('customers').compareDocumentPosition(screen.getByText('orders')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Data Size DESC/i }))
+    expect(screen.getByText('orders').compareDocumentPosition(screen.getByText('customers')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Engine' }))
     fireEvent.click(screen.getByRole('option', { name: 'postgres' }))

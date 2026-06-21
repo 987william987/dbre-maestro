@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -94,7 +95,8 @@ func (r *DBMetadataRepo) ListInventorySnapshots(ctx context.Context, engine stri
 		cluster_endpoint,
 		cluster_reader_endpoint,
 		instance_endpoint,
-		raw_payload_json
+		raw_payload_json,
+		tags_json
 	FROM cloud_db_inventory_snapshots`
 	args := []any{}
 	if trimmedEngine := strings.TrimSpace(engine); trimmedEngine != "" {
@@ -108,6 +110,7 @@ func (r *DBMetadataRepo) ListInventorySnapshots(ctx context.Context, engine stri
 	if err := r.db.SelectContext(ctx, &items, baseQuery, args...); err != nil {
 		return nil, fmt.Errorf("list cloud_db_inventory_snapshots: %w", err)
 	}
+	hydrateInventoryTags(items)
 	return items, nil
 }
 
@@ -123,6 +126,7 @@ func (r *DBMetadataRepo) ListObjectSnapshots(ctx context.Context, connectionID u
 		database_name,
 		schema_name,
 		table_name,
+		row_count,
 		data_size_bytes,
 		index_size_bytes
 	FROM db_object_snapshots`
@@ -191,8 +195,8 @@ func (r *DBMetadataRepo) ReplaceInventorySnapshots(ctx context.Context, snapshot
 	for _, item := range items {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO cloud_db_inventory_snapshots
-			 (snapshot_at, provider, engine, region, az, account_id, db_identifier, cluster_identifier, instance_identifier, role, engine_version, instance_class, storage_type, cluster_endpoint, cluster_reader_endpoint, instance_endpoint, raw_payload_json, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 (snapshot_at, provider, engine, region, az, account_id, db_identifier, cluster_identifier, instance_identifier, role, engine_version, instance_class, storage_type, cluster_endpoint, cluster_reader_endpoint, instance_endpoint, raw_payload_json, tags_json, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			snapshotAt.UTC(),
 			item.Provider,
 			item.Engine,
@@ -210,6 +214,7 @@ func (r *DBMetadataRepo) ReplaceInventorySnapshots(ctx context.Context, snapshot
 			item.ClusterReaderEndpoint,
 			item.InstanceEndpoint,
 			item.RawPayloadJSON,
+			nullableTagsJSON(item.Tags),
 			timeutil.NowUTC(),
 		); err != nil {
 			return fmt.Errorf("insert inventory snapshot %s: %w", item.DBIdentifier, err)
@@ -241,8 +246,8 @@ func (r *DBMetadataRepo) ReplaceObjectSnapshotsForConnection(ctx context.Context
 	for _, item := range items {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO db_object_snapshots
-			 (snapshot_at, db_connection_id, connection_name_snapshot, engine, cluster_name, node_name, database_name, schema_name, table_name, data_size_bytes, index_size_bytes, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 (snapshot_at, db_connection_id, connection_name_snapshot, engine, cluster_name, node_name, database_name, schema_name, table_name, row_count, data_size_bytes, index_size_bytes, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			snapshotAt.UTC(),
 			dbConnectionID,
 			item.ConnectionName,
@@ -252,6 +257,7 @@ func (r *DBMetadataRepo) ReplaceObjectSnapshotsForConnection(ctx context.Context
 			item.DatabaseName,
 			item.SchemaName,
 			item.TableName,
+			item.RowCount,
 			item.DataSizeBytes,
 			item.IndexSizeBytes,
 			timeutil.NowUTC(),
@@ -292,7 +298,8 @@ func (r *DBMetadataRepo) FindLatestInventoryByEndpoint(ctx context.Context, endp
 		cluster_endpoint,
 		cluster_reader_endpoint,
 		instance_endpoint,
-		raw_payload_json
+		raw_payload_json,
+		tags_json
 	FROM cloud_db_inventory_snapshots
 	WHERE cluster_endpoint = ?
 	   OR cluster_reader_endpoint = ?
@@ -305,5 +312,31 @@ func (r *DBMetadataRepo) FindLatestInventoryByEndpoint(ctx context.Context, endp
 		}
 		return nil, fmt.Errorf("find inventory by endpoint %s: %w", trimmedEndpoint, err)
 	}
+	items := []model.CloudDBInventorySnapshot{item}
+	hydrateInventoryTags(items)
+	item = items[0]
 	return &item, nil
+}
+
+func hydrateInventoryTags(items []model.CloudDBInventorySnapshot) {
+	for i := range items {
+		if items[i].TagsJSON == nil || strings.TrimSpace(*items[i].TagsJSON) == "" {
+			continue
+		}
+		var tags map[string]string
+		if err := json.Unmarshal([]byte(*items[i].TagsJSON), &tags); err == nil {
+			items[i].Tags = tags
+		}
+	}
+}
+
+func nullableTagsJSON(tags map[string]string) any {
+	if len(tags) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(tags)
+	if err != nil {
+		return nil
+	}
+	return string(raw)
 }

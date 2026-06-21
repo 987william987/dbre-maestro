@@ -1,5 +1,5 @@
 import { apiClient } from '@/shared/api/client'
-import type { DBObjectSnapshot, InventorySnapshot } from '@/shared/types/dbMetadata'
+import type { DBObjectConnectionOption, DBObjectSnapshot, InventorySnapshot } from '@/shared/types/dbMetadata'
 
 type InventoryResponse = {
   items: InventorySnapshot[]
@@ -9,6 +9,7 @@ type InventoryResponse = {
 type ObjectResponse = {
   items: DBObjectSnapshot[]
   total: number
+  connection_options?: DBObjectConnectionOption[]
 }
 
 export function listInventorySnapshots() {
@@ -22,5 +23,6 @@ export function listDBObjectSnapshots() {
   return apiClient.get<ObjectResponse>('/db-metadata/objects').then((response) => ({
     ...response,
     items: Array.isArray(response.items) ? response.items : [],
+    connection_options: Array.isArray(response.connection_options) ? response.connection_options : [],
   }))
 }

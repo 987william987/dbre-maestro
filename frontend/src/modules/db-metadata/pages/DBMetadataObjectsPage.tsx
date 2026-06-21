@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Search, SlidersHorizontal } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, Search, SlidersHorizontal } from 'lucide-react'
 import { DBMetadataSectionTabs } from '@/modules/db-metadata/components/DBMetadataSectionTabs'
 import { listDBObjectSnapshots } from '@/modules/db-metadata/api'
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
-import type { DBObjectSnapshot } from '@/shared/types/dbMetadata'
+import type { DBObjectConnectionOption, DBObjectSnapshot } from '@/shared/types/dbMetadata'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
@@ -17,20 +17,24 @@ const PAGE_SIZE = 20
 const OBJECT_COLUMNS = [
   { key: 'connection', label: 'Connection' },
   { key: 'engine', label: 'Engine' },
-  { key: 'clusterNode', label: 'Cluster / Node' },
   { key: 'databaseSchema', label: 'Database / Schema' },
   { key: 'table', label: 'Table' },
+  { key: 'rows', label: 'Rows' },
   { key: 'dataSize', label: 'Data Size' },
   { key: 'indexSize', label: 'Index Size' },
+  { key: 'totalSize', label: 'Total Size' },
   { key: 'snapshotTime', label: 'Snapshot Time' },
 ] as const
 
 type ObjectColumnKey = (typeof OBJECT_COLUMNS)[number]['key']
+type SortKey = 'rows' | 'dataSize' | 'indexSize' | 'totalSize'
+type SortDirection = 'asc' | 'desc'
 
 const DEFAULT_VISIBLE_COLUMNS: ObjectColumnKey[] = OBJECT_COLUMNS.map((column) => column.key)
 
 export function DBMetadataObjectsPage() {
   const [items, setItems] = useState<DBObjectSnapshot[]>([])
+  const [scanConnectionOptions, setScanConnectionOptions] = useState<DBObjectConnectionOption[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [offset, setOffset] = useState(0)
@@ -39,6 +43,7 @@ export function DBMetadataObjectsPage() {
   const [keyword, setKeyword] = useState('')
   const [visibleColumns, setVisibleColumns] = useState<ObjectColumnKey[]>(DEFAULT_VISIBLE_COLUMNS)
   const [columnMenuOpen, setColumnMenuOpen] = useState(false)
+  const [sortState, setSortState] = useState<{ key: SortKey; direction: SortDirection }>({ key: 'rows', direction: 'desc' })
   const columnMenuRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -51,6 +56,7 @@ export function DBMetadataObjectsPage() {
         const response = await listDBObjectSnapshots()
         if (active) {
           setItems(response.items)
+          setScanConnectionOptions(response.connection_options ?? [])
         }
       } catch (loadError) {
         if (active) {
@@ -96,10 +102,23 @@ export function DBMetadataObjectsPage() {
     return ['all', ...engines]
   }, [items])
 
-  const connectionOptions = useMemo(() => {
-    const names = Array.from(new Set(items.map((item) => item.connection_name).filter(Boolean))).sort((a, b) => a.localeCompare(b))
-    return ['all', ...names]
-  }, [items])
+  const connectionSelectOptions = useMemo(() => {
+    const optionsByID = new Map<number, string>()
+    for (const option of scanConnectionOptions) {
+      optionsByID.set(option.id, option.name)
+    }
+    for (const item of items) {
+      if (!optionsByID.has(item.db_connection_id)) {
+        optionsByID.set(item.db_connection_id, item.connection_name)
+      }
+    }
+    return [
+      { value: 'all', label: 'All Connections' },
+      ...Array.from(optionsByID.entries())
+        .sort(([, left], [, right]) => left.localeCompare(right))
+        .map(([id, name]) => ({ value: String(id), label: name })),
+    ]
+  }, [items, scanConnectionOptions])
 
   const filteredItems = useMemo(() => {
     const loweredKeyword = keyword.trim().toLowerCase()
@@ -107,7 +126,7 @@ export function DBMetadataObjectsPage() {
       if (engineFilter !== 'all' && item.engine !== engineFilter) {
         return false
       }
-      if (connectionFilter !== 'all' && item.connection_name !== connectionFilter) {
+      if (connectionFilter !== 'all' && String(item.db_connection_id) !== connectionFilter) {
         return false
       }
       if (loweredKeyword === '') {
@@ -117,8 +136,6 @@ export function DBMetadataObjectsPage() {
       return [
         item.connection_name,
         item.engine,
-        item.cluster_name ?? '',
-        item.node_name ?? '',
         item.database_name,
         item.schema_name,
         item.table_name,
@@ -126,7 +143,20 @@ export function DBMetadataObjectsPage() {
     })
   }, [connectionFilter, engineFilter, items, keyword])
 
-  const pagedItems = filteredItems.slice(offset, offset + PAGE_SIZE)
+  const sortedItems = useMemo(() => {
+    return [...filteredItems].sort((left, right) => compareObjectSnapshots(left, right, sortState))
+  }, [filteredItems, sortState])
+
+  const pagedItems = sortedItems.slice(offset, offset + PAGE_SIZE)
+
+  function toggleSort(key: SortKey) {
+    setSortState((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'desc' ? 'asc' : 'desc',
+    }))
+    setOffset(0)
+  }
+
   function toggleColumn(columnKey: ObjectColumnKey) {
     setVisibleColumns((current) => {
       if (current.includes(columnKey)) {
@@ -188,9 +218,9 @@ export function DBMetadataObjectsPage() {
                 setConnectionFilter(value)
                 setOffset(0)
               }}
-              options={connectionOptions.map((option) => ({
-                value: option,
-                label: option === 'all' ? 'All Connections' : option,
+              options={connectionSelectOptions.map((option) => ({
+                value: option.value,
+                label: option.label,
               }))}
             />
           </div>
@@ -270,11 +300,12 @@ export function DBMetadataObjectsPage() {
                   <tr>
                     {visibleColumns.includes('connection') ? <th className="px-3 py-3">Connection</th> : null}
                     {visibleColumns.includes('engine') ? <th className="px-3 py-3">Engine</th> : null}
-                    {visibleColumns.includes('clusterNode') ? <th className="px-3 py-3">Cluster / Node</th> : null}
                     {visibleColumns.includes('databaseSchema') ? <th className="px-3 py-3">Database / Schema</th> : null}
                     {visibleColumns.includes('table') ? <th className="px-3 py-3">Table</th> : null}
-                    {visibleColumns.includes('dataSize') ? <th className="px-3 py-3">Data Size</th> : null}
-                    {visibleColumns.includes('indexSize') ? <th className="px-3 py-3">Index Size</th> : null}
+                    {visibleColumns.includes('rows') ? <SortableHeader label="Rows" sortKey="rows" sortState={sortState} onSort={toggleSort} /> : null}
+                    {visibleColumns.includes('dataSize') ? <SortableHeader label="Data Size" sortKey="dataSize" sortState={sortState} onSort={toggleSort} /> : null}
+                    {visibleColumns.includes('indexSize') ? <SortableHeader label="Index Size" sortKey="indexSize" sortState={sortState} onSort={toggleSort} /> : null}
+                    {visibleColumns.includes('totalSize') ? <SortableHeader label="Total Size" sortKey="totalSize" sortState={sortState} onSort={toggleSort} /> : null}
                     {visibleColumns.includes('snapshotTime') ? <th className="px-3 py-3">Snapshot Time</th> : null}
                   </tr>
                 </thead>
@@ -287,11 +318,6 @@ export function DBMetadataObjectsPage() {
                       {visibleColumns.includes('engine') ? (
                         <td className="px-3 py-2.5 align-top text-[12px]">{item.engine}</td>
                       ) : null}
-                      {visibleColumns.includes('clusterNode') ? (
-                        <td className="px-3 py-2.5 align-top text-[12px]">
-                          {(item.cluster_name ?? '-') + ' / ' + (item.node_name ?? '-')}
-                        </td>
-                      ) : null}
                       {visibleColumns.includes('databaseSchema') ? (
                         <td className="px-3 py-2.5 align-top text-[12px]">
                           {item.database_name} / {item.schema_name}
@@ -300,11 +326,17 @@ export function DBMetadataObjectsPage() {
                       {visibleColumns.includes('table') ? (
                         <td className="px-3 py-2.5 align-top font-mono text-[12px]">{item.table_name}</td>
                       ) : null}
+                      {visibleColumns.includes('rows') ? (
+                        <td className="px-3 py-2.5 align-top text-[12px] tabular-nums">{formatRows(item.row_count)}</td>
+                      ) : null}
                       {visibleColumns.includes('dataSize') ? (
-                        <td className="px-3 py-2.5 align-top text-[12px]">{item.data_size_bytes.toLocaleString()}</td>
+                        <td className="px-3 py-2.5 align-top text-[12px]">{formatGB(item.data_size_bytes)}</td>
                       ) : null}
                       {visibleColumns.includes('indexSize') ? (
-                        <td className="px-3 py-2.5 align-top text-[12px]">{item.index_size_bytes.toLocaleString()}</td>
+                        <td className="px-3 py-2.5 align-top text-[12px]">{formatGB(item.index_size_bytes)}</td>
+                      ) : null}
+                      {visibleColumns.includes('totalSize') ? (
+                        <td className="px-3 py-2.5 align-top text-[12px]">{formatGB(item.data_size_bytes + item.index_size_bytes)}</td>
                       ) : null}
                       {visibleColumns.includes('snapshotTime') ? (
                         <td className="px-3 py-2.5 align-top whitespace-nowrap text-[12px] text-muted">{formatDateTime(item.snapshot_at)}</td>
@@ -318,7 +350,7 @@ export function DBMetadataObjectsPage() {
               offset={offset}
               pageSize={PAGE_SIZE}
               count={pagedItems.length}
-              total={filteredItems.length}
+              total={sortedItems.length}
               onChange={setOffset}
             />
           </div>
@@ -326,4 +358,81 @@ export function DBMetadataObjectsPage() {
       </section>
     </div>
   )
+}
+
+function SortableHeader({
+  label,
+  sortKey,
+  sortState,
+  onSort,
+}: {
+  label: string
+  sortKey: SortKey
+  sortState: { key: SortKey; direction: SortDirection }
+  onSort: (key: SortKey) => void
+}) {
+  const active = sortState.key === sortKey
+  return (
+    <th className="px-3 py-3">
+      <button
+        type="button"
+        aria-label={active ? `${label} ${sortState.direction.toUpperCase()}` : label}
+        onClick={() => onSort(sortKey)}
+        className={cn('inline-flex items-center gap-1 text-left uppercase tracking-[0.16em] transition hover:text-ink', active ? 'text-ink' : 'text-faint')}
+      >
+        {label}
+        {active ? sortState.direction === 'desc' ? <ArrowDown className="h-3 w-3" aria-hidden="true" /> : <ArrowUp className="h-3 w-3" aria-hidden="true" /> : null}
+      </button>
+    </th>
+  )
+}
+
+function compareObjectSnapshots(left: DBObjectSnapshot, right: DBObjectSnapshot, sortState: { key: SortKey; direction: SortDirection }) {
+  const leftValue = getSortValue(left, sortState.key)
+  const rightValue = getSortValue(right, sortState.key)
+  const direction = sortState.direction === 'desc' ? -1 : 1
+  if (leftValue !== rightValue) {
+    return leftValue < rightValue ? -direction : direction
+  }
+  const leftTotal = getTotalSize(left)
+  const rightTotal = getTotalSize(right)
+  if (leftTotal !== rightTotal) {
+    return rightTotal - leftTotal
+  }
+  return left.table_name.localeCompare(right.table_name)
+}
+
+function getSortValue(item: DBObjectSnapshot, key: SortKey) {
+  switch (key) {
+    case 'rows':
+      return item.row_count
+    case 'dataSize':
+      return item.data_size_bytes
+    case 'indexSize':
+      return item.index_size_bytes
+    case 'totalSize':
+      return getTotalSize(item)
+  }
+}
+
+function getTotalSize(item: DBObjectSnapshot) {
+  return item.data_size_bytes + item.index_size_bytes
+}
+
+function formatRows(rows: number) {
+  if (!Number.isFinite(rows) || rows <= 0) {
+    return '0'
+  }
+  return Math.round(rows).toLocaleString()
+}
+
+function formatGB(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '0.00 GB'
+  }
+  const gb = bytes / 1024 / 1024 / 1024
+  return `${gb.toLocaleString(undefined, {
+    minimumFractionDigits: gb < 10 ? 2 : 1,
+    maximumFractionDigits: gb < 10 ? 2 : 1,
+  })} GB`
 }
