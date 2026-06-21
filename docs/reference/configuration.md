@@ -142,13 +142,15 @@
 | `sql_editor_postgres_statement_timeout_ms` | `25000` | PostgreSQL session `statement_timeout` |
 | `lark_app_id` | `""` | Lark App ID |
 | `lark_app_secret` | `""` | Lark App Secret，加密保存且不會回填明文 |
+| `require_non_sensitive_export_review` | `true` | 普通 SQL Export 是否需要審批 |
 | `db_metadata_inventory_enabled` | `true` | 是否啟用 inventory scan |
 | `db_metadata_inventory_regions` | `[]` | AWS 掃描 region 清單 |
 | `db_metadata_inventory_engines` | `aurora-mysql, aurora-postgresql, redis` | engine 篩選 |
-| `db_metadata_inventory_sync_interval_minutes` | `5` | inventory scan 間隔 |
+| `db_metadata_inventory_cron` | `0 9 * * *` | inventory scan cron |
 | `db_metadata_object_enabled` | `true` | 是否啟用 object scan |
 | `db_metadata_object_enabled_connection_ids` | `[]` | object scan 目標連線 |
-| `db_metadata_object_sync_interval_minutes` | `60` | object scan 間隔 |
+| `db_metadata_object_cron` | `0 10 * * *` | object scan cron |
+| `db_metadata_cron_timezone` | `Asia/Taipei` | metadata scan cron 時區 |
 
 ## AWS 本機驗證
 

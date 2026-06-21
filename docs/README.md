@@ -15,6 +15,7 @@
 
 - [How to 使用 SQL Editor](how-to/use-sql-editor.md)
 - [How to 建立與執行 Tickets](how-to/create-and-execute-tickets.md)
+- [How to 設定 Approval Policy](how-to/configure-approval-policies.md)
 - [How to 設定 Masking Rules](how-to/configure-masking-rules.md)
 - [How to 綁定使用者 Lark Open ID](how-to/bind-lark-open-id.md)
 

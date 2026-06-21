@@ -99,7 +99,7 @@ PostgreSQL metadata 掃描目前會避開 AWS RDS 的 `rdsadmin` database，因�
 - `DBMetadataInventoryJob`
 - `DBMetadataObjectJob`
 
-掃描頻率由 Settings 決定。
+掃描時間由 Settings 的 cron 表達式決定。
 
 ## 相關設定
 
@@ -108,10 +108,11 @@ PostgreSQL metadata 掃描目前會避開 AWS RDS 的 `rdsadmin` database，因�
 | `db_metadata_inventory_enabled` | 是否啟用 inventory scan |
 | `db_metadata_inventory_regions` | 掃描 region |
 | `db_metadata_inventory_engines` | 掃描 engine 類型 |
-| `db_metadata_inventory_sync_interval_minutes` | inventory 間隔 |
+| `db_metadata_inventory_cron` | inventory scan cron，例如 `0 9 * * *` |
 | `db_metadata_object_enabled` | 是否啟用 object scan |
 | `db_metadata_object_enabled_connection_ids` | object scan 目標 connection |
-| `db_metadata_object_sync_interval_minutes` | object 間隔 |
+| `db_metadata_object_cron` | object scan cron，例如 `0 10 * * *` |
+| `db_metadata_cron_timezone` | metadata scan cron 時區 |
 
 ## 相關文件
 

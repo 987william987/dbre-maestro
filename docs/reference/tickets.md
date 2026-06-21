@@ -25,16 +25,21 @@ Tickets 模組負責 DDL / DML / Redis 變更工單、Query Access 查詢授權�
 
 | 權限 | 意義 |
 |---|---|
-| `tickets.apply` | 建立 DDL / DML / Redis / Query Access 工單，且可進入 ticket workspace |
+| `tickets.read` | 進入 Tickets workspace，查看自己被允許看到的工單 |
+| `tickets.apply` | 建立 DDL / DML / Redis / Query Access 工單 |
 | `tickets.review` | 審核 DDL / DML / Redis / Query Access 工單 |
 | `tickets.execute` | 執行 DDL / DML / Redis 工單 |
+| `sql_editor.export` | 從 SQL Editor 建立 `sql_export` 工單 |
 | `sql_editor.export_review` | 審核 `sql_export` |
+| `sql_editor.sensitive_apply` | 從 SQL Editor 建立 `sensitive_query_access` 工單 |
 | `sql_editor.sensitive_review` | 審核 / 撤銷 `sensitive_query_access` |
 
 實際上：
 
-- `tickets.apply` 也是 Tickets workspace 的最小讀取入口
+- Tickets workspace 的頁面入口是 `tickets.read`
+- `tickets.apply` 只代表能建立一般工單，不代表能審批或執行
 - 可建立的連線清單仍受 DB Scope 過濾
+- 工單列表與詳情仍會依 ticket access 控制可見範圍
 
 `query_access` 復用既有 Tickets workspace：
 
@@ -64,6 +69,8 @@ Tickets 模組負責 DDL / DML / Redis 變更工單、Query Access 查詢授權�
 - `sensitive_query_access`
 
 另外，`query_access` 也提供 SQL Editor 快捷入口，方便在查詢被拒絕時直接發起申請。
+
+`POST /api/tickets` 只接受 `ddl`、`dml`、`redis`、`query_access`。`sql_export` 與 `sensitive_query_access` 必須走 SQL Editor 專用流程建立。
 
 ## 建單前檢測
 
@@ -131,6 +138,8 @@ DDL / DML / Redis 工單在提交前，應先經過 `POST /api/tickets/review`�
 | `ticket_type` | `ddl \| dml \| redis \| query_access` | 是 |
 | `db_connection_id` | `number \| null` | 是 |
 | `database_name` | `string \| null` | 是 |
+
+若 `ticket_type` 是 `sql_export` 或 `sensitive_query_access`，後端會拒絕請求；這兩種工單需要透過 SQL Editor 的 export 或 sensitive access API 建立。
 
 ## Workflow
 
@@ -210,6 +219,15 @@ Query Access 使用 rule-based 授權：
 
 ### SQL Export
 
+SQL Export 有普通導出與敏感導出兩種語義，使用同一個 `sql_export` ticket type，並用 `contains_sensitive` 區分：
+
+| 欄位 | 語義 |
+|---|---|
+| `contains_sensitive = false` 或 `null` | 普通數據導出 |
+| `contains_sensitive = true` | 敏感數據導出 |
+
+敏感導出永遠需要審批。普通導出是否需要審批，由 Settings 的 `require_non_sensitive_export_review` 控制；關閉時，普通導出會自動成為可下載狀態，但仍建立一張 export ticket 作為稽核紀錄。
+
 ```text
 pending_review
   -> approved (export ready)
@@ -230,6 +248,8 @@ pending_review
 ## 通知規則
 
 目前 Ticket 通知同時會走站內通知與 Lark；是否派送給自己，依事件策略決定。
+
+SQL Export 通知會補充工單類型語義，讓收件人能分辨普通數據導出與敏感數據導出。
 
 ### 提交與收回
 
@@ -361,6 +381,7 @@ Ticket number 不使用單純 auto increment 流水號，而改成較不易碰�
 ## 相關文件
 
 - [How to 建立與執行 Tickets](../how-to/create-and-execute-tickets.md)
+- [How to 設定 Approval Policy](../how-to/configure-approval-policies.md)
 - [後端 API 與權限對照](backend-api-and-permissions.md)
 - [SQL Editor](sql-editor.md)
 - [DB Connections](db-connections.md)

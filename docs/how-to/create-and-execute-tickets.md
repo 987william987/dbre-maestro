@@ -5,7 +5,7 @@
 ## Prerequisites
 
 - 你已登入系統
-- 建單者需要 `tickets.apply`
+- 建單者需要 `tickets.read` 與 `tickets.apply`
 - Reviewer 需要 `tickets.review`
 - Executor / DBA 需要 `tickets.execute`
 - 目標 DB connection 必須在你的 DB Scope 內
@@ -14,7 +14,7 @@
 
 1. 打開 `New Ticket` 頁面。
 
-   路徑是 `/tickets/new`。若你看不到，通常代表沒有 `tickets.apply`。
+   路徑是 `/tickets/new`。若你看不到，通常代表沒有 `tickets.apply`。若整個 Tickets 頁都看不到，先確認是否有 `tickets.read`。
 
 2. 填寫標題、描述、工單類型與目標實例。
 
@@ -56,6 +56,8 @@
    詳情頁會保留每一句 statement 的 review result，供 reviewer 與 DBA 重新確認。
 
 7. Reviewer 審核工單。
+
+   Reviewer 除了要有對應 review permission，也要被 Approval Policy 指定為該 workflow 的有效審批人。
 
    - 通過：`Approve`
    - 不通過：`Reject`
@@ -112,4 +114,5 @@ Ticket 流程中的通知規則如下：
 ## 相關文件
 
 - [Tickets 參考](../reference/tickets.md)
+- [How to 設定 Approval Policy](configure-approval-policies.md)
 - [後端 API 與權限對照](../reference/backend-api-and-permissions.md)

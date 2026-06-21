@@ -11,8 +11,10 @@ SQL Editor 是平台上的受控查詢工作區，用於 MySQL、PostgreSQL 與 
 ## 頁面入口
 
 - Route：`/sql-editor`
-- 前端 route guard：`sql_editor.query`
+- 前端 route guard：`sql_editor.read`
 - 主要 API namespace：`/api/query`
+
+`sql_editor.read` 只代表能進入 SQL Editor 頁面。實際查詢、歷史、收藏與 metadata 讀取仍需要 `sql_editor.query`。
 
 ## Tab 工作區狀態
 
@@ -173,9 +175,12 @@ SQL Editor 左側資產樹使用：
 
 建立匯出需要：
 
-- 頁面權限：`sql_editor.query`
+- 頁面權限：`sql_editor.read`
+- 查詢能力：`sql_editor.query`
 - 動作權限：`sql_editor.export`
 - 目標資料源必須在使用者 DB Scope 內
+
+匯出會建立 `sql_export` 工單。若查詢結果包含敏感欄位，工單會標記為敏感導出；否則是普通導出。敏感導出永遠需要審批，普通導出是否需要審批由 Settings 的 `require_non_sensitive_export_review` 控制。即使普通導出不需審批，系統仍會建立 export ticket 作為稽核紀錄。
 
 下載限制與回饋：
 
@@ -222,6 +227,7 @@ SQL Editor 左側資產樹使用：
 
 - [How to 使用 SQL Editor](../how-to/use-sql-editor.md)
 - [Tickets](tickets.md)
+- [How to 設定 Approval Policy](../how-to/configure-approval-policies.md)
 - [DB Connections](db-connections.md)
 - [Masking 與 DSL](masking-and-dsl.md)
 - [平台 Settings](settings.md)

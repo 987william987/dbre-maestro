@@ -23,6 +23,21 @@ Users 模組同時管理三個視角：
 
 這符合系統的頁面型權限原則：導航頁面使用 `*.read` / `*.write`，不是零散按鈕 permission。
 
+Workbench 的權限邊界分成頁面入口與操作權限：
+
+| 權限 | 類型 | 用途 |
+|---|---|---|
+| `tickets.read` | 頁面入口 | 進入 Tickets workspace |
+| `tickets.apply` | 操作 | 建立 DDL / DML / Redis / Query Access 工單 |
+| `tickets.review` | 操作 | 具備一般工單審批資格 |
+| `tickets.execute` | 操作 | 具備 DDL / DML / Redis 執行資格 |
+| `sql_editor.read` | 頁面入口 | 進入 SQL Editor |
+| `sql_editor.query` | 操作 | 執行查詢、讀取查詢相關 metadata |
+| `sql_editor.export` | 操作 | 發起 SQL Export |
+| `sql_editor.export_review` | 操作 | 具備 SQL Export 審批資格 |
+| `sql_editor.sensitive_apply` | 操作 | 發起 Sensitive Query Access |
+| `sql_editor.sensitive_review` | 操作 | 具備 Sensitive Query Access 審批 / revoke 資格 |
+
 ## Users 視角
 
 User detail 目前管理：
@@ -116,12 +131,15 @@ Users / Auth Groups 並不直接決定 SQL 能不能執行哪種語句，而是�
 
 例如：
 
-- 有 `sql_editor.query` 就可以進 SQL Editor
-- 有 `tickets.apply` 就可以進 Tickets workspace
+- 有 `sql_editor.read` 才可以進 SQL Editor，有 `sql_editor.query` 才可以執行查詢
+- 有 `tickets.read` 才可以進 Tickets workspace，有 `tickets.apply` 才可以建立一般工單
 - 但真正可選哪些資料源，還要看 direct / group DB Scope 綜合結果
+
+審批還需要搭配 Approval Policy。`tickets.review`、`sql_editor.export_review`、`sql_editor.sensitive_review` 只代表使用者具備審批資格；是否會收到某類 workflow 的審批任務，還要看該 workflow 的 policy 是否把此使用者或其 auth group 列為候選審批人。
 
 ## 相關文件
 
 - [權限模型](../explanation/permission-model.md)
 - [後端 API 與權限對照](backend-api-and-permissions.md)
 - [DB Connections](db-connections.md)
+- [How to 設定 Approval Policy](../how-to/configure-approval-policies.md)

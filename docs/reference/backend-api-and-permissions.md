@@ -6,9 +6,9 @@
 
 | 頁面 | Route | 前端可見條件 |
 |---|---|---|
-| Tickets | `/tickets` | `tickets.apply`、`tickets.review`、`tickets.execute`、`sql_editor.export`、`sql_editor.export_review`、`sql_editor.sensitive_apply`、`sql_editor.sensitive_review` 任一 |
+| Tickets | `/tickets` | `tickets.read` |
 | New Ticket | `/tickets/new` | `tickets.apply` |
-| SQL Editor | `/sql-editor` | `sql_editor.query` |
+| SQL Editor | `/sql-editor` | `sql_editor.read` |
 | Users | `/users` | `users.read` 或 `users.write` |
 | Auth Groups | `/users/groups` | `users.read` 或 `users.write` |
 | Resources | `/users/resources` | `users.read` 或 `users.write` |
@@ -22,7 +22,7 @@
 ## 設計原則
 
 - 導航頁大多遵循 `*.read` / `*.write`
-- `SQL Editor` 與 `Tickets` 採動作型 permission
+- `SQL Editor` 與 `Tickets` 的頁面入口使用 `*.read`，工作流動作用動作型 permission
 - 實際可作用資料源仍受 DB Scope 限制
 - 前端 route guard 只做 UX gating，真正安全邊界在後端
 - admin user 與 all-permissions auth group 必須透過統一 helper 永遠取得完整 permission、DB Scope 與 grant 類能力
@@ -38,10 +38,12 @@
 | `sql_review.read` / `sql_review.write` | SQL Review Rules |
 | `audit_logs.read` / `audit_logs.write` | Audit Logs |
 | `settings.read` / `settings.write` | Settings |
-| `tickets.apply` | 建立 DDL / DML / Redis 工單，並可進入 ticket workspace |
-| `tickets.review` | 審核 DDL / DML / Redis 工單 |
+| `tickets.read` | 進入 Tickets workspace，查看自己被允許看到的工單 |
+| `tickets.apply` | 建立 DDL / DML / Redis / Query Access 工單 |
+| `tickets.review` | 審核 DDL / DML / Redis / Query Access 工單 |
 | `tickets.execute` | 執行 DDL / DML / Redis 工單 |
-| `sql_editor.query` | 使用 SQL Editor |
+| `sql_editor.read` | 進入 SQL Editor workspace |
+| `sql_editor.query` | 執行 SQL Editor 查詢、查詢歷史、收藏與 metadata API |
 | `sql_editor.export` | 從 SQL Editor 建立 export 工單 |
 | `sql_editor.export_review` | 審核 export 工單 |
 | `sql_editor.sensitive_apply` | 建立 sensitive access 工單 |
@@ -82,7 +84,7 @@
 | `GET /api/tickets/connections` | `requireTicketsApply` | DB 清單再受 DB Scope 過濾 |
 | `GET /api/tickets/connections/{id}/databases` | `requireTicketsApply` | 目標 DB 或 Redis DB index 選單 |
 | `POST /api/tickets/review` | `requireTicketsApply` | SQL / Redis review、parser、policy、validation |
-| `POST /api/tickets` | `requireTicketsApply` | 建立 DDL / DML / Redis 工單 |
+| `POST /api/tickets` | `requireTicketsApply` | 建立 DDL / DML / Redis / Query Access 工單；不接受 `sql_export` 與 `sensitive_query_access` |
 | `POST /api/tickets/{id}/approve` | `requireTicketWorkflowReview` | 依 ticket type 二次檢查 reviewer 權限 |
 | `POST /api/tickets/{id}/reject` | `requireTicketWorkflowReject` | reviewer 可拒絕；DDL / DML / Redis 的 DBA 也可於 `approved` / `pending_execution` 階段拒絕 |
 | `POST /api/tickets/{id}/withdraw` | `requireTicketsApply` | 僅 submitter 可於 `pending_review` 收回 |
@@ -95,7 +97,7 @@
 | API | Gate | 備註 |
 |---|---|---|
 | `GET /api/query/connections` | `requireSQLEditorQuery` | 回傳使用者可用 DB connections |
-| `GET /api/query/constraints` | `requireSQLEditorQuery` | 回傳 limit / timeout 約束 |
+| `GET /api/query/constraints` | `requireSQLEditorRead` | 回傳 limit / timeout 約束，供 SQL Editor 初始 UI 使用 |
 | `POST /api/query` | `requireSQLEditorQuery` | 單 statement 唯讀查詢 |
 | `POST /api/query/sensitive-access` | `requireSQLEditorSensitiveApply` | 建立 sensitive query access 工單 |
 | `GET /api/query/history` | `requireSQLEditorQuery` | 查詢歷史 |
@@ -196,6 +198,7 @@
 | `GET /api/audit-logs/export` | `requireAuditLogsWrite` |
 | `GET /api/settings` | `requireSettingsRead` |
 | `GET /api/settings/db-connections` | `requireSettingsRead` |
+| `GET /api/settings/approval-resolution` | `requireSettingsRead` |
 | `PATCH /api/settings` | `requireSettingsWrite` |
 | `GET /api/notifications` | 已登入 |
 | `POST /api/notifications/read-all` | 已登入 |
@@ -215,8 +218,11 @@
 | `ddl` | `tickets.review` | `tickets.execute` |
 | `dml` | `tickets.review` | `tickets.execute` |
 | `redis_command` | `tickets.review` | `tickets.execute` |
+| `query_access` | `tickets.review` | 無獨立 execute，approve 後 scope 生效 |
 | `sql_export` | `sql_editor.export_review` | 無獨立 execute，approve 後可下載 |
 | `sensitive_query_access` | `sql_editor.sensitive_review` | 無獨立 execute，approve 後 scope 生效 |
+
+審批人還需要被 Approval Policy 指定。Permission 只代表具備審批資格；Approval Policy 決定該 workflow 會路由給哪些候選人。有效審批人會排除 inactive user，以及缺少該 workflow review permission 的候選人。
 
 ## Ticket 通知與角色對照
 
@@ -241,8 +247,8 @@
 | 類別 | 是否符合原則一 | 是否符合原則二 |
 |---|---|---|
 | CRUD 型導航頁 | 是 | 不適用 |
-| SQL Editor | 是，使用動作型 permission 代表頁面入口 | 是，DB 作用範圍靠 DB Scope |
-| Tickets | 是，`tickets.apply` 作為工作台最小入口 | 是，DB 作用範圍靠 DB Scope |
+| SQL Editor | 是，使用 `sql_editor.read` 代表頁面入口 | 是，DB 作用範圍靠 DB Scope |
+| Tickets | 是，使用 `tickets.read` 代表頁面入口 | 是，DB 作用範圍靠 DB Scope |
 | Resources 子頁 | 是，隸屬 `users.read` / `users.write` workspace | 不適用 |
 
 ## 相關文件
