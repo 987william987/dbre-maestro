@@ -93,6 +93,11 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	currentSettings, err := h.settings.Get(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load settings failed")
+		return
+	}
 
 	for _, userID := range append([]uint64{}, req.SensitiveExportReviewerUserIDs...) {
 		if err := h.validateUserExists(r, userID); err != nil {
@@ -106,7 +111,9 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.LarkAppID != "" && req.LarkAppSecret == "" && !req.LarkAppSecretConfigured {
+	larkSecretConfigured, larkSecretRequired := resolveLarkSecretState(req.LarkAppID, req.LarkAppSecret, req.LarkAppSecretConfigured, currentSettings.LarkAppSecretConfigured)
+	req.LarkAppSecretConfigured = larkSecretConfigured
+	if larkSecretRequired {
 		jsonErr(w, http.StatusUnprocessableEntity, "lark_app_secret is required when configuring lark for the first time")
 		return
 	}
@@ -167,12 +174,7 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.ApprovalPolicies) == 0 {
-		current, err := h.settings.Get(r.Context())
-		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "load approval policies failed")
-			return
-		}
-		req.ApprovalPolicies = current.ApprovalPolicies
+		req.ApprovalPolicies = currentSettings.ApprovalPolicies
 	}
 	resolution, err := h.resolveApprovalPolicies(r.Context(), req.ApprovalPolicies)
 	if err != nil {
@@ -234,6 +236,19 @@ func (h *SettingsHandler) validateUserExists(r *http.Request, userID uint64) err
 		return fmt.Errorf("user %d does not exist", userID)
 	}
 	return nil
+}
+
+func resolveLarkSecretState(appID string, appSecret string, requestConfigured bool, currentConfigured bool) (configured bool, required bool) {
+	if strings.TrimSpace(appSecret) != "" {
+		return true, false
+	}
+	if strings.TrimSpace(appID) == "" {
+		return requestConfigured || currentConfigured, false
+	}
+	if requestConfigured || currentConfigured {
+		return true, false
+	}
+	return false, true
 }
 
 type approvalResolutionUser struct {
