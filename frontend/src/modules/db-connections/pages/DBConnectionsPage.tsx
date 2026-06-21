@@ -514,30 +514,28 @@ export function DBConnectionsPage() {
                         </label>
                       </div>
 
-                      {form.dbType !== 'redis' ? (
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <label className="grid gap-1.5 text-[12px] font-medium text-muted">
-                            Readwrite Username
-                            <input
-                              value={form.readwriteUsername}
-                              onChange={(event) => setForm((current) => ({ ...current, readwriteUsername: event.target.value }))}
-                              className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                              disabled={submitting}
-                            />
-                          </label>
-                          <label className="grid gap-1.5 text-[12px] font-medium text-muted">
-                            Readwrite Password
-                            <input
-                              value={form.readwritePassword}
-                              type="password"
-                              onChange={(event) => setForm((current) => ({ ...current, readwritePassword: event.target.value }))}
-                              placeholder={drawerState.mode === 'edit' ? 'Leave blank to keep the current password' : ''}
-                              className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                              disabled={submitting}
-                            />
-                          </label>
-                        </div>
-                      ) : null}
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                          Readwrite Username
+                          <input
+                            value={form.readwriteUsername}
+                            onChange={(event) => setForm((current) => ({ ...current, readwriteUsername: event.target.value }))}
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            disabled={submitting}
+                          />
+                        </label>
+                        <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                          Readwrite Password
+                          <input
+                            value={form.readwritePassword}
+                            type="password"
+                            onChange={(event) => setForm((current) => ({ ...current, readwritePassword: event.target.value }))}
+                            placeholder={drawerState.mode === 'edit' ? 'Leave blank to keep the current password' : ''}
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            disabled={submitting}
+                          />
+                        </label>
+                      </div>
 
                       <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
                         <p className="font-semibold text-ink">Credential Policy</p>
