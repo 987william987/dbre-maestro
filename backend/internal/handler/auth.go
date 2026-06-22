@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"image/png"
@@ -29,7 +30,15 @@ type AuthHandler struct {
 	refreshCookieSecure bool
 	loginRateLimiter    requestRateLimiter
 	refreshRateLimiter  requestRateLimiter
+	mfaEnforcement      MFAEnforcement
 }
+
+type MFAEnforcement string
+
+const (
+	MFAEnforcementDisabled          MFAEnforcement = "disabled"
+	MFAEnforcementRequiredForAdmins MFAEnforcement = "required_for_admins"
+)
 
 const (
 	refreshCookiePath       = "/api/auth/refresh"
@@ -37,10 +46,18 @@ const (
 	sessionListLimit        = 20
 )
 
-func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, jwtSecret []byte, refreshCookieSecure ...bool) *AuthHandler {
+func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, jwtSecret []byte, options ...any) *AuthHandler {
 	secure := false
-	if len(refreshCookieSecure) > 0 {
-		secure = refreshCookieSecure[0]
+	enforcement := MFAEnforcementDisabled
+	for _, option := range options {
+		switch value := option.(type) {
+		case bool:
+			secure = value
+		case string:
+			enforcement = normalizeMFAEnforcement(value)
+		case MFAEnforcement:
+			enforcement = value
+		}
 	}
 	return &AuthHandler{
 		users:               users,
@@ -50,6 +67,7 @@ func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo
 		refreshCookieSecure: secure,
 		loginRateLimiter:    newRequestRateLimiter(5, time.Minute),
 		refreshRateLimiter:  newRequestRateLimiter(30, time.Minute),
+		mfaEnforcement:      enforcement,
 	}
 }
 
@@ -151,7 +169,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requiresMFA, err := h.users.RequiresMFA(r.Context(), user)
+	requiresMFA, err := h.requiresMFA(r.Context(), user)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "mfa policy check failed")
 		return
@@ -264,7 +282,7 @@ func (h *AuthHandler) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnauthorized, "user is disabled")
 		return
 	}
-	requiresMFA, err := h.users.RequiresMFA(r.Context(), user)
+	requiresMFA, err := h.requiresMFA(r.Context(), user)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "mfa policy check failed")
 		return
@@ -359,7 +377,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnauthorized, "user is disabled")
 		return
 	}
-	requiresMFA, err := h.users.RequiresMFA(r.Context(), user)
+	requiresMFA, err := h.requiresMFA(r.Context(), user)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "mfa policy check failed")
 		return
@@ -582,6 +600,25 @@ func (h *AuthHandler) allowAuthAttempt(w http.ResponseWriter, r *http.Request, l
 	})
 	jsonErr(w, http.StatusTooManyRequests, fmt.Sprintf("%s rate limit exceeded", action))
 	return false
+}
+
+func (h *AuthHandler) requiresMFA(ctx context.Context, user *model.User) (bool, error) {
+	if h.mfaEnforcement == MFAEnforcementDisabled {
+		return false, nil
+	}
+	if h.mfaEnforcement == MFAEnforcementRequiredForAdmins {
+		return h.users.RequiresMFA(ctx, user)
+	}
+	return false, nil
+}
+
+func normalizeMFAEnforcement(value string) MFAEnforcement {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(MFAEnforcementRequiredForAdmins):
+		return MFAEnforcementRequiredForAdmins
+	default:
+		return MFAEnforcementDisabled
+	}
 }
 
 func (h *AuthHandler) refreshCookie(r *http.Request, value string, expiresAt time.Time) *http.Cookie {

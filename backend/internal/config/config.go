@@ -15,6 +15,7 @@ import (
 type Config struct {
 	Port                string
 	AppEnv              string
+	MFAEnforcement      string
 	DBDSN               string
 	MigrationDSN        string
 	JWTSecret           []byte
@@ -40,6 +41,7 @@ func Load() (*Config, error) {
 			pool.ProfileShadowValidation: pool.DefaultConfigForProfile(pool.ProfileShadowValidation),
 		},
 	}
+	c.MFAEnforcement = defaultMFAEnforcement(c.AppEnv)
 
 	if c.DBDSN == "" {
 		return nil, errors.New("DB_DSN is required")
@@ -69,6 +71,12 @@ func Load() (*Config, error) {
 	}
 
 	c.LarkWebhookURL = os.Getenv("LARK_WEBHOOK_URL")
+	if raw := os.Getenv("MFA_ENFORCEMENT"); raw != "" {
+		c.MFAEnforcement = normalizeMFAEnforcement(raw)
+		if c.MFAEnforcement == "" {
+			return nil, errors.New("MFA_ENFORCEMENT must be disabled or required_for_admins")
+		}
+	}
 	c.RefreshCookieSecure = c.AppEnv == "production"
 	if raw := os.Getenv("REFRESH_COOKIE_SECURE"); raw != "" {
 		secure, err := strconv.ParseBool(raw)
@@ -83,6 +91,23 @@ func Load() (*Config, error) {
 	}
 
 	return c, nil
+}
+
+func defaultMFAEnforcement(appEnv string) string {
+	if appEnv == "production" {
+		return "required_for_admins"
+	}
+	return "disabled"
+}
+
+func normalizeMFAEnforcement(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "disabled", "required_for_admins":
+		return normalized
+	default:
+		return ""
+	}
 }
 
 func getEnv(key, fallback string) string {
