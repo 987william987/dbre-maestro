@@ -7,13 +7,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/dbre-maestro/maestro/internal/crypto"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
 type UserRepo struct {
-	db *sqlx.DB
+	db     *sqlx.DB
+	encKey []byte
 }
 
 type AuthGroupRecord struct {
@@ -29,8 +31,12 @@ type ResourceBoundUser struct {
 	Username string `db:"username" json:"username"`
 }
 
-func NewUserRepo(db *sqlx.DB) *UserRepo {
-	return &UserRepo{db: db}
+func NewUserRepo(db *sqlx.DB, encKey ...[]byte) *UserRepo {
+	var key []byte
+	if len(encKey) > 0 {
+		key = encKey[0]
+	}
+	return &UserRepo{db: db, encKey: key}
 }
 
 func (r *UserRepo) Create(ctx context.Context, username, email, larkRecipient, passwordHash string, isProtected bool) (*model.User, error) {
@@ -112,6 +118,70 @@ func (r *UserRepo) GetAuthGroups(ctx context.Context, userID uint64) ([]model.Au
 		ORDER BY auth_group
 	`, userID, timeutil.NowUTC(), userID, timeutil.NowUTC())
 	return groups, err
+}
+
+func (r *UserRepo) RequiresMFA(ctx context.Context, user *model.User) (bool, error) {
+	if user == nil {
+		return false, nil
+	}
+	if user.IsProtected {
+		return true, nil
+	}
+	groups, err := r.GetAuthGroups(ctx, user.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, group := range groups {
+		if group == model.AuthGroupAdmin {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *UserRepo) StoreMFASecret(ctx context.Context, userID uint64, secret string) error {
+	if len(r.encKey) == 0 {
+		return errors.New("user mfa encryption key is not configured")
+	}
+	encrypted, err := crypto.Encrypt(r.encKey, []byte(secret))
+	if err != nil {
+		return fmt.Errorf("encrypt mfa secret: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx,
+		`UPDATE users SET mfa_secret_encrypted = ?, mfa_enabled = 0, mfa_enabled_at = NULL, updated_at = ? WHERE id = ?`,
+		encrypted, timeutil.NowUTC(), userID,
+	)
+	return err
+}
+
+func (r *UserRepo) DecryptMFASecret(user *model.User) (string, error) {
+	if user == nil || len(user.MFASecret) == 0 {
+		return "", nil
+	}
+	if len(r.encKey) == 0 {
+		return "", errors.New("user mfa encryption key is not configured")
+	}
+	plain, err := crypto.Decrypt(r.encKey, user.MFASecret)
+	if err != nil {
+		return "", fmt.Errorf("decrypt mfa secret: %w", err)
+	}
+	return string(plain), nil
+}
+
+func (r *UserRepo) EnableMFA(ctx context.Context, userID uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE users SET mfa_enabled = 1, mfa_enabled_at = ?, updated_at = ? WHERE id = ? AND mfa_secret_encrypted IS NOT NULL`,
+		timeutil.NowUTC(), timeutil.NowUTC(), userID,
+	)
+	return err
+}
+
+func (r *UserRepo) ResetMFA(ctx context.Context, userID uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE users SET mfa_enabled = 0, mfa_secret_encrypted = NULL, mfa_enabled_at = NULL, updated_at = ? WHERE id = ?`,
+		timeutil.NowUTC(), userID,
+	)
+	return err
 }
 
 func (r *UserRepo) GetAuthGroupRecords(ctx context.Context, userID uint64) ([]AuthGroupRecord, error) {

@@ -181,3 +181,7 @@ export function revokeUserSession(userId: number, sessionId: number) {
 export function revokeUserSessions(userId: number) {
   return apiClient.delete<void>(`/users/${userId}/sessions`)
 }
+
+export function resetUserMFA(userId: number) {
+  return apiClient.post<void>(`/users/${userId}/mfa/reset`)
+}

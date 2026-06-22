@@ -354,6 +354,45 @@ func (h *UserHandler) RevokeSessions(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// POST /users/{id}/mfa/reset — Admin only
+func (h *UserHandler) ResetMFA(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	if h.sessions == nil {
+		jsonErr(w, http.StatusInternalServerError, "session repo unavailable")
+		return
+	}
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if err := h.users.ResetMFA(r.Context(), id); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "reset mfa failed")
+		return
+	}
+	if err := h.sessions.RevokeAllForUser(r.Context(), id); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "revoke sessions failed")
+		return
+	}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "user_mfa_reset",
+		ResourceType: "user",
+		ResourceID:   &id,
+		Details: map[string]any{
+			"username": user.Username,
+		},
+		IPAddress: clientIP(r),
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // POST /users/{id}/memberships — Admin only
 // Body: { "auth_group": "dba", "expires_at": "2026-12-31T00:00:00Z" }
 func (h *UserHandler) AddMembership(w http.ResponseWriter, r *http.Request) {

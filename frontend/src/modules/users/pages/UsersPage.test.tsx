@@ -14,6 +14,7 @@ vi.mock('@/modules/users/api', () => ({
   listUserSessions: vi.fn(),
   revokeUserSession: vi.fn(),
   revokeUserSessions: vi.fn(),
+  resetUserMFA: vi.fn(),
   listQueryAccessRules: vi.fn(),
   createQueryAccessRule: vi.fn(),
   revokeQueryAccessRule: vi.fn(),
@@ -33,7 +34,7 @@ vi.mock('@/modules/auth-groups/api', () => ({
 
 import { createAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
 import { getDBConnectionBindings } from '@/modules/db-connections/api'
-import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccessRules, listUserDBConnections, listUserSessions, listUsers, patchUser, revokeQueryAccessRule, revokeUserSession, revokeUserSessions } from '@/modules/users/api'
+import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccessRules, listUserDBConnections, listUserSessions, listUsers, patchUser, resetUserMFA, revokeQueryAccessRule, revokeUserSession, revokeUserSessions } from '@/modules/users/api'
 
 const mockedListUsers = vi.mocked(listUsers)
 const mockedGetUser = vi.mocked(getUser)
@@ -44,6 +45,7 @@ const mockedListUserDBConnections = vi.mocked(listUserDBConnections)
 const mockedListUserSessions = vi.mocked(listUserSessions)
 const mockedRevokeUserSession = vi.mocked(revokeUserSession)
 const mockedRevokeUserSessions = vi.mocked(revokeUserSessions)
+const mockedResetUserMFA = vi.mocked(resetUserMFA)
 const mockedListQueryAccessRules = vi.mocked(listQueryAccessRules)
 const mockedCreateQueryAccessRule = vi.mocked(createQueryAccessRule)
 const mockedRevokeQueryAccessRule = vi.mocked(revokeQueryAccessRule)
@@ -100,6 +102,7 @@ describe('UsersPage', () => {
     mockedListUserSessions.mockResolvedValue({ sessions: [] })
     mockedRevokeUserSession.mockResolvedValue(undefined)
     mockedRevokeUserSessions.mockResolvedValue(undefined)
+    mockedResetUserMFA.mockResolvedValue(undefined)
     mockedListQueryAccessRules.mockResolvedValue({ rules: [] })
     mockedCreateQueryAccessRule.mockResolvedValue({
       id: 1,

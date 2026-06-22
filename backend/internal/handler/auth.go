@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
+	"image/png"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +16,8 @@ import (
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/go-chi/chi/v5"
+	"github.com/pquerna/otp"
+	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -145,6 +150,32 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	requiresMFA, err := h.users.RequiresMFA(r.Context(), user)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "mfa policy check failed")
+		return
+	}
+	if requiresMFA {
+		if !user.MFAEnabled || len(user.MFASecret) == 0 {
+			h.startMFASetup(w, r, user)
+			return
+		}
+		mfaToken, err := auth.NewMFAChallengeToken(user.ID, user.Username, false, h.jwtSecret)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "token error")
+			return
+		}
+		jsonOK(w, map[string]any{
+			"mfa_required": true,
+			"mfa_token":    mfaToken,
+		})
+		return
+	}
+
+	h.completeLogin(w, r, user)
+}
+
+func (h *AuthHandler) completeLogin(w http.ResponseWriter, r *http.Request, user *model.User) {
 	rawRefresh, hashRefresh, err := auth.NewRefreshToken()
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "token error")
@@ -174,6 +205,101 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 
 	jsonOK(w, map[string]string{"access_token": accessToken})
+}
+
+func (h *AuthHandler) startMFASetup(w http.ResponseWriter, r *http.Request, user *model.User) {
+	key, err := totp.Generate(totp.GenerateOpts{
+		Issuer:      "DBRE Maestro",
+		AccountName: user.Username,
+	})
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "mfa setup failed")
+		return
+	}
+	if err := h.users.StoreMFASecret(r.Context(), user.ID, key.Secret()); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "mfa setup failed")
+		return
+	}
+	mfaToken, err := auth.NewMFAChallengeToken(user.ID, user.Username, true, h.jwtSecret)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "token error")
+		return
+	}
+	qrDataURL, err := totpQRCodeDataURL(key)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "mfa setup failed")
+		return
+	}
+	jsonOK(w, map[string]any{
+		"mfa_setup_required": true,
+		"mfa_token":          mfaToken,
+		"otp_auth_url":       key.URL(),
+		"mfa_secret":         key.Secret(),
+		"qr_data_url":        qrDataURL,
+	})
+}
+
+// POST /auth/mfa/verify
+func (h *AuthHandler) VerifyMFA(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MFAToken string `json:"mfa_token"`
+		Code     string `json:"code"`
+	}
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	claims, err := auth.ParseMFAChallengeToken(strings.TrimSpace(req.MFAToken), h.jwtSecret)
+	if err != nil {
+		jsonErr(w, http.StatusUnauthorized, "invalid mfa token")
+		return
+	}
+	user, err := h.users.GetByID(r.Context(), claims.UserID)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusUnauthorized, "user not found")
+		return
+	}
+	if !user.IsActive {
+		jsonErr(w, http.StatusUnauthorized, "user is disabled")
+		return
+	}
+	requiresMFA, err := h.users.RequiresMFA(r.Context(), user)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "mfa policy check failed")
+		return
+	}
+	if !requiresMFA {
+		jsonErr(w, http.StatusBadRequest, "mfa is not required")
+		return
+	}
+	secret, err := h.users.DecryptMFASecret(user)
+	if err != nil || secret == "" {
+		jsonErr(w, http.StatusUnauthorized, "mfa is not configured")
+		return
+	}
+	if !totp.Validate(strings.TrimSpace(req.Code), secret) {
+		h.logAudit(r, repository.AuditEntry{
+			ActorID:      &user.ID,
+			ActorName:    user.Username,
+			ActionType:   "mfa_failed",
+			ResourceType: "auth",
+		})
+		jsonErr(w, http.StatusUnauthorized, "invalid mfa code")
+		return
+	}
+	if claims.Setup || !user.MFAEnabled {
+		if err := h.users.EnableMFA(r.Context(), user.ID); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "enable mfa failed")
+			return
+		}
+		h.logAudit(r, repository.AuditEntry{
+			ActorID:      &user.ID,
+			ActorName:    user.Username,
+			ActionType:   "mfa_enable",
+			ResourceType: "auth",
+		})
+	}
+	h.completeLogin(w, r, user)
 }
 
 // POST /auth/refresh
@@ -230,6 +356,16 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	if !user.IsActive {
 		h.sessions.RevokeAllForUser(r.Context(), user.ID)
 		jsonErr(w, http.StatusUnauthorized, "user is disabled")
+		return
+	}
+	requiresMFA, err := h.users.RequiresMFA(r.Context(), user)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "mfa policy check failed")
+		return
+	}
+	if requiresMFA && (!user.MFAEnabled || len(user.MFASecret) == 0) {
+		h.sessions.RevokeAllForUser(r.Context(), user.ID)
+		jsonErr(w, http.StatusUnauthorized, "mfa required")
 		return
 	}
 
@@ -491,6 +627,18 @@ func (h *AuthHandler) logLoginFailed(r *http.Request, actorID *uint64, username 
 			"reason": reason,
 		},
 	})
+}
+
+func totpQRCodeDataURL(key *otp.Key) (string, error) {
+	img, err := key.Image(220, 220)
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return "", err
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
 func parseAuthUintParam(w http.ResponseWriter, r *http.Request, name string) (uint64, bool) {

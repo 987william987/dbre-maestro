@@ -8,11 +8,19 @@ import { getSetupStatus } from '@/shared/setup/api'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 
 export function LoginPage() {
-  const { isAuthenticated, login, status, user } = useAuth()
+  const { isAuthenticated, login, status, user, verifyMFA } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [mfaCode, setMFACode] = useState('')
+  const [mfaChallenge, setMFAChallenge] = useState<{
+    token: string
+    setupRequired: boolean
+    otpAuthURL?: string
+    mfaSecret?: string
+    qrDataURL?: string
+  } | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -49,7 +57,27 @@ export function LoginPage() {
     setLoading(true)
 
     try {
-      await login({ username, password })
+      if (mfaChallenge) {
+        if (!verifyMFA) {
+          throw new Error('MFA verification is unavailable')
+        }
+        await verifyMFA({ mfaToken: mfaChallenge.token, code: mfaCode })
+        const nextPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
+        navigate(nextPath ?? '/', { replace: true })
+        return
+      }
+      const result = await login({ username, password })
+      if (result.status === 'mfa_required') {
+        setMFAChallenge({
+          token: result.mfaToken,
+          setupRequired: result.setupRequired,
+          otpAuthURL: result.otpAuthURL,
+          mfaSecret: result.mfaSecret,
+          qrDataURL: result.qrDataURL,
+        })
+        setMFACode('')
+        return
+      }
       const nextPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
       navigate(nextPath ?? '/', { replace: true })
     } catch (submitError) {
@@ -80,7 +108,7 @@ export function LoginPage() {
               onChange={(event) => setUsername(event.target.value)}
               placeholder="e.g. admin"
               autoComplete="username"
-              disabled={loading}
+              disabled={loading || mfaChallenge !== null}
             />
           </label>
 
@@ -94,31 +122,81 @@ export function LoginPage() {
                 placeholder="Enter your password"
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="current-password"
-                disabled={loading}
+                disabled={loading || mfaChallenge !== null}
               />
               <button
                 type="button"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-faint transition hover:text-muted"
                 onClick={() => setShowPassword((value) => !value)}
-                disabled={loading}
+                disabled={loading || mfaChallenge !== null}
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </label>
 
+          {mfaChallenge ? (
+            <div className="grid gap-4 rounded-card border border-border bg-panel-soft px-4 py-4">
+              <div>
+                <p className="text-sm font-semibold text-ink">
+                  {mfaChallenge.setupRequired ? 'Set up MFA' : 'Enter MFA code'}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-muted">
+                  {mfaChallenge.setupRequired
+                    ? 'Scan the QR code with Google Authenticator or enter the setup key manually, then enter the 6-digit code.'
+                    : 'Enter the 6-digit code from your authenticator app.'}
+                </p>
+              </div>
+              {mfaChallenge.setupRequired && mfaChallenge.qrDataURL ? (
+                <div className="flex justify-center">
+                  <img src={mfaChallenge.qrDataURL} alt="MFA setup QR code" className="h-44 w-44 rounded-lg border border-border bg-white p-2" />
+                </div>
+              ) : null}
+              {mfaChallenge.setupRequired && mfaChallenge.mfaSecret ? (
+                <div className="rounded-lg border border-border bg-white px-3 py-2">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Setup Key</p>
+                  <p className="mt-1 break-all font-mono text-[12px] text-ink">{mfaChallenge.mfaSecret}</p>
+                </div>
+              ) : null}
+              <label className="flex flex-col gap-1.5">
+                <span className="text-sm font-semibold text-ink">Authenticator Code</span>
+                <input
+                  className="h-10 rounded-control border border-border bg-panel px-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                  value={mfaCode}
+                  onChange={(event) => setMFACode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  disabled={loading}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setMFAChallenge(null)
+                  setMFACode('')
+                  setError('')
+                }}
+                className="justify-self-start text-xs font-semibold text-muted underline decoration-border underline-offset-4 transition hover:text-ink"
+                disabled={loading}
+              >
+                Use another account
+              </button>
+            </div>
+          ) : null}
+
           {error ? <InlineAlert>{error}</InlineAlert> : null}
 
           <button
             type="submit"
-            disabled={loading || username.trim() === '' || password.trim() === ''}
+            disabled={loading || (mfaChallenge ? mfaCode.length !== 6 : username.trim() === '' || password.trim() === '')}
             className={cn(
               'mt-1 inline-flex h-10 items-center justify-center gap-2 rounded-control px-4 text-sm font-bold transition-colors',
               'bg-brand text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50',
             )}
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {loading ? 'Signing in…' : 'Sign in'}
+            {loading ? 'Signing in…' : mfaChallenge ? 'Verify and Sign in' : 'Sign in'}
           </button>
         </form>
 

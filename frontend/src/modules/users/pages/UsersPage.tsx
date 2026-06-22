@@ -4,7 +4,7 @@ import { Database, Info, KeyRound, Loader2, Plus, RefreshCw, Shield, Trash2, Use
 import { useNavigate } from 'react-router-dom'
 import { createAuthGroup, deleteAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
 import { getDBConnectionBindings } from '@/modules/db-connections/api'
-import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccessRules, listUserDBConnections, listUserSessions, listUsers, patchUser, revokeQueryAccessRule, revokeUserSession, revokeUserSessions } from '@/modules/users/api'
+import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccessRules, listUserDBConnections, listUserSessions, listUsers, patchUser, resetUserMFA, revokeQueryAccessRule, revokeUserSession, revokeUserSessions } from '@/modules/users/api'
 import type { QueryAccessRule } from '@/modules/users/api'
 import type { AccountSession } from '@/modules/account/api'
 import { ApiError } from '@/shared/api/client'
@@ -178,6 +178,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   const [selectedUserSessions, setSelectedUserSessions] = useState<AccountSession[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(false)
   const [sessionsActing, setSessionsActing] = useState<number | 'all' | null>(null)
+  const [mfaResetting, setMFAResetting] = useState(false)
   const [selectedAuthGroup, setSelectedAuthGroup] = useState<AuthGroupDetail | null>(null)
   const [userDraft, setUserDraft] = useState<UserDraft>(EMPTY_USER_DRAFT)
   const [authGroupDraft, setAuthGroupDraft] = useState<AuthGroupDraft>(EMPTY_AUTH_GROUP_DRAFT)
@@ -272,6 +273,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     setSelectedUserSessions([])
     setSessionsLoading(false)
     setSessionsActing(null)
+    setMFAResetting(false)
     setSelectedAuthGroup(null)
     setUserDraft(EMPTY_USER_DRAFT)
     setAuthGroupDraft(EMPTY_AUTH_GROUP_DRAFT)
@@ -370,6 +372,23 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       setDrawerError(revokeError instanceof ApiError ? revokeError.message : 'Failed to revoke user sessions.')
     } finally {
       setSessionsActing(null)
+    }
+  }
+
+  async function handleResetUserMFA() {
+    if (drawerState?.mode !== 'edit-user') {
+      return
+    }
+    setMFAResetting(true)
+    setDrawerError('')
+    try {
+      await resetUserMFA(drawerState.userId)
+      await refreshSelectedUserSessions(drawerState.userId)
+      pushToast('MFA reset. The user must set up MFA on next sign-in.', 'success')
+    } catch (resetError) {
+      setDrawerError(resetError instanceof ApiError ? resetError.message : 'Failed to reset user MFA.')
+    } finally {
+      setMFAResetting(false)
     }
   }
 
@@ -1485,6 +1504,21 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                   {drawerState.mode === 'edit-user' && !selectedUserIsProtected ? (
                     <CardSection title="Account Controls" icon={<Shield className="h-4 w-4 text-accent" />}>
                       <div className="grid gap-3">
+                        <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-panel-soft px-3 py-3">
+                          <div>
+                            <p className="text-[12px] font-semibold text-ink">Reset MFA</p>
+                            <p className="mt-1 text-[11px] text-muted">Clears this user's authenticator setup and revokes all sessions.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleResetUserMFA()}
+                            disabled={saving || mfaResetting}
+                            className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
+                          >
+                            {mfaResetting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            Reset MFA
+                          </button>
+                        </div>
                         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
                           <div>
                             <p className="text-[12px] font-semibold text-amber-800">Sign-in Status</p>

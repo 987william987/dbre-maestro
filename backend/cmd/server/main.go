@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -45,8 +46,37 @@ func timeoutExceptEventStream(timeout time.Duration) func(http.Handler) http.Han
 	}
 }
 
+func resetMFABreakGlass(ctx context.Context, users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, username string) error {
+	user, err := users.GetByUsername(ctx, username)
+	if err != nil {
+		return fmt.Errorf("load user: %w", err)
+	}
+	if user == nil {
+		return fmt.Errorf("user %q not found", username)
+	}
+	if err := users.ResetMFA(ctx, user.ID); err != nil {
+		return fmt.Errorf("reset mfa: %w", err)
+	}
+	if err := sessions.RevokeAllForUser(ctx, user.ID); err != nil {
+		return fmt.Errorf("revoke sessions: %w", err)
+	}
+	if audit != nil {
+		_ = audit.Log(ctx, repository.AuditEntry{
+			ActorName:    "break_glass",
+			ActionType:   "user_mfa_reset_break_glass",
+			ResourceType: "user",
+			ResourceID:   &user.ID,
+			Details: map[string]any{
+				"username": user.Username,
+			},
+		})
+	}
+	return nil
+}
+
 func main() {
 	migrateOnly := flag.Bool("migrate-only", false, "run migrations and exit")
+	resetMFAUsername := flag.String("reset-mfa-username", "", "break-glass reset MFA for a username and exit")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -107,9 +137,17 @@ func main() {
 		slog.Warn("crash recovery: marked tickets as interrupted", "count", n)
 	}
 
-	userRepo := repository.NewUserRepo(metaDB)
+	userRepo := repository.NewUserRepo(metaDB, cfg.EncryptionKey)
 	sessionRepo := repository.NewSessionRepo(metaDB)
 	auditRepo := repository.NewAuditRepo(metaDB)
+	if strings.TrimSpace(*resetMFAUsername) != "" {
+		if err := resetMFABreakGlass(context.Background(), userRepo, sessionRepo, auditRepo, strings.TrimSpace(*resetMFAUsername)); err != nil {
+			slog.Error("break-glass mfa reset failed", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("break-glass mfa reset complete", "username", strings.TrimSpace(*resetMFAUsername))
+		return
+	}
 	dbConnRepo := repository.NewDBConnectionRepo(metaDB, cfg.EncryptionKey)
 	exportRepo := repository.NewExportRepo(metaDB)
 	queryArtifactRepo := repository.NewQueryArtifactRepo(metaDB)
@@ -178,6 +216,7 @@ func main() {
 		r.Post("/setup", authH.Setup)
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/login", authH.Login)
+			r.Post("/mfa/verify", authH.VerifyMFA)
 			r.Post("/refresh", authH.Refresh)
 			r.With(
 				middleware.RequireAuth(cfg.JWTSecret),
@@ -247,6 +286,7 @@ func main() {
 			r.With(requireUsersRead).Get("/{id}/sessions", userH.ListSessions)
 			r.With(requireUsersWrite).Delete("/{id}/sessions", userH.RevokeSessions)
 			r.With(requireUsersWrite).Delete("/{id}/sessions/{sessionID}", userH.RevokeSession)
+			r.With(requireUsersWrite).Post("/{id}/mfa/reset", userH.ResetMFA)
 			r.With(requireUsersWrite).Patch("/{id}", userH.Patch)
 			r.With(requireUsersWrite).Delete("/{id}", userH.Delete)
 			r.With(requireUsersWrite).Post("/{id}/memberships", userH.AddMembership)

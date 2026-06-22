@@ -32,3 +32,7 @@ tidy:
 
 gen-key:
 	@dd if=/dev/urandom bs=32 count=1 2>/dev/null | base64
+
+reset-mfa:
+	@test -n "$(USERNAME)" || (echo "USERNAME is required, e.g. make reset-mfa USERNAME=admin" && exit 1)
+	cd backend && go run ./cmd/server -reset-mfa-username "$(USERNAME)"

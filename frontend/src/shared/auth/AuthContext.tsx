@@ -7,11 +7,28 @@ type LoginParams = {
   password: string
 }
 
+type MFAVerifyParams = {
+  mfaToken: string
+  code: string
+}
+
+type LoginResult =
+  | { status: 'authenticated' }
+  | {
+      status: 'mfa_required'
+      mfaToken: string
+      setupRequired: boolean
+      otpAuthURL?: string
+      mfaSecret?: string
+      qrDataURL?: string
+    }
+
 type AuthContextValue = {
   status: AuthStatus
   user: CurrentUser | null
   accessToken: string | null
-  login: (params: LoginParams) => Promise<void>
+  login: (params: LoginParams) => Promise<LoginResult>
+  verifyMFA?: (params: MFAVerifyParams) => Promise<void>
   logout: () => Promise<void>
   clearAuth: () => void
   isAuthenticated: boolean
@@ -28,7 +45,13 @@ type MeResponse = {
 }
 
 type LoginResponse = {
-  access_token: string
+  access_token?: string
+  mfa_required?: boolean
+  mfa_setup_required?: boolean
+  mfa_token?: string
+  otp_auth_url?: string
+  mfa_secret?: string
+  qr_data_url?: string
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -175,7 +198,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [accessToken, clearAuth, refreshAccessToken])
 
-  const login = useCallback(async ({ username, password }: LoginParams) => {
+  const completeLogin = useCallback(async (token: string) => {
+    applyAccessToken(token)
+
+    try {
+      const currentUser = await fetchMe(token)
+      setUser(currentUser)
+      setStatus('authenticated')
+    } catch (error) {
+      clearAuth()
+      throw error
+    }
+  }, [applyAccessToken, clearAuth, fetchMe])
+
+  const login = useCallback(async ({ username, password }: LoginParams): Promise<LoginResult> => {
     const { response, data } = await fetchJSON<LoginResponse>('/auth/login', {
       method: 'POST',
       headers: {
@@ -184,7 +220,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ username, password }),
     })
 
-    if (!response.ok || !data?.access_token) {
+    if (!response.ok) {
       const message =
         data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
           ? data.error
@@ -192,17 +228,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(message)
     }
 
-    applyAccessToken(data.access_token)
-
-    try {
-      const currentUser = await fetchMe(data.access_token)
-      setUser(currentUser)
-      setStatus('authenticated')
-    } catch (error) {
-      clearAuth()
-      throw error
+    if (data?.access_token) {
+      await completeLogin(data.access_token)
+      return { status: 'authenticated' }
     }
-  }, [applyAccessToken, clearAuth, fetchMe])
+
+    if ((data?.mfa_required || data?.mfa_setup_required) && data.mfa_token) {
+      return {
+        status: 'mfa_required',
+        mfaToken: data.mfa_token,
+        setupRequired: data.mfa_setup_required === true,
+        otpAuthURL: data.otp_auth_url,
+        mfaSecret: data.mfa_secret,
+        qrDataURL: data.qr_data_url,
+      }
+    }
+
+    throw new Error('Sign-in failed')
+  }, [completeLogin])
+
+  const verifyMFA = useCallback(async ({ mfaToken, code }: MFAVerifyParams) => {
+    const { response, data } = await fetchJSON<LoginResponse>('/auth/mfa/verify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ mfa_token: mfaToken, code }),
+    })
+
+    if (!response.ok || !data?.access_token) {
+      const message =
+        data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+          ? data.error
+          : 'MFA verification failed'
+      throw new Error(message)
+    }
+
+    await completeLogin(data.access_token)
+  }, [completeLogin])
 
   const logout = useCallback(async () => {
     const token = accessToken
@@ -227,10 +290,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     accessToken,
     login,
+    verifyMFA,
     logout,
     clearAuth,
     isAuthenticated: status === 'authenticated' && user !== null,
-  }), [accessToken, clearAuth, login, logout, status, user])
+  }), [accessToken, clearAuth, login, logout, status, user, verifyMFA])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
