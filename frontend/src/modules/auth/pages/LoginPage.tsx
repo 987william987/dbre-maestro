@@ -6,6 +6,7 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import { defaultRouteForPermissions } from '@/shared/auth/permissions'
 import { getSetupStatus } from '@/shared/setup/api'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
+import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 
 export function LoginPage() {
   const { isAuthenticated, login, status, user, verifyMFA } = useAuth()
@@ -46,7 +47,15 @@ export function LoginPage() {
     }
   }, [])
 
-  if (status !== 'loading' && isAuthenticated) {
+  if (status === 'loading') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-page px-6">
+        <LoadingBlock message="Loading..." className="min-h-[160px] w-full max-w-sm rounded-card border-border bg-panel" />
+      </div>
+    )
+  }
+
+  if (isAuthenticated) {
     const nextPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
     return <Navigate to={nextPath ?? defaultRouteForPermissions(user?.permissions ?? [])} replace />
   }

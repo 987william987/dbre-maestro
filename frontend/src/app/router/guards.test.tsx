@@ -13,6 +13,32 @@ import { useAuth } from '@/shared/auth/AuthContext'
 const mockedUseAuth = vi.mocked(useAuth)
 
 describe('route guards', () => {
+  it('session 驗證中時 ProtectedRoute 顯示中性 loading，不導去 login', () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'loading',
+      isAuthenticated: false,
+      user: null,
+      accessToken: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/tickets']}>
+        <Routes>
+          <Route path="/login" element={<div>login page</div>} />
+          <Route element={<ProtectedRoute />}>
+            <Route path="/tickets" element={<div>tickets page</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('Loading...')).toBeInTheDocument()
+    expect(screen.queryByText('login page')).not.toBeInTheDocument()
+  })
+
   it('未登入時 ProtectedRoute 會導去 /login', () => {
     mockedUseAuth.mockReturnValue({
       status: 'anonymous',
