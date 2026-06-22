@@ -79,6 +79,58 @@ func (d *Dispatcher) NotifyUsers(ctx context.Context, userIDs []uint64, msg Mess
 	return SendResult{Attempts: totalAttempts}
 }
 
+func (d *Dispatcher) SendFileToUsers(ctx context.Context, userIDs []uint64, filename string, data []byte) SendResult {
+	client, mode, err := d.resolveClient(ctx)
+	if err != nil {
+		return SendResult{Err: err}
+	}
+	if client == nil {
+		return SendResult{SkippedReason: "lark_not_configured"}
+	}
+	if mode != ModeApp {
+		return SendResult{Err: fmt.Errorf("lark file delivery requires app mode")}
+	}
+
+	users, err := d.users.ListByIDs(ctx, dedupeUserIDs(userIDs))
+	if err != nil {
+		return SendResult{Err: fmt.Errorf("load lark recipients failed: %w", err)}
+	}
+	recipients := make([]string, 0, len(users))
+	seen := make(map[string]struct{}, len(users))
+	for _, user := range users {
+		recipient := strings.TrimSpace(user.LarkRecipient)
+		if recipient == "" {
+			continue
+		}
+		key := strings.ToLower(recipient)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		recipients = append(recipients, recipient)
+	}
+	if len(recipients) == 0 {
+		return SendResult{SkippedReason: "no_lark_recipient_open_id"}
+	}
+
+	var failed []string
+	totalAttempts := 0
+	for _, recipient := range recipients {
+		result := client.SendFileToRecipient(ctx, recipient, filename, data)
+		totalAttempts += result.Attempts
+		if result.Err != nil {
+			failed = append(failed, fmt.Sprintf("%s: %s", recipient, result.Err.Error()))
+		}
+	}
+	if len(failed) > 0 {
+		return SendResult{
+			Attempts: totalAttempts,
+			Err:      fmt.Errorf("lark file delivery failed for %d recipient(s): %s", len(failed), strings.Join(failed, "; ")),
+		}
+	}
+	return SendResult{Attempts: totalAttempts}
+}
+
 func (d *Dispatcher) resolveClient(ctx context.Context) (*Client, Mode, error) {
 	if d.settings != nil {
 		settings, err := d.settings.Get(ctx)

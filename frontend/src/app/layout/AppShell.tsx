@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, BriefcaseBusiness, ChevronDown, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
+import { Bell, BriefcaseBusiness, CalendarClock, ChevronDown, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -44,6 +44,13 @@ const NAV_ITEMS: NavItem[] = [
     icon: SquareTerminal,
     allowed: (permissions) => permissions.includes('sql_editor.read'),
     to: '/sql-editor',
+  },
+  {
+    key: 'scheduled-sql-reports',
+    label: 'Scheduled Reports',
+    icon: CalendarClock,
+    allowed: (permissions) => permissions.includes('scheduled_sql_reports.read') || permissions.includes('scheduled_sql_reports.write'),
+    to: '/scheduled-sql-reports',
   },
   {
     key: 'users',
@@ -114,7 +121,7 @@ const NAV_ITEMS: NavItem[] = [
 const NAV_GROUPS = [
   {
     title: 'Workbench',
-    items: ['/tickets', '/tickets/new', '/sql-editor'],
+    items: ['/tickets', '/tickets/new', '/sql-editor', '/scheduled-sql-reports'],
   },
   {
     title: 'Governance',

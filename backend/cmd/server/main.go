@@ -118,6 +118,7 @@ func main() {
 	authGroupRepo := repository.NewAuthGroupRepo(metaDB)
 	settingsRepo := repository.NewSettingsRepo(metaDB, cfg.EncryptionKey)
 	dbMetadataRepo := repository.NewDBMetadataRepo(metaDB)
+	scheduledReportRepo := repository.NewScheduledSQLReportRepo(metaDB)
 
 	larkDispatcher := notification.NewDispatcher(settingsRepo, userRepo, cfg.LarkWebhookURL)
 	if cfg.LarkWebhookURL != "" {
@@ -152,11 +153,13 @@ func main() {
 	whitelistH := handler.NewMaskingWhitelistHandler(dbConnRepo, whitelistRepo, auditRepo)
 	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, authGroupRepo, dbConnRepo, auditRepo)
 	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo, settingsRepo)
+	scheduledReportH := handler.NewScheduledSQLReportHandler(scheduledReportRepo, dbConnRepo, userRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, ticketRepo, maskingEngine, auditRepo, larkDispatcher)
 	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
 	objectJob := job.NewDBMetadataObjectJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
 
 	// Background scheduler: poll every 30s for due scheduled tickets
 	go runScheduler(ticketRepo, dbConnRepo, ticketH)
+	go runScheduledSQLReportScheduler(scheduledReportH)
 	go inventoryJob.Start(context.Background())
 	go objectJob.Start(context.Background())
 
@@ -321,6 +324,19 @@ func main() {
 			r.With(requireSQLEditorQuery).Delete("/saved-queries/{id}", queryH.DeleteSavedQuery)
 		})
 
+		r.Route("/scheduled-sql-reports", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireScheduledSQLReportsRead).Get("/", scheduledReportH.List)
+			r.With(requireScheduledSQLReportsRead).Get("/connections", scheduledReportH.ListConnections)
+			r.With(requireScheduledSQLReportsRead).Get("/recipients", scheduledReportH.ListRecipients)
+			r.With(requireScheduledSQLReportsWrite).Post("/", scheduledReportH.Create)
+			r.With(requireScheduledSQLReportsRead).Get("/{id}", scheduledReportH.Get)
+			r.With(requireScheduledSQLReportsWrite).Patch("/{id}", scheduledReportH.Update)
+			r.With(requireScheduledSQLReportsWrite).Delete("/{id}", scheduledReportH.Delete)
+		})
+
 		r.Route("/db-connections/{id}/metadata", func(r chi.Router) {
 			r.Use(middleware.RequireAuth(cfg.JWTSecret))
 			r.Use(middleware.RequireActiveUser(userRepo))
@@ -429,6 +445,16 @@ func runScheduler(tickets *repository.TicketRepo, dbConns *repository.DBConnecti
 	}
 }
 
+func runScheduledSQLReportScheduler(reportH *handler.ScheduledSQLReportHandler) {
+	ticker := time.NewTicker(scheduledSQLReportSchedulerPollInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		reportH.RunDueReports(context.Background())
+	}
+}
+
+const scheduledSQLReportSchedulerPollInterval = time.Minute
+
 func requireUsersRead(next http.Handler) http.Handler {
 	return middleware.RequirePermission("users.read", "users.write")(next)
 }
@@ -464,6 +490,12 @@ func requireSQLEditorQuery(next http.Handler) http.Handler {
 }
 func requireSQLEditorRead(next http.Handler) http.Handler {
 	return middleware.RequirePermission("sql_editor.read")(next)
+}
+func requireScheduledSQLReportsRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission("scheduled_sql_reports.read", "scheduled_sql_reports.write")(next)
+}
+func requireScheduledSQLReportsWrite(next http.Handler) http.Handler {
+	return middleware.RequirePermission("scheduled_sql_reports.write")(next)
 }
 func requireSQLEditorSensitiveApply(next http.Handler) http.Handler {
 	return middleware.RequirePermission("sql_editor.sensitive_apply")(next)

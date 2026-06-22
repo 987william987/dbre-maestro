@@ -16,6 +16,7 @@ const DBMetadataObjectsPage = lazy(() => import('@/modules/db-metadata/pages/DBM
 const MaskingDSLGuidePage = lazy(() => import('@/modules/masking-rules/pages/MaskingDSLGuidePage').then((module) => ({ default: module.MaskingDSLGuidePage })))
 const MaskingRulesPage = lazy(() => import('@/modules/masking-rules/pages/MaskingRulesPage').then((module) => ({ default: module.MaskingRulesPage })))
 const SettingsPage = lazy(() => import('@/modules/settings/pages/SettingsPage').then((module) => ({ default: module.SettingsPage })))
+const ScheduledSQLReportsPage = lazy(() => import('@/modules/scheduled-sql-reports/pages/ScheduledSQLReportsPage').then((module) => ({ default: module.ScheduledSQLReportsPage })))
 const SQLEditorPage = lazy(() => import('@/modules/sql-editor/pages/SQLEditorPage').then((module) => ({ default: module.SQLEditorPage })))
 const SQLReviewRulesPage = lazy(() => import('@/modules/sql-review-rules/pages/SQLReviewRulesPage').then((module) => ({ default: module.SQLReviewRulesPage })))
 const TicketDetailPage = lazy(() => import('@/modules/tickets/pages/TicketDetailPage').then((module) => ({ default: module.TicketDetailPage })))
@@ -61,6 +62,9 @@ export default function App() {
               </Route>
               <Route element={<RoleRoute allowedPermissions={['sql_editor.read']} />}>
                 <Route path="/sql-editor" element={<SQLEditorPage />} />
+              </Route>
+              <Route element={<RoleRoute allowedPermissions={['scheduled_sql_reports.read', 'scheduled_sql_reports.write']} />}>
+                <Route path="/scheduled-sql-reports" element={<ScheduledSQLReportsPage />} />
               </Route>
               <Route element={<RoleRoute allowedPermissions={['db_connections.read', 'db_connections.write']} />}>
                 <Route path="/db-connections" element={<DBConnectionsPage />} />

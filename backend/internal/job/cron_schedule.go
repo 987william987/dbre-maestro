@@ -22,6 +22,25 @@ func ValidateCronExpression(expression string) error {
 	return err
 }
 
+func NextCronTime(expression string, location *time.Location, after time.Time) (time.Time, error) {
+	schedule, err := parseCronSchedule(expression)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if location == nil {
+		location = time.UTC
+	}
+	cursor := after.In(location).Truncate(time.Minute).Add(time.Minute)
+	deadline := cursor.AddDate(1, 0, 0)
+	for !cursor.After(deadline) {
+		if schedule.matches(cursor) {
+			return cursor.UTC(), nil
+		}
+		cursor = cursor.Add(time.Minute)
+	}
+	return time.Time{}, fmt.Errorf("cron expression has no matching time within one year")
+}
+
 func parseCronSchedule(expression string) (*cronSchedule, error) {
 	fields := strings.Fields(strings.TrimSpace(expression))
 	if len(fields) != 5 {

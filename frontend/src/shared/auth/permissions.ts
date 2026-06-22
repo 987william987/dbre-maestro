@@ -13,6 +13,9 @@ export function defaultRouteForPermissions(userPermissions: string[]) {
   if (userPermissions.includes('sql_editor.read')) {
     return '/sql-editor'
   }
+  if (userPermissions.includes('scheduled_sql_reports.read') || userPermissions.includes('scheduled_sql_reports.write')) {
+    return '/scheduled-sql-reports'
+  }
   if (userPermissions.includes('users.read') || userPermissions.includes('users.write')) {
     return '/users'
   }

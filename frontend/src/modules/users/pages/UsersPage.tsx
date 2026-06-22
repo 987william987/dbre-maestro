@@ -55,6 +55,8 @@ const PERMISSION_METADATA: PermissionOption[] = [
   { key: 'sql_editor.sensitive_apply', module: 'SQL Editor', action: 'Sensitive Apply', label: 'Sensitive Apply', description: 'Request temporary sensitive data access.' },
   { key: 'sql_editor.sensitive_review', module: 'SQL Editor', action: 'Sensitive Review', label: 'Sensitive Review', description: 'Review or revoke sensitive data access requests.' },
   { key: 'sql_editor.sensitive_execute', module: 'SQL Editor', action: 'Sensitive Execute', label: 'Sensitive Execute', description: 'Execute sensitive data access requests.' },
+  { key: 'scheduled_sql_reports.read', module: 'Scheduled SQL Reports', action: 'Read', label: 'Scheduled Reports Read', description: 'Enter Scheduled SQL Reports and view report definitions and run history.' },
+  { key: 'scheduled_sql_reports.write', module: 'Scheduled SQL Reports', action: 'Write', label: 'Scheduled Reports Write', description: 'Create, update, enable, disable, and delete scheduled SQL reports.' },
   { key: 'global.sensitive', module: 'Global', action: 'Sensitive', label: 'Global Sensitive', description: 'Bypass masking rules permanently to view sensitive data.' },
 ]
 const PAGE_SIZE = 20

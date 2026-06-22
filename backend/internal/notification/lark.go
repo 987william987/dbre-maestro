@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -172,6 +173,48 @@ func (c *Client) SendToRecipient(ctx context.Context, recipient string, msg Mess
 	}
 }
 
+func (c *Client) SendFileToRecipient(ctx context.Context, recipient string, filename string, data []byte) SendResult {
+	recipient = strings.TrimSpace(recipient)
+	if recipient == "" {
+		return SendResult{}
+	}
+	if c.cfg.Mode != ModeApp {
+		return SendResult{Err: fmt.Errorf("lark file delivery requires app mode")}
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-time.After(retryDelays[attempt-2]):
+			case <-ctx.Done():
+				return SendResult{Attempts: attempt - 1, Err: ctx.Err()}
+			}
+		}
+
+		fileKey, err := c.uploadFile(ctx, filename, data)
+		if err != nil {
+			if shouldRetryLarkError(err) {
+				lastErr = fmt.Errorf("attempt %d upload file: %w", attempt, err)
+				continue
+			}
+			return SendResult{Attempts: attempt, Err: err}
+		}
+		if err := c.postAppFileMessage(ctx, "open_id", recipient, fileKey); err != nil {
+			if shouldRetryLarkError(err) {
+				lastErr = fmt.Errorf("attempt %d send file message: %w", attempt, err)
+				continue
+			}
+			return SendResult{Attempts: attempt, Err: err}
+		}
+		return SendResult{Attempts: attempt}
+	}
+	return SendResult{
+		Attempts: maxAttempts,
+		Err:      fmt.Errorf("lark app file delivery failed after %d attempts: %w", maxAttempts, lastErr),
+	}
+}
+
 func (c *Client) post(ctx context.Context, payload []byte) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.WebhookURL, bytes.NewReader(payload))
 	if err != nil {
@@ -219,6 +262,14 @@ type larkSendMessageRequest struct {
 type larkSendMessageResponse struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
+}
+
+type larkUploadFileResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+	Data struct {
+		FileKey string `json:"file_key"`
+	} `json:"data"`
 }
 
 type larkAPIError struct {
@@ -322,6 +373,135 @@ func (c *Client) postAppMessage(ctx context.Context, receiveIDType, receiveID st
 	return resp.StatusCode, nil
 }
 
+func (c *Client) uploadFile(ctx context.Context, filename string, data []byte) (string, error) {
+	accessToken, err := c.getTenantAccessToken(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("file_type", "stream"); err != nil {
+		return "", err
+	}
+	if err := writer.WriteField("file_name", filename); err != nil {
+		return "", err
+	}
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		return "", err
+	}
+	if _, err := part.Write(data); err != nil {
+		return "", err
+	}
+	if err := writer.Close(); err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://open.larksuite.com/open-apis/im/v1/files", &body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var parsed larkUploadFileResponse
+	if len(respBody) > 0 {
+		if err := json.Unmarshal(respBody, &parsed); err != nil {
+			return "", fmt.Errorf("decode lark upload file response: %w", err)
+		}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || parsed.Code != 0 {
+		if parsed.Code == 99991663 {
+			c.invalidateTenantAccessToken()
+		}
+		msg := strings.TrimSpace(parsed.Msg)
+		if msg == "" {
+			msg = strings.TrimSpace(string(respBody))
+		}
+		return "", &larkAPIError{
+			Status: resp.StatusCode,
+			Code:   parsed.Code,
+			Body:   fmt.Sprintf("lark upload file http %d code=%d msg=%s", resp.StatusCode, parsed.Code, msg),
+		}
+	}
+	if parsed.Data.FileKey == "" {
+		return "", fmt.Errorf("lark upload file returned empty file_key")
+	}
+	return parsed.Data.FileKey, nil
+}
+
+func (c *Client) postAppFileMessage(ctx context.Context, receiveIDType, receiveID, fileKey string) error {
+	content, err := json.Marshal(map[string]string{"file_key": fileKey})
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(larkSendMessageRequest{
+		ReceiveID: receiveID,
+		MsgType:   "file",
+		Content:   string(content),
+	})
+	if err != nil {
+		return err
+	}
+	return c.postAppMessagePayload(ctx, receiveIDType, payload)
+}
+
+func (c *Client) postAppMessagePayload(ctx context.Context, receiveIDType string, payload []byte) error {
+	accessToken, err := c.getTenantAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+	endpoint := "https://open.larksuite.com/open-apis/im/v1/messages?receive_id_type=" + url.QueryEscape(receiveIDType)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	var parsed larkSendMessageResponse
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return fmt.Errorf("decode lark message response: %w", err)
+		}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || parsed.Code != 0 {
+		if parsed.Code == 99991663 {
+			c.invalidateTenantAccessToken()
+		}
+		msg := strings.TrimSpace(parsed.Msg)
+		if msg == "" {
+			msg = strings.TrimSpace(string(body))
+		}
+		return &larkAPIError{
+			Status: resp.StatusCode,
+			Code:   parsed.Code,
+			Body:   fmt.Sprintf("lark send message http %d code=%d msg=%s", resp.StatusCode, parsed.Code, msg),
+		}
+	}
+	return nil
+}
+
 func (c *Client) getTenantAccessToken(ctx context.Context) (string, error) {
 	c.tokenMu.Lock()
 	if c.accessToken != "" && time.Now().Before(c.tokenExpiry) {
@@ -391,4 +571,12 @@ func (c *Client) invalidateTenantAccessToken() {
 
 func (e *larkAPIError) isInvalidAccessToken() bool {
 	return e.Code == 99991663 || strings.Contains(strings.ToLower(e.Body), "invalid access token")
+}
+
+func shouldRetryLarkError(err error) bool {
+	var apiErr *larkAPIError
+	if errors.As(err, &apiErr) {
+		return apiErr.isInvalidAccessToken() || apiErr.Status >= 500 || apiErr.Status == 0
+	}
+	return true
 }
