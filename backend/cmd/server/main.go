@@ -245,6 +245,9 @@ func main() {
 			r.With(requireSettingsRead).Get("/", settingsH.Get)
 			r.With(requireSettingsRead).Get("/db-connections", settingsH.ListDBConnections)
 			r.With(requireSettingsRead).Get("/approval-resolution", settingsH.ApprovalResolution)
+			r.With(requireSettingsRead).Get("/workflow-rules", settingsH.ListWorkflowRules)
+			r.With(requireSettingsWrite).Put("/workflow-rules", settingsH.ReplaceWorkflowRules)
+			r.With(requireSettingsRead).Post("/workflow-rules/preview", settingsH.PreviewWorkflowRule)
 			r.With(requireSettingsWrite).Patch("/", settingsH.Patch)
 		})
 
@@ -344,6 +347,7 @@ func main() {
 				r.With(requireSensitiveReview).Post("/revoke", ticketH.Revoke)
 				r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)
 				r.With(requireTicketsExecute).Post("/stop", ticketH.Stop)
+				r.With(requireSettingsWrite).Post("/retry-workflow-resolution", ticketH.RetryWorkflowResolution)
 			})
 		})
 

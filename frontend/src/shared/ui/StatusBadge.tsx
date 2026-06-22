@@ -12,6 +12,7 @@ const STATUS_STYLES: Record<TicketStatus, string> = {
   failed: 'border-rose-200 bg-rose-50 text-rose-700',
   stopped: 'border-rose-200 bg-rose-50 text-rose-700',
   interrupted: 'border-rose-200 bg-rose-50 text-rose-700',
+  needs_admin_attention: 'border-orange-200 bg-orange-50 text-orange-700',
 }
 
 const STATUS_LABELS: Record<TicketStatus, string> = {
@@ -25,6 +26,7 @@ const STATUS_LABELS: Record<TicketStatus, string> = {
   failed: 'Failed',
   stopped: 'Stopped',
   interrupted: 'Interrupted',
+  needs_admin_attention: 'Needs Admin Attention',
 }
 
 export function StatusBadge({ status, className }: { status: TicketStatus; className?: string }) {

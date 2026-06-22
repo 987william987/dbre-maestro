@@ -5,16 +5,17 @@ import "time"
 type TicketStatus string
 
 const (
-	TicketStatusPendingReview    TicketStatus = "pending_review"
-	TicketStatusApproved         TicketStatus = "approved"
-	TicketStatusRejected         TicketStatus = "rejected"
-	TicketStatusWithdrawn        TicketStatus = "withdrawn"
-	TicketStatusPendingExecution TicketStatus = "pending_execution"
-	TicketStatusExecuting        TicketStatus = "executing"
-	TicketStatusCompleted        TicketStatus = "completed"
-	TicketStatusFailed           TicketStatus = "failed"
-	TicketStatusStopped          TicketStatus = "stopped"
-	TicketStatusInterrupted      TicketStatus = "interrupted"
+	TicketStatusPendingReview       TicketStatus = "pending_review"
+	TicketStatusApproved            TicketStatus = "approved"
+	TicketStatusRejected            TicketStatus = "rejected"
+	TicketStatusWithdrawn           TicketStatus = "withdrawn"
+	TicketStatusPendingExecution    TicketStatus = "pending_execution"
+	TicketStatusExecuting           TicketStatus = "executing"
+	TicketStatusCompleted           TicketStatus = "completed"
+	TicketStatusFailed              TicketStatus = "failed"
+	TicketStatusStopped             TicketStatus = "stopped"
+	TicketStatusInterrupted         TicketStatus = "interrupted"
+	TicketStatusNeedsAdminAttention TicketStatus = "needs_admin_attention"
 )
 
 type TicketType string

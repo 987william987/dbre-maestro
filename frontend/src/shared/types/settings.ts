@@ -3,6 +3,7 @@ export type PlatformSettings = {
   sensitive_query_access_reviewer_user_ids: number[]
   require_non_sensitive_export_review: boolean
   approval_policies: ApprovalPolicy[]
+  workflow_rules: WorkflowRule[]
   lark_app_id: string
   lark_app_secret?: string
   lark_app_secret_configured: boolean
@@ -35,6 +36,32 @@ export type ApprovalPolicy = {
   reviewer_user_ids: number[]
   reviewer_auth_groups: string[]
   enabled: boolean
+}
+
+export type WorkflowRule = {
+  id?: number
+  rule_name: string
+  ticket_type: 'ddl' | 'dml' | 'redis_command' | 'query_access' | 'sql_export' | 'sensitive_query_access'
+  db_connection_id?: number | null
+  export_sensitivity?: 'normal' | 'sensitive' | null
+  approval_enabled: boolean
+  approval_auth_groups: string[]
+  executor_auth_groups: string[]
+  priority: number
+  enabled: boolean
+}
+
+export type WorkflowResolution = {
+  rule_id?: number
+  rule_name: string
+  ticket_type: WorkflowRule['ticket_type']
+  db_connection_id?: number | null
+  export_sensitivity?: 'normal' | 'sensitive' | null
+  approval_enabled: boolean
+  approval_user_ids: number[]
+  executor_user_ids: number[]
+  error_code?: string
+  error_message?: string
 }
 
 export type ApprovalResolutionUser = {

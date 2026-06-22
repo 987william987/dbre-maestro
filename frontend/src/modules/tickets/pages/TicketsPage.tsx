@@ -30,6 +30,7 @@ const STATUS_OPTIONS: Array<{ value: '' | TicketStatus; label: string }> = [
   { value: 'failed', label: 'Failed' },
   { value: 'stopped', label: 'Stopped' },
   { value: 'interrupted', label: 'Interrupted' },
+  { value: 'needs_admin_attention', label: 'Needs Admin Attention' },
 ]
 
 const TYPE_OPTIONS: Array<{ value: '' | TicketType; label: string }> = [

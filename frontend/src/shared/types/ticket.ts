@@ -11,6 +11,7 @@ export type TicketStatus =
   | 'failed'
   | 'stopped'
   | 'interrupted'
+  | 'needs_admin_attention'
 
 export type TicketType = 'ddl' | 'dml'
   | 'redis_command'
@@ -113,6 +114,7 @@ export type TicketCapabilities = {
   can_withdraw: boolean
   can_revoke: boolean
   can_execute: boolean
+  can_retry_workflow_resolution?: boolean
   can_download_export: boolean
 }
 

@@ -186,6 +186,8 @@ func exportTicketStateLabel(status model.TicketStatus) string {
 		return "已停止"
 	case model.TicketStatusInterrupted:
 		return "已中斷"
+	case model.TicketStatusNeedsAdminAttention:
+		return "需要管理員處理"
 	default:
 		return string(status)
 	}
@@ -238,24 +240,36 @@ func (h *ExportHandler) sendInApp(ctx context.Context, userID uint64, notifType,
 	publishNotificationCreated(ctx, h.broker, h.notifRepo, userID, notificationID)
 }
 
-func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, workflowType model.ApprovalWorkflowType, title, body, ticketNo string) {
-	reviewerIDs, usedPolicy, err := approvalPolicyReviewerIDs(ctx, h.settings, h.users, workflowType)
+func (h *ExportHandler) notifyUsers(ctx context.Context, userIDs []uint64, actorID uint64, ticketID uint64, notifType, title, body, ticketNo string) {
+	seen := map[uint64]struct{}{}
+	for _, userID := range userIDs {
+		if userID == 0 || userID == actorID {
+			continue
+		}
+		if _, ok := seen[userID]; ok {
+			continue
+		}
+		seen[userID] = struct{}{}
+		h.sendInApp(ctx, userID, notifType, title, body, "ticket", ticketID)
+		h.notifyLarkUsers(ctx, []uint64{userID}, title, body, ticketNo)
+	}
+}
+
+func (h *ExportHandler) notifyAdminUsers(ctx context.Context, ticketID uint64, title, body, ticketNo string) {
+	if h.users == nil {
+		return
+	}
+	admins, err := h.users.ListUsersByAuthGroup(ctx, model.AuthGroupAdmin)
 	if err != nil {
 		return
 	}
-	if !usedPolicy {
-		reviewerIDs, err = listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorExportReview})
-		if err != nil {
-			return
+	ids := make([]uint64, 0, len(admins))
+	for _, admin := range admins {
+		if admin.IsActive {
+			ids = append(ids, admin.ID)
 		}
 	}
-	for _, reviewerID := range reviewerIDs {
-		if reviewerID == submitterID {
-			continue
-		}
-		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticketID)
-		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body, ticketNo)
-	}
+	h.notifyUsers(ctx, ids, 0, ticketID, "ticket_needs_admin_attention", title, body, ticketNo)
 }
 
 // POST /exports
@@ -316,14 +330,6 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	containsSensitive := analysis.ContainsSensitive
-	requireReview := true
-	if !containsSensitive {
-		requireReview, err = h.settings.RequireNonSensitiveExportReview(r.Context())
-		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "load export approval setting failed")
-			return
-		}
-	}
 	title := fmt.Sprintf("SQL Export / %s", conn.Name)
 	description := fmt.Sprintf("由 SQL Editor 建立的導出申請。Sensitive=%t", containsSensitive)
 	ticket, err := h.tickets.CreateWithScopes(r.Context(), &model.Ticket{
@@ -340,8 +346,47 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "create export ticket failed")
 		return
 	}
-	if !containsSensitive && !requireReview {
-		comment := "Auto-approved because non-sensitive export approval is disabled."
+	resolution, err := resolveTicketWorkflow(r.Context(), h.settings, h.users, ticket)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "resolve export workflow failed")
+		return
+	}
+	if resolution == nil || resolution.ErrorCode != "" {
+		comment := "Workflow resolution failed."
+		if resolution != nil && resolution.ErrorMessage != "" {
+			comment = resolution.ErrorMessage
+		}
+		if _, err := h.tickets.UpdateStatus(r.Context(), ticket.ID, model.TicketStatusPendingReview, model.TicketStatusNeedsAdminAttention, nil, &comment, nil); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "mark export workflow attention failed")
+			return
+		}
+		if updated, err := h.tickets.GetByID(r.Context(), ticket.ID); err == nil && updated != nil {
+			ticket = updated
+		}
+		h.audit.Log(r.Context(), repository.AuditEntry{
+			ActorID:      &userID,
+			ActorName:    middleware.UsernameFromCtx(r.Context()),
+			ActionType:   "workflow_resolution_failed",
+			ResourceType: "ticket",
+			ResourceID:   &ticket.ID,
+			Details:      workflowAuditDetails(ticket, resolution),
+			IPAddress:    clientIP(r),
+		})
+		connName := h.loadTicketNotificationContext(r.Context(), ticket)
+		body := buildTicketNotificationBody(ticket, connName, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.ID))
+		h.notifyAdminUsers(r.Context(), ticket.ID, "工單需要管理員處理", body, ticket.TicketNo)
+		publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
+		jsonCreated(w, map[string]any{
+			"ticket_id":          ticket.ID,
+			"ticket_no":          ticket.TicketNo,
+			"status":             string(ticket.Status),
+			"contains_sensitive": containsSensitive,
+			"scope_count":        len(analysis.Scopes),
+		})
+		return
+	}
+	if !resolution.ApprovalEnabled {
+		comment := "Auto-approved because workflow rule approval is disabled."
 		ok, err := h.tickets.UpdateStatus(r.Context(), ticket.ID, model.TicketStatusPendingReview, model.TicketStatusApproved, nil, &comment, nil)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "auto-approve export ticket failed")
@@ -368,9 +413,9 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			ResourceType: "ticket",
 			ResourceID:   &ticket.ID,
 			Details: map[string]any{
-				"ticket_type":                         ticket.TicketType,
-				"contains_sensitive":                  containsSensitive,
-				"require_non_sensitive_export_review": requireReview,
+				"ticket_type":        ticket.TicketType,
+				"contains_sensitive": containsSensitive,
+				"workflow_rule_id":   *resolution.RuleID,
 			},
 			IPAddress: clientIP(r),
 		})
@@ -383,14 +428,13 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ResourceType: "ticket",
 		ResourceID:   &ticket.ID,
 		Details: map[string]any{
-			"ticket_type":                         ticket.TicketType,
-			"contains_sensitive":                  containsSensitive,
-			"require_non_sensitive_export_review": requireReview,
+			"ticket_type":        ticket.TicketType,
+			"contains_sensitive": containsSensitive,
 		},
 		IPAddress: clientIP(r),
 	})
 	connName := h.loadTicketNotificationContext(r.Context(), ticket)
-	if requireReview || containsSensitive {
+	if resolution.ApprovalEnabled {
 		body := buildTicketNotificationBody(
 			ticket,
 			connName,
@@ -400,11 +444,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			h.ticketLink(ticket.ID),
 		)
 		h.sendInApp(r.Context(), userID, "ticket_submitted", fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
-		workflowType := model.ApprovalWorkflowSQLExportNormal
-		if containsSensitive {
-			workflowType = model.ApprovalWorkflowSQLExportSensitive
-		}
-		h.notifyReviewers(r.Context(), ticket.ID, userID, workflowType, exportPendingReviewTitle(), body, ticket.TicketNo)
+		h.notifyUsers(r.Context(), resolution.ApprovalUserIDs, userID, ticket.ID, "ticket_pending_review", exportPendingReviewTitle(), body, ticket.TicketNo)
 	} else {
 		body := buildTicketNotificationBody(
 			ticket,

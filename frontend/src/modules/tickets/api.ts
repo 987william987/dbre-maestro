@@ -156,6 +156,10 @@ export async function revokeTicket(id: number) {
   return apiClient.post<Ticket>(`/tickets/${id}/revoke`)
 }
 
+export async function retryWorkflowResolution(id: number) {
+  return apiClient.post<{ ticket: Ticket }>(`/tickets/${id}/retry-workflow-resolution`)
+}
+
 export async function listConnections() {
   const response = await apiClient.get<DBConnectionsResponse>('/tickets/connections')
 

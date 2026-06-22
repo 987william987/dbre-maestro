@@ -1,0 +1,155 @@
+package handler
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/repository"
+)
+
+const (
+	workflowErrorNoMatchingRule       = "no_matching_rule"
+	workflowErrorNoEffectiveApprovers = "no_effective_approval_users"
+	workflowErrorNoEffectiveExecutors = "no_effective_executor_users"
+	workflowErrorInvalidRule          = "invalid_rule"
+	workflowExcludedInactive          = "inactive"
+	workflowExcludedMissingPermission = "missing_permission"
+)
+
+type workflowRuleMatcher interface {
+	MatchWorkflowRule(ctx context.Context, ticketType model.TicketType, dbConnectionID *uint64, exportSensitivity *string) (*model.WorkflowRule, error)
+}
+
+func resolveTicketWorkflow(ctx context.Context, settings *repository.SettingsRepo, users *repository.UserRepo, ticket *model.Ticket) (*model.WorkflowResolution, error) {
+	if ticket == nil {
+		return nil, nil
+	}
+	dbConnectionID := ticket.DBConnectionID
+	exportSensitivity := workflowExportSensitivity(ticket)
+	return resolveWorkflow(ctx, settings, users, ticket.TicketType, dbConnectionID, exportSensitivity)
+}
+
+func resolveWorkflow(ctx context.Context, settings *repository.SettingsRepo, users *repository.UserRepo, ticketType model.TicketType, dbConnectionID *uint64, exportSensitivity *string) (*model.WorkflowResolution, error) {
+	return resolveWorkflowWithMatcher(ctx, settings, users, ticketType, dbConnectionID, exportSensitivity)
+}
+
+func resolveWorkflowWithMatcher(ctx context.Context, settings workflowRuleMatcher, users *repository.UserRepo, ticketType model.TicketType, dbConnectionID *uint64, exportSensitivity *string) (*model.WorkflowResolution, error) {
+	resolution := &model.WorkflowResolution{
+		TicketType:            ticketType,
+		DBConnectionID:        dbConnectionID,
+		ExportSensitivity:     exportSensitivity,
+		ApprovalUserIDs:       []uint64{},
+		ExecutorUserIDs:       []uint64{},
+		MissingApprovalGroups: []model.AuthGroup{},
+		MissingExecutorGroups: []model.AuthGroup{},
+		ExcludedApprovalUsers: []model.WorkflowExcludedUser{},
+		ExcludedExecutorUsers: []model.WorkflowExcludedUser{},
+		ApprovalEnabled:       true,
+	}
+	if settings == nil || users == nil {
+		resolution.ErrorCode = workflowErrorInvalidRule
+		resolution.ErrorMessage = "workflow resolver is not configured"
+		return resolution, nil
+	}
+	rule, err := settings.MatchWorkflowRule(ctx, ticketType, dbConnectionID, exportSensitivity)
+	if err != nil {
+		return nil, err
+	}
+	if rule == nil {
+		resolution.ErrorCode = workflowErrorNoMatchingRule
+		resolution.ErrorMessage = "no matching workflow rule"
+		return resolution, nil
+	}
+	resolution.RuleID = &rule.ID
+	resolution.RuleName = rule.RuleName
+	resolution.ApprovalEnabled = rule.ApprovalEnabled
+
+	approvalUsers, missingApprovalGroups, excludedApprovalUsers, err := resolveWorkflowUsers(ctx, users, rule.ApprovalAuthGroups, reviewPermissionsForTicket(ticketType))
+	if err != nil {
+		return nil, err
+	}
+	resolution.ApprovalUserIDs = approvalUsers
+	resolution.MissingApprovalGroups = missingApprovalGroups
+	resolution.ExcludedApprovalUsers = excludedApprovalUsers
+
+	executorUsers, missingExecutorGroups, excludedExecutorUsers, err := resolveWorkflowUsers(ctx, users, rule.ExecutorAuthGroups, []string{permissionTicketExecute})
+	if err != nil {
+		return nil, err
+	}
+	resolution.ExecutorUserIDs = executorUsers
+	resolution.MissingExecutorGroups = missingExecutorGroups
+	resolution.ExcludedExecutorUsers = excludedExecutorUsers
+
+	if rule.ApprovalEnabled && len(resolution.ApprovalUserIDs) == 0 {
+		resolution.ErrorCode = workflowErrorNoEffectiveApprovers
+		resolution.ErrorMessage = fmt.Sprintf("workflow rule %q has no effective approval users", rule.RuleName)
+		return resolution, nil
+	}
+	if isExecutableTicketType(ticketType) && len(resolution.ExecutorUserIDs) == 0 {
+		resolution.ErrorCode = workflowErrorNoEffectiveExecutors
+		resolution.ErrorMessage = fmt.Sprintf("workflow rule %q has no effective executor users", rule.RuleName)
+		return resolution, nil
+	}
+	return resolution, nil
+}
+
+func resolveWorkflowUsers(ctx context.Context, users *repository.UserRepo, groups []model.AuthGroup, requiredPermissions []string) ([]uint64, []model.AuthGroup, []model.WorkflowExcludedUser, error) {
+	seen := map[uint64]struct{}{}
+	userIDs := []uint64{}
+	missingGroups := []model.AuthGroup{}
+	excluded := []model.WorkflowExcludedUser{}
+	allowedIDs, err := users.ListActiveUserIDsByPermissionKeys(ctx, requiredPermissions)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	allowed := make(map[uint64]struct{}, len(allowedIDs))
+	for _, userID := range allowedIDs {
+		allowed[userID] = struct{}{}
+	}
+	for _, group := range groups {
+		groupUsers, err := users.ListUsersByAuthGroup(ctx, group)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if len(groupUsers) == 0 {
+			missingGroups = append(missingGroups, group)
+			continue
+		}
+		for _, user := range groupUsers {
+			if _, ok := seen[user.ID]; ok {
+				continue
+			}
+			seen[user.ID] = struct{}{}
+			if !user.IsActive {
+				excluded = append(excluded, model.WorkflowExcludedUser{UserID: user.ID, Username: user.Username, Reason: workflowExcludedInactive})
+				continue
+			}
+			if _, ok := allowed[user.ID]; !ok {
+				excluded = append(excluded, model.WorkflowExcludedUser{UserID: user.ID, Username: user.Username, Reason: workflowExcludedMissingPermission})
+				continue
+			}
+			userIDs = append(userIDs, user.ID)
+		}
+	}
+	return userIDs, missingGroups, excluded, nil
+}
+
+func workflowExportSensitivity(ticket *model.Ticket) *string {
+	if ticket == nil || ticket.TicketType != model.TicketTypeSQLExport || ticket.ContainsSensitive == nil {
+		return nil
+	}
+	value := "normal"
+	if *ticket.ContainsSensitive {
+		value = "sensitive"
+	}
+	return &value
+}
+
+func workflowExportSensitivityFromBool(containsSensitive bool) *string {
+	value := "normal"
+	if containsSensitive {
+		value = "sensitive"
+	}
+	return &value
+}

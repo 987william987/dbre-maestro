@@ -44,6 +44,20 @@ describe('SettingsPage', () => {
         { workflow_type: 'ddl', reviewer_user_ids: [7], reviewer_auth_groups: ['reviewer'], enabled: true },
         { workflow_type: 'sql_export_sensitive', reviewer_user_ids: [], reviewer_auth_groups: ['reviewer'], enabled: true },
       ],
+      workflow_rules: [
+        {
+          id: 1,
+          rule_name: 'Global DDL',
+          ticket_type: 'ddl',
+          db_connection_id: null,
+          export_sensitivity: null,
+          approval_enabled: true,
+          approval_auth_groups: ['data_owner'],
+          executor_auth_groups: ['dba'],
+          priority: 100,
+          enabled: true,
+        },
+      ],
       sql_editor_app_timeout_seconds: 30,
       sql_editor_mysql_max_execution_time_ms: 25000,
       sql_editor_postgres_statement_timeout_ms: 25000,
@@ -71,7 +85,8 @@ describe('SettingsPage', () => {
     })
     mockedListAuthGroups.mockResolvedValue({
       auth_groups: [
-        { name: 'reviewer', label: 'Reviewer', description: '', system_defined: true, user_count: 1 },
+        { name: 'data_owner', label: 'Data Owner', description: '', system_defined: true, user_count: 1 },
+        { name: 'dba', label: 'DBA', description: '', system_defined: true, user_count: 1 },
       ],
     })
 
@@ -88,16 +103,18 @@ describe('SettingsPage', () => {
     expect(screen.getByDisplayValue('ap-northeast-1')).toBeInTheDocument()
     expect(screen.getByDisplayValue('0 9 * * *')).toBeInTheDocument()
     expect(screen.getByDisplayValue('Asia/Taipei')).toBeInTheDocument()
-    expect(screen.getByText('Approval Routing')).toBeInTheDocument()
-    expect(screen.getAllByText('Effective reviewers').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('leader').length).toBeGreaterThan(0)
-    expect(screen.getByText('analytics-ro')).toBeInTheDocument()
-    expect(screen.getByText('warehouse-ro')).toBeInTheDocument()
+    expect(screen.getByText('Workflow Rules')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Global DDL')).toBeInTheDocument()
+    expect(screen.getAllByText('Data Owner').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('DBA').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('analytics-ro').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('warehouse-ro').length).toBeGreaterThan(0)
     expect(screen.getByText('2 selected')).toBeInTheDocument()
-    expect(screen.getByRole('switch', { name: 'Require approval for non-sensitive exports' })).toBeChecked()
+    expect(screen.queryByText('Export Approval')).not.toBeInTheDocument()
     expect(screen.getByRole('switch', { name: 'analytics-ro selected for object scan' })).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: 'warehouse-ro selected for object scan' })).toBeInTheDocument()
     expect(screen.queryByText('ID 12')).not.toBeInTheDocument()
     expect(screen.queryByText('db-a.internal:3306')).not.toBeInTheDocument()
+    expect(mockedListUsers).not.toHaveBeenCalled()
   })
 })

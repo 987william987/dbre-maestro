@@ -1,6 +1,6 @@
 import { apiClient } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { ApprovalResolutionWorkflow, PlatformSettings } from '@/shared/types/settings'
+import type { ApprovalResolutionWorkflow, PlatformSettings, WorkflowResolution, WorkflowRule } from '@/shared/types/settings'
 
 function normalizeSettings(settings: PlatformSettings): PlatformSettings {
   return {
@@ -20,6 +20,9 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
           reviewer_auth_groups: Array.isArray(policy.reviewer_auth_groups) ? policy.reviewer_auth_groups : [],
           enabled: typeof policy.enabled === 'boolean' ? policy.enabled : true,
         }))
+      : [],
+    workflow_rules: Array.isArray(settings.workflow_rules)
+      ? settings.workflow_rules.map(normalizeWorkflowRule)
       : [],
     lark_app_id: typeof settings.lark_app_id === 'string' ? settings.lark_app_id : '',
     lark_app_secret: typeof settings.lark_app_secret === 'string' ? settings.lark_app_secret : '',
@@ -47,6 +50,21 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
   }
 }
 
+function normalizeWorkflowRule(rule: WorkflowRule): WorkflowRule {
+  return {
+    id: typeof rule.id === 'number' ? rule.id : undefined,
+    rule_name: typeof rule.rule_name === 'string' ? rule.rule_name : '',
+    ticket_type: rule.ticket_type,
+    db_connection_id: typeof rule.db_connection_id === 'number' ? rule.db_connection_id : null,
+    export_sensitivity: rule.export_sensitivity === 'normal' || rule.export_sensitivity === 'sensitive' ? rule.export_sensitivity : null,
+    approval_enabled: typeof rule.approval_enabled === 'boolean' ? rule.approval_enabled : true,
+    approval_auth_groups: Array.isArray(rule.approval_auth_groups) ? rule.approval_auth_groups : [],
+    executor_auth_groups: Array.isArray(rule.executor_auth_groups) ? rule.executor_auth_groups : [],
+    priority: typeof rule.priority === 'number' ? rule.priority : 100,
+    enabled: typeof rule.enabled === 'boolean' ? rule.enabled : true,
+  }
+}
+
 export function getSettings() {
   return apiClient.get<PlatformSettings>('/settings').then(normalizeSettings)
 }
@@ -59,6 +77,24 @@ export function getApprovalResolution() {
   return apiClient.get<{ workflows: ApprovalResolutionWorkflow[] }>('/settings/approval-resolution').then((response) => ({
     workflows: Array.isArray(response.workflows) ? response.workflows : [],
   }))
+}
+
+export function listWorkflowRules() {
+  return apiClient.get<{ workflow_rules: WorkflowRule[] }>('/settings/workflow-rules').then((response) => ({
+    workflow_rules: Array.isArray(response.workflow_rules) ? response.workflow_rules.map(normalizeWorkflowRule) : [],
+  }))
+}
+
+export function replaceWorkflowRules(workflowRules: WorkflowRule[]) {
+  return apiClient.put<{ workflow_rules: WorkflowRule[] }>('/settings/workflow-rules', {
+    workflow_rules: workflowRules,
+  }).then((response) => ({
+    workflow_rules: Array.isArray(response.workflow_rules) ? response.workflow_rules.map(normalizeWorkflowRule) : [],
+  }))
+}
+
+export function previewWorkflowRule(rule: WorkflowRule) {
+  return apiClient.post<{ workflow_resolution: WorkflowResolution }>('/settings/workflow-rules/preview', rule)
 }
 
 type SettingsDBConnectionsResponse = {

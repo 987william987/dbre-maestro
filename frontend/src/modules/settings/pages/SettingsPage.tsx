@@ -1,14 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Save } from 'lucide-react'
+import { Plus, Save, Trash2 } from 'lucide-react'
 import { listAuthGroups } from '@/modules/auth-groups/api'
 import { getSettings, listSettingsDBConnections, patchSettings } from '@/modules/settings/api'
-import { listUsers } from '@/modules/users/api'
 import { ApiError } from '@/shared/api/client'
 import type { AuthGroupSummary } from '@/shared/types/authGroup'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { ApprovalPolicy, ApprovalWorkflowType, PlatformSettings } from '@/shared/types/settings'
-import type { UserSummary } from '@/shared/types/user'
+import type { ApprovalPolicy, PlatformSettings, WorkflowRule } from '@/shared/types/settings'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
@@ -19,7 +17,6 @@ type SettingsForm = {
   larkAppID: string
   larkAppSecret: string
   larkAppSecretConfigured: boolean
-  requireNonSensitiveExportReview: boolean
   sqlEditorAppTimeoutSeconds: string
   sqlEditorMySQLMaxExecutionTimeMs: string
   sqlEditorPostgresStatementTimeoutMs: string
@@ -32,25 +29,33 @@ type SettingsForm = {
   objectCron: string
   cronTimezone: string
   approvalPolicies: ApprovalPolicy[]
+  workflowRules: WorkflowRule[]
 }
 
-const APPROVAL_WORKFLOW_LABELS: Record<ApprovalWorkflowType, string> = {
+const WORKFLOW_TICKET_TYPE_LABELS: Record<WorkflowRule['ticket_type'], string> = {
   ddl: 'DDL',
   dml: 'DML',
   redis_command: 'Redis Command',
   query_access: 'Query Access',
-  sql_export_normal: 'Normal SQL Export',
-  sql_export_sensitive: 'Sensitive SQL Export',
+  sql_export: 'SQL Export',
   sensitive_query_access: 'Sensitive Query Access',
 }
 
-const APPROVAL_WORKFLOW_PERMISSIONS: Record<ApprovalWorkflowType, string[]> = {
+const WORKFLOW_TICKET_TYPES: Array<WorkflowRule['ticket_type']> = [
+  'ddl',
+  'dml',
+  'redis_command',
+  'query_access',
+  'sql_export',
+  'sensitive_query_access',
+]
+
+const WORKFLOW_REVIEW_PERMISSIONS: Record<WorkflowRule['ticket_type'], string[]> = {
   ddl: ['tickets.review'],
   dml: ['tickets.review'],
   redis_command: ['tickets.review'],
   query_access: ['tickets.review'],
-  sql_export_normal: ['sql_editor.export_review'],
-  sql_export_sensitive: ['sql_editor.export_review'],
+  sql_export: ['sql_editor.export_review'],
   sensitive_query_access: ['sql_editor.sensitive_review'],
 }
 
@@ -59,12 +64,11 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<PlatformSettings | null>(null)
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [connections, setConnections] = useState<Array<Pick<DBConnection, 'id' | 'name' | 'db_type' | 'host' | 'port'>>>([])
-  const [users, setUsers] = useState<UserSummary[]>([])
   const [authGroups, setAuthGroups] = useState<AuthGroupSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const approvalIssues = form ? findApprovalPolicyIssues(form.approvalPolicies, users, authGroups) : []
+  const workflowIssues = form ? findWorkflowRuleIssues(form.workflowRules, authGroups) : []
 
   useEffect(() => {
     let active = true
@@ -73,17 +77,15 @@ export function SettingsPage() {
       setLoading(true)
       setError('')
       try {
-        const [settingsResponse, connectionsResponse, usersResponse, authGroupsResponse] = await Promise.all([
+        const [settingsResponse, connectionsResponse, authGroupsResponse] = await Promise.all([
           getSettings(),
           listSettingsDBConnections(),
-          listUsers(),
           listAuthGroups(),
         ])
         if (active) {
           setSettings(settingsResponse)
           setForm(toForm(settingsResponse))
           setConnections(connectionsResponse.connections)
-          setUsers(usersResponse.users)
           setAuthGroups(authGroupsResponse.auth_groups)
         }
       } catch (loadError) {
@@ -113,9 +115,9 @@ export function SettingsPage() {
     setSaving(true)
     setError('')
     try {
-      const issues = findApprovalPolicyIssues(form.approvalPolicies, users, authGroups)
+      const issues = findWorkflowRuleIssues(form.workflowRules, authGroups)
       if (issues.length > 0) {
-        setError(`Approval routing has no effective reviewers: ${issues.join(', ')}`)
+        setError(`Workflow rules are incomplete: ${issues.join(', ')}`)
         return
       }
       const payload = toPayload(settings, form)
@@ -130,18 +132,43 @@ export function SettingsPage() {
     }
   }
 
-  function updateApprovalPolicy(workflowType: ApprovalWorkflowType, patch: Partial<ApprovalPolicy>) {
+  function updateWorkflowRule(index: number, patch: Partial<WorkflowRule>) {
     setForm((current) => {
       if (!current) {
         return current
       }
       return {
         ...current,
-        approvalPolicies: current.approvalPolicies.map((policy) =>
-          policy.workflow_type === workflowType ? { ...policy, ...patch } : policy,
-        ),
+        workflowRules: current.workflowRules.map((rule, itemIndex) => itemIndex === index ? normalizeWorkflowRulePatch({ ...rule, ...patch }) : rule),
       }
     })
+  }
+
+  function addWorkflowRule() {
+    setForm((current) => current ? {
+      ...current,
+      workflowRules: [
+        ...current.workflowRules,
+        {
+          rule_name: 'New Workflow Rule',
+          ticket_type: 'ddl',
+          db_connection_id: null,
+          export_sensitivity: null,
+          approval_enabled: true,
+          approval_auth_groups: ['data_owner'],
+          executor_auth_groups: ['dba'],
+          priority: 100,
+          enabled: true,
+        },
+      ],
+    } : current)
+  }
+
+  function removeWorkflowRule(index: number) {
+    setForm((current) => current ? {
+      ...current,
+      workflowRules: current.workflowRules.filter((_, itemIndex) => itemIndex !== index),
+    } : current)
   }
 
   return (
@@ -200,28 +227,6 @@ export function SettingsPage() {
                 value={form.sqlEditorPostgresStatementTimeoutMs}
                 onChange={(value) => setForm((current) => current ? { ...current, sqlEditorPostgresStatementTimeoutMs: value } : current)}
               />
-            </div>
-          </section>
-
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
-            <div className="border-b border-border/80 px-4 py-3">
-              <p className="text-[14px] font-semibold text-ink">Export Approval</p>
-              <p className="mt-1 text-[12px] leading-5 text-muted">Sensitive exports always require approval. This setting only controls non-sensitive SQL Editor exports.</p>
-            </div>
-            <div className="px-4 py-4">
-              <label className="flex items-start gap-3 text-[13px] font-medium text-ink">
-                <span className="pt-0.5">
-                  <Switch
-                    ariaLabel="Require approval for non-sensitive exports"
-                    checked={form.requireNonSensitiveExportReview}
-                    onChange={(checked) => setForm((current) => current ? { ...current, requireNonSensitiveExportReview: checked } : current)}
-                  />
-                </span>
-                <span>
-                  <span className="block">Require approval for non-sensitive exports</span>
-                  <span className="mt-1 block text-[12px] font-normal leading-5 text-muted">When disabled, non-sensitive exports are auto-approved but still create export tickets for audit records.</span>
-                </span>
-              </label>
             </div>
           </section>
 
@@ -349,53 +354,45 @@ export function SettingsPage() {
 
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border/80 px-4 py-3">
-              <p className="text-[14px] font-semibold text-ink">Approval Routing</p>
-              <p className="mt-1 text-[12px] leading-5 text-muted">Configure reviewer pools by workflow. These routing rules are separate from execution permissions.</p>
+              <p className="text-[14px] font-semibold text-ink">Workflow Rules</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Route ticket approval, export approval, and execution responsibility by ticket type and DB connection.</p>
             </div>
-            {approvalIssues.length > 0 ? (
+            {workflowIssues.length > 0 ? (
               <div className="border-b border-danger/20 bg-red-50 px-4 py-3 text-[12px] font-medium leading-5 text-danger">
-                No effective reviewers for {approvalIssues.join(', ')}. Add reviewer users or groups that also have the required permission before saving.
+                {workflowIssues.join(' ')}
               </div>
             ) : null}
             <div className="divide-y divide-border/80">
-              {form.approvalPolicies.map((policy) => (
-                <div key={policy.workflow_type} className="grid gap-4 px-4 py-4 lg:grid-cols-[220px_1fr_1fr]">
-                  <label className="flex items-center gap-2 text-[13px] font-semibold text-ink">
-                    <Switch
-                      ariaLabel={`${APPROVAL_WORKFLOW_LABELS[policy.workflow_type]} approval routing enabled`}
-                      checked={policy.enabled}
-                      onChange={(checked) => updateApprovalPolicy(policy.workflow_type, { enabled: checked })}
-                    />
-                    {APPROVAL_WORKFLOW_LABELS[policy.workflow_type]}
-                  </label>
-                  <Checklist
-                    title="Reviewer users"
-                    emptyMessage="No active users available."
-                    items={users.filter((user) => user.is_active).map((user) => ({ id: user.id, label: user.username }))}
-                    selectedIDs={policy.reviewer_user_ids}
-                    onChange={(selectedIDs) => updateApprovalPolicy(policy.workflow_type, { reviewer_user_ids: selectedIDs })}
-                  />
-                  <Checklist
-                    title="Reviewer auth groups"
-                    emptyMessage="No auth groups available."
-                    items={authGroups.map((group) => ({ id: group.name, label: group.label }))}
-                    selectedIDs={policy.reviewer_auth_groups}
-                    onChange={(selectedIDs) => updateApprovalPolicy(policy.workflow_type, { reviewer_auth_groups: selectedIDs })}
-                  />
-                  <EffectiveReviewersPreview
-                    policy={policy}
-                    users={users}
-                    authGroups={authGroups}
-                  />
-                </div>
+              {form.workflowRules.length === 0 ? (
+                <div className="px-4 py-6 text-[13px] text-muted">No workflow rules configured.</div>
+              ) : form.workflowRules.map((rule, index) => (
+                <WorkflowRuleEditor
+                  key={`${rule.id ?? 'new'}-${index}`}
+                  rule={rule}
+                  index={index}
+                  connections={connections}
+                  authGroups={authGroups}
+                  onChange={(patch) => updateWorkflowRule(index, patch)}
+                  onRemove={() => removeWorkflowRule(index)}
+                />
               ))}
+            </div>
+            <div className="flex justify-end border-t border-border/80 px-4 py-3">
+              <button
+                type="button"
+                onClick={addWorkflowRule}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+              >
+                <Plus className="h-4 w-4" />
+                Add Rule
+              </button>
             </div>
           </section>
 
           <div className="flex justify-end">
             <button
               type="submit"
-              disabled={saving || approvalIssues.length > 0}
+              disabled={saving || workflowIssues.length > 0}
               className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Save className="h-4 w-4" />
@@ -408,125 +405,190 @@ export function SettingsPage() {
   )
 }
 
-function EffectiveReviewersPreview({
-  policy,
-  users,
+function WorkflowRuleEditor({
+  rule,
+  index,
+  connections,
   authGroups,
+  onChange,
+  onRemove,
 }: {
-  policy: ApprovalPolicy
-  users: UserSummary[]
+  rule: WorkflowRule
+  index: number
+  connections: Array<Pick<DBConnection, 'id' | 'name' | 'db_type' | 'host' | 'port'>>
   authGroups: AuthGroupSummary[]
+  onChange: (patch: Partial<WorkflowRule>) => void
+  onRemove: () => void
 }) {
-  const requiredPermissions = APPROVAL_WORKFLOW_PERMISSIONS[policy.workflow_type] ?? []
-  if (!policy.enabled) {
-    return (
-      <div className="lg:col-start-2 lg:col-span-2 rounded-lg border border-border bg-panel-soft px-3 py-3">
-        <p className="text-[12px] font-semibold text-muted">Effective reviewers</p>
-        <p className="mt-2 text-[12px] leading-5 text-muted">Routing is disabled for this workflow.</p>
-      </div>
-    )
-  }
-
-  const resolution = resolveApprovalPolicy(policy, users, authGroups)
-  const excludedReviewers = resolution.excludedReviewers.map((user) => `${user.username} (${user.reason})`)
+  const isExecutable = isExecutableTicketType(rule.ticket_type)
+  const approvalGroupItems = workflowAuthGroupItems(authGroups, rule.approval_auth_groups)
+  const executorGroupItems = workflowAuthGroupItems(authGroups, rule.executor_auth_groups)
+  const requiredReviewPermissions = WORKFLOW_REVIEW_PERMISSIONS[rule.ticket_type] ?? []
+  const hasDeprecatedReviewer = [...rule.approval_auth_groups, ...rule.executor_auth_groups].includes('reviewer')
 
   return (
-    <div className="lg:col-start-2 lg:col-span-2 rounded-lg border border-border bg-panel-soft px-3 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[12px] font-semibold text-muted">Effective reviewers</span>
-        <span className="rounded-full border border-border bg-white px-2 py-0.5 text-[10px] font-semibold text-muted">
-          Requires {requiredPermissions.join(' or ')}
-        </span>
-      </div>
-      {resolution.effectiveReviewers.length === 0 ? (
-        <p className="mt-2 text-[12px] leading-5 text-danger">
-          No effective reviewers. Add users or groups that also have the required permission.
-        </p>
-      ) : (
-        <div className="mt-2 flex flex-wrap gap-2">
-          {resolution.effectiveReviewers.map((user) => (
-            <span key={user.id} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-ink">
-              <span>{user.username}</span>
-              <span className="text-[10px] font-medium text-muted">
-                {user.sources.join(', ')}
-              </span>
-            </span>
-          ))}
+    <div className="grid gap-4 px-4 py-4">
+      <div className="grid gap-3 lg:grid-cols-[minmax(180px,1.2fr)_170px_190px_140px_auto]">
+        <Field
+          label="Rule name"
+          value={rule.rule_name}
+          onChange={(value) => onChange({ rule_name: value })}
+        />
+        <label className="grid gap-2 text-[12px] font-semibold text-muted">
+          <span>Ticket type</span>
+          <select
+            value={rule.ticket_type}
+            onChange={(event) => onChange({ ticket_type: event.target.value as WorkflowRule['ticket_type'] })}
+            className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
+          >
+            {WORKFLOW_TICKET_TYPES.map((ticketType) => (
+              <option key={ticketType} value={ticketType}>{WORKFLOW_TICKET_TYPE_LABELS[ticketType]}</option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-2 text-[12px] font-semibold text-muted">
+          <span>DB connection</span>
+          <select
+            value={rule.db_connection_id ?? ''}
+            onChange={(event) => onChange({ db_connection_id: event.target.value === '' ? null : Number(event.target.value) })}
+            className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
+          >
+            <option value="">All connections</option>
+            {connections.map((connection) => (
+              <option key={connection.id} value={connection.id}>{connection.name}</option>
+            ))}
+          </select>
+        </label>
+        <Field
+          label="Priority"
+          value={String(rule.priority)}
+          onChange={(value) => onChange({ priority: parsePositiveInt(value, 100) })}
+        />
+        <div className="flex items-end justify-end">
+          <button
+            type="button"
+            onClick={onRemove}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-danger/20 bg-red-50 text-danger transition hover:bg-red-100"
+            aria-label={`Remove workflow rule ${index + 1}`}
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
         </div>
-      )}
-      {excludedReviewers.length > 0 ? (
-        <p className="mt-2 text-[11px] leading-5 text-muted">
-          Excluded: {excludedReviewers.join(', ')}
-        </p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[220px_1fr_1fr]">
+        <div className="grid content-start gap-3">
+          <label className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+            <Switch
+              ariaLabel={`${rule.rule_name} enabled`}
+              checked={rule.enabled}
+              onChange={(checked) => onChange({ enabled: checked })}
+            />
+            Enabled
+          </label>
+          <label className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+            <Switch
+              ariaLabel={`${rule.rule_name} approval enabled`}
+              checked={rule.approval_enabled}
+              onChange={(checked) => onChange({ approval_enabled: checked })}
+            />
+            Approval required
+          </label>
+          {rule.ticket_type === 'sql_export' ? (
+            <label className="grid gap-2 text-[12px] font-semibold text-muted">
+              <span>Export sensitivity</span>
+              <select
+                value={rule.export_sensitivity ?? 'normal'}
+                onChange={(event) => onChange({ export_sensitivity: event.target.value as 'normal' | 'sensitive' })}
+                className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
+              >
+                <option value="normal">Normal</option>
+                <option value="sensitive">Sensitive</option>
+              </select>
+            </label>
+          ) : null}
+          <div className="rounded-lg border border-border bg-panel-soft px-3 py-2 text-[11px] leading-5 text-muted">
+            Review permission: {requiredReviewPermissions.join(' or ') || 'None'}
+            {isExecutable ? <><br />Execution permission: tickets.execute</> : null}
+          </div>
+        </div>
+        <Checklist
+          title="Approval auth groups"
+          emptyMessage="No auth groups available."
+          items={approvalGroupItems}
+          selectedIDs={rule.approval_auth_groups}
+          onChange={(selectedIDs) => onChange({ approval_auth_groups: selectedIDs })}
+        />
+        <Checklist
+          title="Executor auth groups"
+          emptyMessage="No auth groups available."
+          items={executorGroupItems}
+          selectedIDs={rule.executor_auth_groups}
+          onChange={(selectedIDs) => onChange({ executor_auth_groups: selectedIDs })}
+        />
+      </div>
+      {hasDeprecatedReviewer ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-5 text-amber-800">
+          The Reviewer auth group is deprecated. Move this rule to Data Owner or Security before the legacy group is removed.
+        </div>
       ) : null}
     </div>
   )
 }
 
-type LocalApprovalResolutionUser = {
-  id: number
-  username: string
-  sources: string[]
-  reason?: string
+function workflowAuthGroupItems(authGroups: AuthGroupSummary[], selectedGroups: string[]) {
+  return authGroups
+    .filter((group) => group.name !== 'reviewer' || selectedGroups.includes(group.name))
+    .map((group) => ({
+      id: group.name,
+      label: group.name === 'reviewer' ? `${group.label} (Deprecated)` : group.label,
+    }))
 }
 
-function findApprovalPolicyIssues(policies: ApprovalPolicy[], users: UserSummary[], authGroups: AuthGroupSummary[]) {
-  return policies
-    .filter((policy) => policy.enabled)
-    .filter((policy) => resolveApprovalPolicy(policy, users, authGroups).effectiveReviewers.length === 0)
-    .map((policy) => APPROVAL_WORKFLOW_LABELS[policy.workflow_type])
-}
-
-function resolveApprovalPolicy(policy: ApprovalPolicy, users: UserSummary[], authGroups: AuthGroupSummary[]) {
-  const requiredPermissions = APPROVAL_WORKFLOW_PERMISSIONS[policy.workflow_type] ?? []
-  const reviewerSources = new Map<number, Set<string>>()
-  function addReviewerSource(userID: number, source: string) {
-    const sources = reviewerSources.get(userID) ?? new Set<string>()
-    sources.add(source)
-    reviewerSources.set(userID, sources)
-  }
-  for (const userID of policy.reviewer_user_ids) {
-    addReviewerSource(userID, 'user')
-  }
-  for (const groupName of policy.reviewer_auth_groups) {
-    for (const user of users) {
-      if (user.auth_groups.includes(groupName)) {
-        addReviewerSource(user.id, `group:${groupName}`)
+function findWorkflowRuleIssues(rules: WorkflowRule[], authGroups: AuthGroupSummary[]) {
+  const availableGroups = new Set(authGroups.map((group) => group.name))
+  const issues: string[] = []
+  for (const [index, rule] of rules.entries()) {
+    if (!rule.enabled) {
+      continue
+    }
+    const label = rule.rule_name.trim() || `Rule ${index + 1}`
+    if (!rule.rule_name.trim()) {
+      issues.push(`${label}: rule name is required.`)
+    }
+    if (rule.ticket_type === 'sql_export' && rule.export_sensitivity !== 'normal' && rule.export_sensitivity !== 'sensitive') {
+      issues.push(`${label}: SQL Export requires export sensitivity.`)
+    }
+    if (rule.approval_enabled && rule.approval_auth_groups.length === 0) {
+      issues.push(`${label}: approval auth groups are required when approval is enabled.`)
+    }
+    if (isExecutableTicketType(rule.ticket_type) && rule.executor_auth_groups.length === 0) {
+      issues.push(`${label}: executor auth groups are required for executable tickets.`)
+    }
+    for (const group of [...rule.approval_auth_groups, ...rule.executor_auth_groups]) {
+      if (!availableGroups.has(group)) {
+        issues.push(`${label}: auth group ${group} does not exist.`)
       }
     }
   }
-
-  const effectiveReviewers: LocalApprovalResolutionUser[] = []
-  const excludedReviewers: LocalApprovalResolutionUser[] = []
-  for (const user of users.filter((item) => reviewerSources.has(item.id))) {
-    const sources = Array.from(reviewerSources.get(user.id) ?? []).sort()
-    if (!user.is_active) {
-      excludedReviewers.push({ id: user.id, username: user.username, sources, reason: 'inactive' })
-      continue
-    }
-    if (!hasAnyRequiredPermission(user, authGroups, requiredPermissions)) {
-      excludedReviewers.push({ id: user.id, username: user.username, sources, reason: 'missing permission' })
-      continue
-    }
-    effectiveReviewers.push({ id: user.id, username: user.username, sources })
-  }
-  effectiveReviewers.sort((left, right) => left.username.localeCompare(right.username))
-  excludedReviewers.sort((left, right) => left.username.localeCompare(right.username))
-  return { effectiveReviewers, excludedReviewers }
+  return issues
 }
 
-function hasAnyRequiredPermission(user: UserSummary, authGroups: AuthGroupSummary[], requiredPermissions: string[]) {
-  if (requiredPermissions.length === 0) {
-    return false
+function isExecutableTicketType(ticketType: WorkflowRule['ticket_type']) {
+  return ticketType === 'ddl' || ticketType === 'dml' || ticketType === 'redis_command'
+}
+
+function normalizeWorkflowRulePatch(rule: WorkflowRule): WorkflowRule {
+  const nextRule = { ...rule }
+  if (nextRule.ticket_type === 'sql_export') {
+    nextRule.export_sensitivity = nextRule.export_sensitivity === 'sensitive' ? 'sensitive' : 'normal'
+  } else {
+    nextRule.export_sensitivity = null
   }
-  const permissions = new Set(user.permissions ?? [])
-  for (const groupName of user.auth_groups) {
-    const group = authGroups.find((item) => item.name === groupName)
-    for (const permission of group?.permissions ?? []) {
-      permissions.add(permission)
-    }
+  if (!isExecutableTicketType(nextRule.ticket_type)) {
+    nextRule.executor_auth_groups = []
   }
-  return requiredPermissions.some((permission) => permissions.has(permission))
+  return nextRule
 }
 
 function Field({
@@ -606,7 +668,6 @@ function toForm(settings: PlatformSettings): SettingsForm {
     larkAppID: settings.lark_app_id,
     larkAppSecret: '',
     larkAppSecretConfigured: settings.lark_app_secret_configured,
-    requireNonSensitiveExportReview: settings.require_non_sensitive_export_review,
     sqlEditorAppTimeoutSeconds: String(settings.sql_editor_app_timeout_seconds),
     sqlEditorMySQLMaxExecutionTimeMs: String(settings.sql_editor_mysql_max_execution_time_ms),
     sqlEditorPostgresStatementTimeoutMs: String(settings.sql_editor_postgres_statement_timeout_ms),
@@ -619,6 +680,7 @@ function toForm(settings: PlatformSettings): SettingsForm {
     objectCron: settings.db_metadata_object_cron,
     cronTimezone: settings.db_metadata_cron_timezone,
     approvalPolicies: settings.approval_policies,
+    workflowRules: settings.workflow_rules,
   }
 }
 
@@ -626,7 +688,7 @@ function toPayload(current: PlatformSettings | null, form: SettingsForm): Platfo
   return {
     sensitive_export_reviewer_user_ids: current?.sensitive_export_reviewer_user_ids ?? [],
     sensitive_query_access_reviewer_user_ids: current?.sensitive_query_access_reviewer_user_ids ?? [],
-    require_non_sensitive_export_review: form.requireNonSensitiveExportReview,
+    require_non_sensitive_export_review: current?.require_non_sensitive_export_review ?? true,
     lark_app_id: form.larkAppID.trim(),
     lark_app_secret: form.larkAppSecret,
     lark_app_secret_configured: form.larkAppSecretConfigured,
@@ -644,6 +706,7 @@ function toPayload(current: PlatformSettings | null, form: SettingsForm): Platfo
     db_metadata_object_sync_interval_minutes: current?.db_metadata_object_sync_interval_minutes ?? 60,
     db_metadata_cron_timezone: form.cronTimezone.trim(),
     approval_policies: form.approvalPolicies,
+    workflow_rules: form.workflowRules,
   }
 }
 

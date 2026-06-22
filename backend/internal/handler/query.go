@@ -191,24 +191,36 @@ func (h *QueryHandler) ticketLink(ticketID uint64) string {
 	return h.appBaseURL + path
 }
 
-func (h *QueryHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body, ticketNo string) {
-	reviewerIDs, usedPolicy, err := approvalPolicyReviewerIDs(ctx, h.settings, h.users, model.ApprovalWorkflowSensitiveQueryAccess)
+func (h *QueryHandler) notifyUsers(ctx context.Context, userIDs []uint64, actorID uint64, ticketID uint64, notifType, title, body, ticketNo string) {
+	seen := map[uint64]struct{}{}
+	for _, userID := range userIDs {
+		if userID == 0 || userID == actorID {
+			continue
+		}
+		if _, ok := seen[userID]; ok {
+			continue
+		}
+		seen[userID] = struct{}{}
+		h.sendInApp(ctx, userID, notifType, title, body, "ticket", ticketID)
+		h.notifyLarkUsers(ctx, []uint64{userID}, title, body, ticketNo)
+	}
+}
+
+func (h *QueryHandler) notifyAdminUsers(ctx context.Context, ticketID uint64, title, body, ticketNo string) {
+	if h.users == nil {
+		return
+	}
+	admins, err := h.users.ListUsersByAuthGroup(ctx, model.AuthGroupAdmin)
 	if err != nil {
 		return
 	}
-	if !usedPolicy {
-		reviewerIDs, err = listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorSensitiveRev})
-		if err != nil {
-			return
+	ids := make([]uint64, 0, len(admins))
+	for _, admin := range admins {
+		if admin.IsActive {
+			ids = append(ids, admin.ID)
 		}
 	}
-	for _, reviewerID := range reviewerIDs {
-		if reviewerID == submitterID {
-			continue
-		}
-		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticketID)
-		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body, ticketNo)
-	}
+	h.notifyUsers(ctx, ids, 0, ticketID, "ticket_needs_admin_attention", title, body, ticketNo)
 }
 
 // GET /query/connections
@@ -445,6 +457,43 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		jsonErr(w, http.StatusInternalServerError, "create sensitive access ticket failed")
 		return
 	}
+	resolution, err := resolveTicketWorkflow(r.Context(), h.settings, h.users, ticket)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "resolve sensitive access workflow failed")
+		return
+	}
+	if resolution == nil || resolution.ErrorCode != "" {
+		comment := "Workflow resolution failed."
+		if resolution != nil && resolution.ErrorMessage != "" {
+			comment = resolution.ErrorMessage
+		}
+		if _, err := h.tickets.UpdateStatus(r.Context(), ticket.ID, model.TicketStatusPendingReview, model.TicketStatusNeedsAdminAttention, nil, &comment, nil); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "mark sensitive access workflow attention failed")
+			return
+		}
+		if updated, err := h.tickets.GetByID(r.Context(), ticket.ID); err == nil && updated != nil {
+			ticket = updated
+		}
+		h.audit.Log(r.Context(), repository.AuditEntry{
+			ActorID:      &userID,
+			ActorName:    middleware.UsernameFromCtx(r.Context()),
+			ActionType:   "workflow_resolution_failed",
+			ResourceType: "ticket",
+			ResourceID:   &ticket.ID,
+			Details:      workflowAuditDetails(ticket, resolution),
+			IPAddress:    clientIP(r),
+		})
+		body := buildTicketNotificationBody(ticket, &conn.Name, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.ID))
+		h.notifyAdminUsers(r.Context(), ticket.ID, "工單需要管理員處理", body, ticket.TicketNo)
+		publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
+		jsonCreated(w, map[string]any{
+			"ticket_id":   ticket.ID,
+			"ticket_no":   ticket.TicketNo,
+			"status":      string(ticket.Status),
+			"scope_count": len(analysis.Scopes),
+		})
+		return
+	}
 
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
@@ -468,7 +517,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		"提交人已送出工單，等待 reviewer 處理。",
 		h.ticketLink(ticket.ID),
 	)
-	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
+	h.notifyUsers(r.Context(), resolution.ApprovalUserIDs, userID, ticket.ID, "ticket_pending_review", exportPendingReviewTitle(), body, ticket.TicketNo)
 	publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
 
 	jsonCreated(w, map[string]any{

@@ -14,7 +14,7 @@ import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useToast } from '@/shared/ui/ToastContext'
-import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, revokeTicket, withdrawTicket } from '@/modules/tickets/api'
+import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, retryWorkflowResolution, revokeTicket, withdrawTicket } from '@/modules/tickets/api'
 
 function DetailTable({
   headers,
@@ -522,7 +522,7 @@ export function TicketDetailPage() {
   const [error, setError] = useState('')
   const [comment, setComment] = useState('')
   const [reason, setReason] = useState('')
-  const [acting, setActing] = useState<'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke' | null>(null)
+  const [acting, setActing] = useState<'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke' | 'retry_workflow' | null>(null)
   const [confirmAction, setConfirmAction] = useState<'withdraw' | 'execute' | 'revoke' | null>(null)
   const [downloadingExport, setDownloadingExport] = useState(false)
   const [otherDetailsOpen, setOtherDetailsOpen] = useState(false)
@@ -615,12 +615,13 @@ export function TicketDetailPage() {
   const canWithdraw = detail?.capabilities?.can_withdraw ?? false
   const canExecute = detail?.capabilities?.can_execute ?? false
   const canRevoke = detail?.capabilities?.can_revoke ?? false
+  const canRetryWorkflow = detail?.capabilities?.can_retry_workflow_resolution ?? false
   const exportDownloadURL = detail?.export_request?.download_url ?? null
   const statementResults = detail ? buildStatementResults(detail) : []
   const queryAccessItems = detail?.query_access_items ?? []
   const queryAccessConnections = summarizeQueryAccessConnections(queryAccessItems)
   const queryAccessScopeSummary = summarizeQueryAccessScope(queryAccessItems)
-  const hasActionPanel = canReview || canWithdraw || canExecute || canReject || canRevoke || (ticket?.ticket_type === 'sql_export' && detail?.capabilities.can_download_export && exportDownloadURL)
+  const hasActionPanel = canReview || canWithdraw || canExecute || canReject || canRevoke || canRetryWorkflow || (ticket?.ticket_type === 'sql_export' && detail?.capabilities.can_download_export && exportDownloadURL)
   const shouldShowActionPanel = hasActionPanel && !['completed', 'failed', 'rejected', 'withdrawn', 'stopped', 'interrupted'].includes(ticket?.status ?? '')
   const showExecutionActions = (ticket?.status === 'approved' && canReject) ||
     (ticket?.status === 'pending_execution' && (canExecute || canReject)) ||
@@ -647,7 +648,7 @@ export function TicketDetailPage() {
   }
 
   async function runAction(
-    type: 'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke',
+    type: 'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke' | 'retry_workflow',
     action: () => Promise<Ticket | void>,
   ) {
     setActing(type)
@@ -923,6 +924,20 @@ export function TicketDetailPage() {
                       >
                         {acting === 'withdraw' ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
                         Withdraw Ticket
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {canRetryWorkflow && ticket.status === 'needs_admin_attention' ? (
+                    <div className="p-0">
+                      <button
+                        type="button"
+                        disabled={acting !== null}
+                        onClick={() => void runAction('retry_workflow', () => retryWorkflowResolution(ticket.id).then((response) => response.ticket))}
+                        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 text-[13px] font-bold text-orange-700 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {acting === 'retry_workflow' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                        Retry Workflow Resolution
                       </button>
                     </div>
                   ) : null}

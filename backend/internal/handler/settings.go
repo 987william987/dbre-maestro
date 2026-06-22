@@ -87,6 +87,61 @@ func (h *SettingsHandler) ApprovalResolution(w http.ResponseWriter, r *http.Requ
 	jsonOK(w, map[string]any{"workflows": resolution})
 }
 
+func (h *SettingsHandler) ListWorkflowRules(w http.ResponseWriter, r *http.Request) {
+	rules, err := h.settings.ListWorkflowRules(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list workflow rules failed")
+		return
+	}
+	jsonOK(w, map[string]any{"workflow_rules": rules})
+}
+
+func (h *SettingsHandler) ReplaceWorkflowRules(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		WorkflowRules []model.WorkflowRule `json:"workflow_rules"`
+	}
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.validateWorkflowRules(r.Context(), req.WorkflowRules); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	if err := h.settings.ReplaceWorkflowRules(r.Context(), req.WorkflowRules); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "replace workflow rules failed")
+		return
+	}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "workflow_rules_update",
+		ResourceType: "settings",
+		Details:      map[string]any{"workflow_rules": req.WorkflowRules},
+		IPAddress:    clientIP(r),
+	})
+	jsonOK(w, map[string]any{"workflow_rules": req.WorkflowRules})
+}
+
+func (h *SettingsHandler) PreviewWorkflowRule(w http.ResponseWriter, r *http.Request) {
+	var req model.WorkflowRule
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.validateWorkflowRuleShape(r.Context(), req); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	resolution, err := resolveWorkflowWithMatcher(r.Context(), &workflowRulePreviewSettings{rule: req}, h.users, req.TicketType, req.DBConnectionID, req.ExportSensitivity)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "preview workflow rule failed")
+		return
+	}
+	jsonOK(w, map[string]any{"workflow_resolution": resolution})
+}
+
 func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	var req model.PlatformSettings
 	if err := bindJSON(r, &req); err != nil {
@@ -121,20 +176,6 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		if err := h.validateConnectionExists(r, connectionID); err != nil {
 			jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 			return
-		}
-	}
-	for _, policy := range req.ApprovalPolicies {
-		for _, userID := range policy.ReviewerUserIDs {
-			if err := h.validateUserExists(r, userID); err != nil {
-				jsonErr(w, http.StatusUnprocessableEntity, err.Error())
-				return
-			}
-		}
-		for _, authGroup := range policy.ReviewerAuthGroups {
-			if err := h.validateAuthGroupExists(r, authGroup); err != nil {
-				jsonErr(w, http.StatusUnprocessableEntity, err.Error())
-				return
-			}
 		}
 	}
 	if req.SQLEditorAppTimeoutSeconds <= 0 {
@@ -176,16 +217,12 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	if len(req.ApprovalPolicies) == 0 {
 		req.ApprovalPolicies = currentSettings.ApprovalPolicies
 	}
-	resolution, err := h.resolveApprovalPolicies(r.Context(), req.ApprovalPolicies)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "resolve approval policies failed")
-		return
+	if req.WorkflowRules == nil {
+		req.WorkflowRules = currentSettings.WorkflowRules
 	}
-	for _, item := range resolution {
-		if item.Enabled && len(item.EffectiveReviewers) == 0 {
-			jsonErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("approval policy %s has no effective reviewers", item.WorkflowType))
-			return
-		}
+	if err := h.validateWorkflowRules(r.Context(), req.WorkflowRules); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
 	}
 
 	if err := h.settings.Replace(r.Context(), &req); err != nil {
@@ -399,6 +436,117 @@ func (h *SettingsHandler) validateAuthGroupExists(r *http.Request, authGroup mod
 		return fmt.Errorf("auth group validation is not configured")
 	}
 	group, err := h.auths.GetByKey(r.Context(), string(authGroup))
+	if err != nil {
+		return err
+	}
+	if group == nil {
+		return fmt.Errorf("auth group %s does not exist", authGroup)
+	}
+	return nil
+}
+
+type workflowRulePreviewSettings struct {
+	rule model.WorkflowRule
+}
+
+func (s *workflowRulePreviewSettings) MatchWorkflowRule(ctx context.Context, ticketType model.TicketType, dbConnectionID *uint64, exportSensitivity *string) (*model.WorkflowRule, error) {
+	_ = ctx
+	if s.rule.TicketType != ticketType {
+		return nil, nil
+	}
+	if !workflowConnectionMatches(s.rule.DBConnectionID, dbConnectionID) {
+		return nil, nil
+	}
+	if !workflowSensitivityMatches(s.rule.ExportSensitivity, exportSensitivity) {
+		return nil, nil
+	}
+	if s.rule.ID == 0 {
+		s.rule.ID = 1
+	}
+	return &s.rule, nil
+}
+
+func workflowConnectionMatches(ruleConnID *uint64, ticketConnID *uint64) bool {
+	if ruleConnID == nil {
+		return true
+	}
+	if ticketConnID == nil {
+		return false
+	}
+	return *ruleConnID == *ticketConnID
+}
+
+func workflowSensitivityMatches(ruleSensitivity *string, ticketSensitivity *string) bool {
+	if ruleSensitivity == nil && ticketSensitivity == nil {
+		return true
+	}
+	if ruleSensitivity == nil || ticketSensitivity == nil {
+		return false
+	}
+	return *ruleSensitivity == *ticketSensitivity
+}
+
+func (h *SettingsHandler) validateWorkflowRules(ctx context.Context, rules []model.WorkflowRule) error {
+	if len(rules) == 0 {
+		return fmt.Errorf("workflow_rules is required")
+	}
+	for i, rule := range rules {
+		if err := h.validateWorkflowRuleShape(ctx, rule); err != nil {
+			return fmt.Errorf("workflow rule %d is invalid: %w", i+1, err)
+		}
+		if !rule.Enabled {
+			continue
+		}
+		resolution, err := resolveWorkflowWithMatcher(ctx, &workflowRulePreviewSettings{rule: rule}, h.users, rule.TicketType, rule.DBConnectionID, rule.ExportSensitivity)
+		if err != nil {
+			return err
+		}
+		if resolution == nil || resolution.ErrorCode != "" {
+			if resolution != nil && resolution.ErrorMessage != "" {
+				return fmt.Errorf("workflow rule %q is invalid: %s", rule.RuleName, resolution.ErrorMessage)
+			}
+			return fmt.Errorf("workflow rule %q is invalid", rule.RuleName)
+		}
+	}
+	return nil
+}
+
+func (h *SettingsHandler) validateWorkflowRuleShape(ctx context.Context, rule model.WorkflowRule) error {
+	if strings.TrimSpace(rule.RuleName) == "" {
+		return fmt.Errorf("rule_name is required")
+	}
+	if rule.TicketType == "" {
+		return fmt.Errorf("ticket_type is required")
+	}
+	if rule.DBConnectionID != nil {
+		conn, err := h.dbConns.GetByID(ctx, *rule.DBConnectionID)
+		if err != nil {
+			return err
+		}
+		if conn == nil {
+			return fmt.Errorf("db connection %d does not exist", *rule.DBConnectionID)
+		}
+	}
+	if rule.TicketType == model.TicketTypeSQLExport {
+		if rule.ExportSensitivity == nil || (*rule.ExportSensitivity != "normal" && *rule.ExportSensitivity != "sensitive") {
+			return fmt.Errorf("sql_export workflow rule requires export_sensitivity normal or sensitive")
+		}
+	} else if rule.ExportSensitivity != nil {
+		return fmt.Errorf("export_sensitivity is only allowed for sql_export workflow rules")
+	}
+	for _, group := range append(append([]model.AuthGroup{}, rule.ApprovalAuthGroups...), rule.ExecutorAuthGroups...) {
+		if err := h.validateAuthGroupExistsContext(ctx, group); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *SettingsHandler) validateAuthGroupExistsContext(ctx context.Context, authGroup model.AuthGroup) error {
+	if h.auths == nil {
+		return fmt.Errorf("auth group validation is not configured")
+	}
+	group, err := h.auths.GetByKey(ctx, string(authGroup))
 	if err != nil {
 		return err
 	}

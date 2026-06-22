@@ -7,6 +7,7 @@ type PlatformSettings struct {
 	SensitiveQueryAccessReviewerUserIDs  []uint64         `json:"sensitive_query_access_reviewer_user_ids"`
 	RequireNonSensitiveExportReview      bool             `json:"require_non_sensitive_export_review"`
 	ApprovalPolicies                     []ApprovalPolicy `json:"approval_policies"`
+	WorkflowRules                        []WorkflowRule   `json:"workflow_rules"`
 	LarkAppID                            string           `json:"lark_app_id"`
 	LarkAppSecret                        string           `json:"lark_app_secret,omitempty"`
 	LarkAppSecretConfigured              bool             `json:"lark_app_secret_configured"`
@@ -42,4 +43,40 @@ type ApprovalPolicy struct {
 	ReviewerUserIDs    []uint64             `json:"reviewer_user_ids"`
 	ReviewerAuthGroups []AuthGroup          `json:"reviewer_auth_groups"`
 	Enabled            bool                 `db:"enabled" json:"enabled"`
+}
+
+type WorkflowRule struct {
+	ID                 uint64      `db:"id" json:"id"`
+	RuleName           string      `db:"rule_name" json:"rule_name"`
+	TicketType         TicketType  `db:"ticket_type" json:"ticket_type"`
+	DBConnectionID     *uint64     `db:"db_connection_id" json:"db_connection_id,omitempty"`
+	ExportSensitivity  *string     `db:"export_sensitivity" json:"export_sensitivity,omitempty"`
+	ApprovalEnabled    bool        `db:"approval_enabled" json:"approval_enabled"`
+	ApprovalAuthGroups []AuthGroup `json:"approval_auth_groups"`
+	ExecutorAuthGroups []AuthGroup `json:"executor_auth_groups"`
+	Priority           int         `db:"priority" json:"priority"`
+	Enabled            bool        `db:"enabled" json:"enabled"`
+}
+
+type WorkflowExcludedUser struct {
+	UserID   uint64 `json:"user_id"`
+	Reason   string `json:"reason"`
+	Username string `json:"username,omitempty"`
+}
+
+type WorkflowResolution struct {
+	RuleID                *uint64                `json:"rule_id,omitempty"`
+	RuleName              string                 `json:"rule_name"`
+	TicketType            TicketType             `json:"ticket_type"`
+	DBConnectionID        *uint64                `json:"db_connection_id,omitempty"`
+	ExportSensitivity     *string                `json:"export_sensitivity,omitempty"`
+	ApprovalEnabled       bool                   `json:"approval_enabled"`
+	ApprovalUserIDs       []uint64               `json:"approval_user_ids"`
+	ExecutorUserIDs       []uint64               `json:"executor_user_ids"`
+	MissingApprovalGroups []AuthGroup            `json:"missing_approval_groups"`
+	MissingExecutorGroups []AuthGroup            `json:"missing_executor_groups"`
+	ExcludedApprovalUsers []WorkflowExcludedUser `json:"excluded_approval_users"`
+	ExcludedExecutorUsers []WorkflowExcludedUser `json:"excluded_executor_users"`
+	ErrorCode             string                 `json:"error_code"`
+	ErrorMessage          string                 `json:"error_message"`
 }
