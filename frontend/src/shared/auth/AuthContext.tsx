@@ -2,8 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { configureApiClient, withApiPath } from '@/shared/api/client'
 import type { AuthStatus, CurrentAuthGroup, CurrentUser } from '@/shared/types/auth'
 
-const ACCESS_TOKEN_KEY = 'dbre_maestro.access_token'
-
 type LoginParams = {
   username: string
   password: string
@@ -34,18 +32,6 @@ type LoginResponse = {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
-
-function readStoredToken() {
-  return window.localStorage.getItem(ACCESS_TOKEN_KEY)
-}
-
-function writeStoredToken(token: string | null) {
-  if (token) {
-    window.localStorage.setItem(ACCESS_TOKEN_KEY, token)
-  } else {
-    window.localStorage.removeItem(ACCESS_TOKEN_KEY)
-  }
-}
 
 function normalizeMe(payload: MeResponse): CurrentUser {
   const authGroupDetails = Array.isArray(payload.auth_groups)
@@ -109,14 +95,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshPromiseRef = useRef<Promise<string | null> | null>(null)
 
   const clearAuth = useCallback(() => {
-    writeStoredToken(null)
     setAccessToken(null)
     setUser(null)
     setStatus('anonymous')
   }, [])
 
   const applyAccessToken = useCallback((token: string | null) => {
-    writeStoredToken(token)
     setAccessToken(token)
   }, [])
 
@@ -165,36 +149,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applyAccessToken, clearAuth])
 
   const bootstrap = useCallback(async () => {
-    const storedToken = readStoredToken()
-
-    if (!storedToken) {
-      setStatus('anonymous')
+    const refreshedToken = await refreshAccessToken()
+    if (!refreshedToken) {
       return
     }
-
-    applyAccessToken(storedToken)
 
     try {
-      const currentUser = await fetchMe(storedToken)
+      const currentUser = await fetchMe(refreshedToken)
       setUser(currentUser)
       setStatus('authenticated')
-      return
     } catch {
-      const refreshedToken = await refreshAccessToken()
-      if (!refreshedToken) {
-        clearAuth()
-        return
-      }
-
-      try {
-        const currentUser = await fetchMe(refreshedToken)
-        setUser(currentUser)
-        setStatus('authenticated')
-      } catch {
-        clearAuth()
-      }
+      clearAuth()
     }
-  }, [applyAccessToken, clearAuth, fetchMe, refreshAccessToken])
+  }, [clearAuth, fetchMe, refreshAccessToken])
 
   useEffect(() => {
     void bootstrap()
@@ -241,7 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const token = accessToken
 
     try {
-    await fetch(withApiPath('/auth/logout'), {
+      await fetch(withApiPath('/auth/logout'), {
         method: 'POST',
         credentials: 'same-origin',
         headers: token

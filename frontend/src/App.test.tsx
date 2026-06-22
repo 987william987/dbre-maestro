@@ -3,8 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppProviders } from '@/app/providers/AppProviders'
 import App from '@/App'
 
-const storage = new Map<string, string>()
-
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), {
     status: init.status ?? 200,
@@ -17,29 +15,11 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 
 describe('App routing', () => {
   beforeEach(() => {
-    storage.clear()
     window.history.replaceState({}, '', '/')
     vi.restoreAllMocks()
-
-    Object.defineProperty(window, 'localStorage', {
-      value: {
-        getItem: (key: string) => storage.get(key) ?? null,
-        setItem: (key: string, value: string) => {
-          storage.set(key, value)
-        },
-        removeItem: (key: string) => {
-          storage.delete(key)
-        },
-        clear: () => {
-          storage.clear()
-        },
-      },
-      configurable: true,
-    })
   })
 
   it('does not blank the page at /tickets when the backend returns a null ticket array', async () => {
-    window.localStorage.setItem('dbre_maestro.access_token', 'test-token')
     window.history.replaceState({}, '', '/tickets')
 
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
@@ -48,6 +28,10 @@ describe('App routing', () => {
         : input instanceof URL
           ? input.toString()
           : input.url
+
+      if (url === '/api/auth/refresh') {
+        return jsonResponse({ access_token: 'test-token' })
+      }
 
       if (url === '/api/auth/me') {
         expect(init?.headers).toMatchObject({
