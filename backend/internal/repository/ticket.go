@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ type TicketRepo struct {
 type TicketListFilter struct {
 	SubmitterID           *uint64
 	VisibleToUserID       *uint64
+	VisibleToAllTickets   bool
 	VisibleToExecutorPool bool
 	ReviewWorkflowTypes   []model.ApprovalWorkflowType
 	Status                *model.TicketStatus
@@ -128,6 +130,15 @@ func generateTicketNo() (string, error) {
 func (r *TicketRepo) GetByID(ctx context.Context, id uint64) (*model.Ticket, error) {
 	var t model.Ticket
 	err := r.db.GetContext(ctx, &t, `SELECT * FROM tickets WHERE id = ?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &t, err
+}
+
+func (r *TicketRepo) GetByTicketNo(ctx context.Context, ticketNo string) (*model.Ticket, error) {
+	var t model.Ticket
+	err := r.db.GetContext(ctx, &t, `SELECT * FROM tickets WHERE ticket_no = ?`, ticketNo)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -262,9 +273,21 @@ func (r *TicketRepo) List(ctx context.Context, filter TicketListFilter, limit, o
 		where += ` AND t.submitter_id = ?`
 		args = append(args, *filter.SubmitterID)
 	}
-	if filter.VisibleToUserID != nil {
+	if filter.VisibleToUserID != nil && !filter.VisibleToAllTickets {
 		visibility := []string{`t.submitter_id = ?`}
 		visibilityArgs := []any{*filter.VisibleToUserID}
+		participantIDJSON := strconv.FormatUint(*filter.VisibleToUserID, 10)
+		visibility = append(visibility, `EXISTS (
+			SELECT 1
+			FROM ticket_workflow_snapshots tws
+			WHERE tws.ticket_id = t.id
+			  AND (
+			    JSON_CONTAINS(tws.approval_user_ids, ?)
+			    OR JSON_CONTAINS(tws.admin_user_ids, ?)
+			    OR (t.status = ? AND JSON_CONTAINS(tws.executor_user_ids, ?))
+			  )
+		)`)
+		visibilityArgs = append(visibilityArgs, participantIDJSON, participantIDJSON, model.TicketStatusPendingExecution, participantIDJSON)
 		for _, workflowType := range filter.ReviewWorkflowTypes {
 			condition, conditionArgs := ticketWorkflowCondition(workflowType)
 			if condition == "" {

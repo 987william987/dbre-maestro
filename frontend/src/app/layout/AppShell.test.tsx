@@ -82,6 +82,7 @@ describe('AppShell notifications', () => {
           body: '工單 T-101 等待審核',
           resource_type: 'ticket',
           resource_id: 101,
+          resource_ref: 'T-101',
           is_read: false,
           created_at: new Date().toISOString(),
         },

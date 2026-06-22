@@ -59,6 +59,7 @@ func TestBuildTicketNotificationBodyIncludesExportContext(t *testing.T) {
 	containsSensitive := false
 	ticket := &model.Ticket{
 		ID:                42,
+		TicketNo:          "TK-20260622-080000000-ABCDEF",
 		TicketType:        model.TicketTypeSQLExport,
 		ContainsSensitive: &containsSensitive,
 		DatabaseName:      &databaseName,
@@ -70,7 +71,7 @@ func TestBuildTicketNotificationBodyIncludesExportContext(t *testing.T) {
 		exportTicketStateLabel(model.TicketStatusPendingReview),
 		"請審核是否通過此工單",
 		description,
-		"/tickets/42",
+		"/tickets/TK-20260622-080000000-ABCDEF",
 	)
 
 	for _, part := range []string{
@@ -81,7 +82,7 @@ func TestBuildTicketNotificationBodyIncludesExportContext(t *testing.T) {
 		"資料來源：warehouse-prod",
 		"資料庫：analytics",
 		"說明：submitter already sent the ticket, waiting for reviewer action.",
-		"工單連結：/tickets/42",
+		"工單連結：/tickets/TK-20260622-080000000-ABCDEF",
 	} {
 		if !strings.Contains(body, part) {
 			t.Fatalf("body missing %q: %s", part, body)
@@ -93,6 +94,7 @@ func TestBuildTicketNotificationBodyIncludesSensitiveExportType(t *testing.T) {
 	containsSensitive := true
 	ticket := &model.Ticket{
 		ID:                42,
+		TicketNo:          "TK-20260622-080000000-ABCDEF",
 		TicketType:        model.TicketTypeSQLExport,
 		ContainsSensitive: &containsSensitive,
 	}

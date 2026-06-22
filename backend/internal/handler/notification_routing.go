@@ -25,6 +25,7 @@ type NotificationRoute struct {
 	Body         string
 	ResourceType string
 	ResourceID   uint64
+	ResourceRef  string
 	TicketNo     string
 }
 
@@ -39,7 +40,11 @@ func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) 
 	if r.notifs != nil {
 		for _, userID := range recipients {
 			resourceType := route.ResourceType
-			notificationID, err := r.notifs.Create(ctx, userID, route.NotifType, route.Title, route.Body, &resourceType, &route.ResourceID)
+			var resourceRef *string
+			if route.ResourceRef != "" {
+				resourceRef = &route.ResourceRef
+			}
+			notificationID, err := r.notifs.Create(ctx, userID, route.NotifType, route.Title, route.Body, &resourceType, &route.ResourceID, resourceRef)
 			if err != nil {
 				inAppFailed = append(inAppFailed, userID)
 				r.recordDelivery(ctx, route, userID, "in_app", "failed", 0, err.Error())
@@ -122,6 +127,7 @@ func (r *NotificationRouter) SendTicket(ctx context.Context, ticket *model.Ticke
 	if ticket != nil {
 		route.ResourceType = "ticket"
 		route.ResourceID = ticket.ID
+		route.ResourceRef = ticket.TicketNo
 		route.TicketNo = ticket.TicketNo
 	}
 	return r.Send(ctx, route)

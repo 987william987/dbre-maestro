@@ -6,6 +6,7 @@ export type NotificationItem = {
   body: string
   resource_type?: string | null
   resource_id?: number | null
+  resource_ref?: string | null
   is_read: boolean
   created_at: string
 }

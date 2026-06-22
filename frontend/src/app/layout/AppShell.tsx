@@ -299,8 +299,8 @@ export function AppShell() {
     }
 
     setNotificationOpen(false)
-    if (notification.resource_type === 'ticket' && notification.resource_id) {
-      navigate(`/tickets/${notification.resource_id}`)
+    if (notification.resource_type === 'ticket' && notification.resource_ref) {
+      navigate(`/tickets/${notification.resource_ref}`)
     }
   }
 

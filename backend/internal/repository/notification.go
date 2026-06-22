@@ -31,10 +31,10 @@ func NewNotificationRepo(db *sqlx.DB) *NotificationRepo {
 }
 
 // Create inserts a notification for a user.
-func (r *NotificationRepo) Create(ctx context.Context, userID uint64, notifType, title, body string, resourceType *string, resourceID *uint64) (uint64, error) {
+func (r *NotificationRepo) Create(ctx context.Context, userID uint64, notifType, title, body string, resourceType *string, resourceID *uint64, resourceRef *string) (uint64, error) {
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO notifications (user_id, type, title, body, resource_type, resource_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		userID, notifType, title, body, resourceType, resourceID, timeutil.NowUTC(),
+		`INSERT INTO notifications (user_id, type, title, body, resource_type, resource_id, resource_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		userID, notifType, title, body, resourceType, resourceID, resourceRef, timeutil.NowUTC(),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("create notification: %w", err)

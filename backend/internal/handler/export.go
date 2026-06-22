@@ -195,8 +195,8 @@ func exportTicketStateLabel(status model.TicketStatus) string {
 	}
 }
 
-func (h *ExportHandler) ticketLink(ticketID uint64) string {
-	path := fmt.Sprintf("/tickets/%d", ticketID)
+func (h *ExportHandler) ticketLink(ticketNo string) string {
+	path := fmt.Sprintf("/tickets/%s", ticketNo)
 	if h.appBaseURL == "" {
 		return path
 	}
@@ -323,7 +323,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			IPAddress:    clientIP(r),
 		})
 		connName := h.loadTicketNotificationContext(r.Context(), ticket)
-		body := buildTicketNotificationBody(ticket, connName, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.ID))
+		body := buildTicketNotificationBody(ticket, connName, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.TicketNo))
 		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
 			RecipientIDs: resolution.AdminUserIDs,
 			ActorID:      &userID,
@@ -397,7 +397,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			exportTicketStateLabel(ticket.Status),
 			"請審核是否通過此工單",
 			"提交人已送出工單，等待 reviewer 處理。",
-			h.ticketLink(ticket.ID),
+			h.ticketLink(ticket.TicketNo),
 		)
 		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
 			RecipientIDs: []uint64{userID},
@@ -421,7 +421,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			exportTicketStateLabel(ticket.Status),
 			"普通導出已自動通過",
 			"此導出不包含敏感欄位，且目前設定不要求普通導出審批。",
-			h.ticketLink(ticket.ID),
+			h.ticketLink(ticket.TicketNo),
 		)
 		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
 			RecipientIDs: []uint64{userID},

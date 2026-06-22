@@ -158,8 +158,8 @@ func (h *QueryHandler) loadSQLEditorTimeoutSettings(ctx context.Context) sqlEdit
 	return settings
 }
 
-func (h *QueryHandler) ticketLink(ticketID uint64) string {
-	path := fmt.Sprintf("/tickets/%d", ticketID)
+func (h *QueryHandler) ticketLink(ticketNo string) string {
+	path := fmt.Sprintf("/tickets/%s", ticketNo)
 	if h.appBaseURL == "" {
 		return path
 	}
@@ -430,7 +430,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 			Details:      workflowAuditDetails(ticket, resolution),
 			IPAddress:    clientIP(r),
 		})
-		body := buildTicketNotificationBody(ticket, &conn.Name, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.ID))
+		body := buildTicketNotificationBody(ticket, &conn.Name, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.TicketNo))
 		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
 			RecipientIDs: resolution.AdminUserIDs,
 			ActorID:      &userID,
@@ -468,7 +468,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		exportTicketStateLabel(model.TicketStatusPendingReview),
 		"請審核是否通過此工單",
 		"提交人已送出工單，等待 reviewer 處理。",
-		h.ticketLink(ticket.ID),
+		h.ticketLink(ticket.TicketNo),
 	)
 	h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
 		RecipientIDs: resolution.ApprovalUserIDs,

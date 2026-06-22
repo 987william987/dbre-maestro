@@ -443,7 +443,7 @@ export function NewTicketPage() {
           approved_duration_minutes: duration.minutes,
           rules,
         })
-        navigate(`/tickets/${created.id}`, { replace: true })
+        navigate(`/tickets/${created.ticket_no}`, { replace: true })
         return
       }
 
@@ -455,7 +455,7 @@ export function NewTicketPage() {
         db_connection_id: dbConnectionId ? Number(dbConnectionId) : null,
         database_name: requiresDatabaseSelection ? databaseName.trim() : null,
       })
-      navigate(`/tickets/${created.id}`, { replace: true })
+      navigate(`/tickets/${created.ticket_no}`, { replace: true })
     } catch (submitError) {
       setError(submitError instanceof ApiError ? submitError.message : 'Failed to create ticket. Please try again.')
     } finally {

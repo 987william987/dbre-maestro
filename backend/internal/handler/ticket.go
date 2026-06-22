@@ -40,6 +40,7 @@ type TicketHandler struct {
 	broker             *realtime.Broker
 	lark               *notification.Dispatcher
 	notifications      *NotificationRouter
+	forbiddenLimiter   *requestRateLimiter
 	appBaseURL         string
 }
 
@@ -228,12 +229,13 @@ func NewTicketHandler(
 		broker:             broker,
 		lark:               lark,
 		notifications:      NewNotificationRouter(notifRepo, audit, broker, lark),
+		forbiddenLimiter:   newRequestRateLimiter(20, time.Minute),
 		appBaseURL:         strings.TrimRight(appBaseURL, "/"),
 	}
 }
 
-func (h *TicketHandler) ticketLink(ticketID uint64) string {
-	path := fmt.Sprintf("/tickets/%d", ticketID)
+func (h *TicketHandler) ticketLink(ticketNo string) string {
+	path := fmt.Sprintf("/tickets/%s", ticketNo)
 	if h.appBaseURL == "" {
 		return path
 	}
@@ -360,7 +362,7 @@ func (h *TicketHandler) buildTicketNotificationBody(ticket *model.Ticket, curren
 	if strings.TrimSpace(detail) != "" {
 		parts = append(parts, fmt.Sprintf("說明：%s", strings.TrimSpace(detail)))
 	}
-	parts = append(parts, fmt.Sprintf("工單連結：%s", h.ticketLink(ticket.ID)))
+	parts = append(parts, fmt.Sprintf("工單連結：%s", h.ticketLink(ticket.TicketNo)))
 	return strings.Join(parts, "\n")
 }
 
@@ -1006,9 +1008,15 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	// T5: IDOR — ticket workspace permissions open the page, while workflow
 	// rules narrow review/execute visibility to assigned participants.
-	filter.VisibleToUserID = &userID
-	if middleware.HasPermission(r.Context(), permissionTicketExecute) {
-		filter.VisibleToExecutorPool = true
+	fullQueueVisible, err := h.canViewFullTicketQueue(r.Context(), userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket access check failed")
+		return
+	}
+	if fullQueueVisible {
+		filter.VisibleToAllTickets = true
+	} else {
+		filter.VisibleToUserID = &userID
 	}
 
 	tickets, _, err := h.tickets.List(r.Context(), filter, 100, 0)
@@ -1022,6 +1030,10 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	visibleTickets := make([]model.Ticket, 0, len(tickets))
 	for _, ticket := range tickets {
+		if fullQueueVisible {
+			visibleTickets = append(visibleTickets, ticket)
+			continue
+		}
 		t := ticket
 		canView, err := h.canViewTicket(r.Context(), &t, userID)
 		if err != nil {
@@ -1067,20 +1079,15 @@ func (h *TicketHandler) WorkflowDashboardSummary(w http.ResponseWriter, r *http.
 
 // GET /tickets/{id}
 func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := parseTicketID(w, r)
-	if id == 0 {
-		return
-	}
-
-	ticket, err := h.tickets.GetByID(r.Context(), id)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "get ticket failed")
+	ticket, resolved := h.resolveTicketRef(w, r)
+	if !resolved {
 		return
 	}
 	if ticket == nil {
 		jsonErr(w, http.StatusNotFound, "ticket not found")
 		return
 	}
+	id := ticket.ID
 
 	// T5: IDOR — only submitters, ticket-wide roles, or policy reviewers for this
 	// workflow can view a ticket.
@@ -1091,7 +1098,7 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canView {
-		jsonErr(w, http.StatusForbidden, "forbidden")
+		h.forbidTicketAccess(w, r, ticket, "view", "not_visible")
 		return
 	}
 
@@ -1288,17 +1295,17 @@ func (h *TicketHandler) loadWorkflowTrace(ctx context.Context, ticket *model.Tic
 
 // POST /tickets/{id}/retry-workflow-resolution
 func (h *TicketHandler) RetryWorkflowResolution(w http.ResponseWriter, r *http.Request) {
-	id := parseTicketID(w, r)
-	if id == 0 {
+	ticket, resolved := h.resolveTicketRef(w, r)
+	if !resolved {
 		return
 	}
-	if !middleware.HasPermission(r.Context(), "settings.write") {
-		jsonErr(w, http.StatusForbidden, "forbidden")
-		return
-	}
-	ticket, err := h.tickets.GetByID(r.Context(), id)
-	if err != nil || ticket == nil {
+	if ticket == nil {
 		jsonErr(w, http.StatusNotFound, "ticket not found")
+		return
+	}
+	id := ticket.ID
+	if !middleware.HasPermission(r.Context(), "settings.write") {
+		h.forbidTicketAccess(w, r, ticket, "retry_workflow_resolution", "missing_settings_write")
 		return
 	}
 	if ticket.Status != model.TicketStatusNeedsAdminAttention {
@@ -1519,21 +1526,21 @@ func (h *TicketHandler) lookupUsernamesByIDs(ctx context.Context, userIDs []uint
 
 // POST /tickets/{id}/approve
 func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
-	id := parseTicketID(w, r)
-	if id == 0 {
+	ticket, resolved := h.resolveTicketRef(w, r)
+	if !resolved {
 		return
 	}
+	if ticket == nil {
+		jsonErr(w, http.StatusNotFound, "ticket not found")
+		return
+	}
+	id := ticket.ID
 
 	var req struct {
 		Comment *string `json:"comment"`
 	}
 	bindJSON(r, &req)
 
-	ticket, err := h.tickets.GetByID(r.Context(), id)
-	if err != nil || ticket == nil {
-		jsonErr(w, http.StatusNotFound, "ticket not found")
-		return
-	}
 	userID := middleware.UserIDFromCtx(r.Context())
 	allowed, err := h.canRejectTicket(r.Context(), ticket, userID)
 	if err != nil {
@@ -1541,7 +1548,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allowed {
-		jsonErr(w, http.StatusForbidden, "forbidden")
+		h.forbidTicketAccess(w, r, ticket, "approve", "not_reviewer")
 		return
 	}
 
@@ -1644,10 +1651,15 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 
 // POST /tickets/{id}/reject
 func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
-	id := parseTicketID(w, r)
-	if id == 0 {
+	ticket, resolved := h.resolveTicketRef(w, r)
+	if !resolved {
 		return
 	}
+	if ticket == nil {
+		jsonErr(w, http.StatusNotFound, "ticket not found")
+		return
+	}
+	id := ticket.ID
 
 	var req struct {
 		Reason string `json:"reason"`
@@ -1657,11 +1669,6 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ticket, err := h.tickets.GetByID(r.Context(), id)
-	if err != nil || ticket == nil {
-		jsonErr(w, http.StatusNotFound, "ticket not found")
-		return
-	}
 	userID := middleware.UserIDFromCtx(r.Context())
 	allowed, err := h.canRejectTicket(r.Context(), ticket, userID)
 	if err != nil {
@@ -1669,7 +1676,7 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allowed {
-		jsonErr(w, http.StatusForbidden, "forbidden")
+		h.forbidTicketAccess(w, r, ticket, "reject", "not_reviewer_or_executor")
 		return
 	}
 
@@ -1714,16 +1721,16 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 
 // POST /tickets/{id}/withdraw
 func (h *TicketHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
-	id := parseTicketID(w, r)
-	if id == 0 {
+	ticket, resolved := h.resolveTicketRef(w, r)
+	if !resolved {
 		return
 	}
-
-	ticket, err := h.tickets.GetByID(r.Context(), id)
-	if err != nil || ticket == nil {
+	if ticket == nil {
 		jsonErr(w, http.StatusNotFound, "ticket not found")
 		return
 	}
+	id := ticket.ID
+
 	userID := middleware.UserIDFromCtx(r.Context())
 	allowed, err := h.canWithdrawTicket(r.Context(), ticket, userID)
 	if err != nil {
@@ -1731,7 +1738,7 @@ func (h *TicketHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allowed {
-		jsonErr(w, http.StatusForbidden, "forbidden")
+		h.forbidTicketAccess(w, r, ticket, "withdraw", "not_submitter")
 		return
 	}
 
@@ -1769,8 +1776,23 @@ func (h *TicketHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 
 // POST /tickets/{id}/stop — DBA/Admin only; stops an executing ticket
 func (h *TicketHandler) Stop(w http.ResponseWriter, r *http.Request) {
-	id := parseTicketID(w, r)
-	if id == 0 {
+	ticket, resolved := h.resolveTicketRef(w, r)
+	if !resolved {
+		return
+	}
+	if ticket == nil {
+		jsonErr(w, http.StatusNotFound, "ticket not found")
+		return
+	}
+	id := ticket.ID
+	userID := middleware.UserIDFromCtx(r.Context())
+	allowed, err := h.canStopTicket(r.Context(), ticket, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket stop check failed")
+		return
+	}
+	if !allowed {
+		h.forbidTicketAccess(w, r, ticket, "stop", "not_executor_or_admin")
 		return
 	}
 
@@ -1784,7 +1806,6 @@ func (h *TicketHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := middleware.UserIDFromCtx(r.Context())
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
@@ -1801,21 +1822,20 @@ func (h *TicketHandler) Stop(w http.ResponseWriter, r *http.Request) {
 // POST /tickets/{id}/execute — T9: OCC protected; runs SQL on target DB
 // Body (optional): { "scheduled_at": "2026-06-11T10:00:00Z" }
 func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
-	id := parseTicketID(w, r)
-	if id == 0 {
+	ticket, resolved := h.resolveTicketRef(w, r)
+	if !resolved {
 		return
 	}
+	if ticket == nil {
+		jsonErr(w, http.StatusNotFound, "ticket not found")
+		return
+	}
+	id := ticket.ID
 
 	var req struct {
 		ScheduledAt *time.Time `json:"scheduled_at"`
 	}
 	bindJSON(r, &req) // optional body; ignore parse errors
-
-	ticket, err := h.tickets.GetByID(r.Context(), id)
-	if err != nil || ticket == nil {
-		jsonErr(w, http.StatusNotFound, "ticket not found")
-		return
-	}
 
 	if ticket.Status != model.TicketStatusPendingExecution {
 		jsonErr(w, http.StatusUnprocessableEntity, "ticket is not pending execution")
@@ -1832,6 +1852,15 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := middleware.UserIDFromCtx(r.Context())
+	allowed, err := h.canExecuteTicket(r.Context(), ticket, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket execution check failed")
+		return
+	}
+	if !allowed {
+		h.forbidTicketAccess(w, r, ticket, "execute", "not_executor")
+		return
+	}
 
 	// Scheduled execution: store scheduled_at and return without running
 	if req.ScheduledAt != nil && req.ScheduledAt.After(time.Now()) {
@@ -1989,16 +2018,15 @@ func (h *TicketHandler) RunScheduledTicket(ticket *model.Ticket, executorID uint
 }
 
 func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
-	id := parseTicketID(w, r)
-	if id == 0 {
+	ticket, resolved := h.resolveTicketRef(w, r)
+	if !resolved {
 		return
 	}
-
-	ticket, err := h.tickets.GetByID(r.Context(), id)
-	if err != nil || ticket == nil {
+	if ticket == nil {
 		jsonErr(w, http.StatusNotFound, "ticket not found")
 		return
 	}
+	id := ticket.ID
 	if ticket.TicketType != model.TicketTypeSensitiveQueryAccess && ticket.TicketType != model.TicketTypeQueryAccess {
 		jsonErr(w, http.StatusUnprocessableEntity, "only sensitive_query_access and query_access tickets can be revoked")
 		return
@@ -2011,7 +2039,7 @@ func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allowed {
-		jsonErr(w, http.StatusForbidden, "forbidden")
+		h.forbidTicketAccess(w, r, ticket, "revoke", "not_revoker")
 		return
 	}
 
@@ -2054,9 +2082,25 @@ func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, updated)
 }
 
-func (h *TicketHandler) canViewFullTicketQueue(ctx context.Context) (bool, error) {
-	if middleware.HasPermission(ctx, permissionTicketReview, permissionTicketExecute, permissionSQLEditorExportReview, permissionSQLEditorSensitiveRev) {
+func (h *TicketHandler) canViewFullTicketQueue(ctx context.Context, userID uint64) (bool, error) {
+	if h.users == nil || userID == 0 {
+		return false, nil
+	}
+	hasAllPermissions, err := h.users.HasAllPermissions(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if hasAllPermissions {
 		return true, nil
+	}
+	groups, err := h.users.GetAuthGroups(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	for _, group := range groups {
+		if group == model.AuthGroupAdmin || group == model.AuthGroupDBA {
+			return true, nil
+		}
 	}
 	return false, nil
 }
@@ -2064,6 +2108,9 @@ func (h *TicketHandler) canViewFullTicketQueue(ctx context.Context) (bool, error
 func (h *TicketHandler) canViewTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
 	if ticket == nil {
 		return false, nil
+	}
+	if allowed, err := h.canViewFullTicketQueue(ctx, userID); err != nil || allowed {
+		return allowed, err
 	}
 	if ticket.SubmitterID == userID {
 		return true, nil
@@ -2085,7 +2132,33 @@ func (h *TicketHandler) canReviewTicket(ctx context.Context, ticket *model.Ticke
 	if resolution == nil || resolution.ErrorCode != "" || !resolution.ApprovalEnabled {
 		return false, nil
 	}
+	if allowed, err := h.canAdminOverrideTicketReview(ctx, userID); err != nil || allowed {
+		return allowed, err
+	}
 	return uint64InSlice(userID, resolution.ApprovalUserIDs), nil
+}
+
+func (h *TicketHandler) canAdminOverrideTicketReview(ctx context.Context, userID uint64) (bool, error) {
+	if h.users == nil || userID == 0 {
+		return false, nil
+	}
+	hasAllPermissions, err := h.users.HasAllPermissions(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if hasAllPermissions {
+		return true, nil
+	}
+	groups, err := h.users.GetAuthGroups(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	for _, group := range groups {
+		if group == model.AuthGroupAdmin {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (h *TicketHandler) canExecuteTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
@@ -2103,6 +2176,24 @@ func (h *TicketHandler) canExecuteTicket(ctx context.Context, ticket *model.Tick
 		return false, nil
 	}
 	return uint64InSlice(userID, resolution.ExecutorUserIDs), nil
+}
+
+func (h *TicketHandler) canStopTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
+	if ticket == nil {
+		return false, nil
+	}
+	if !middleware.HasPermission(ctx, permissionTicketExecute) {
+		return false, nil
+	}
+	if ticket.ExecutorID != nil && *ticket.ExecutorID == userID {
+		return true, nil
+	}
+	if ticket.Status == model.TicketStatusPendingExecution {
+		if allowed, err := h.canExecuteTicket(ctx, ticket, userID); err != nil || allowed {
+			return allowed, err
+		}
+	}
+	return h.canViewFullTicketQueue(ctx, userID)
 }
 
 func uint64InSlice(value uint64, values []uint64) bool {
@@ -2411,15 +2502,74 @@ func buildTicketKindReviewItems(statements []sqlparse.ParsedStatement, kindErr e
 	return items
 }
 
-// splitSQLStatements splits a multi-statement SQL string by semicolons.
-func parseTicketID(w http.ResponseWriter, r *http.Request) uint64 {
-	s := chi.URLParam(r, "id")
-	id, err := strconv.ParseUint(s, 10, 64)
-	if err != nil || id == 0 {
-		jsonErr(w, http.StatusBadRequest, "invalid ticket id")
-		return 0
+func (h *TicketHandler) resolveTicketRef(w http.ResponseWriter, r *http.Request) (*model.Ticket, bool) {
+	ref := strings.TrimSpace(chi.URLParam(r, "id"))
+	if ref == "" {
+		jsonErr(w, http.StatusBadRequest, "invalid ticket reference")
+		return nil, false
 	}
-	return id
+
+	if id, err := strconv.ParseUint(ref, 10, 64); err == nil {
+		if id == 0 {
+			jsonErr(w, http.StatusBadRequest, "invalid ticket reference")
+			return nil, false
+		}
+		ticket, err := h.tickets.GetByID(r.Context(), id)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "get ticket failed")
+			return nil, false
+		}
+		return ticket, true
+	}
+
+	ticket, err := h.tickets.GetByTicketNo(r.Context(), ref)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "get ticket failed")
+		return nil, false
+	}
+	return ticket, true
+}
+
+func (h *TicketHandler) forbidTicketAccess(w http.ResponseWriter, r *http.Request, ticket *model.Ticket, action string, reason string) {
+	userID := middleware.UserIDFromCtx(r.Context())
+	key := fmt.Sprintf("%d:%s", userID, clientIP(r))
+	if h.forbiddenLimiter != nil && !h.forbiddenLimiter.Allow(key, time.Now()) {
+		h.logForbiddenTicketAccess(r, ticket, action, "rate_limited")
+		jsonErr(w, http.StatusTooManyRequests, "too many forbidden ticket access attempts")
+		return
+	}
+	h.logForbiddenTicketAccess(r, ticket, action, reason)
+	jsonErr(w, http.StatusForbidden, "forbidden")
+}
+
+func (h *TicketHandler) logForbiddenTicketAccess(r *http.Request, ticket *model.Ticket, action string, reason string) {
+	if h.audit == nil {
+		return
+	}
+	userID := middleware.UserIDFromCtx(r.Context())
+	var resourceID *uint64
+	var ticketNo string
+	if ticket != nil {
+		id := ticket.ID
+		resourceID = &id
+		ticketNo = ticket.TicketNo
+	}
+	if err := h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "ticket_forbidden_access",
+		ResourceType: "ticket",
+		ResourceID:   resourceID,
+		Details: map[string]any{
+			"action":     action,
+			"reason":     reason,
+			"ticket_ref": chi.URLParam(r, "id"),
+			"ticket_no":  ticketNo,
+		},
+		IPAddress: clientIP(r),
+	}); err != nil {
+		slog.Warn("write forbidden ticket access audit failed", "err", err)
+	}
 }
 
 func hasGroup(groups []model.AuthGroup, targets ...model.AuthGroup) bool {
