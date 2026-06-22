@@ -1,6 +1,6 @@
 import { apiClient } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { ApprovalResolutionWorkflow, PlatformSettings, WorkflowResolution, WorkflowRule } from '@/shared/types/settings'
+import type { ApprovalResolutionWorkflow, PlatformSettings, WorkflowResolution, WorkflowRule, WorkflowRulePreview, WorkflowSimulationRequest } from '@/shared/types/settings'
 
 function normalizeSettings(settings: PlatformSettings): PlatformSettings {
   return {
@@ -95,6 +95,18 @@ export function replaceWorkflowRules(workflowRules: WorkflowRule[]) {
 
 export function previewWorkflowRule(rule: WorkflowRule) {
   return apiClient.post<{ workflow_resolution: WorkflowResolution }>('/settings/workflow-rules/preview', rule)
+}
+
+export function previewWorkflowRules(workflowRules: WorkflowRule[]) {
+  return apiClient.post<{ previews: WorkflowRulePreview[] }>('/settings/workflow-rules/effective-preview', {
+    workflow_rules: workflowRules,
+  }).then((response) => ({
+    previews: Array.isArray(response.previews) ? response.previews : [],
+  }))
+}
+
+export function simulateWorkflowRule(payload: WorkflowSimulationRequest) {
+  return apiClient.post<{ workflow_resolution: WorkflowResolution }>('/settings/workflow-rules/simulate', payload)
 }
 
 type SettingsDBConnectionsResponse = {

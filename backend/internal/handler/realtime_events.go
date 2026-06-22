@@ -28,8 +28,8 @@ func publishNotificationCreated(ctx context.Context, broker *realtime.Broker, re
 	broker.PublishToUsers([]uint64{userID}, "notification.created", notificationCreatedEvent{Notification: *notification})
 }
 
-func publishTicketRealtimeEvent(ctx context.Context, broker *realtime.Broker, users *repository.UserRepo, ticket *model.Ticket, actorID *uint64) {
-	if broker == nil || users == nil || ticket == nil {
+func publishTicketRealtimeEvent(ctx context.Context, broker *realtime.Broker, ticket *model.Ticket, resolution *model.WorkflowResolution, actorID *uint64) {
+	if broker == nil || ticket == nil {
 		return
 	}
 
@@ -38,11 +38,12 @@ func publishTicketRealtimeEvent(ctx context.Context, broker *realtime.Broker, us
 	if actorID != nil && *actorID != 0 {
 		recipients = append(recipients, *actorID)
 	}
-	if workspaceReaders, err := listActiveUserIDsByPermissions(ctx, users, ticketWorkspaceRealtimePermissions()); err == nil {
-		recipients = append(recipients, workspaceReaders...)
-	}
-	if reviewerIDs, err := listActiveUserIDsByPermissions(ctx, users, reviewPermissionsForTicket(ticket.TicketType)); err == nil {
-		recipients = append(recipients, reviewerIDs...)
+	if resolution != nil {
+		recipients = append(recipients, resolution.ApprovalUserIDs...)
+		recipients = append(recipients, resolution.ExecutorUserIDs...)
+		if ticket.Status == model.TicketStatusNeedsAdminAttention {
+			recipients = append(recipients, resolution.AdminUserIDs...)
+		}
 	}
 	if ticket.ExecutorID != nil {
 		recipients = append(recipients, *ticket.ExecutorID)

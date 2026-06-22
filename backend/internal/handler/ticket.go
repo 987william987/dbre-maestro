@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -38,6 +39,7 @@ type TicketHandler struct {
 	notifRepo          *repository.NotificationRepo
 	broker             *realtime.Broker
 	lark               *notification.Dispatcher
+	notifications      *NotificationRouter
 	appBaseURL         string
 }
 
@@ -53,6 +55,19 @@ type ticketResponse struct {
 type ticketWorkflowParticipants struct {
 	Reviewers []string `json:"reviewers"`
 	Executors []string `json:"executors"`
+}
+
+type ticketWorkflowTrace struct {
+	RuleID          *uint64         `json:"workflow_rule_id,omitempty"`
+	RuleName        string          `json:"workflow_rule_name"`
+	ApprovalEnabled bool            `json:"approval_enabled"`
+	ApprovalUserIDs []uint64        `json:"approval_user_ids"`
+	ExecutorUserIDs []uint64        `json:"executor_user_ids"`
+	AdminUserIDs    []uint64        `json:"admin_user_ids"`
+	ErrorCode       string          `json:"error_code,omitempty"`
+	ErrorMessage    string          `json:"error_message,omitempty"`
+	ResolvedAt      time.Time       `json:"resolved_at"`
+	ResolutionTrace json.RawMessage `json:"resolution_trace,omitempty"`
 }
 
 type ticketReviewItem struct {
@@ -212,23 +227,8 @@ func NewTicketHandler(
 		notifRepo:          notifRepo,
 		broker:             broker,
 		lark:               lark,
+		notifications:      NewNotificationRouter(notifRepo, audit, broker, lark),
 		appBaseURL:         strings.TrimRight(appBaseURL, "/"),
-	}
-}
-
-func (h *TicketHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body, ticketNo string) {
-	if h.lark == nil || len(userIDs) == 0 {
-		return
-	}
-	result := h.lark.NotifyUsers(ctx, userIDs, notification.Message{Title: title, Body: body, TicketNo: ticketNo})
-	if result.Err != nil {
-		h.audit.Log(ctx, repository.AuditEntry{
-			ActionType: "notification_failure",
-			Details: map[string]any{
-				"err":      result.Err.Error(),
-				"attempts": result.Attempts,
-			},
-		})
 	}
 }
 
@@ -313,15 +313,31 @@ func approvalWorkflowForTicket(ticket *model.Ticket) model.ApprovalWorkflowType 
 	}
 }
 
-func (h *TicketHandler) approvalPolicyReviewerIDs(ctx context.Context, ticket *model.Ticket) ([]uint64, bool, error) {
-	resolution, err := resolveTicketWorkflow(ctx, h.settings, h.users, ticket)
+func (h *TicketHandler) workflowReviewerIDs(ctx context.Context, ticket *model.Ticket) ([]uint64, error) {
+	resolution, err := h.ticketWorkflowResolution(ctx, ticket)
 	if err != nil {
-		return nil, true, err
+		return nil, err
 	}
 	if resolution == nil {
-		return []uint64{}, true, nil
+		return []uint64{}, nil
 	}
-	return resolution.ApprovalUserIDs, true, nil
+	return resolution.ApprovalUserIDs, nil
+}
+
+func (h *TicketHandler) ticketWorkflowResolution(ctx context.Context, ticket *model.Ticket) (*model.WorkflowResolution, error) {
+	if ticket == nil {
+		return nil, nil
+	}
+	if h.tickets != nil {
+		snapshot, err := h.tickets.GetWorkflowSnapshot(ctx, ticket.ID)
+		if err != nil {
+			return nil, err
+		}
+		if snapshot != nil {
+			return workflowResolutionFromSnapshot(ticket, snapshot), nil
+		}
+	}
+	return resolveTicketWorkflow(ctx, h.settings, h.users, ticket)
 }
 
 func (h *TicketHandler) buildTicketNotificationBody(ticket *model.Ticket, currentStatus model.TicketStatus, nextAction string, detail string) string {
@@ -364,10 +380,14 @@ func (h *TicketHandler) dispatchTicketNotification(
 		return
 	}
 	body := h.buildTicketNotificationBody(ticket, policy.Status, policy.NextAction, detail)
-	for _, recipientID := range recipientIDs {
-		h.sendInApp(ctx, recipientID, policy.NotifType, policy.Title, body, "ticket", ticket.ID)
-	}
-	h.notifyLarkUsers(ctx, recipientIDs, policy.Title, body, ticket.TicketNo)
+	h.notifications.SendTicket(ctx, ticket, NotificationRoute{
+		RecipientIDs: recipientIDs,
+		ActorID:      actorID,
+		NotifyActor:  policy.NotifyActor,
+		NotifType:    policy.NotifType,
+		Title:        policy.Title,
+		Body:         body,
+	})
 }
 
 func (h *TicketHandler) resolveTicketNotificationRecipients(
@@ -397,21 +417,15 @@ func (h *TicketHandler) resolveTicketNotificationRecipients(
 		case ticketRoleSubmitter:
 			addRecipient(ticket.SubmitterID)
 		case ticketRoleReviewer:
-			reviewerIDs, usedPolicy, err := h.approvalPolicyReviewerIDs(ctx, ticket)
+			reviewerIDs, err := h.workflowReviewerIDs(ctx, ticket)
 			if err != nil {
 				return nil, err
-			}
-			if !usedPolicy {
-				reviewerIDs, err = listActiveUserIDsByPermissions(ctx, h.users, reviewPermissionsForTicket(ticket.TicketType))
-				if err != nil {
-					return nil, err
-				}
 			}
 			for _, reviewerID := range reviewerIDs {
 				addRecipient(reviewerID)
 			}
 		case ticketRoleExecutorPool:
-			resolution, err := resolveTicketWorkflow(ctx, h.settings, h.users, ticket)
+			resolution, err := h.ticketWorkflowResolution(ctx, ticket)
 			if err != nil {
 				return nil, err
 			}
@@ -423,30 +437,27 @@ func (h *TicketHandler) resolveTicketNotificationRecipients(
 				addRecipient(*ticket.ExecutorID)
 			}
 		case ticketRoleAdmin:
-			admins, err := h.users.ListUsersByAuthGroup(ctx, model.AuthGroupAdmin)
+			resolution, err := h.ticketWorkflowResolution(ctx, ticket)
 			if err != nil {
 				return nil, err
 			}
-			for _, admin := range admins {
-				if admin.IsActive {
-					addRecipient(admin.ID)
+			adminIDs := []uint64{}
+			if resolution != nil {
+				adminIDs = resolution.AdminUserIDs
+			}
+			if len(adminIDs) == 0 {
+				adminIDs, err = workflowAdminUserIDs(ctx, h.users)
+				if err != nil {
+					return nil, err
 				}
+			}
+			for _, adminID := range adminIDs {
+				addRecipient(adminID)
 			}
 		}
 	}
 
 	return recipients, nil
-}
-
-func (h *TicketHandler) sendInApp(ctx context.Context, userID uint64, notifType, title, body, resType string, resID uint64) {
-	if h.notifRepo == nil {
-		return
-	}
-	notificationID, err := h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
-	if err != nil {
-		return
-	}
-	publishNotificationCreated(ctx, h.broker, h.notifRepo, userID, notificationID)
 }
 
 func (h *TicketHandler) publishTicketUpdate(ctx context.Context, ticket *model.Ticket, actorID *uint64) {
@@ -459,11 +470,12 @@ func (h *TicketHandler) publishTicketUpdate(ctx context.Context, ticket *model.T
 	if actorID != nil && *actorID != 0 {
 		recipients = append(recipients, *actorID)
 	}
-	if workspaceReaders, err := listActiveUserIDsByPermissions(ctx, h.users, ticketWorkspaceRealtimePermissions()); err == nil {
-		recipients = append(recipients, workspaceReaders...)
-	}
-	if reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, reviewPermissionsForTicket(ticket.TicketType)); err == nil {
-		recipients = append(recipients, reviewerIDs...)
+	if resolution, err := h.ticketWorkflowResolution(ctx, ticket); err == nil && resolution != nil {
+		recipients = append(recipients, resolution.ApprovalUserIDs...)
+		recipients = append(recipients, resolution.ExecutorUserIDs...)
+		if ticket.Status == model.TicketStatusNeedsAdminAttention {
+			recipients = append(recipients, resolution.AdminUserIDs...)
+		}
 	}
 	if ticket.ExecutorID != nil {
 		recipients = append(recipients, *ticket.ExecutorID)
@@ -856,8 +868,11 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TicketHandler) applyWorkflowAfterCreate(ctx context.Context, ticket *model.Ticket, actorID *uint64, ipAddress string) (*model.Ticket, error) {
-	resolution, err := resolveTicketWorkflow(ctx, h.settings, h.users, ticket)
+	resolution, err := h.ticketWorkflowResolution(ctx, ticket)
 	if err != nil {
+		return ticket, err
+	}
+	if err := h.tickets.SaveWorkflowSnapshot(ctx, ticket.ID, resolution); err != nil {
 		return ticket, err
 	}
 	if resolution == nil || resolution.ErrorCode != "" {
@@ -936,6 +951,13 @@ func workflowAuditDetails(ticket *model.Ticket, resolution *model.WorkflowResolu
 		}
 		details["workflow_rule_name"] = resolution.RuleName
 		details["approval_enabled"] = resolution.ApprovalEnabled
+		details["approval_user_ids"] = resolution.ApprovalUserIDs
+		details["executor_user_ids"] = resolution.ExecutorUserIDs
+		details["admin_user_ids"] = resolution.AdminUserIDs
+		details["missing_approval_groups"] = resolution.MissingApprovalGroups
+		details["missing_executor_groups"] = resolution.MissingExecutorGroups
+		details["excluded_approval_users"] = resolution.ExcludedApprovalUsers
+		details["excluded_executor_users"] = resolution.ExcludedExecutorUsers
 		details["error_code"] = resolution.ErrorCode
 		details["error_message"] = resolution.ErrorMessage
 	}
@@ -1032,6 +1054,15 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonOK(w, map[string]any{"tickets": responseTickets, "total": total, "limit": limit, "offset": offset})
+}
+
+func (h *TicketHandler) WorkflowDashboardSummary(w http.ResponseWriter, r *http.Request) {
+	summary, err := h.tickets.WorkflowDashboardSummary(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load workflow dashboard summary failed")
+		return
+	}
+	jsonOK(w, map[string]any{"summary": summary})
 }
 
 // GET /tickets/{id}
@@ -1142,16 +1173,29 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if auditLogs == nil {
 		auditLogs = []model.AuditLog{}
 	}
+	var workflowTrace *ticketWorkflowTrace
+	if allowed, err := h.canViewWorkflowTrace(r.Context(), userID); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket workflow trace check failed")
+		return
+	} else if allowed {
+		trace, err := h.loadWorkflowTrace(r.Context(), ticket)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "get ticket workflow trace failed")
+			return
+		}
+		workflowTrace = trace
+	}
 
 	jsonOK(w, map[string]any{
-		"ticket":                enrichedTicket,
-		"executions":            executions,
-		"review_results":        reviewResults,
-		"activity_logs":         auditLogs,
-		"scopes":                scopes,
-		"query_access_items":    h.mustListQueryAccessItems(r.Context(), id),
-		"export_request":        exportDetail,
-		"workflow_participants": workflowParticipants,
+		"ticket":                    enrichedTicket,
+		"executions":                executions,
+		"review_results":            reviewResults,
+		"activity_logs":             auditLogs,
+		"scopes":                    scopes,
+		"query_access_items":        h.mustListQueryAccessItems(r.Context(), id),
+		"export_request":            exportDetail,
+		"workflow_participants":     workflowParticipants,
+		"workflow_resolution_trace": workflowTrace,
 		"capabilities": map[string]any{
 			"can_review":   canReview,
 			"can_reject":   canReject,
@@ -1174,7 +1218,7 @@ func (h *TicketHandler) loadWorkflowParticipants(ctx context.Context, ticket *mo
 		return participants, nil
 	}
 
-	resolution, err := resolveTicketWorkflow(ctx, h.settings, h.users, ticket)
+	resolution, err := h.ticketWorkflowResolution(ctx, ticket)
 	if err != nil {
 		return participants, err
 	}
@@ -1193,6 +1237,53 @@ func (h *TicketHandler) loadWorkflowParticipants(ctx context.Context, ticket *mo
 	}
 
 	return participants, nil
+}
+
+func (h *TicketHandler) canViewWorkflowTrace(ctx context.Context, userID uint64) (bool, error) {
+	if middleware.HasPermission(ctx, "settings.write") {
+		return true, nil
+	}
+	if h.users == nil || userID == 0 {
+		return false, nil
+	}
+	groups, err := h.users.GetAuthGroups(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	for _, group := range groups {
+		if group == model.AuthGroupAdmin {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (h *TicketHandler) loadWorkflowTrace(ctx context.Context, ticket *model.Ticket) (*ticketWorkflowTrace, error) {
+	if h.tickets == nil || ticket == nil {
+		return nil, nil
+	}
+	snapshot, err := h.tickets.GetWorkflowSnapshot(ctx, ticket.ID)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot == nil {
+		return nil, nil
+	}
+	trace := &ticketWorkflowTrace{
+		RuleID:          snapshot.RuleID,
+		RuleName:        snapshot.RuleName,
+		ApprovalEnabled: snapshot.ApprovalEnabled,
+		ApprovalUserIDs: append([]uint64{}, snapshot.ApprovalUserIDs...),
+		ExecutorUserIDs: append([]uint64{}, snapshot.ExecutorUserIDs...),
+		AdminUserIDs:    append([]uint64{}, snapshot.AdminUserIDs...),
+		ErrorCode:       snapshot.ErrorCode,
+		ErrorMessage:    snapshot.ErrorMessage,
+		ResolvedAt:      snapshot.ResolvedAt,
+	}
+	if strings.TrimSpace(snapshot.ResolutionTrace) != "" {
+		trace.ResolutionTrace = json.RawMessage(snapshot.ResolutionTrace)
+	}
+	return trace, nil
 }
 
 // POST /tickets/{id}/retry-workflow-resolution
@@ -1217,6 +1308,10 @@ func (h *TicketHandler) RetryWorkflowResolution(w http.ResponseWriter, r *http.R
 	resolution, err := resolveTicketWorkflow(r.Context(), h.settings, h.users, ticket)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "resolve workflow failed")
+		return
+	}
+	if err := h.tickets.SaveWorkflowSnapshot(r.Context(), ticket.ID, resolution); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "save workflow snapshot failed")
 		return
 	}
 	actorID := middleware.UserIDFromCtx(r.Context())
@@ -1269,6 +1364,82 @@ func (h *TicketHandler) RetryWorkflowResolution(w http.ResponseWriter, r *http.R
 	}
 	h.publishTicketUpdate(r.Context(), updated, &actorID)
 	jsonOK(w, map[string]any{"ticket": updated, "workflow_resolution": resolution})
+}
+
+func (h *TicketHandler) RetryWorkflowResolutionBatch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TicketIDs []uint64 `json:"ticket_ids"`
+	}
+	_ = bindJSON(r, &req)
+
+	tickets := []model.Ticket{}
+	if len(req.TicketIDs) > 0 {
+		for _, id := range req.TicketIDs {
+			ticket, err := h.tickets.GetByID(r.Context(), id)
+			if err != nil {
+				jsonErr(w, http.StatusInternalServerError, "load ticket failed")
+				return
+			}
+			if ticket != nil && ticket.Status == model.TicketStatusNeedsAdminAttention {
+				tickets = append(tickets, *ticket)
+			}
+		}
+	} else {
+		status := model.TicketStatusNeedsAdminAttention
+		list, _, err := h.tickets.List(r.Context(), repository.TicketListFilter{Status: &status}, 500, 0)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "list needs-admin tickets failed")
+			return
+		}
+		tickets = list
+	}
+
+	actorID := middleware.UserIDFromCtx(r.Context())
+	results := make([]map[string]any, 0, len(tickets))
+	for _, item := range tickets {
+		ticket := item
+		resolution, err := resolveTicketWorkflow(r.Context(), h.settings, h.users, &ticket)
+		if err != nil {
+			results = append(results, map[string]any{"ticket_id": ticket.ID, "status": "failed", "error": err.Error()})
+			continue
+		}
+		if err := h.tickets.SaveWorkflowSnapshot(r.Context(), ticket.ID, resolution); err != nil {
+			results = append(results, map[string]any{"ticket_id": ticket.ID, "status": "failed", "error": err.Error()})
+			continue
+		}
+		if resolution == nil || resolution.ErrorCode != "" {
+			h.dispatchTicketNotification(r.Context(), &ticket, ticketEventNeedsAdmin, &actorID, "Workflow Rule 仍無法解析，工單維持需管理員處理狀態。")
+			results = append(results, map[string]any{"ticket_id": ticket.ID, "status": "needs_admin_attention", "workflow_resolution": resolution})
+			continue
+		}
+		target := model.TicketStatusPendingReview
+		if !resolution.ApprovalEnabled {
+			target = model.TicketStatusApproved
+		}
+		comment := "Workflow Rule 已批次重新解析。"
+		ok, err := h.tickets.UpdateStatus(r.Context(), ticket.ID, model.TicketStatusNeedsAdminAttention, target, nil, &comment, nil)
+		if err != nil || !ok {
+			errorText := "ticket status changed concurrently"
+			if err != nil {
+				errorText = err.Error()
+			}
+			results = append(results, map[string]any{"ticket_id": ticket.ID, "status": "failed", "error": errorText})
+			continue
+		}
+		updated, _ := h.tickets.GetByID(r.Context(), ticket.ID)
+		if updated == nil {
+			updated = &ticket
+			updated.Status = target
+		}
+		if target == model.TicketStatusApproved {
+			h.dispatchTicketNotification(r.Context(), updated, ticketEventApproved, &actorID, "Workflow Rule 設定為免審批，工單已自動核准。")
+		} else {
+			h.dispatchTicketNotification(r.Context(), updated, ticketEventPendingReview, &actorID, "Workflow Rule 已批次重新解析，工單等待 reviewer 處理。")
+		}
+		h.publishTicketUpdate(r.Context(), updated, &actorID)
+		results = append(results, map[string]any{"ticket_id": ticket.ID, "status": string(target), "workflow_resolution": resolution})
+	}
+	jsonOK(w, map[string]any{"results": results})
 }
 
 func (h *TicketHandler) buildTicketResponse(ctx context.Context, ticket *model.Ticket) (ticketResponse, error) {
@@ -1907,7 +2078,7 @@ func (h *TicketHandler) canReviewTicket(ctx context.Context, ticket *model.Ticke
 	if !h.canReviewWorkflowByPermission(ctx, approvalWorkflowForTicket(ticket)) {
 		return false, nil
 	}
-	resolution, err := resolveTicketWorkflow(ctx, h.settings, h.users, ticket)
+	resolution, err := h.ticketWorkflowResolution(ctx, ticket)
 	if err != nil {
 		return false, err
 	}
@@ -1924,7 +2095,7 @@ func (h *TicketHandler) canExecuteTicket(ctx context.Context, ticket *model.Tick
 	if !middleware.HasPermission(ctx, permissionTicketExecute) {
 		return false, nil
 	}
-	resolution, err := resolveTicketWorkflow(ctx, h.settings, h.users, ticket)
+	resolution, err := h.ticketWorkflowResolution(ctx, ticket)
 	if err != nil {
 		return false, err
 	}

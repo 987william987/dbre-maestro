@@ -15,6 +15,17 @@ type NotificationRepo struct {
 	db *sqlx.DB
 }
 
+type NotificationDelivery struct {
+	NotificationType string
+	ResourceType     string
+	ResourceID       uint64
+	UserID           uint64
+	Channel          string
+	Status           string
+	Attempts         int
+	ErrorMessage     string
+}
+
 func NewNotificationRepo(db *sqlx.DB) *NotificationRepo {
 	return &NotificationRepo{db: db}
 }
@@ -33,6 +44,23 @@ func (r *NotificationRepo) Create(ctx context.Context, userID uint64, notifType,
 		return 0, fmt.Errorf("read notification id: %w", err)
 	}
 	return uint64(id), nil
+}
+
+func (r *NotificationRepo) CreateDelivery(ctx context.Context, delivery NotificationDelivery) error {
+	var errMsg *string
+	if delivery.ErrorMessage != "" {
+		errMsg = &delivery.ErrorMessage
+	}
+	if _, err := r.db.ExecContext(ctx,
+		`INSERT INTO notification_deliveries
+		 (notification_type, resource_type, resource_id, user_id, channel, status, attempts, error_message, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		delivery.NotificationType, delivery.ResourceType, delivery.ResourceID, delivery.UserID,
+		delivery.Channel, delivery.Status, delivery.Attempts, errMsg, timeutil.NowUTC(),
+	); err != nil {
+		return fmt.Errorf("create notification delivery: %w", err)
+	}
+	return nil
 }
 
 // List returns notifications for a user (unread first, then read), most recent first.

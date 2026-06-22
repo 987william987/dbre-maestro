@@ -142,6 +142,104 @@ func (h *SettingsHandler) PreviewWorkflowRule(w http.ResponseWriter, r *http.Req
 	jsonOK(w, map[string]any{"workflow_resolution": resolution})
 }
 
+func (h *SettingsHandler) PreviewWorkflowRules(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		WorkflowRules []model.WorkflowRule `json:"workflow_rules"`
+	}
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	rules := withWorkflowPreviewIDs(req.WorkflowRules)
+	previews := make([]model.WorkflowRulePreview, 0, len(rules))
+	matcher := &workflowRuleSetPreviewSettings{rules: rules}
+	for _, rule := range rules {
+		resolution, err := resolveWorkflowWithMatcher(r.Context(), &workflowRulePreviewSettings{rule: rule}, h.users, rule.TicketType, rule.DBConnectionID, rule.ExportSensitivity)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "preview workflow rule failed")
+			return
+		}
+		if resolution == nil {
+			resolution = &model.WorkflowResolution{TicketType: rule.TicketType, DBConnectionID: rule.DBConnectionID, ExportSensitivity: rule.ExportSensitivity}
+		}
+		selected, err := matcher.MatchWorkflowRule(r.Context(), rule.TicketType, rule.DBConnectionID, rule.ExportSensitivity)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "preview workflow rule conflicts failed")
+			return
+		}
+		preview := model.WorkflowRulePreview{
+			Rule:              rule,
+			Resolution:        *resolution,
+			ApprovalUsers:     h.workflowRulePreviewUsers(r.Context(), resolution.ApprovalUserIDs),
+			ExecutorUsers:     h.workflowRulePreviewUsers(r.Context(), resolution.ExecutorUserIDs),
+			AdminUsers:        h.workflowRulePreviewUsers(r.Context(), resolution.AdminUserIDs),
+			Effective:         rule.Enabled && selected != nil && selected.ID == rule.ID,
+			ConflictRuleIDs:   []uint64{},
+			ConflictRuleNames: []string{},
+		}
+		if rule.Enabled && selected != nil && selected.ID != rule.ID {
+			preview.ShadowedByRuleID = &selected.ID
+			preview.ShadowedByRuleName = selected.RuleName
+		}
+		for _, other := range rules {
+			if other.ID == rule.ID || !other.Enabled || !rule.Enabled {
+				continue
+			}
+			if workflowRulesConflict(rule, other) {
+				preview.ConflictRuleIDs = append(preview.ConflictRuleIDs, other.ID)
+				preview.ConflictRuleNames = append(preview.ConflictRuleNames, other.RuleName)
+			}
+		}
+		previews = append(previews, preview)
+	}
+	jsonOK(w, map[string]any{"previews": previews})
+}
+
+func (h *SettingsHandler) SimulateWorkflowRule(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TicketType        model.TicketType `json:"ticket_type"`
+		DBConnectionID    *uint64          `json:"db_connection_id"`
+		ExportSensitivity *string          `json:"export_sensitivity"`
+	}
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.TicketType == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "ticket_type is required")
+		return
+	}
+	if req.TicketType == model.TicketTypeSQLExport {
+		if req.ExportSensitivity == nil || (*req.ExportSensitivity != "normal" && *req.ExportSensitivity != "sensitive") {
+			jsonErr(w, http.StatusUnprocessableEntity, "sql_export simulation requires export_sensitivity normal or sensitive")
+			return
+		}
+	} else {
+		req.ExportSensitivity = nil
+	}
+	resolution, err := resolveWorkflow(r.Context(), h.settings, h.users, req.TicketType, req.DBConnectionID, req.ExportSensitivity)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "simulate workflow rule failed")
+		return
+	}
+	jsonOK(w, map[string]any{"workflow_resolution": resolution})
+}
+
+func (h *SettingsHandler) workflowRulePreviewUsers(ctx context.Context, userIDs []uint64) []model.WorkflowRuleUser {
+	if h.users == nil || len(userIDs) == 0 {
+		return []model.WorkflowRuleUser{}
+	}
+	users, err := h.users.ListByIDs(ctx, userIDs)
+	if err != nil {
+		return []model.WorkflowRuleUser{}
+	}
+	items := make([]model.WorkflowRuleUser, 0, len(users))
+	for _, user := range users {
+		items = append(items, model.WorkflowRuleUser{ID: user.ID, Username: user.Username})
+	}
+	return items
+}
+
 func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	var req model.PlatformSettings
 	if err := bindJSON(r, &req); err != nil {
@@ -466,6 +564,59 @@ func (s *workflowRulePreviewSettings) MatchWorkflowRule(ctx context.Context, tic
 	return &s.rule, nil
 }
 
+type workflowRuleSetPreviewSettings struct {
+	rules []model.WorkflowRule
+}
+
+func (s *workflowRuleSetPreviewSettings) MatchWorkflowRule(ctx context.Context, ticketType model.TicketType, dbConnectionID *uint64, exportSensitivity *string) (*model.WorkflowRule, error) {
+	_ = ctx
+	var best *model.WorkflowRule
+	bestScore := -1
+	for i := range s.rules {
+		rule := &s.rules[i]
+		if !rule.Enabled || rule.TicketType != ticketType {
+			continue
+		}
+		if !workflowConnectionMatches(rule.DBConnectionID, dbConnectionID) {
+			continue
+		}
+		if !workflowSensitivityPreviewMatches(rule.ExportSensitivity, exportSensitivity) {
+			continue
+		}
+		score := 0
+		if rule.DBConnectionID != nil {
+			score += 2
+		}
+		if rule.ExportSensitivity != nil {
+			score++
+		}
+		if best == nil || score > bestScore || (score == bestScore && (rule.Priority < best.Priority || (rule.Priority == best.Priority && rule.ID < best.ID))) {
+			copyRule := *rule
+			best = &copyRule
+			bestScore = score
+		}
+	}
+	return best, nil
+}
+
+func withWorkflowPreviewIDs(rules []model.WorkflowRule) []model.WorkflowRule {
+	next := make([]model.WorkflowRule, len(rules))
+	copy(next, rules)
+	maxID := uint64(0)
+	for _, rule := range next {
+		if rule.ID > maxID {
+			maxID = rule.ID
+		}
+	}
+	for i := range next {
+		if next[i].ID == 0 {
+			maxID++
+			next[i].ID = maxID
+		}
+	}
+	return next
+}
+
 func workflowConnectionMatches(ruleConnID *uint64, ticketConnID *uint64) bool {
 	if ruleConnID == nil {
 		return true
@@ -484,6 +635,37 @@ func workflowSensitivityMatches(ruleSensitivity *string, ticketSensitivity *stri
 		return false
 	}
 	return *ruleSensitivity == *ticketSensitivity
+}
+
+func workflowSensitivityPreviewMatches(ruleSensitivity *string, ticketSensitivity *string) bool {
+	if ruleSensitivity == nil {
+		return true
+	}
+	return ticketSensitivity != nil && *ruleSensitivity == *ticketSensitivity
+}
+
+func workflowRulesConflict(a model.WorkflowRule, b model.WorkflowRule) bool {
+	if a.TicketType != b.TicketType || a.Priority != b.Priority {
+		return false
+	}
+	if !uint64PtrEqual(a.DBConnectionID, b.DBConnectionID) {
+		return false
+	}
+	return stringPtrEqual(a.ExportSensitivity, b.ExportSensitivity)
+}
+
+func uint64PtrEqual(a *uint64, b *uint64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func stringPtrEqual(a *string, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func (h *SettingsHandler) validateWorkflowRules(ctx context.Context, rules []model.WorkflowRule) error {

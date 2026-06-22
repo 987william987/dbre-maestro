@@ -64,6 +64,30 @@ export type WorkflowResolution = {
   error_message?: string
 }
 
+export type WorkflowRuleUser = {
+  id: number
+  username: string
+}
+
+export type WorkflowRulePreview = {
+  rule: WorkflowRule
+  resolution: WorkflowResolution
+  approval_users: WorkflowRuleUser[]
+  executor_users: WorkflowRuleUser[]
+  admin_users: WorkflowRuleUser[]
+  effective: boolean
+  shadowed_by_rule_id?: number
+  shadowed_by_rule_name?: string
+  conflict_rule_ids: number[]
+  conflict_rule_names: string[]
+}
+
+export type WorkflowSimulationRequest = {
+  ticket_type: WorkflowRule['ticket_type']
+  db_connection_id?: number | null
+  export_sensitivity?: 'normal' | 'sensitive' | null
+}
+
 export type ApprovalResolutionUser = {
   id: number
   username: string

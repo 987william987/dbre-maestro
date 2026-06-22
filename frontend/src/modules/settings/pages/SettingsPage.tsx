@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Plus, Save, Trash2 } from 'lucide-react'
 import { listAuthGroups } from '@/modules/auth-groups/api'
-import { getSettings, listSettingsDBConnections, patchSettings } from '@/modules/settings/api'
+import { getSettings, listSettingsDBConnections, patchSettings, previewWorkflowRules } from '@/modules/settings/api'
 import { ApiError } from '@/shared/api/client'
 import type { AuthGroupSummary } from '@/shared/types/authGroup'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { ApprovalPolicy, PlatformSettings, WorkflowRule } from '@/shared/types/settings'
+import type { ApprovalPolicy, PlatformSettings, WorkflowRule, WorkflowRulePreview } from '@/shared/types/settings'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
@@ -69,6 +69,7 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [workflowPreviews, setWorkflowPreviews] = useState<WorkflowRulePreview[]>([])
   const workflowIssues = form ? findWorkflowRuleIssues(form.workflowRules, authGroups) : []
 
   useEffect(() => {
@@ -106,6 +107,31 @@ export function SettingsPage() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    if (!form || form.workflowRules.length === 0) {
+      setWorkflowPreviews([])
+      return
+    }
+    let active = true
+    const timer = window.setTimeout(() => {
+      previewWorkflowRules(form.workflowRules)
+        .then((response) => {
+          if (active) {
+            setWorkflowPreviews(response.previews)
+          }
+        })
+        .catch(() => {
+          if (active) {
+            setWorkflowPreviews([])
+          }
+        })
+    }, 250)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [form?.workflowRules])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -373,6 +399,7 @@ export function SettingsPage() {
                   index={index}
                   connections={connections}
                   authGroups={authGroups}
+                  preview={workflowPreviews[index]}
                   onChange={(patch) => updateWorkflowRule(index, patch)}
                   onRemove={() => removeWorkflowRule(index)}
                 />
@@ -411,6 +438,7 @@ function WorkflowRuleEditor({
   index,
   connections,
   authGroups,
+  preview,
   onChange,
   onRemove,
 }: {
@@ -418,6 +446,7 @@ function WorkflowRuleEditor({
   index: number
   connections: Array<Pick<DBConnection, 'id' | 'name' | 'db_type' | 'host' | 'port'>>
   authGroups: AuthGroupSummary[]
+  preview?: WorkflowRulePreview
   onChange: (patch: Partial<WorkflowRule>) => void
   onRemove: () => void
 }) {
@@ -533,6 +562,42 @@ function WorkflowRuleEditor({
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-5 text-amber-800">
           The Reviewer auth group is deprecated. Move this rule to Data Owner or Security before the legacy group is removed.
         </div>
+      ) : null}
+      <WorkflowRulePreviewSummary preview={preview} />
+    </div>
+  )
+}
+
+function WorkflowRulePreviewSummary({ preview }: { preview?: WorkflowRulePreview }) {
+  if (!preview) {
+    return (
+      <div className="rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px] leading-5 text-muted">
+        Resolving effective workflow preview...
+      </div>
+    )
+  }
+  const reviewerNames = preview.approval_users.map((user) => user.username).join(', ') || 'None'
+  const executorNames = preview.executor_users.map((user) => user.username).join(', ') || 'None'
+  const conflictNames = preview.conflict_rule_names.join(', ')
+  const hasIssue = Boolean(preview.resolution.error_code || preview.shadowed_by_rule_id || preview.conflict_rule_ids.length > 0)
+
+  return (
+    <div className={`rounded-lg border px-3 py-2 text-[12px] leading-5 ${hasIssue ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="font-semibold">{preview.effective ? 'Effective' : 'Not effective'}</span>
+        <span>Reviewers: {reviewerNames}</span>
+        {preview.rule.ticket_type === 'ddl' || preview.rule.ticket_type === 'dml' || preview.rule.ticket_type === 'redis_command' ? (
+          <span>Executors: {executorNames}</span>
+        ) : null}
+      </div>
+      {preview.resolution.error_message ? (
+        <p className="mt-1">{preview.resolution.error_message}</p>
+      ) : null}
+      {preview.shadowed_by_rule_name ? (
+        <p className="mt-1">Shadowed by: {preview.shadowed_by_rule_name}</p>
+      ) : null}
+      {conflictNames ? (
+        <p className="mt-1">Conflict: {conflictNames}</p>
       ) : null}
     </div>
   )

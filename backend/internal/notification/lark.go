@@ -65,8 +65,9 @@ const maxAttempts = 3
 // SendResult is returned by Send regardless of success/failure so callers
 // can log to audit_logs without needing to inspect the error type.
 type SendResult struct {
-	Attempts int
-	Err      error
+	Attempts      int
+	Err           error
+	SkippedReason string
 }
 
 // Send delivers a message. The caller is responsible for logging failures

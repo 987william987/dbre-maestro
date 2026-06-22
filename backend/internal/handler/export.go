@@ -36,6 +36,7 @@ type ExportHandler struct {
 	notifRepo           *repository.NotificationRepo
 	broker              *realtime.Broker
 	lark                *notification.Dispatcher
+	notifications       *NotificationRouter
 	downloadRateLimiter *requestRateLimiter
 	appBaseURL          string
 }
@@ -68,6 +69,7 @@ func NewExportHandler(
 		notifRepo:           notifRepo,
 		broker:              broker,
 		lark:                lark,
+		notifications:       NewNotificationRouter(notifRepo, audit, broker, lark),
 		downloadRateLimiter: newRequestRateLimiter(3, time.Minute),
 		appBaseURL:          strings.TrimRight(appBaseURL, "/"),
 	}
@@ -216,62 +218,6 @@ func (h *ExportHandler) loadTicketNotificationContext(ctx context.Context, ticke
 	return &conn.Name
 }
 
-func (h *ExportHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body, ticketNo string) {
-	if h.lark == nil || len(userIDs) == 0 {
-		return
-	}
-	result := h.lark.NotifyUsers(ctx, userIDs, notification.Message{Title: title, Body: body, TicketNo: ticketNo})
-	if result.Err != nil {
-		h.audit.Log(ctx, repository.AuditEntry{
-			ActionType: "notification_failure",
-			Details:    map[string]any{"err": result.Err.Error(), "attempts": result.Attempts},
-		})
-	}
-}
-
-func (h *ExportHandler) sendInApp(ctx context.Context, userID uint64, notifType, title, body, resType string, resID uint64) {
-	if h.notifRepo == nil {
-		return
-	}
-	notificationID, err := h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
-	if err != nil {
-		return
-	}
-	publishNotificationCreated(ctx, h.broker, h.notifRepo, userID, notificationID)
-}
-
-func (h *ExportHandler) notifyUsers(ctx context.Context, userIDs []uint64, actorID uint64, ticketID uint64, notifType, title, body, ticketNo string) {
-	seen := map[uint64]struct{}{}
-	for _, userID := range userIDs {
-		if userID == 0 || userID == actorID {
-			continue
-		}
-		if _, ok := seen[userID]; ok {
-			continue
-		}
-		seen[userID] = struct{}{}
-		h.sendInApp(ctx, userID, notifType, title, body, "ticket", ticketID)
-		h.notifyLarkUsers(ctx, []uint64{userID}, title, body, ticketNo)
-	}
-}
-
-func (h *ExportHandler) notifyAdminUsers(ctx context.Context, ticketID uint64, title, body, ticketNo string) {
-	if h.users == nil {
-		return
-	}
-	admins, err := h.users.ListUsersByAuthGroup(ctx, model.AuthGroupAdmin)
-	if err != nil {
-		return
-	}
-	ids := make([]uint64, 0, len(admins))
-	for _, admin := range admins {
-		if admin.IsActive {
-			ids = append(ids, admin.ID)
-		}
-	}
-	h.notifyUsers(ctx, ids, 0, ticketID, "ticket_needs_admin_attention", title, body, ticketNo)
-}
-
 // POST /exports
 // Creates a sql_export ticket from SQL Editor context.
 func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +297,10 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "resolve export workflow failed")
 		return
 	}
+	if err := h.tickets.SaveWorkflowSnapshot(r.Context(), ticket.ID, resolution); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "save export workflow snapshot failed")
+		return
+	}
 	if resolution == nil || resolution.ErrorCode != "" {
 		comment := "Workflow resolution failed."
 		if resolution != nil && resolution.ErrorMessage != "" {
@@ -374,8 +324,14 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		})
 		connName := h.loadTicketNotificationContext(r.Context(), ticket)
 		body := buildTicketNotificationBody(ticket, connName, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.ID))
-		h.notifyAdminUsers(r.Context(), ticket.ID, "工單需要管理員處理", body, ticket.TicketNo)
-		publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
+		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
+			RecipientIDs: resolution.AdminUserIDs,
+			ActorID:      &userID,
+			NotifType:    "ticket_needs_admin_attention",
+			Title:        "工單需要管理員處理",
+			Body:         body,
+		})
+		publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
 		jsonCreated(w, map[string]any{
 			"ticket_id":          ticket.ID,
 			"ticket_no":          ticket.TicketNo,
@@ -443,8 +399,21 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			"提交人已送出工單，等待 reviewer 處理。",
 			h.ticketLink(ticket.ID),
 		)
-		h.sendInApp(r.Context(), userID, "ticket_submitted", fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
-		h.notifyUsers(r.Context(), resolution.ApprovalUserIDs, userID, ticket.ID, "ticket_pending_review", exportPendingReviewTitle(), body, ticket.TicketNo)
+		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
+			RecipientIDs: []uint64{userID},
+			ActorID:      &userID,
+			NotifyActor:  true,
+			NotifType:    "ticket_submitted",
+			Title:        fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo),
+			Body:         body,
+		})
+		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
+			RecipientIDs: resolution.ApprovalUserIDs,
+			ActorID:      &userID,
+			NotifType:    "ticket_pending_review",
+			Title:        exportPendingReviewTitle(),
+			Body:         body,
+		})
 	} else {
 		body := buildTicketNotificationBody(
 			ticket,
@@ -454,9 +423,16 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			"此導出不包含敏感欄位，且目前設定不要求普通導出審批。",
 			h.ticketLink(ticket.ID),
 		)
-		h.sendInApp(r.Context(), userID, "ticket_auto_approved", fmt.Sprintf("普通匯出已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
+		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
+			RecipientIDs: []uint64{userID},
+			ActorID:      &userID,
+			NotifyActor:  true,
+			NotifType:    "ticket_auto_approved",
+			Title:        fmt.Sprintf("普通匯出已建立：%s", ticket.TicketNo),
+			Body:         body,
+		})
 	}
-	publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
+	publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":          ticket.ID,
@@ -554,8 +530,15 @@ func (h *ExportHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	})
 
 	approveBody := fmt.Sprintf("Export request #%d was approved. Please download it before it expires.", id)
-	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已通過", approveBody, "")
-	h.sendInApp(r.Context(), req.RequesterID, "export_approved", "導出申請已通過", approveBody, "export", id)
+	h.notifications.Send(r.Context(), NotificationRoute{
+		RecipientIDs: []uint64{req.RequesterID},
+		NotifType:    "export_approved",
+		Title:        "導出申請已通過",
+		Body:         approveBody,
+		ResourceType: "export",
+		ResourceID:   id,
+		NotifyActor:  true,
+	})
 
 	jsonOK(w, map[string]any{
 		"id":           id,
@@ -599,8 +582,15 @@ func (h *ExportHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	})
 
 	rejectBody := fmt.Sprintf("Export request #%d was rejected.", id)
-	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已拒絕", rejectBody, "")
-	h.sendInApp(r.Context(), req.RequesterID, "export_rejected", "導出申請已拒絕", rejectBody, "export", id)
+	h.notifications.Send(r.Context(), NotificationRoute{
+		RecipientIDs: []uint64{req.RequesterID},
+		NotifType:    "export_rejected",
+		Title:        "導出申請已拒絕",
+		Body:         rejectBody,
+		ResourceType: "export",
+		ResourceID:   id,
+		NotifyActor:  true,
+	})
 
 	w.WriteHeader(http.StatusNoContent)
 }

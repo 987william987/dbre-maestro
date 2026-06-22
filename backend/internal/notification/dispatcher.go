@@ -32,7 +32,7 @@ func (d *Dispatcher) NotifyUsers(ctx context.Context, userIDs []uint64, msg Mess
 		return SendResult{Err: err}
 	}
 	if client == nil {
-		return SendResult{}
+		return SendResult{SkippedReason: "lark_not_configured"}
 	}
 	if mode == ModeWebhook {
 		return client.Send(ctx, msg)
@@ -58,7 +58,7 @@ func (d *Dispatcher) NotifyUsers(ctx context.Context, userIDs []uint64, msg Mess
 		recipients = append(recipients, recipient)
 	}
 	if len(recipients) == 0 {
-		return SendResult{}
+		return SendResult{SkippedReason: "no_lark_recipient_open_id"}
 	}
 
 	var failed []string

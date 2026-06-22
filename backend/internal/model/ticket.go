@@ -97,3 +97,19 @@ type TicketReviewResult struct {
 	Message          *string   `db:"message"           json:"message,omitempty"`
 	CreatedAt        time.Time `db:"created_at"        json:"created_at"`
 }
+
+type TicketWorkflowSnapshot struct {
+	TicketID        uint64    `db:"ticket_id" json:"ticket_id"`
+	RuleID          *uint64   `db:"workflow_rule_id" json:"workflow_rule_id,omitempty"`
+	RuleName        string    `db:"workflow_rule_name" json:"workflow_rule_name"`
+	ApprovalEnabled bool      `db:"approval_enabled" json:"approval_enabled"`
+	ApprovalUserIDs []uint64  `json:"approval_user_ids"`
+	ExecutorUserIDs []uint64  `json:"executor_user_ids"`
+	AdminUserIDs    []uint64  `json:"admin_user_ids"`
+	ErrorCode       string    `db:"error_code" json:"error_code,omitempty"`
+	ErrorMessage    string    `db:"error_message" json:"error_message,omitempty"`
+	ResolutionTrace string    `db:"resolution_trace" json:"resolution_trace"`
+	ResolvedAt      time.Time `db:"resolved_at" json:"resolved_at"`
+	CreatedAt       time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt       time.Time `db:"updated_at" json:"updated_at"`
+}

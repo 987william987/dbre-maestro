@@ -248,6 +248,8 @@ func main() {
 			r.With(requireSettingsRead).Get("/workflow-rules", settingsH.ListWorkflowRules)
 			r.With(requireSettingsWrite).Put("/workflow-rules", settingsH.ReplaceWorkflowRules)
 			r.With(requireSettingsRead).Post("/workflow-rules/preview", settingsH.PreviewWorkflowRule)
+			r.With(requireSettingsRead).Post("/workflow-rules/effective-preview", settingsH.PreviewWorkflowRules)
+			r.With(requireSettingsRead).Post("/workflow-rules/simulate", settingsH.SimulateWorkflowRule)
 			r.With(requireSettingsWrite).Patch("/", settingsH.Patch)
 		})
 
@@ -334,9 +336,11 @@ func main() {
 			r.Use(middleware.InjectPermissions(userRepo))
 
 			r.With(requireTicketsRead).Get("/", ticketH.List)
+			r.With(requireTicketsRead).Get("/workflow-dashboard-summary", ticketH.WorkflowDashboardSummary)
 			r.With(requireTicketsApply).Get("/connections", ticketH.ListConnections)
 			r.With(requireTicketsApply).Get("/connections/{id}/databases", ticketH.ListDatabases)
 			r.With(requireTicketsApply).Post("/review", ticketH.ReviewSQL)
+			r.With(requireSettingsWrite).Post("/retry-workflow-resolution-batch", ticketH.RetryWorkflowResolutionBatch)
 			r.With(requireTicketsApply).Post("/", ticketH.Create)
 
 			r.Route("/{id}", func(r chi.Router) {

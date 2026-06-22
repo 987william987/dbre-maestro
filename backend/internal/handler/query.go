@@ -61,19 +61,20 @@ func writeQueryExecutionError(w http.ResponseWriter, err error, operation string
 }
 
 type QueryHandler struct {
-	dbConns      *repository.DBConnectionRepo
-	users        *repository.UserRepo
-	maskingRules *repository.MaskingRuleRepo
-	audit        *repository.AuditRepo
-	artifacts    *repository.QueryArtifactRepo
-	tickets      *repository.TicketRepo
-	settings     *repository.SettingsRepo
-	queryAccess  *queryaccess.Service
-	masking      *maskingRuntime
-	notifRepo    *repository.NotificationRepo
-	broker       *realtime.Broker
-	lark         *notification.Dispatcher
-	appBaseURL   string
+	dbConns       *repository.DBConnectionRepo
+	users         *repository.UserRepo
+	maskingRules  *repository.MaskingRuleRepo
+	audit         *repository.AuditRepo
+	artifacts     *repository.QueryArtifactRepo
+	tickets       *repository.TicketRepo
+	settings      *repository.SettingsRepo
+	queryAccess   *queryaccess.Service
+	masking       *maskingRuntime
+	notifRepo     *repository.NotificationRepo
+	broker        *realtime.Broker
+	lark          *notification.Dispatcher
+	notifications *NotificationRouter
+	appBaseURL    string
 }
 
 type sqlEditorConstraintsResponse struct {
@@ -107,19 +108,20 @@ func NewQueryHandler(
 	appBaseURL string,
 ) *QueryHandler {
 	return &QueryHandler{
-		dbConns:      dbConns,
-		users:        users,
-		maskingRules: maskingRules,
-		audit:        audit,
-		artifacts:    artifacts,
-		tickets:      tickets,
-		settings:     settings,
-		queryAccess:  queryaccess.NewService(queryAccessRepo, users),
-		masking:      newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
-		notifRepo:    notifRepo,
-		broker:       broker,
-		lark:         lark,
-		appBaseURL:   strings.TrimRight(appBaseURL, "/"),
+		dbConns:       dbConns,
+		users:         users,
+		maskingRules:  maskingRules,
+		audit:         audit,
+		artifacts:     artifacts,
+		tickets:       tickets,
+		settings:      settings,
+		queryAccess:   queryaccess.NewService(queryAccessRepo, users),
+		masking:       newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
+		notifRepo:     notifRepo,
+		broker:        broker,
+		lark:          lark,
+		notifications: NewNotificationRouter(notifRepo, audit, broker, lark),
+		appBaseURL:    strings.TrimRight(appBaseURL, "/"),
 	}
 }
 
@@ -156,71 +158,12 @@ func (h *QueryHandler) loadSQLEditorTimeoutSettings(ctx context.Context) sqlEdit
 	return settings
 }
 
-func (h *QueryHandler) sendInApp(ctx context.Context, userID uint64, notifType, title, body, resType string, resID uint64) {
-	if h.notifRepo == nil {
-		return
-	}
-	notificationID, err := h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
-	if err != nil {
-		return
-	}
-	publishNotificationCreated(ctx, h.broker, h.notifRepo, userID, notificationID)
-}
-
-func (h *QueryHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body, ticketNo string) {
-	if h.lark == nil || len(userIDs) == 0 {
-		return
-	}
-	result := h.lark.NotifyUsers(ctx, userIDs, notification.Message{Title: title, Body: body, TicketNo: ticketNo})
-	if result.Err != nil {
-		h.audit.Log(ctx, repository.AuditEntry{
-			ActionType: "notification_failure",
-			Details: map[string]any{
-				"err":      result.Err.Error(),
-				"attempts": result.Attempts,
-			},
-		})
-	}
-}
-
 func (h *QueryHandler) ticketLink(ticketID uint64) string {
 	path := fmt.Sprintf("/tickets/%d", ticketID)
 	if h.appBaseURL == "" {
 		return path
 	}
 	return h.appBaseURL + path
-}
-
-func (h *QueryHandler) notifyUsers(ctx context.Context, userIDs []uint64, actorID uint64, ticketID uint64, notifType, title, body, ticketNo string) {
-	seen := map[uint64]struct{}{}
-	for _, userID := range userIDs {
-		if userID == 0 || userID == actorID {
-			continue
-		}
-		if _, ok := seen[userID]; ok {
-			continue
-		}
-		seen[userID] = struct{}{}
-		h.sendInApp(ctx, userID, notifType, title, body, "ticket", ticketID)
-		h.notifyLarkUsers(ctx, []uint64{userID}, title, body, ticketNo)
-	}
-}
-
-func (h *QueryHandler) notifyAdminUsers(ctx context.Context, ticketID uint64, title, body, ticketNo string) {
-	if h.users == nil {
-		return
-	}
-	admins, err := h.users.ListUsersByAuthGroup(ctx, model.AuthGroupAdmin)
-	if err != nil {
-		return
-	}
-	ids := make([]uint64, 0, len(admins))
-	for _, admin := range admins {
-		if admin.IsActive {
-			ids = append(ids, admin.ID)
-		}
-	}
-	h.notifyUsers(ctx, ids, 0, ticketID, "ticket_needs_admin_attention", title, body, ticketNo)
 }
 
 // GET /query/connections
@@ -462,6 +405,10 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		jsonErr(w, http.StatusInternalServerError, "resolve sensitive access workflow failed")
 		return
 	}
+	if err := h.tickets.SaveWorkflowSnapshot(r.Context(), ticket.ID, resolution); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "save sensitive access workflow snapshot failed")
+		return
+	}
 	if resolution == nil || resolution.ErrorCode != "" {
 		comment := "Workflow resolution failed."
 		if resolution != nil && resolution.ErrorMessage != "" {
@@ -484,8 +431,14 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 			IPAddress:    clientIP(r),
 		})
 		body := buildTicketNotificationBody(ticket, &conn.Name, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.ID))
-		h.notifyAdminUsers(r.Context(), ticket.ID, "工單需要管理員處理", body, ticket.TicketNo)
-		publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
+		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
+			RecipientIDs: resolution.AdminUserIDs,
+			ActorID:      &userID,
+			NotifType:    "ticket_needs_admin_attention",
+			Title:        "工單需要管理員處理",
+			Body:         body,
+		})
+		publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
 		jsonCreated(w, map[string]any{
 			"ticket_id":   ticket.ID,
 			"ticket_no":   ticket.TicketNo,
@@ -517,8 +470,14 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		"提交人已送出工單，等待 reviewer 處理。",
 		h.ticketLink(ticket.ID),
 	)
-	h.notifyUsers(r.Context(), resolution.ApprovalUserIDs, userID, ticket.ID, "ticket_pending_review", exportPendingReviewTitle(), body, ticket.TicketNo)
-	publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
+	h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
+		RecipientIDs: resolution.ApprovalUserIDs,
+		ActorID:      &userID,
+		NotifType:    "ticket_pending_review",
+		Title:        exportPendingReviewTitle(),
+		Body:         body,
+	})
+	publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":   ticket.ID,

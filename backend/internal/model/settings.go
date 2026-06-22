@@ -73,10 +73,29 @@ type WorkflowResolution struct {
 	ApprovalEnabled       bool                   `json:"approval_enabled"`
 	ApprovalUserIDs       []uint64               `json:"approval_user_ids"`
 	ExecutorUserIDs       []uint64               `json:"executor_user_ids"`
+	AdminUserIDs          []uint64               `json:"admin_user_ids,omitempty"`
 	MissingApprovalGroups []AuthGroup            `json:"missing_approval_groups"`
 	MissingExecutorGroups []AuthGroup            `json:"missing_executor_groups"`
 	ExcludedApprovalUsers []WorkflowExcludedUser `json:"excluded_approval_users"`
 	ExcludedExecutorUsers []WorkflowExcludedUser `json:"excluded_executor_users"`
 	ErrorCode             string                 `json:"error_code"`
 	ErrorMessage          string                 `json:"error_message"`
+}
+
+type WorkflowRulePreview struct {
+	Rule               WorkflowRule       `json:"rule"`
+	Resolution         WorkflowResolution `json:"resolution"`
+	ApprovalUsers      []WorkflowRuleUser `json:"approval_users"`
+	ExecutorUsers      []WorkflowRuleUser `json:"executor_users"`
+	AdminUsers         []WorkflowRuleUser `json:"admin_users"`
+	Effective          bool               `json:"effective"`
+	ShadowedByRuleID   *uint64            `json:"shadowed_by_rule_id,omitempty"`
+	ShadowedByRuleName string             `json:"shadowed_by_rule_name,omitempty"`
+	ConflictRuleIDs    []uint64           `json:"conflict_rule_ids"`
+	ConflictRuleNames  []string           `json:"conflict_rule_names"`
+}
+
+type WorkflowRuleUser struct {
+	ID       uint64 `json:"id"`
+	Username string `json:"username"`
 }

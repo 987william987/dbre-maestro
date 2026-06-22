@@ -9,6 +9,7 @@ import type {
   TicketReviewResult,
   TicketStatus,
   TicketType,
+  WorkflowDashboardSummary,
 } from '@/shared/types/ticket'
 
 type TicketsResponse = {
@@ -105,7 +106,7 @@ export async function listTickets(params: ListTicketsParams = {}) {
   }
 }
 
-export async function getTicket(id: string) {
+export async function getTicket(id: string): Promise<TicketDetail> {
   return apiClient.get<TicketDetail>(`/tickets/${id}`).then((response) => ({
     ...response,
     executions: Array.isArray(response.executions) ? response.executions : [],
@@ -118,6 +119,7 @@ export async function getTicket(id: string) {
       reviewers: Array.isArray(response.workflow_participants?.reviewers) ? response.workflow_participants.reviewers : [],
       executors: Array.isArray(response.workflow_participants?.executors) ? response.workflow_participants.executors : [],
     },
+    workflow_resolution_trace: response.workflow_resolution_trace ?? null,
   }))
 }
 
@@ -158,6 +160,16 @@ export async function revokeTicket(id: number) {
 
 export async function retryWorkflowResolution(id: number) {
   return apiClient.post<{ ticket: Ticket }>(`/tickets/${id}/retry-workflow-resolution`)
+}
+
+export async function retryWorkflowResolutionBatch(ticketIDs?: number[]) {
+  return apiClient.post<{ results: Array<Record<string, unknown>> }>('/tickets/retry-workflow-resolution-batch', {
+    ticket_ids: ticketIDs ?? [],
+  })
+}
+
+export async function getWorkflowDashboardSummary() {
+  return apiClient.get<{ summary: WorkflowDashboardSummary }>('/tickets/workflow-dashboard-summary')
 }
 
 export async function listConnections() {

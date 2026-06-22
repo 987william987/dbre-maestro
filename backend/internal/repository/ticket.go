@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -29,6 +30,34 @@ type TicketListFilter struct {
 	Keyword               *string
 	From                  *time.Time
 	To                    *time.Time
+}
+
+type WorkflowDashboardSummary struct {
+	NormalExports       int64                         `json:"normal_exports"`
+	SensitiveExports    int64                         `json:"sensitive_exports"`
+	AutoApprovedExports int64                         `json:"auto_approved_exports"`
+	NeedsAdminAttention int64                         `json:"needs_admin_attention"`
+	ByType              []WorkflowDashboardCount      `json:"by_type"`
+	BySubmitter         []WorkflowDashboardUserCount  `json:"by_submitter"`
+	ByReviewer          []WorkflowDashboardUserCount  `json:"by_reviewer"`
+	ByExecutor          []WorkflowDashboardUserCount  `json:"by_executor"`
+	ByWorkflowError     []WorkflowDashboardErrorCount `json:"by_workflow_error"`
+}
+
+type WorkflowDashboardCount struct {
+	Key   string `db:"key_name" json:"key"`
+	Count int64  `db:"count" json:"count"`
+}
+
+type WorkflowDashboardUserCount struct {
+	UserID   *uint64 `db:"user_id" json:"user_id,omitempty"`
+	Username *string `db:"username" json:"username,omitempty"`
+	Count    int64   `db:"count" json:"count"`
+}
+
+type WorkflowDashboardErrorCount struct {
+	ErrorCode string `db:"error_code" json:"error_code"`
+	Count     int64  `db:"count" json:"count"`
 }
 
 func NewTicketRepo(db *sqlx.DB) *TicketRepo {
@@ -103,6 +132,105 @@ func (r *TicketRepo) GetByID(ctx context.Context, id uint64) (*model.Ticket, err
 		return nil, nil
 	}
 	return &t, err
+}
+
+func (r *TicketRepo) SaveWorkflowSnapshot(ctx context.Context, ticketID uint64, resolution *model.WorkflowResolution) error {
+	if resolution == nil {
+		resolution = &model.WorkflowResolution{}
+	}
+	approvalUserIDs, err := json.Marshal(resolution.ApprovalUserIDs)
+	if err != nil {
+		return fmt.Errorf("encode workflow approval users: %w", err)
+	}
+	executorUserIDs, err := json.Marshal(resolution.ExecutorUserIDs)
+	if err != nil {
+		return fmt.Errorf("encode workflow executor users: %w", err)
+	}
+	adminUserIDs, err := json.Marshal(resolution.AdminUserIDs)
+	if err != nil {
+		return fmt.Errorf("encode workflow admin users: %w", err)
+	}
+	resolutionTrace, err := json.Marshal(resolution)
+	if err != nil {
+		return fmt.Errorf("encode workflow resolution trace: %w", err)
+	}
+	now := timeutil.NowUTC()
+	if _, err := r.db.ExecContext(ctx,
+		`INSERT INTO ticket_workflow_snapshots
+		 (ticket_id, workflow_rule_id, workflow_rule_name, approval_enabled, approval_user_ids, executor_user_ids, admin_user_ids, error_code, error_message, resolution_trace, resolved_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE
+		   workflow_rule_id = VALUES(workflow_rule_id),
+		   workflow_rule_name = VALUES(workflow_rule_name),
+		   approval_enabled = VALUES(approval_enabled),
+		   approval_user_ids = VALUES(approval_user_ids),
+		   executor_user_ids = VALUES(executor_user_ids),
+		   admin_user_ids = VALUES(admin_user_ids),
+		   error_code = VALUES(error_code),
+		   error_message = VALUES(error_message),
+		   resolution_trace = VALUES(resolution_trace),
+		   resolved_at = VALUES(resolved_at),
+		   updated_at = VALUES(updated_at)`,
+		ticketID, resolution.RuleID, resolution.RuleName, resolution.ApprovalEnabled, string(approvalUserIDs), string(executorUserIDs),
+		string(adminUserIDs), resolution.ErrorCode, resolution.ErrorMessage, string(resolutionTrace), now, now, now,
+	); err != nil {
+		return fmt.Errorf("save ticket workflow snapshot: %w", err)
+	}
+	return nil
+}
+
+func (r *TicketRepo) GetWorkflowSnapshot(ctx context.Context, ticketID uint64) (*model.TicketWorkflowSnapshot, error) {
+	var row struct {
+		TicketID        uint64    `db:"ticket_id"`
+		RuleID          *uint64   `db:"workflow_rule_id"`
+		RuleName        string    `db:"workflow_rule_name"`
+		ApprovalEnabled bool      `db:"approval_enabled"`
+		ApprovalUserIDs string    `db:"approval_user_ids"`
+		ExecutorUserIDs string    `db:"executor_user_ids"`
+		AdminUserIDs    string    `db:"admin_user_ids"`
+		ErrorCode       string    `db:"error_code"`
+		ErrorMessage    string    `db:"error_message"`
+		ResolutionTrace string    `db:"resolution_trace"`
+		ResolvedAt      time.Time `db:"resolved_at"`
+		CreatedAt       time.Time `db:"created_at"`
+		UpdatedAt       time.Time `db:"updated_at"`
+	}
+	err := r.db.GetContext(ctx, &row,
+		`SELECT ticket_id, workflow_rule_id, workflow_rule_name, approval_enabled,
+		        approval_user_ids, executor_user_ids, admin_user_ids, error_code, error_message, resolution_trace,
+		        resolved_at, created_at, updated_at
+		 FROM ticket_workflow_snapshots
+		 WHERE ticket_id = ?`,
+		ticketID,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get ticket workflow snapshot: %w", err)
+	}
+	snapshot := &model.TicketWorkflowSnapshot{
+		TicketID:        row.TicketID,
+		RuleID:          row.RuleID,
+		RuleName:        row.RuleName,
+		ApprovalEnabled: row.ApprovalEnabled,
+		ErrorCode:       row.ErrorCode,
+		ErrorMessage:    row.ErrorMessage,
+		ResolutionTrace: row.ResolutionTrace,
+		ResolvedAt:      row.ResolvedAt,
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
+	}
+	if err := json.Unmarshal([]byte(row.ApprovalUserIDs), &snapshot.ApprovalUserIDs); err != nil {
+		return nil, fmt.Errorf("decode workflow approval users: %w", err)
+	}
+	if err := json.Unmarshal([]byte(row.ExecutorUserIDs), &snapshot.ExecutorUserIDs); err != nil {
+		return nil, fmt.Errorf("decode workflow executor users: %w", err)
+	}
+	if err := json.Unmarshal([]byte(row.AdminUserIDs), &snapshot.AdminUserIDs); err != nil {
+		return nil, fmt.Errorf("decode workflow admin users: %w", err)
+	}
+	return snapshot, nil
 }
 
 func (r *TicketRepo) Delete(ctx context.Context, id uint64) error {
@@ -190,6 +318,73 @@ func (r *TicketRepo) List(ctx context.Context, filter TicketListFilter, limit, o
 		return nil, 0, err
 	}
 	return tickets, total, nil
+}
+
+func (r *TicketRepo) WorkflowDashboardSummary(ctx context.Context) (*WorkflowDashboardSummary, error) {
+	summary := &WorkflowDashboardSummary{}
+	if err := r.db.GetContext(ctx, &summary.NormalExports,
+		`SELECT COUNT(*) FROM tickets WHERE ticket_type = ? AND COALESCE(contains_sensitive, 0) = 0`,
+		model.TicketTypeSQLExport,
+	); err != nil {
+		return nil, fmt.Errorf("count normal exports: %w", err)
+	}
+	if err := r.db.GetContext(ctx, &summary.SensitiveExports,
+		`SELECT COUNT(*) FROM tickets WHERE ticket_type = ? AND contains_sensitive = 1`,
+		model.TicketTypeSQLExport,
+	); err != nil {
+		return nil, fmt.Errorf("count sensitive exports: %w", err)
+	}
+	if err := r.db.GetContext(ctx, &summary.AutoApprovedExports,
+		`SELECT COUNT(*) FROM tickets t
+		 JOIN ticket_workflow_snapshots tws ON tws.ticket_id = t.id
+		 WHERE t.ticket_type = ? AND COALESCE(t.contains_sensitive, 0) = 0 AND tws.approval_enabled = 0`,
+		model.TicketTypeSQLExport,
+	); err != nil {
+		return nil, fmt.Errorf("count auto-approved exports: %w", err)
+	}
+	if err := r.db.GetContext(ctx, &summary.NeedsAdminAttention,
+		`SELECT COUNT(*) FROM tickets WHERE status = ?`,
+		model.TicketStatusNeedsAdminAttention,
+	); err != nil {
+		return nil, fmt.Errorf("count needs admin attention: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &summary.ByType,
+		`SELECT ticket_type AS key_name, COUNT(*) AS count FROM tickets GROUP BY ticket_type ORDER BY count DESC`,
+	); err != nil {
+		return nil, fmt.Errorf("count by type: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &summary.BySubmitter,
+		`SELECT t.submitter_id AS user_id, u.username AS username, COUNT(*) AS count
+		 FROM tickets t LEFT JOIN users u ON u.id = t.submitter_id
+		 GROUP BY t.submitter_id, u.username ORDER BY count DESC LIMIT 20`,
+	); err != nil {
+		return nil, fmt.Errorf("count by submitter: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &summary.ByReviewer,
+		`SELECT t.reviewer_id AS user_id, u.username AS username, COUNT(*) AS count
+		 FROM tickets t LEFT JOIN users u ON u.id = t.reviewer_id
+		 WHERE t.reviewer_id IS NOT NULL
+		 GROUP BY t.reviewer_id, u.username ORDER BY count DESC LIMIT 20`,
+	); err != nil {
+		return nil, fmt.Errorf("count by reviewer: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &summary.ByExecutor,
+		`SELECT t.executor_id AS user_id, u.username AS username, COUNT(*) AS count
+		 FROM tickets t LEFT JOIN users u ON u.id = t.executor_id
+		 WHERE t.executor_id IS NOT NULL
+		 GROUP BY t.executor_id, u.username ORDER BY count DESC LIMIT 20`,
+	); err != nil {
+		return nil, fmt.Errorf("count by executor: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &summary.ByWorkflowError,
+		`SELECT error_code, COUNT(*) AS count
+		 FROM ticket_workflow_snapshots
+		 WHERE error_code <> ''
+		 GROUP BY error_code ORDER BY count DESC`,
+	); err != nil {
+		return nil, fmt.Errorf("count workflow errors: %w", err)
+	}
+	return summary, nil
 }
 
 func ticketWorkflowCondition(workflowType model.ApprovalWorkflowType) (string, []any) {

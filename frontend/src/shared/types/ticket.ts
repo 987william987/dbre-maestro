@@ -123,6 +123,19 @@ export type TicketWorkflowParticipants = {
   executors: string[]
 }
 
+export type TicketWorkflowTrace = {
+  workflow_rule_id?: number | null
+  workflow_rule_name: string
+  approval_enabled: boolean
+  approval_user_ids: number[]
+  executor_user_ids: number[]
+  admin_user_ids: number[]
+  error_code?: string
+  error_message?: string
+  resolved_at: string
+  resolution_trace?: unknown
+}
+
 export type TicketDetail = {
   ticket: Ticket
   executions: TicketExecution[]
@@ -136,5 +149,18 @@ export type TicketDetail = {
     download_url?: string | null
   } | null
   workflow_participants: TicketWorkflowParticipants
+  workflow_resolution_trace?: TicketWorkflowTrace | null
   capabilities: TicketCapabilities
+}
+
+export type WorkflowDashboardSummary = {
+  normal_exports: number
+  sensitive_exports: number
+  auto_approved_exports: number
+  needs_admin_attention: number
+  by_type: Array<{ key: string; count: number }>
+  by_submitter: Array<{ user_id?: number | null; username?: string | null; count: number }>
+  by_reviewer: Array<{ user_id?: number | null; username?: string | null; count: number }>
+  by_executor: Array<{ user_id?: number | null; username?: string | null; count: number }>
+  by_workflow_error: Array<{ error_code: string; count: number }>
 }

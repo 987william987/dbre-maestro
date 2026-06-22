@@ -61,6 +61,10 @@ function formatTicketActor(name: string | null | undefined, id: number | null | 
   return '—'
 }
 
+function formatIDList(ids: number[]) {
+  return ids.length > 0 ? ids.join(', ') : '—'
+}
+
 function formatExecutionDuration(startedAt?: string | null, completedAt?: string | null) {
   if (!startedAt || !completedAt) {
     return '—'
@@ -807,7 +811,32 @@ export function TicketDetailPage() {
                   </table>
                 </div>
               </div>
-            ) : statementResults.length === 0 ? (
+            ) : null}
+
+            {detail.workflow_resolution_trace ? (
+              <div className="px-4 pb-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Workflow Resolution Trace</p>
+                <DetailTable
+                  headers={['Rule', 'Approval Required', 'Reviewers', 'Executors', 'Admins', 'Error', 'Resolved At']}
+                  rows={[[
+                    detail.workflow_resolution_trace.workflow_rule_name || detail.workflow_resolution_trace.workflow_rule_id || '—',
+                    detail.workflow_resolution_trace.approval_enabled ? 'Yes' : 'No',
+                    formatIDList(detail.workflow_resolution_trace.approval_user_ids),
+                    formatIDList(detail.workflow_resolution_trace.executor_user_ids),
+                    formatIDList(detail.workflow_resolution_trace.admin_user_ids),
+                    detail.workflow_resolution_trace.error_message || detail.workflow_resolution_trace.error_code || '—',
+                    formatDateTime(detail.workflow_resolution_trace.resolved_at, true),
+                  ]]}
+                />
+                {detail.workflow_resolution_trace.resolution_trace ? (
+                  <pre className="mt-3 max-h-64 overflow-auto rounded-xl border border-border bg-panel-soft p-3 font-mono text-[12px] leading-6 text-ink">
+                    {JSON.stringify(detail.workflow_resolution_trace.resolution_trace, null, 2)}
+                  </pre>
+                ) : null}
+              </div>
+            ) : null}
+
+            {ticket.ticket_type === 'query_access' ? null : statementResults.length === 0 ? (
               <div className="px-4 pb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">SQL Content</p>
                 <pre className="mt-2 overflow-x-auto rounded-xl border border-border bg-panel-soft p-4 font-mono text-[13px] leading-7 text-ink">

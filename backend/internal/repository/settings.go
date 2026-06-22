@@ -73,11 +73,7 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	}
 	settings.SensitiveExportReviewerUserIDs = exportReviewerIDs
 	settings.SensitiveQueryAccessReviewerUserIDs = sensitiveReviewerIDs
-	approvalPolicies, err := r.ListApprovalPolicies(ctx)
-	if err != nil {
-		return nil, err
-	}
-	settings.ApprovalPolicies = approvalPolicies
+	settings.ApprovalPolicies = []model.ApprovalPolicy{}
 	workflowRules, err := r.ListWorkflowRules(ctx)
 	if err != nil {
 		return nil, err
@@ -266,9 +262,6 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 		return err
 	}
 	if err := upsertString(ctx, tx, settingDBMetadataCronTimezone, settings.DBMetadataCronTimezone); err != nil {
-		return err
-	}
-	if err := replaceApprovalPolicies(ctx, tx, settings.ApprovalPolicies); err != nil {
 		return err
 	}
 	if settings.WorkflowRules != nil {

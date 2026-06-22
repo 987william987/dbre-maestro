@@ -57,6 +57,11 @@ func resolveWorkflowWithMatcher(ctx context.Context, settings workflowRuleMatche
 		return nil, err
 	}
 	if rule == nil {
+		adminIDs, err := workflowAdminUserIDs(ctx, users)
+		if err != nil {
+			return nil, err
+		}
+		resolution.AdminUserIDs = adminIDs
 		resolution.ErrorCode = workflowErrorNoMatchingRule
 		resolution.ErrorMessage = "no matching workflow rule"
 		return resolution, nil
@@ -82,11 +87,21 @@ func resolveWorkflowWithMatcher(ctx context.Context, settings workflowRuleMatche
 	resolution.ExcludedExecutorUsers = excludedExecutorUsers
 
 	if rule.ApprovalEnabled && len(resolution.ApprovalUserIDs) == 0 {
+		adminIDs, err := workflowAdminUserIDs(ctx, users)
+		if err != nil {
+			return nil, err
+		}
+		resolution.AdminUserIDs = adminIDs
 		resolution.ErrorCode = workflowErrorNoEffectiveApprovers
 		resolution.ErrorMessage = fmt.Sprintf("workflow rule %q has no effective approval users", rule.RuleName)
 		return resolution, nil
 	}
 	if isExecutableTicketType(ticketType) && len(resolution.ExecutorUserIDs) == 0 {
+		adminIDs, err := workflowAdminUserIDs(ctx, users)
+		if err != nil {
+			return nil, err
+		}
+		resolution.AdminUserIDs = adminIDs
 		resolution.ErrorCode = workflowErrorNoEffectiveExecutors
 		resolution.ErrorMessage = fmt.Sprintf("workflow rule %q has no effective executor users", rule.RuleName)
 		return resolution, nil
@@ -133,6 +148,42 @@ func resolveWorkflowUsers(ctx context.Context, users *repository.UserRepo, group
 		}
 	}
 	return userIDs, missingGroups, excluded, nil
+}
+
+func workflowAdminUserIDs(ctx context.Context, users *repository.UserRepo) ([]uint64, error) {
+	if users == nil {
+		return []uint64{}, nil
+	}
+	admins, err := users.ListUsersByAuthGroup(ctx, model.AuthGroupAdmin)
+	if err != nil {
+		return nil, err
+	}
+	userIDs := make([]uint64, 0, len(admins))
+	for _, admin := range admins {
+		if admin.IsActive {
+			userIDs = append(userIDs, admin.ID)
+		}
+	}
+	return userIDs, nil
+}
+
+func workflowResolutionFromSnapshot(ticket *model.Ticket, snapshot *model.TicketWorkflowSnapshot) *model.WorkflowResolution {
+	if ticket == nil || snapshot == nil {
+		return nil
+	}
+	return &model.WorkflowResolution{
+		RuleID:            snapshot.RuleID,
+		RuleName:          snapshot.RuleName,
+		TicketType:        ticket.TicketType,
+		DBConnectionID:    ticket.DBConnectionID,
+		ExportSensitivity: workflowExportSensitivity(ticket),
+		ApprovalEnabled:   snapshot.ApprovalEnabled,
+		ApprovalUserIDs:   append([]uint64{}, snapshot.ApprovalUserIDs...),
+		ExecutorUserIDs:   append([]uint64{}, snapshot.ExecutorUserIDs...),
+		AdminUserIDs:      append([]uint64{}, snapshot.AdminUserIDs...),
+		ErrorCode:         snapshot.ErrorCode,
+		ErrorMessage:      snapshot.ErrorMessage,
+	}
 }
 
 func workflowExportSensitivity(ticket *model.Ticket) *string {
