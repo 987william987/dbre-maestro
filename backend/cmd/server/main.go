@@ -188,6 +188,18 @@ func main() {
 				middleware.RequireAuth(cfg.JWTSecret),
 				middleware.RequireActiveUser(userRepo),
 			).Post("/logout", authH.Logout)
+			r.With(
+				middleware.RequireAuth(cfg.JWTSecret),
+				middleware.RequireActiveUser(userRepo),
+			).Get("/sessions", authH.ListSessions)
+			r.With(
+				middleware.RequireAuth(cfg.JWTSecret),
+				middleware.RequireActiveUser(userRepo),
+			).Delete("/sessions", authH.RevokeSessions)
+			r.With(
+				middleware.RequireAuth(cfg.JWTSecret),
+				middleware.RequireActiveUser(userRepo),
+			).Delete("/sessions/{id}", authH.RevokeSession)
 		})
 
 		r.Route("/exports", func(r chi.Router) {

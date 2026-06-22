@@ -52,12 +52,36 @@ func (r *SessionRepo) GetByTokenHash(ctx context.Context, hash string) (*model.S
 	return &s, err
 }
 
+func (r *SessionRepo) ListForUser(ctx context.Context, userID uint64) ([]model.Session, error) {
+	var sessions []model.Session
+	err := r.db.SelectContext(ctx, &sessions,
+		`SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC`,
+		userID,
+	)
+	return sessions, err
+}
+
 func (r *SessionRepo) Revoke(ctx context.Context, tokenHash string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL`,
 		timeutil.NowUTC(), tokenHash,
 	)
 	return err
+}
+
+func (r *SessionRepo) RevokeByIDForUser(ctx context.Context, sessionID, userID uint64) (bool, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL`,
+		timeutil.NowUTC(), sessionID, userID,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 func (r *SessionRepo) RevokeAllForUser(ctx context.Context, userID uint64) error {

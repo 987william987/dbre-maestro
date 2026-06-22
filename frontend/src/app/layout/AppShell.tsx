@@ -610,6 +610,18 @@ export function AppShell() {
 
                   <button
                     type="button"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      navigate('/account/sessions')
+                    }}
+                    className="flex h-8 w-full items-center justify-between rounded-md px-2 text-[12px] font-medium text-ink transition-colors hover:bg-panel-soft"
+                  >
+                    <span>Sessions</span>
+                    <ShieldCheck className="h-3.5 w-3.5 text-muted" />
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={handleLogout}
                     className="flex h-8 w-full items-center justify-between rounded-md px-2 text-[12px] font-medium text-ink transition-colors hover:bg-panel-soft"
                   >

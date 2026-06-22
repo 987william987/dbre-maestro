@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -10,6 +12,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/repository"
+	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -19,16 +22,29 @@ type AuthHandler struct {
 	audit               *repository.AuditRepo
 	jwtSecret           []byte
 	refreshCookieSecure bool
+	loginRateLimiter    *requestRateLimiter
+	refreshRateLimiter  *requestRateLimiter
 }
 
-const refreshCookiePath = "/api/auth/refresh"
+const (
+	refreshCookiePath       = "/api/auth/refresh"
+	refreshReuseGraceWindow = 30 * time.Second
+)
 
 func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, jwtSecret []byte, refreshCookieSecure ...bool) *AuthHandler {
 	secure := false
 	if len(refreshCookieSecure) > 0 {
 		secure = refreshCookieSecure[0]
 	}
-	return &AuthHandler{users: users, sessions: sessions, audit: audit, jwtSecret: jwtSecret, refreshCookieSecure: secure}
+	return &AuthHandler{
+		users:               users,
+		sessions:            sessions,
+		audit:               audit,
+		jwtSecret:           jwtSecret,
+		refreshCookieSecure: secure,
+		loginRateLimiter:    newRequestRateLimiter(5, time.Minute),
+		refreshRateLimiter:  newRequestRateLimiter(30, time.Minute),
+	}
 }
 
 // GET /setup/status
@@ -106,8 +122,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	username := strings.TrimSpace(req.Username)
+	if !h.allowAuthAttempt(w, r, h.loginRateLimiter, "login", strings.ToLower(username)) {
+		return
+	}
 
-	user, err := h.users.GetByUsername(r.Context(), req.Username)
+	user, err := h.users.GetByUsername(r.Context(), username)
 	if err != nil || user == nil {
 		jsonErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -141,21 +161,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    rawRefresh,
-		Path:     refreshCookiePath,
-		Expires:  expiresAt,
-		HttpOnly: true,
-		Secure:   h.refreshCookieSecure || r.TLS != nil,
-		SameSite: http.SameSiteStrictMode,
-	})
+	http.SetCookie(w, h.refreshCookie(r, rawRefresh, expiresAt))
 
-	h.audit.Log(r.Context(), repository.AuditEntry{
+	h.logAudit(r, repository.AuditEntry{
 		ActorID:    &user.ID,
 		ActorName:  user.Username,
 		ActionType: "login",
-		IPAddress:  clientIP(r),
 	})
 
 	jsonOK(w, map[string]string{"access_token": accessToken})
@@ -163,6 +174,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 // POST /auth/refresh
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	if !h.allowAuthAttempt(w, r, h.refreshRateLimiter, "refresh", "") {
+		return
+	}
 	cookie, err := r.Cookie("refresh_token")
 	if err != nil {
 		jsonErr(w, http.StatusUnauthorized, "missing refresh token")
@@ -175,7 +189,28 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnauthorized, "invalid refresh token")
 		return
 	}
-	if session.RevokedAt != nil || time.Now().After(session.ExpiresAt) {
+	if session.RevokedAt != nil {
+		if time.Since(*session.RevokedAt) <= refreshReuseGraceWindow {
+			http.SetCookie(w, h.clearRefreshCookie(r))
+			jsonErr(w, http.StatusUnauthorized, "stale refresh token")
+			return
+		}
+		h.sessions.RevokeAllForUser(r.Context(), session.UserID)
+		http.SetCookie(w, h.clearRefreshCookie(r))
+		h.logAudit(r, repository.AuditEntry{
+			ActorID:      &session.UserID,
+			ActionType:   "refresh_token_reuse_detected",
+			ResourceType: "session",
+			ResourceID:   &session.ID,
+			Details: map[string]any{
+				"session_id": session.ID,
+				"revoked_at": session.RevokedAt,
+			},
+		})
+		jsonErr(w, http.StatusUnauthorized, "refresh token reuse detected")
+		return
+	}
+	if time.Now().After(session.ExpiresAt) {
 		jsonErr(w, http.StatusUnauthorized, "refresh token expired or revoked")
 		return
 	}
@@ -210,15 +245,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	h.sessions.Create(r.Context(), user.ID, hashRefresh,
 		r.Header.Get("User-Agent"), clientIP(r), expiresAt)
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    rawRefresh,
-		Path:     refreshCookiePath,
-		Expires:  expiresAt,
-		HttpOnly: true,
-		Secure:   h.refreshCookieSecure || r.TLS != nil,
-		SameSite: http.SameSiteStrictMode,
-	})
+	http.SetCookie(w, h.refreshCookie(r, rawRefresh, expiresAt))
 
 	jsonOK(w, map[string]string{"access_token": accessToken})
 }
@@ -231,27 +258,72 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		h.sessions.Revoke(r.Context(), hash)
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		Path:     refreshCookiePath,
-		MaxAge:   -1,
-		HttpOnly: true,
-		Secure:   h.refreshCookieSecure || r.TLS != nil,
-		SameSite: http.SameSiteStrictMode,
-	})
+	http.SetCookie(w, h.clearRefreshCookie(r))
 
 	userID := middleware.UserIDFromCtx(r.Context())
 	username := middleware.UsernameFromCtx(r.Context())
 	if userID != 0 {
-		h.audit.Log(r.Context(), repository.AuditEntry{
+		h.logAudit(r, repository.AuditEntry{
 			ActorID:    &userID,
 			ActorName:  username,
 			ActionType: "logout",
-			IPAddress:  clientIP(r),
 		})
 	}
 
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *AuthHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromCtx(r.Context())
+	sessions, err := h.sessions.ListForUser(r.Context(), userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load sessions failed")
+		return
+	}
+	if sessions == nil {
+		sessions = []model.Session{}
+	}
+	jsonOK(w, map[string]any{"sessions": sessions})
+}
+
+func (h *AuthHandler) RevokeSession(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromCtx(r.Context())
+	sessionID, ok := parseAuthUintParam(w, r, "id")
+	if !ok {
+		return
+	}
+	revoked, err := h.sessions.RevokeByIDForUser(r.Context(), sessionID, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "revoke session failed")
+		return
+	}
+	if !revoked {
+		jsonErr(w, http.StatusNotFound, "session not found")
+		return
+	}
+	h.logAudit(r, repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "session_revoke",
+		ResourceType: "session",
+		ResourceID:   &sessionID,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *AuthHandler) RevokeSessions(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromCtx(r.Context())
+	if err := h.sessions.RevokeAllForUser(r.Context(), userID); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "revoke sessions failed")
+		return
+	}
+	http.SetCookie(w, h.clearRefreshCookie(r))
+	h.logAudit(r, repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "session_revoke_all",
+		ResourceType: "session",
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -342,6 +414,70 @@ func validatePassword(pw string) error {
 		return errStr("password must contain uppercase, lowercase, and digit characters")
 	}
 	return nil
+}
+
+func (h *AuthHandler) allowAuthAttempt(w http.ResponseWriter, r *http.Request, limiter *requestRateLimiter, action string, subject string) bool {
+	key := clientIP(r)
+	if subject != "" {
+		key += ":" + subject
+	}
+	if limiter == nil || limiter.Allow(key, time.Now()) {
+		return true
+	}
+	h.logAudit(r, repository.AuditEntry{
+		ActionType:   "auth_rate_limited",
+		ResourceType: "auth",
+		Details: map[string]any{
+			"action":  action,
+			"subject": subject,
+		},
+	})
+	jsonErr(w, http.StatusTooManyRequests, fmt.Sprintf("%s rate limit exceeded", action))
+	return false
+}
+
+func (h *AuthHandler) refreshCookie(r *http.Request, value string, expiresAt time.Time) *http.Cookie {
+	return &http.Cookie{
+		Name:     "refresh_token",
+		Value:    value,
+		Path:     refreshCookiePath,
+		Expires:  expiresAt,
+		HttpOnly: true,
+		Secure:   h.refreshCookieSecure || r.TLS != nil,
+		SameSite: http.SameSiteStrictMode,
+	}
+}
+
+func (h *AuthHandler) clearRefreshCookie(r *http.Request) *http.Cookie {
+	return &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     refreshCookiePath,
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   h.refreshCookieSecure || r.TLS != nil,
+		SameSite: http.SameSiteStrictMode,
+	}
+}
+
+func (h *AuthHandler) logAudit(r *http.Request, entry repository.AuditEntry) {
+	if h.audit == nil {
+		return
+	}
+	if entry.IPAddress == "" {
+		entry.IPAddress = clientIP(r)
+	}
+	_ = h.audit.Log(r.Context(), entry)
+}
+
+func parseAuthUintParam(w http.ResponseWriter, r *http.Request, name string) (uint64, bool) {
+	value := strings.TrimSpace(chi.URLParam(r, name))
+	id, err := strconv.ParseUint(value, 10, 64)
+	if err != nil || id == 0 {
+		jsonErr(w, http.StatusBadRequest, "invalid "+name)
+		return 0, false
+	}
+	return id, true
 }
 
 type errStr string

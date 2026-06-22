@@ -10,6 +10,7 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 
 const AuditLogsPage = lazy(() => import('@/modules/audit/pages/AuditLogsPage').then((module) => ({ default: module.AuditLogsPage })))
+const AccountSessionsPage = lazy(() => import('@/modules/account/pages/SessionsPage').then((module) => ({ default: module.SessionsPage })))
 const DBConnectionsPage = lazy(() => import('@/modules/db-connections/pages/DBConnectionsPage').then((module) => ({ default: module.DBConnectionsPage })))
 const DBMetadataInventoryPage = lazy(() => import('@/modules/db-metadata/pages/DBMetadataInventoryPage').then((module) => ({ default: module.DBMetadataInventoryPage })))
 const DBMetadataObjectsPage = lazy(() => import('@/modules/db-metadata/pages/DBMetadataObjectsPage').then((module) => ({ default: module.DBMetadataObjectsPage })))
@@ -47,6 +48,7 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<AppShell />}>
               <Route path="/" element={<HomeRedirect />} />
+              <Route path="/account/sessions" element={<AccountSessionsPage />} />
               <Route element={<RoleRoute allowedPermissions={[...TICKET_WORKSPACE_PERMISSIONS]} />}>
                 <Route path="/tickets" element={<TicketsPage />} />
                 <Route path="/tickets/:id" element={<TicketDetailPage />} />
