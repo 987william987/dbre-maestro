@@ -24,8 +24,8 @@ Permission 決定：
 DB Scope 決定：
   3. 這個動作可以作用在哪些 DB connection
 
-Approval Policy 決定：
-  4. 某類工單送出後，路由給哪些有效審批人
+Workflow Rules 決定：
+  4. 某類工單送出後，路由給哪些有效審批人與執行人
 ```
 
 ## 原則一：導航頁對應頁面可查看 / 可編輯
@@ -58,6 +58,7 @@ Approval Policy 決定：
 
 - `tickets.read`：可進入 Tickets workspace，並查看自己被允許看到的工單
 - `sql_editor.read`：可進入 SQL Editor workspace
+- `scheduled_sql_reports.read`：可進入 Scheduled SQL Reports，查看報表與 run history
 
 工作流與操作能力：
 
@@ -69,6 +70,7 @@ Approval Policy 決定：
 - `tickets.apply`
 - `tickets.review`
 - `tickets.execute`
+- `scheduled_sql_reports.write`
 
 其中：
 
@@ -103,13 +105,13 @@ Tickets workspace 入口使用 `tickets.read`，建單使用 `tickets.apply`。
 - `sql_export` 由 SQL Editor 的 export 流程建立，操作權限是 `sql_editor.export`
 - `sensitive_query_access` 由 SQL Editor 的敏感查詢申請流程建立，操作權限是 `sql_editor.sensitive_apply`
 
-## Approval Policy 是路由，不是授權
+## Workflow Rules 是路由，不是授權
 
-Approval Policy Center 決定每一種 workflow 的候選審批人，例如 user 清單或 auth group 清單。它不取代 permission。
+Workflow Rules 決定每一種 workflow 的候選審批人與執行人，例如 auth group 清單、DB connection scope 與 priority。它不取代 permission。
 
 有效審批人必須同時滿足：
 
-- 被 Approval Policy 指定為候選人，或屬於被指定的 auth group
+- 屬於 Workflow Rules 指定的 auth group
 - 使用者仍為 active
 - 具備該 workflow 需要的 review permission
 
@@ -121,9 +123,9 @@ Approval Policy Center 決定每一種 workflow 的候選審批人，例如 user
 | Normal SQL Export / Sensitive SQL Export | `sql_editor.export_review` |
 | Sensitive Query Access | `sql_editor.sensitive_review` |
 
-因此 DBA 即使有 `tickets.review`，如果沒有被 Approval Policy 指定為某 workflow 的 reviewer，也不會成為該 workflow 的有效審批人。反過來說，只被 policy 指定但沒有對應 review permission，也不會成為有效審批人。
+因此 DBA 即使有 `tickets.review`，如果沒有被 Workflow Rules 指定為某 workflow 的 reviewer，也不會成為該 workflow 的有效審批人。反過來說，只被 rule 指定但沒有對應 review permission，也不會成為有效審批人。
 
-Settings 儲存 Approval Policy 時會檢查所有啟用 workflow；若某個 workflow 沒有有效審批人，會拒絕儲存並提示管理者修正。建立 ticket 時不會因 policy 暫時無有效審批人而被擋，避免把設定治理錯誤轉嫁到申請人身上。
+Settings 儲存 Workflow Rules 時會檢查啟用 rule；若 rule 無法解析出有效審批人或執行人，會拒絕儲存並提示管理者修正。建立 ticket 後若 workflow resolution 仍遇到缺失，工單可進入 `needs_admin_attention`，由 admin 修正 rule 後重新解析。
 
 ## Resources 子頁的角色
 
@@ -211,13 +213,13 @@ Tickets 系統允許不同 ticket type 擁有不同入口，但最後都收斂�
 
 - 頁面權限與工作流權限分工清楚
 - SQL Editor / Tickets 能共用 DB Scope 機制
-- Approval Policy 可以彈性路由不同 workflow 的審批人
+- Workflow Rules 可以彈性路由不同 workflow 的審批人與執行人
 - RBAC 不需要為每個資料庫硬切角色
 
 代價是：
 
 - permission 名稱數量會增加
-- 新增功能時，需要同步更新前端導航、route guard、後端 middleware、Approval Policy 與說明文件
+- 新增功能時，需要同步更新前端導航、route guard、後端 middleware、Workflow Rules 與說明文件
 
 ## 相關文件
 
@@ -225,3 +227,4 @@ Tickets 系統允許不同 ticket type 擁有不同入口，但最後都收斂�
 - [Users / RBAC](../reference/users-and-rbac.md)
 - [Tickets](../reference/tickets.md)
 - [SQL Editor](../reference/sql-editor.md)
+- [Workflow Rules](../reference/workflow-rules.md)

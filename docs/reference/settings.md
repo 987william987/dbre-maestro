@@ -14,8 +14,7 @@
 
 - Lark Notifications
 - SQL Editor Timeout
-- Export Approval
-- Approval Policy
+- Workflow Rules
 - Inventory Scan
 - Object Scan
 
@@ -56,19 +55,9 @@
 - 這些值不直接控制 export download
 - 它們是 SQL Editor 查詢保護機制的一部分
 
-## Export Approval
+## Workflow Rules
 
-| 欄位 | 對應 key | 預設值 | 用途 |
-|---|---|---|---|
-| Require approval for non-sensitive exports | `require_non_sensitive_export_review` | `true` | 控制普通 SQL Export 是否需要審批 |
-
-敏感 SQL Export 永遠需要審批，不受此開關影響。
-
-當 `require_non_sensitive_export_review = false` 時，普通導出不進人工審批，但仍會建立 `sql_export` ticket 作為稽核紀錄。Dashboard 或 audit 報表可以用 ticket 的 `contains_sensitive` 區分普通導出與敏感導出。
-
-## Approval Policy
-
-Approval Policy 決定不同 workflow 送出後路由給哪些審批人。它是審批路由設定，不是 permission 授權本身。
+Workflow Rules 決定不同 workflow 送出後路由給哪些審批人與執行人。它是審批 / 執行路由設定，不是 permission 授權本身。
 
 | Workflow | 必要審批權限 |
 |---|---|
@@ -80,15 +69,20 @@ Approval Policy 決定不同 workflow 送出後路由給哪些審批人。它是
 | `sql_export_sensitive` | `sql_editor.export_review` |
 | `sensitive_query_access` | `sql_editor.sensitive_review` |
 
-每個 policy 可以指定：
+每個 rule 可以指定：
 
-- `reviewer_user_ids`
-- `reviewer_auth_groups`
+- `db_connection_id`
+- `approval_enabled`
+- `approval_auth_groups`
+- `executor_auth_groups`
+- `priority`
 - `enabled`
 
-有效審批人會由候選 user 與 auth group 成員合併後計算，並排除 inactive user 與缺少必要審批權限的候選人。
+普通 SQL Export 是否需要審批，由 `sql_export_normal` 對應 rule 的 `approval_enabled` 控制。敏感 SQL Export 應維持需要審批。
 
-Settings 頁會顯示 effective reviewer preview，讓管理者在儲存前看見每個 workflow 最終會通知誰。儲存時若任一啟用 workflow 沒有有效審批人，`PATCH /api/settings` 會回傳 `422`，管理者需要補齊 policy 或授權後才能儲存。
+有效審批人 / 執行人會由候選 auth group 成員合併後計算，並排除 inactive user 與缺少必要權限的候選人。
+
+Settings 頁會顯示 effective preview 與 conflict preview，讓管理者在儲存前看見每個 workflow 最終會通知誰，以及哪些規則可能互相覆蓋。儲存時若啟用 rule 無法解析出有效人員，後端會拒絕儲存。
 
 舊欄位仍保留在 API payload 中以維持相容性，但不應再作為新功能的主要配置來源：
 
@@ -128,13 +122,23 @@ Inventory Scan 與 Object Scan 使用類 crontab 表達式，例如 `0 9 * * *`�
 
 ### `GET /api/settings/approval-resolution`
 
-回傳每個 workflow 的審批人解析結果，供 Settings 頁展示 effective reviewer preview 與排除原因。
+回傳舊 Approval Policy 的審批人解析結果。此 API 保留作相容用途，新功能應使用 Workflow Rules preview。
+
+### `GET /api/settings/workflow-rules`
+
+回傳 Workflow Rules。
+
+### `PUT /api/settings/workflow-rules`
+
+整批替換 Workflow Rules。
+
+### `POST /api/settings/workflow-rules/effective-preview`
+
+回傳 Workflow Rules 的 effective preview 與 conflict preview。
 
 ### `PATCH /api/settings`
 
-用於寫回 Lark、SQL Editor timeout、export approval、approval policies 與 metadata scan 設定。
-
-若 approval policies 中任一啟用 workflow 沒有有效審批人，回傳 `422`。
+用於寫回 Lark、SQL Editor timeout 與 metadata scan 等平台設定。
 
 ## 資料持久化
 
@@ -158,4 +162,5 @@ Settings 存在 Meta DB 的 `platform_settings` 表中，由 `SettingsRepo` 做�
 - [設定與環境變數](configuration.md)
 - [SQL Editor](sql-editor.md)
 - [DB Metadata](db-metadata.md)
-- [How to 設定 Approval Policy](../how-to/configure-approval-policies.md)
+- [Workflow Rules](workflow-rules.md)
+- [How to 設定 Workflow Rules](../how-to/configure-workflow-rules.md)

@@ -8,24 +8,28 @@ DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL / DML /
 
 ## 功能概覽
 
-- `Tickets`：提交與流轉 DDL / DML / Redis / SQL Export / Sensitive Access 工單
+- `Tickets`：提交與流轉 DDL / DML / Redis / Query Access / SQL Export / Sensitive Access 工單
 - `SQL Editor`：單 statement 查詢、格式化、Explain、匯出申請、敏感查詢權限申請
+- `Scheduled Reports`：定期執行唯讀 SQL，產生 CSV 並以 Lark App 推送給指定使用者
 - `DB Connections`：管理 MySQL / PostgreSQL / Redis 連線、讀寫 endpoint 與憑證角色
 - `DB Metadata`：AWS Inventory 快照與資料庫物件快照
 - `Masking Rules`：欄位脫敏規則與 Unmask Whitelist
 - `SQL Review Rules`：依資料庫類型拆分的審核規則
 - `Users / Auth Groups / Resources`：權限、DB Scope 與資源綁定反查
-- `Settings`：SQL Editor timeout 與 DB Metadata 掃描設定
+- `Settings`：SQL Editor timeout、Workflow Rules、Lark 與 DB Metadata 掃描設定
 
 ## 文件入口
 
 - [文件總覽](docs/README.md)
 - [架構總覽](docs/explanation/architecture-overview.md)
 - [權限模型說明](docs/explanation/permission-model.md)
-- [Approval Policy 設定教學](docs/how-to/configure-approval-policies.md)
+- [Workflow Rules 設定教學](docs/how-to/configure-workflow-rules.md)
 - [本機開發教學](docs/tutorials/getting-started-local-dev.md)
+- [登入安全與 Session](docs/reference/auth-and-sessions.md)
 - [SQL Editor 參考](docs/reference/sql-editor.md)
+- [Scheduled SQL Reports 參考](docs/reference/scheduled-sql-reports.md)
 - [Tickets 參考](docs/reference/tickets.md)
+- [Workflow Rules 參考](docs/reference/workflow-rules.md)
 - [DB Connections 參考](docs/reference/db-connections.md)
 - [Users / RBAC 參考](docs/reference/users-and-rbac.md)
 - [Masking DSL 參考](docs/reference/masking-and-dsl.md)

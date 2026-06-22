@@ -37,6 +37,8 @@ Workbench 的權限邊界分成頁面入口與操作權限：
 | `sql_editor.export_review` | 操作 | 具備 SQL Export 審批資格 |
 | `sql_editor.sensitive_apply` | 操作 | 發起 Sensitive Query Access |
 | `sql_editor.sensitive_review` | 操作 | 具備 Sensitive Query Access 審批 / revoke 資格 |
+| `scheduled_sql_reports.read` | 頁面入口 | 進入 Scheduled SQL Reports |
+| `scheduled_sql_reports.write` | 操作 | 建立、更新、啟用、停用、刪除 Scheduled SQL Reports |
 
 ## Users 視角
 
@@ -133,13 +135,15 @@ Users / Auth Groups 並不直接決定 SQL 能不能執行哪種語句，而是�
 
 - 有 `sql_editor.read` 才可以進 SQL Editor，有 `sql_editor.query` 才可以執行查詢
 - 有 `tickets.read` 才可以進 Tickets workspace，有 `tickets.apply` 才可以建立一般工單
+- 有 `scheduled_sql_reports.read` 才可以進 Scheduled SQL Reports，有 `scheduled_sql_reports.write` 才可以維護報表
 - 但真正可選哪些資料源，還要看 direct / group DB Scope 綜合結果
 
-審批還需要搭配 Approval Policy。`tickets.review`、`sql_editor.export_review`、`sql_editor.sensitive_review` 只代表使用者具備審批資格；是否會收到某類 workflow 的審批任務，還要看該 workflow 的 policy 是否把此使用者或其 auth group 列為候選審批人。
+審批還需要搭配 Workflow Rules。`tickets.review`、`sql_editor.export_review`、`sql_editor.sensitive_review` 只代表使用者具備審批資格；是否會收到某類 workflow 的審批任務，還要看 Workflow Rules 是否把此使用者所屬 auth group 列為候選審批人。
 
 ## 相關文件
 
 - [權限模型](../explanation/permission-model.md)
 - [後端 API 與權限對照](backend-api-and-permissions.md)
 - [DB Connections](db-connections.md)
-- [How to 設定 Approval Policy](../how-to/configure-approval-policies.md)
+- [Workflow Rules](workflow-rules.md)
+- [How to 設定 Workflow Rules](../how-to/configure-workflow-rules.md)

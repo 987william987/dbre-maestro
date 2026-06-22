@@ -26,6 +26,7 @@
 | `MYSQL_ROOT_PASSWORD` | Meta DB root 密碼 | migration / 初始化用途 |
 | `DBRE_ENCRYPTION_KEY` | 加密 DB 連線密碼、敏感設定 | 32-byte AES key，base64 編碼 |
 | `JWT_SECRET` | JWT 簽章密鑰 | 任意高熵字串 |
+| `MFA_ENFORCEMENT` | MFA 強制策略 | `disabled` 或 `required_for_admins` |
 
 ## 可選項
 
@@ -35,6 +36,7 @@
 | `APP_BASE_URL` | 前端站台 base URL，供通知內工單連結使用 | `http://localhost:5173` |
 | `MIGRATION_DSN` | migration 專用 DSN | 若未指定，跟 app DSN 同邏輯 |
 | `LARK_WEBHOOK_URL` | Lark webhook fallback | 僅在未配置 Settings 內的 Lark App 時使用 |
+| `REFRESH_COOKIE_SECURE` | 非 production 環境強制 refresh cookie Secure | production 永遠強制 Secure |
 | `AWS_PROFILE` | DB metadata inventory 使用的 AWS profile | `default` |
 | `AWS_SDK_LOAD_CONFIG` | 啟用 shared config | Compose 預設 `1` |
 
@@ -191,6 +193,7 @@ MYSQL_APP_PASSWORD=changeme_app
 MYSQL_ROOT_PASSWORD=changeme_root
 DBRE_ENCRYPTION_KEY=BASE64_32_BYTE_KEY
 JWT_SECRET=long-random-string
+MFA_ENFORCEMENT=disabled
 AWS_PROFILE=default
 
 DB_POOL_QUERY_MAX_OPEN=10
@@ -204,5 +207,6 @@ DB_POOL_SHADOW_VALIDATION_MAX_OPEN=1
 ## 相關文件
 
 - [平台 Settings](settings.md)
+- [登入安全與 Session](auth-and-sessions.md)
 - [本機開發教學](../tutorials/getting-started-local-dev.md)
 - [架構總覽](../explanation/architecture-overview.md)

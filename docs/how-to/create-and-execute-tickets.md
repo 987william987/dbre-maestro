@@ -57,7 +57,7 @@
 
 7. Reviewer 審核工單。
 
-   Reviewer 除了要有對應 review permission，也要被 Approval Policy 指定為該 workflow 的有效審批人。
+   Reviewer 除了要有對應 review permission，也要被 Workflow Rules 指定為該 workflow 的有效審批人。
 
    - 通過：`Approve`
    - 不通過：`Reject`
@@ -89,7 +89,7 @@ Ticket 流程中的通知規則如下：
 可用以下方式確認流程成功：
 
 - `/tickets` 列表看到新工單
-- `/tickets/:id` 詳情頁可看到 review results
+- `/tickets/:ticket_no` 詳情頁可看到 review results
 - 工單狀態從 `pending_review` 轉到下一階段
 - 執行後有 `started_at`、`completed_at` 或失敗狀態
 
@@ -114,5 +114,5 @@ Ticket 流程中的通知規則如下：
 ## 相關文件
 
 - [Tickets 參考](../reference/tickets.md)
-- [How to 設定 Approval Policy](configure-approval-policies.md)
+- [How to 設定 Workflow Rules](configure-workflow-rules.md)
 - [後端 API 與權限對照](../reference/backend-api-and-permissions.md)

@@ -15,7 +15,8 @@
 
 - [How to 使用 SQL Editor](how-to/use-sql-editor.md)
 - [How to 建立與執行 Tickets](how-to/create-and-execute-tickets.md)
-- [How to 設定 Approval Policy](how-to/configure-approval-policies.md)
+- [How to 設定 Workflow Rules](how-to/configure-workflow-rules.md)
+- [How to 建立 Scheduled SQL Report](how-to/create-scheduled-sql-report.md)
 - [How to 設定 Masking Rules](how-to/configure-masking-rules.md)
 - [How to 綁定使用者 Lark Open ID](how-to/bind-lark-open-id.md)
 
@@ -23,14 +24,18 @@
 
 - [設定與環境變數](reference/configuration.md)
 - [後端 API 與權限對照](reference/backend-api-and-permissions.md)
+- [登入安全與 Session](reference/auth-and-sessions.md)
 - [DB Connections](reference/db-connections.md)
 - [SQL Editor](reference/sql-editor.md)
+- [Scheduled SQL Reports](reference/scheduled-sql-reports.md)
 - [Tickets](reference/tickets.md)
+- [Workflow Rules](reference/workflow-rules.md)
 - [Users / RBAC](reference/users-and-rbac.md)
 - [Masking 與 DSL](reference/masking-and-dsl.md)
 - [DB Metadata](reference/db-metadata.md)
 - [平台 Settings](reference/settings.md)
 - [時間欄位與時區規範](reference/time-handling.md)
+- [Workflow Dashboard Data Dictionary](reference/workflow-dashboard-data-dictionary.md)
 
 ## Explanation
 

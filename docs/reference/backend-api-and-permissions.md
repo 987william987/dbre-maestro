@@ -9,6 +9,8 @@
 | Tickets | `/tickets` | `tickets.read` |
 | New Ticket | `/tickets/new` | `tickets.apply` |
 | SQL Editor | `/sql-editor` | `sql_editor.read` |
+| Scheduled Reports | `/scheduled-sql-reports` | `scheduled_sql_reports.read` 或 `scheduled_sql_reports.write` |
+| Account Sessions | `/account/sessions` | 已登入 |
 | Users | `/users` | `users.read` 或 `users.write` |
 | Auth Groups | `/users/groups` | `users.read` 或 `users.write` |
 | Resources | `/users/resources` | `users.read` 或 `users.write` |
@@ -48,6 +50,8 @@
 | `sql_editor.export_review` | 審核 export 工單 |
 | `sql_editor.sensitive_apply` | 建立 sensitive access 工單 |
 | `sql_editor.sensitive_review` | 審核 / 撤銷 sensitive access |
+| `scheduled_sql_reports.read` | 進入 Scheduled SQL Reports，查看報表與 run history |
+| `scheduled_sql_reports.write` | 建立、更新、啟用、停用、刪除 Scheduled SQL Reports |
 | `global.sensitive` | 永久繞過 masking |
 
 ## Admin / All Permissions 工程規範
@@ -71,9 +75,13 @@
 | API | Gate |
 |---|---|
 | `POST /api/auth/login` | 無 |
+| `POST /api/auth/mfa/verify` | MFA challenge token |
 | `POST /api/auth/refresh` | 無 |
 | `GET /api/auth/me` | 已登入 + active |
 | `POST /api/auth/logout` | 已登入 + active |
+| `GET /api/auth/sessions` | 已登入 + active |
+| `DELETE /api/auth/sessions/{id}` | 已登入 + active |
+| `DELETE /api/auth/sessions` | 已登入 + active |
 
 ### Tickets
 
@@ -119,6 +127,18 @@
 |---|---|---|
 | `POST /api/exports` | `sql_editor.export` | 從 SQL Editor 建立 export ticket |
 | `GET /api/exports/download/{token}` | token-based | 不走 Bearer gate，但有下載頻率限制 |
+
+### Scheduled SQL Reports
+
+| API | Gate | 備註 |
+|---|---|---|
+| `GET /api/scheduled-sql-reports` | `scheduled_sql_reports.read` | report 列表 |
+| `GET /api/scheduled-sql-reports/{id}` | `scheduled_sql_reports.read` | report 詳情與 run history |
+| `GET /api/scheduled-sql-reports/connections` | `scheduled_sql_reports.read` | 可用 DB connections，仍受 DB Scope 過濾 |
+| `GET /api/scheduled-sql-reports/recipients` | `scheduled_sql_reports.read` | 可選 Lark recipients |
+| `POST /api/scheduled-sql-reports` | `scheduled_sql_reports.write` | 建立 report，會檢查 query access 與敏感欄位 |
+| `PATCH /api/scheduled-sql-reports/{id}` | `scheduled_sql_reports.write` | 更新 report，會重新檢查 query access 與敏感欄位 |
+| `DELETE /api/scheduled-sql-reports/{id}` | `scheduled_sql_reports.write` | 刪除 report |
 
 ### DB Connections
 
@@ -180,6 +200,10 @@
 | `DELETE /api/users/{id}/permissions/{permissionKey}` | `requireUsersWrite` |
 | `POST /api/users/{id}/db-connections` | `requireUsersWrite` |
 | `DELETE /api/users/{id}/db-connections/{connID}` | `requireUsersWrite` |
+| `GET /api/users/{id}/sessions` | `requireUsersRead` |
+| `DELETE /api/users/{id}/sessions/{sessionID}` | `requireUsersWrite` |
+| `DELETE /api/users/{id}/sessions` | `requireUsersWrite` |
+| `POST /api/users/{id}/mfa/reset` | `requireUsersWrite` |
 | `GET /api/auth-groups` | `requireUsersRead` |
 | `POST /api/auth-groups` | `requireUsersWrite` |
 | `GET /api/auth-groups/{group}` | `requireUsersRead` |
@@ -199,6 +223,11 @@
 | `GET /api/settings` | `requireSettingsRead` |
 | `GET /api/settings/db-connections` | `requireSettingsRead` |
 | `GET /api/settings/approval-resolution` | `requireSettingsRead` |
+| `GET /api/settings/workflow-rules` | `requireSettingsRead` |
+| `PUT /api/settings/workflow-rules` | `requireSettingsWrite` |
+| `POST /api/settings/workflow-rules/preview` | `requireSettingsRead` |
+| `POST /api/settings/workflow-rules/effective-preview` | `requireSettingsRead` |
+| `POST /api/settings/workflow-rules/simulate` | `requireSettingsRead` |
 | `PATCH /api/settings` | `requireSettingsWrite` |
 | `GET /api/notifications` | 已登入 |
 | `POST /api/notifications/read-all` | 已登入 |
@@ -222,7 +251,7 @@
 | `sql_export` | `sql_editor.export_review` | 無獨立 execute，approve 後可下載 |
 | `sensitive_query_access` | `sql_editor.sensitive_review` | 無獨立 execute，approve 後 scope 生效 |
 
-審批人還需要被 Approval Policy 指定。Permission 只代表具備審批資格；Approval Policy 決定該 workflow 會路由給哪些候選人。有效審批人會排除 inactive user，以及缺少該 workflow review permission 的候選人。
+審批人還需要被 Workflow Rules 指定。Permission 只代表具備審批資格；Workflow Rules 決定該 workflow 會路由給哪些候選人。有效審批人會排除 inactive user，以及缺少該 workflow review permission 的候選人。
 
 ## Ticket 通知與角色對照
 
@@ -256,4 +285,7 @@
 - [權限模型](../explanation/permission-model.md)
 - [Tickets](tickets.md)
 - [SQL Editor](sql-editor.md)
+- [Scheduled SQL Reports](scheduled-sql-reports.md)
+- [Workflow Rules](workflow-rules.md)
+- [登入安全與 Session](auth-and-sessions.md)
 - [Users / RBAC](users-and-rbac.md)

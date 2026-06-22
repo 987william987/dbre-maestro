@@ -227,7 +227,7 @@ SQL Editor 左側資產樹使用：
 
 - [How to 使用 SQL Editor](../how-to/use-sql-editor.md)
 - [Tickets](tickets.md)
-- [How to 設定 Approval Policy](../how-to/configure-approval-policies.md)
+- [Workflow Rules](workflow-rules.md)
 - [DB Connections](db-connections.md)
 - [Masking 與 DSL](masking-and-dsl.md)
 - [平台 Settings](settings.md)

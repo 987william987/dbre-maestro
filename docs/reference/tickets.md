@@ -19,7 +19,7 @@ Tickets 模組負責 DDL / DML / Redis 變更工單、Query Access 查詢授權�
 |---|---|
 | Ticket List | `/tickets` |
 | New Ticket | `/tickets/new` |
-| Ticket Detail | `/tickets/:id` |
+| Ticket Detail | `/tickets/:ticket_no` |
 
 ## 權限模型
 
@@ -381,7 +381,8 @@ Ticket number 不使用單純 auto increment 流水號，而改成較不易碰�
 ## 相關文件
 
 - [How to 建立與執行 Tickets](../how-to/create-and-execute-tickets.md)
-- [How to 設定 Approval Policy](../how-to/configure-approval-policies.md)
+- [Workflow Rules](workflow-rules.md)
+- [How to 設定 Workflow Rules](../how-to/configure-workflow-rules.md)
 - [後端 API 與權限對照](backend-api-and-permissions.md)
 - [SQL Editor](sql-editor.md)
 - [DB Connections](db-connections.md)
