@@ -323,3 +323,22 @@ func TestAuthHandlerLogoutClearsRefreshCookieUnderAPINamespace(t *testing.T) {
 		t.Fatalf("cookie MaxAge = %d, want -1", cookies[0].MaxAge)
 	}
 }
+
+func TestAuthHandlerLogoutClearsSecureRefreshCookieWhenConfigured(t *testing.T) {
+	handler := NewAuthHandler(nil, nil, nil, nil, true)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	rec := httptest.NewRecorder()
+	handler.Logout(rec, req)
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cookies len = %d, want 1", len(cookies))
+	}
+	if !cookies[0].Secure {
+		t.Fatal("cookie Secure = false, want true")
+	}
+	if cookies[0].SameSite != http.SameSiteStrictMode {
+		t.Fatalf("cookie SameSite = %v, want Strict", cookies[0].SameSite)
+	}
+}

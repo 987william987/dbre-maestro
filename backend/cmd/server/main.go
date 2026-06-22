@@ -136,7 +136,7 @@ func main() {
 	}
 
 	healthH := handler.NewHealthHandler(metaDB)
-	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret)
+	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret, cfg.RefreshCookieSecure)
 	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL)
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo)
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
@@ -164,6 +164,7 @@ func main() {
 	go objectJob.Start(context.Background())
 
 	r := chi.NewRouter()
+	r.Use(middleware.SecurityHeaders(cfg.AppEnv == "production"))
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
 	r.Use(chimw.Logger)

@@ -14,16 +14,21 @@ import (
 )
 
 type AuthHandler struct {
-	users     *repository.UserRepo
-	sessions  *repository.SessionRepo
-	audit     *repository.AuditRepo
-	jwtSecret []byte
+	users               *repository.UserRepo
+	sessions            *repository.SessionRepo
+	audit               *repository.AuditRepo
+	jwtSecret           []byte
+	refreshCookieSecure bool
 }
 
 const refreshCookiePath = "/api/auth/refresh"
 
-func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, jwtSecret []byte) *AuthHandler {
-	return &AuthHandler{users: users, sessions: sessions, audit: audit, jwtSecret: jwtSecret}
+func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, jwtSecret []byte, refreshCookieSecure ...bool) *AuthHandler {
+	secure := false
+	if len(refreshCookieSecure) > 0 {
+		secure = refreshCookieSecure[0]
+	}
+	return &AuthHandler{users: users, sessions: sessions, audit: audit, jwtSecret: jwtSecret, refreshCookieSecure: secure}
 }
 
 // GET /setup/status
@@ -142,7 +147,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Path:     refreshCookiePath,
 		Expires:  expiresAt,
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   h.refreshCookieSecure || r.TLS != nil,
 		SameSite: http.SameSiteStrictMode,
 	})
 
@@ -211,7 +216,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		Path:     refreshCookiePath,
 		Expires:  expiresAt,
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   h.refreshCookieSecure || r.TLS != nil,
 		SameSite: http.SameSiteStrictMode,
 	})
 
@@ -232,6 +237,8 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		Path:     refreshCookiePath,
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   h.refreshCookieSecure || r.TLS != nil,
+		SameSite: http.SameSiteStrictMode,
 	})
 
 	userID := middleware.UserIDFromCtx(r.Context())

@@ -13,19 +13,22 @@ import (
 )
 
 type Config struct {
-	Port           string
-	DBDSN          string
-	MigrationDSN   string
-	JWTSecret      []byte
-	EncryptionKey  []byte
-	AppBaseURL     string
-	LarkWebhookURL string // optional; empty = Lark notifications disabled
-	PoolProfiles   map[pool.Profile]pool.ProfileConfig
+	Port                string
+	AppEnv              string
+	DBDSN               string
+	MigrationDSN        string
+	JWTSecret           []byte
+	EncryptionKey       []byte
+	AppBaseURL          string
+	RefreshCookieSecure bool
+	LarkWebhookURL      string // optional; empty = Lark notifications disabled
+	PoolProfiles        map[pool.Profile]pool.ProfileConfig
 }
 
 func Load() (*Config, error) {
 	c := &Config{
 		Port:         getEnv("PORT", "8080"),
+		AppEnv:       normalizeAppEnv(getEnv("APP_ENV", "development")),
 		DBDSN:        os.Getenv("DB_DSN"),
 		MigrationDSN: os.Getenv("MIGRATION_DSN"),
 		AppBaseURL:   strings.TrimRight(os.Getenv("APP_BASE_URL"), "/"),
@@ -66,6 +69,14 @@ func Load() (*Config, error) {
 	}
 
 	c.LarkWebhookURL = os.Getenv("LARK_WEBHOOK_URL")
+	c.RefreshCookieSecure = c.AppEnv == "production"
+	if raw := os.Getenv("REFRESH_COOKIE_SECURE"); raw != "" {
+		secure, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("REFRESH_COOKIE_SECURE must be a boolean: %w", err)
+		}
+		c.RefreshCookieSecure = c.RefreshCookieSecure || secure
+	}
 
 	if err := loadPoolProfileConfig(c); err != nil {
 		return nil, err
@@ -79,6 +90,17 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func normalizeAppEnv(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "prod" {
+		return "production"
+	}
+	if normalized == "" {
+		return "development"
+	}
+	return normalized
 }
 
 func loadPoolProfileConfig(c *Config) error {

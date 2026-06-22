@@ -34,6 +34,49 @@ func TestLoadUsesDefaultPoolProfiles(t *testing.T) {
 	}
 }
 
+func TestLoadForcesSecureRefreshCookieInProduction(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("APP_ENV", "production")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !cfg.RefreshCookieSecure {
+		t.Fatal("RefreshCookieSecure = false, want true for production")
+	}
+}
+
+func TestLoadDoesNotAllowDisablingSecureRefreshCookieInProduction(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("REFRESH_COOKIE_SECURE", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !cfg.RefreshCookieSecure {
+		t.Fatal("RefreshCookieSecure = false, want true because production forces secure cookies")
+	}
+}
+
+func TestLoadAllowsForcingSecureRefreshCookieOutsideProduction(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("REFRESH_COOKIE_SECURE", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !cfg.RefreshCookieSecure {
+		t.Fatal("RefreshCookieSecure = false, want true when explicitly enabled")
+	}
+}
+
 func TestLoadOverridesPoolProfilesFromEnv(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("DB_POOL_QUERY_MAX_OPEN", "20")
