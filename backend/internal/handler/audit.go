@@ -15,7 +15,7 @@ import (
 
 type AuditHandler struct {
 	audit             *repository.AuditRepo
-	exportRateLimiter *requestRateLimiter
+	exportRateLimiter requestRateLimiter
 }
 
 func NewAuditHandler(audit *repository.AuditRepo) *AuditHandler {

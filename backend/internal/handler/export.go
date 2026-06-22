@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/masking"
@@ -37,7 +36,7 @@ type ExportHandler struct {
 	broker              *realtime.Broker
 	lark                *notification.Dispatcher
 	notifications       *NotificationRouter
-	downloadRateLimiter *requestRateLimiter
+	downloadRateLimiter requestRateLimiter
 	appBaseURL          string
 }
 
@@ -73,47 +72,6 @@ func NewExportHandler(
 		downloadRateLimiter: newRequestRateLimiter(3, time.Minute),
 		appBaseURL:          strings.TrimRight(appBaseURL, "/"),
 	}
-}
-
-type requestRateLimiter struct {
-	mu      sync.Mutex
-	limit   int
-	window  time.Duration
-	history map[string][]time.Time
-}
-
-func newRequestRateLimiter(limit int, window time.Duration) *requestRateLimiter {
-	return &requestRateLimiter{
-		limit:   limit,
-		window:  window,
-		history: make(map[string][]time.Time),
-	}
-}
-
-func (l *requestRateLimiter) Allow(key string, now time.Time) bool {
-	if l == nil || key == "" || l.limit <= 0 || l.window <= 0 {
-		return true
-	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	cutoff := now.Add(-l.window)
-	current := l.history[key]
-	filtered := current[:0]
-	for _, hitAt := range current {
-		if hitAt.After(cutoff) {
-			filtered = append(filtered, hitAt)
-		}
-	}
-	if len(filtered) >= l.limit {
-		l.history[key] = append([]time.Time(nil), filtered...)
-		return false
-	}
-
-	filtered = append(filtered, now)
-	l.history[key] = append([]time.Time(nil), filtered...)
-	return true
 }
 
 func buildTicketNotificationBody(ticket *model.Ticket, connName *string, currentStatus, nextAction, detail, link string) string {

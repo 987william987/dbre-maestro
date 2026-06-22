@@ -126,7 +126,14 @@ export function SessionsPage() {
                           <div className="flex items-start gap-2">
                             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
                             <div className="min-w-0">
-                              <p className="font-semibold">Session #{session.id}</p>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="font-semibold">Session #{session.id}</p>
+                                {session.is_current ? (
+                                  <span className="inline-flex rounded-full border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                                    Current
+                                  </span>
+                                ) : null}
+                              </div>
                               <p className="mt-1 truncate text-[12px] text-muted" title={session.user_agent ?? ''}>
                                 {session.user_agent || 'Unknown user agent'}
                               </p>
@@ -144,7 +151,7 @@ export function SessionsPage() {
                         <td className="whitespace-nowrap px-4 py-3 text-right">
                           <button
                             type="button"
-                            disabled={acting !== null || revoked}
+                            disabled={acting !== null || revoked || session.is_current}
                             onClick={() => void handleRevoke(session.id)}
                             className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-white px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
                           >

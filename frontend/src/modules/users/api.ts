@@ -1,4 +1,5 @@
 import { apiClient } from '@/shared/api/client'
+import type { AccountSession } from '@/modules/account/api'
 import type { AuthGroup } from '@/shared/types/auth'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { QueryAccessEffect } from '@/shared/types/ticket'
@@ -165,4 +166,18 @@ export function createQueryAccessRule(payload: CreateQueryAccessRulePayload) {
 
 export function revokeQueryAccessRule(id: number) {
   return apiClient.post<{ ok: boolean }>(`/users/query-access-rules/${id}/revoke`)
+}
+
+export function listUserSessions(id: number) {
+  return apiClient.get<{ sessions: AccountSession[] }>(`/users/${id}/sessions`).then((response) => ({
+    sessions: Array.isArray(response.sessions) ? response.sessions : [],
+  }))
+}
+
+export function revokeUserSession(userId: number, sessionId: number) {
+  return apiClient.delete<void>(`/users/${userId}/sessions/${sessionId}`)
+}
+
+export function revokeUserSessions(userId: number) {
+  return apiClient.delete<void>(`/users/${userId}/sessions`)
 }

@@ -22,8 +22,8 @@ type AuthHandler struct {
 	audit               *repository.AuditRepo
 	jwtSecret           []byte
 	refreshCookieSecure bool
-	loginRateLimiter    *requestRateLimiter
-	refreshRateLimiter  *requestRateLimiter
+	loginRateLimiter    requestRateLimiter
+	refreshRateLimiter  requestRateLimiter
 }
 
 const (
@@ -129,22 +129,19 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.users.GetByUsername(r.Context(), username)
 	if err != nil || user == nil {
+		h.logLoginFailed(r, nil, username, "invalid_credentials")
 		jsonErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 	if !user.IsActive {
+		h.logLoginFailed(r, &user.ID, user.Username, "disabled_user")
 		jsonErr(w, http.StatusForbidden, "user is disabled")
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+		h.logLoginFailed(r, &user.ID, user.Username, "invalid_credentials")
 		jsonErr(w, http.StatusUnauthorized, "invalid credentials")
-		return
-	}
-
-	accessToken, err := auth.NewAccessToken(user.ID, user.Username, h.jwtSecret)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "token error")
 		return
 	}
 
@@ -155,9 +152,16 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expiresAt := time.Now().Add(auth.RefreshTokenTTL)
-	if _, err := h.sessions.Create(r.Context(), user.ID, hashRefresh,
-		r.Header.Get("User-Agent"), clientIP(r), expiresAt); err != nil {
+	session, err := h.sessions.Create(r.Context(), user.ID, hashRefresh,
+		r.Header.Get("User-Agent"), clientIP(r), expiresAt)
+	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "session error")
+		return
+	}
+
+	accessToken, err := auth.NewAccessToken(user.ID, user.Username, session.ID, h.jwtSecret)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "token error")
 		return
 	}
 
@@ -229,12 +233,6 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := auth.NewAccessToken(user.ID, user.Username, h.jwtSecret)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "token error")
-		return
-	}
-
 	rawRefresh, hashRefresh, err := auth.NewRefreshToken()
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "token error")
@@ -242,8 +240,18 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expiresAt := time.Now().Add(auth.RefreshTokenTTL)
-	h.sessions.Create(r.Context(), user.ID, hashRefresh,
+	newSession, err := h.sessions.Create(r.Context(), user.ID, hashRefresh,
 		r.Header.Get("User-Agent"), clientIP(r), expiresAt)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "session error")
+		return
+	}
+
+	accessToken, err := auth.NewAccessToken(user.ID, user.Username, newSession.ID, h.jwtSecret)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "token error")
+		return
+	}
 
 	http.SetCookie(w, h.refreshCookie(r, rawRefresh, expiresAt))
 
@@ -283,7 +291,10 @@ func (h *AuthHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	if sessions == nil {
 		sessions = []model.Session{}
 	}
-	jsonOK(w, map[string]any{"sessions": sessions})
+	jsonOK(w, map[string]any{
+		"sessions":           sessions,
+		"current_session_id": middleware.SessionIDFromCtx(r.Context()),
+	})
 }
 
 func (h *AuthHandler) RevokeSession(w http.ResponseWriter, r *http.Request) {
@@ -416,7 +427,7 @@ func validatePassword(pw string) error {
 	return nil
 }
 
-func (h *AuthHandler) allowAuthAttempt(w http.ResponseWriter, r *http.Request, limiter *requestRateLimiter, action string, subject string) bool {
+func (h *AuthHandler) allowAuthAttempt(w http.ResponseWriter, r *http.Request, limiter requestRateLimiter, action string, subject string) bool {
 	key := clientIP(r)
 	if subject != "" {
 		key += ":" + subject
@@ -468,6 +479,18 @@ func (h *AuthHandler) logAudit(r *http.Request, entry repository.AuditEntry) {
 		entry.IPAddress = clientIP(r)
 	}
 	_ = h.audit.Log(r.Context(), entry)
+}
+
+func (h *AuthHandler) logLoginFailed(r *http.Request, actorID *uint64, username string, reason string) {
+	h.logAudit(r, repository.AuditEntry{
+		ActorID:      actorID,
+		ActorName:    username,
+		ActionType:   "login_failed",
+		ResourceType: "auth",
+		Details: map[string]any{
+			"reason": reason,
+		},
+	})
 }
 
 func parseAuthUintParam(w http.ResponseWriter, r *http.Request, name string) (uint64, bool) {

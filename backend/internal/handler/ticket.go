@@ -40,7 +40,7 @@ type TicketHandler struct {
 	broker             *realtime.Broker
 	lark               *notification.Dispatcher
 	notifications      *NotificationRouter
-	forbiddenLimiter   *requestRateLimiter
+	forbiddenLimiter   requestRateLimiter
 	appBaseURL         string
 }
 

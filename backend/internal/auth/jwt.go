@@ -17,15 +17,17 @@ const (
 )
 
 type Claims struct {
-	UserID   uint64 `json:"uid"`
-	Username string `json:"sub"`
+	UserID    uint64 `json:"uid"`
+	Username  string `json:"sub"`
+	SessionID uint64 `json:"sid,omitempty"`
 	jwt.RegisteredClaims
 }
 
-func NewAccessToken(userID uint64, username string, secret []byte) (string, error) {
+func NewAccessToken(userID uint64, username string, sessionID uint64, secret []byte) (string, error) {
 	claims := Claims{
-		UserID:   userID,
-		Username: username,
+		UserID:    userID,
+		Username:  username,
+		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(AccessTokenTTL)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

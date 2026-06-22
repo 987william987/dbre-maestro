@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { Database, Info, KeyRound, Loader2, Plus, Shield, UserPlus, Users as UsersIcon, X } from 'lucide-react'
+import { Database, Info, KeyRound, Loader2, Plus, RefreshCw, Shield, Trash2, UserPlus, Users as UsersIcon, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { createAuthGroup, deleteAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
 import { getDBConnectionBindings } from '@/modules/db-connections/api'
-import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccessRules, listUserDBConnections, listUsers, patchUser, revokeQueryAccessRule } from '@/modules/users/api'
+import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccessRules, listUserDBConnections, listUserSessions, listUsers, patchUser, revokeQueryAccessRule, revokeUserSession, revokeUserSessions } from '@/modules/users/api'
 import type { QueryAccessRule } from '@/modules/users/api'
+import type { AccountSession } from '@/modules/account/api'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import type { AuthGroup } from '@/shared/types/auth'
@@ -174,6 +175,9 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   const [drawerError, setDrawerError] = useState('')
   const [saving, setSaving] = useState(false)
   const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null)
+  const [selectedUserSessions, setSelectedUserSessions] = useState<AccountSession[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [sessionsActing, setSessionsActing] = useState<number | 'all' | null>(null)
   const [selectedAuthGroup, setSelectedAuthGroup] = useState<AuthGroupDetail | null>(null)
   const [userDraft, setUserDraft] = useState<UserDraft>(EMPTY_USER_DRAFT)
   const [authGroupDraft, setAuthGroupDraft] = useState<AuthGroupDraft>(EMPTY_AUTH_GROUP_DRAFT)
@@ -265,6 +269,9 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     setDrawerError('')
     setSaving(false)
     setSelectedUser(null)
+    setSelectedUserSessions([])
+    setSessionsLoading(false)
+    setSessionsActing(null)
     setSelectedAuthGroup(null)
     setUserDraft(EMPTY_USER_DRAFT)
     setAuthGroupDraft(EMPTY_AUTH_GROUP_DRAFT)
@@ -281,6 +288,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     setDrawerState({ mode: 'create-user' })
     setDrawerError('')
     setSelectedUser(null)
+    setSelectedUserSessions([])
     setSelectedAuthGroup(null)
     setConfirmState(null)
     setUserDraft(EMPTY_USER_DRAFT)
@@ -293,10 +301,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     setDrawerError('')
     setConfirmState(null)
     setSelectedUser(null)
+    setSelectedUserSessions([])
     setSelectedAuthGroup(null)
     try {
-      const detail = await getUser(userId)
+      const [detail, sessionsResponse] = await Promise.all([getUser(userId), listUserSessions(userId)])
       setSelectedUser(detail)
+      setSelectedUserSessions(sessionsResponse.sessions)
       setUserDraft({
         username: detail.username,
         email: detail.email,
@@ -313,6 +323,53 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       setDrawerError(loadError instanceof ApiError ? loadError.message : 'Failed to load user details.')
     } finally {
       setDrawerLoading(false)
+    }
+  }
+
+  async function refreshSelectedUserSessions(userId: number) {
+    setSessionsLoading(true)
+    setDrawerError('')
+    try {
+      const response = await listUserSessions(userId)
+      setSelectedUserSessions(response.sessions)
+    } catch (loadError) {
+      setDrawerError(loadError instanceof ApiError ? loadError.message : 'Failed to load user sessions.')
+    } finally {
+      setSessionsLoading(false)
+    }
+  }
+
+  async function handleRevokeUserSession(sessionID: number) {
+    if (drawerState?.mode !== 'edit-user') {
+      return
+    }
+    setSessionsActing(sessionID)
+    setDrawerError('')
+    try {
+      await revokeUserSession(drawerState.userId, sessionID)
+      await refreshSelectedUserSessions(drawerState.userId)
+      pushToast('Session revoked', 'success')
+    } catch (revokeError) {
+      setDrawerError(revokeError instanceof ApiError ? revokeError.message : 'Failed to revoke user session.')
+    } finally {
+      setSessionsActing(null)
+    }
+  }
+
+  async function handleRevokeUserSessions() {
+    if (drawerState?.mode !== 'edit-user') {
+      return
+    }
+    setSessionsActing('all')
+    setDrawerError('')
+    try {
+      await revokeUserSessions(drawerState.userId)
+      await refreshSelectedUserSessions(drawerState.userId)
+      pushToast('All user sessions revoked', 'success')
+    } catch (revokeError) {
+      setDrawerError(revokeError instanceof ApiError ? revokeError.message : 'Failed to revoke user sessions.')
+    } finally {
+      setSessionsActing(null)
     }
   }
 
@@ -1338,6 +1395,90 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         items={(selectedUser.db_connection_ids ?? []).map((connectionId) => getConnectionLabel(connectionId, connections))}
                         emptyMessage="No effective DB scope."
                       />
+                    </CardSection>
+                  ) : null}
+
+                  {drawerState.mode === 'edit-user' && selectedUser ? (
+                    <CardSection title="Sessions" icon={<Shield className="h-4 w-4 text-accent" />}>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[12px] font-semibold text-ink">Refresh Sessions</p>
+                          <p className="mt-1 text-[11px] text-muted">Review and revoke browser sessions for this user.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void refreshSelectedUserSessions(drawerState.userId)}
+                            disabled={sessionsLoading || sessionsActing !== null}
+                            className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:opacity-50"
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${sessionsLoading ? 'animate-spin' : ''}`} />
+                            Refresh
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleRevokeUserSessions()}
+                            disabled={sessionsLoading || sessionsActing !== null || selectedUserSessions.every((session) => session.revoked_at != null)}
+                            className="inline-flex h-9 items-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Revoke All
+                          </button>
+                        </div>
+                      </div>
+
+                      {sessionsLoading ? (
+                        <LoadingBlock message="Loading sessions..." className="min-h-[120px] rounded-lg border-border bg-panel-soft" />
+                      ) : selectedUserSessions.length === 0 ? (
+                        <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">No sessions found.</div>
+                      ) : (
+                        <div className="overflow-x-auto rounded-lg border border-border">
+                          <table className="min-w-full border-collapse text-left text-[12px]">
+                            <thead className="bg-panel-soft text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">
+                              <tr>
+                                <th className="whitespace-nowrap px-3 py-2">Session</th>
+                                <th className="whitespace-nowrap px-3 py-2">IP</th>
+                                <th className="whitespace-nowrap px-3 py-2">Created</th>
+                                <th className="whitespace-nowrap px-3 py-2">Expires</th>
+                                <th className="whitespace-nowrap px-3 py-2">Status</th>
+                                <th className="whitespace-nowrap px-3 py-2 text-right">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border bg-white">
+                              {selectedUserSessions.map((session) => {
+                                const revoked = session.revoked_at != null
+                                return (
+                                  <tr key={session.id} className="align-top">
+                                    <td className="max-w-[260px] px-3 py-2">
+                                      <p className="font-semibold text-ink">Session #{session.id}</p>
+                                      <p className="mt-1 truncate text-[11px] text-muted" title={session.user_agent ?? ''}>
+                                        {session.user_agent || 'Unknown user agent'}
+                                      </p>
+                                    </td>
+                                    <td className="whitespace-nowrap px-3 py-2 text-muted">{session.ip_address || '-'}</td>
+                                    <td className="whitespace-nowrap px-3 py-2 text-muted">{formatDateTime(session.created_at)}</td>
+                                    <td className="whitespace-nowrap px-3 py-2 text-muted">{formatDateTime(session.expires_at)}</td>
+                                    <td className="whitespace-nowrap px-3 py-2">
+                                      <Tag label={revoked ? 'Revoked' : 'Active'} tone={revoked ? 'default' : 'success'} />
+                                    </td>
+                                    <td className="whitespace-nowrap px-3 py-2 text-right">
+                                      <button
+                                        type="button"
+                                        onClick={() => void handleRevokeUserSession(session.id)}
+                                        disabled={sessionsActing !== null || revoked}
+                                        className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-white px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:opacity-50"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                        Revoke
+                                      </button>
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </CardSection>
                   ) : null}
 

@@ -8,12 +8,22 @@ export type AccountSession = {
   expires_at: string
   revoked_at?: string | null
   created_at: string
+  is_current?: boolean
 }
 
 export async function listAccountSessions() {
-  return apiClient.get<{ sessions: AccountSession[] }>('/auth/sessions').then((response) => ({
-    sessions: Array.isArray(response.sessions) ? response.sessions : [],
-  }))
+  return apiClient.get<{ sessions: AccountSession[]; current_session_id?: number }>('/auth/sessions').then((response) => {
+    const currentSessionID = typeof response.current_session_id === 'number' ? response.current_session_id : 0
+    return {
+      sessions: Array.isArray(response.sessions)
+        ? response.sessions.map((session) => ({
+            ...session,
+            is_current: currentSessionID > 0 && session.id === currentSessionID,
+          }))
+        : [],
+      current_session_id: currentSessionID,
+    }
+  })
 }
 
 export async function revokeAccountSession(id: number) {

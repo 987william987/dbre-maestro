@@ -9,7 +9,7 @@ import (
 
 func TestAccessTokenRoundTrip(t *testing.T) {
 	secret := []byte("testsecret32byteslong_padding_xx")
-	token, err := auth.NewAccessToken(42, "alice", secret)
+	token, err := auth.NewAccessToken(42, "alice", 77, secret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,13 +24,16 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 	if claims.Username != "alice" {
 		t.Errorf("Username: got %s, want alice", claims.Username)
 	}
+	if claims.SessionID != 77 {
+		t.Errorf("SessionID: got %d, want 77", claims.SessionID)
+	}
 	if time.Until(claims.ExpiresAt.Time) > auth.AccessTokenTTL {
 		t.Error("expiry exceeds expected TTL")
 	}
 }
 
 func TestAccessTokenWrongSecret(t *testing.T) {
-	token, _ := auth.NewAccessToken(1, "bob", []byte("secret-a"))
+	token, _ := auth.NewAccessToken(1, "bob", 11, []byte("secret-a"))
 	_, err := auth.ParseAccessToken(token, []byte("secret-b"))
 	if err == nil {
 		t.Fatal("expected error with wrong secret, got nil")

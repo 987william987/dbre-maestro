@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,27 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 )
+
+type auditDetailsReason string
+
+func (m auditDetailsReason) Match(v driver.Value) bool {
+	var raw []byte
+	switch value := v.(type) {
+	case []byte:
+		raw = value
+	case string:
+		raw = []byte(value)
+	default:
+		return false
+	}
+	var details struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(raw, &details); err != nil {
+		return false
+	}
+	return details.Reason == string(m)
+}
 
 func authUserRows(isActive bool) *sqlmock.Rows {
 	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
@@ -290,6 +312,72 @@ func TestAuthHandlerLoginDisabledUserReturnsForbidden(t *testing.T) {
 		WillReturnRows(authUserRows(false))
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"username":"alice","password":"Password1"}`))
+	rec := httptest.NewRecorder()
+	handler.Login(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	if !strings.Contains(rec.Body.String(), "user is disabled") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerLoginInvalidCredentialsWritesAudit(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB), []byte("secret"))
+
+	mock.ExpectQuery(`SELECT \* FROM users WHERE username = \?`).
+		WithArgs("missing").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(`INSERT INTO audit_logs \(actor_id, actor_name, action_type, resource_type, resource_id, details, ip_address, created_at\)`).
+		WithArgs(nil, "missing", "login_failed", "auth", nil, auditDetailsReason("invalid_credentials"), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"username":"missing","password":"Password1"}`))
+	req.RemoteAddr = "10.0.0.9:12345"
+	rec := httptest.NewRecorder()
+	handler.Login(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid credentials") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerLoginDisabledUserWritesAudit(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB), []byte("secret"))
+
+	mock.ExpectQuery(`SELECT \* FROM users WHERE username = \?`).
+		WithArgs("alice").
+		WillReturnRows(authUserRows(false))
+	mock.ExpectExec(`INSERT INTO audit_logs \(actor_id, actor_name, action_type, resource_type, resource_id, details, ip_address, created_at\)`).
+		WithArgs(sqlmock.AnyArg(), "alice", "login_failed", "auth", nil, auditDetailsReason("disabled_user"), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"username":"alice","password":"Password1"}`))
+	req.RemoteAddr = "10.0.0.10:12345"
 	rec := httptest.NewRecorder()
 	handler.Login(rec, req)
 
