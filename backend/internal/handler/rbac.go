@@ -17,12 +17,6 @@ var authGroupCatalog = []authGroupMeta{
 		System:      true,
 	},
 	{
-		Name:        model.AuthGroupReviewer,
-		Label:       "Reviewer",
-		Description: "Can review and approve change tickets.",
-		System:      true,
-	},
-	{
 		Name:        model.AuthGroupDBA,
 		Label:       "DBA",
 		Description: "Can manage database connections, query execution, and governance settings.",
@@ -32,6 +26,18 @@ var authGroupCatalog = []authGroupMeta{
 		Name:        model.AuthGroupAdmin,
 		Label:       "Admin",
 		Description: "Has full platform access including user and RBAC administration.",
+		System:      true,
+	},
+	{
+		Name:        model.AuthGroupSecurity,
+		Label:       "Security",
+		Description: "Reviews sensitive data workflows and data export requests.",
+		System:      true,
+	},
+	{
+		Name:        model.AuthGroupDataOwner,
+		Label:       "Data Owner",
+		Description: "Reviews regular database change and access tickets for owned data scope.",
 		System:      true,
 	},
 }

@@ -38,16 +38,26 @@ func (e *MissingAccessError) Error() string {
 }
 
 type Service struct {
-	repo *repository.QueryAccessRepo
+	repo  *repository.QueryAccessRepo
+	users *repository.UserRepo
 }
 
-func NewService(repo *repository.QueryAccessRepo) *Service {
-	return &Service{repo: repo}
+func NewService(repo *repository.QueryAccessRepo, users *repository.UserRepo) *Service {
+	return &Service{repo: repo, users: users}
 }
 
 func (s *Service) CheckSQL(ctx context.Context, userID uint64, conn *model.DBConnection, sqlText string, checkCtx CheckContext) error {
 	if s == nil || s.repo == nil || conn == nil {
 		return nil
+	}
+	if s.users != nil {
+		hasAllPermissions, err := s.users.HasAllPermissions(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if hasAllPermissions {
+			return nil
+		}
 	}
 	refs, err := ExtractObjectRefs(conn, sqlText, checkCtx)
 	if err != nil {
@@ -57,13 +67,20 @@ func (s *Service) CheckSQL(ctx context.Context, userID uint64, conn *model.DBCon
 		return nil
 	}
 
-	grants, err := s.repo.ListActiveGrants(ctx, userID, conn.ID)
+	authGroupIDs := []uint64{}
+	if s.users != nil {
+		authGroupIDs, err = s.users.GetEffectiveAuthGroupIDs(ctx, userID)
+		if err != nil {
+			return err
+		}
+	}
+	rules, err := s.repo.ListActiveRules(ctx, userID, authGroupIDs, conn.ID)
 	if err != nil {
 		return err
 	}
 	missing := make([]ObjectRef, 0)
 	for _, ref := range refs {
-		if !matchesAnyGrant(ref, grants) {
+		if !isAllowedByRules(ref, rules) {
 			missing = append(missing, ref)
 		}
 	}
@@ -71,6 +88,38 @@ func (s *Service) CheckSQL(ctx context.Context, userID uint64, conn *model.DBCon
 		return &MissingAccessError{Missing: dedupeRefs(missing)}
 	}
 	return nil
+}
+
+func isAllowedByRules(ref ObjectRef, rules []model.QueryAccessRule) bool {
+	allowed := false
+	for _, rule := range rules {
+		if !matchesRule(ref, rule) {
+			continue
+		}
+		if rule.Effect == model.QueryAccessEffectDeny {
+			return false
+		}
+		allowed = true
+	}
+	return allowed
+}
+
+func matchesRule(ref ObjectRef, rule model.QueryAccessRule) bool {
+	if rule.ConnectionID != ref.ConnectionID {
+		return false
+	}
+	if !matchesPattern(rule.DatabasePattern, ref.DatabaseName) {
+		return false
+	}
+	return matchesPattern(rule.TablePattern, ref.TableName)
+}
+
+func matchesPattern(pattern, value string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" || pattern == "*" {
+		return true
+	}
+	return equalFold(pattern, value)
 }
 
 func matchesAnyGrant(ref ObjectRef, grants []model.QueryAccessGrant) bool {

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/dbre-maestro/maestro/internal/crypto"
 	"github.com/dbre-maestro/maestro/internal/model"
@@ -17,6 +19,7 @@ import (
 const (
 	settingSensitiveExportReviewers      = "sensitive_export_reviewer_user_ids"
 	settingSensitiveQueryAccessReviewers = "sensitive_query_access_reviewer_user_ids"
+	settingRequireNonSensitiveExportRev  = "require_non_sensitive_export_review"
 	settingLarkAppID                     = "lark_app_id"
 	settingLarkAppSecret                 = "lark_app_secret"
 	settingSQLEditorAppTimeoutSeconds    = "sql_editor_app_timeout_seconds"
@@ -25,10 +28,13 @@ const (
 	settingDBMetadataInventoryEnabled    = "db_metadata_inventory_enabled"
 	settingDBMetadataInventoryRegions    = "db_metadata_inventory_regions"
 	settingDBMetadataInventoryEngines    = "db_metadata_inventory_engines"
+	settingDBMetadataInventoryCron       = "db_metadata_inventory_cron"
 	settingDBMetadataInventorySyncMins   = "db_metadata_inventory_sync_interval_minutes"
 	settingDBMetadataObjectEnabled       = "db_metadata_object_enabled"
 	settingDBMetadataObjectConnectionIDs = "db_metadata_object_enabled_connection_ids"
+	settingDBMetadataObjectCron          = "db_metadata_object_cron"
 	settingDBMetadataObjectSyncMins      = "db_metadata_object_sync_interval_minutes"
+	settingDBMetadataCronTimezone        = "db_metadata_cron_timezone"
 )
 
 type SettingsRepo struct {
@@ -43,15 +49,19 @@ func NewSettingsRepo(db *sqlx.DB, encKey []byte) *SettingsRepo {
 func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error) {
 	settings := &model.PlatformSettings{
 		SQLEditorAppTimeoutSeconds:           30,
+		RequireNonSensitiveExportReview:      true,
 		SQLEditorMySQLMaxExecutionTimeMs:     25000,
 		SQLEditorPostgresStatementTimeoutMs:  25000,
 		DBMetadataInventoryEnabled:           true,
 		DBMetadataInventoryRegions:           []string{},
 		DBMetadataInventoryEngines:           []string{"aurora-mysql", "aurora-postgresql", "redis"},
+		DBMetadataInventoryCron:              "0 9 * * *",
 		DBMetadataInventorySyncIntervalMins:  5,
 		DBMetadataObjectEnabled:              true,
 		DBMetadataObjectEnabledConnectionIDs: []uint64{},
+		DBMetadataObjectCron:                 "0 10 * * *",
 		DBMetadataObjectSyncIntervalMins:     60,
+		DBMetadataCronTimezone:               "Asia/Taipei",
 	}
 	exportReviewerIDs, err := r.getUint64List(ctx, settingSensitiveExportReviewers)
 	if err != nil {
@@ -63,6 +73,19 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	}
 	settings.SensitiveExportReviewerUserIDs = exportReviewerIDs
 	settings.SensitiveQueryAccessReviewerUserIDs = sensitiveReviewerIDs
+	settings.ApprovalPolicies = []model.ApprovalPolicy{}
+	workflowRules, err := r.ListWorkflowRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	settings.WorkflowRules = workflowRules
+	requireNonSensitiveExportReview, err := r.getBool(ctx, settingRequireNonSensitiveExportRev)
+	if err != nil {
+		return nil, err
+	}
+	if requireNonSensitiveExportReview != nil {
+		settings.RequireNonSensitiveExportReview = *requireNonSensitiveExportReview
+	}
 	larkAppID, err := r.getString(ctx, settingLarkAppID)
 	if err != nil {
 		return nil, err
@@ -120,6 +143,13 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	if engines != nil {
 		settings.DBMetadataInventoryEngines = engines
 	}
+	inventoryCron, err := r.getString(ctx, settingDBMetadataInventoryCron)
+	if err != nil {
+		return nil, err
+	}
+	if inventoryCron != nil && *inventoryCron != "" {
+		settings.DBMetadataInventoryCron = *inventoryCron
+	}
 
 	inventorySyncMins, err := r.getInt(ctx, settingDBMetadataInventorySyncMins)
 	if err != nil {
@@ -142,6 +172,13 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 		return nil, err
 	}
 	settings.DBMetadataObjectEnabledConnectionIDs = objectConnectionIDs
+	objectCron, err := r.getString(ctx, settingDBMetadataObjectCron)
+	if err != nil {
+		return nil, err
+	}
+	if objectCron != nil && *objectCron != "" {
+		settings.DBMetadataObjectCron = *objectCron
+	}
 
 	objectSyncMins, err := r.getInt(ctx, settingDBMetadataObjectSyncMins)
 	if err != nil {
@@ -149,6 +186,13 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	}
 	if objectSyncMins != nil {
 		settings.DBMetadataObjectSyncIntervalMins = *objectSyncMins
+	}
+	cronTimezone, err := r.getString(ctx, settingDBMetadataCronTimezone)
+	if err != nil {
+		return nil, err
+	}
+	if cronTimezone != nil && *cronTimezone != "" {
+		settings.DBMetadataCronTimezone = *cronTimezone
 	}
 	return settings, nil
 }
@@ -168,6 +212,9 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 		return err
 	}
 	if err := upsertUint64List(ctx, tx, settingSensitiveQueryAccessReviewers, settings.SensitiveQueryAccessReviewerUserIDs); err != nil {
+		return err
+	}
+	if err := upsertBool(ctx, tx, settingRequireNonSensitiveExportRev, settings.RequireNonSensitiveExportReview); err != nil {
 		return err
 	}
 	if err := upsertString(ctx, tx, settingLarkAppID, settings.LarkAppID); err != nil {
@@ -196,6 +243,9 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 	if err := upsertStringList(ctx, tx, settingDBMetadataInventoryEngines, settings.DBMetadataInventoryEngines); err != nil {
 		return err
 	}
+	if err := upsertString(ctx, tx, settingDBMetadataInventoryCron, settings.DBMetadataInventoryCron); err != nil {
+		return err
+	}
 	if err := upsertInt(ctx, tx, settingDBMetadataInventorySyncMins, settings.DBMetadataInventorySyncIntervalMins); err != nil {
 		return err
 	}
@@ -205,8 +255,19 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 	if err := upsertUint64List(ctx, tx, settingDBMetadataObjectConnectionIDs, settings.DBMetadataObjectEnabledConnectionIDs); err != nil {
 		return err
 	}
+	if err := upsertString(ctx, tx, settingDBMetadataObjectCron, settings.DBMetadataObjectCron); err != nil {
+		return err
+	}
 	if err := upsertInt(ctx, tx, settingDBMetadataObjectSyncMins, settings.DBMetadataObjectSyncIntervalMins); err != nil {
 		return err
+	}
+	if err := upsertString(ctx, tx, settingDBMetadataCronTimezone, settings.DBMetadataCronTimezone); err != nil {
+		return err
+	}
+	if settings.WorkflowRules != nil {
+		if err := replaceWorkflowRules(ctx, tx, settings.WorkflowRules); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit settings tx: %w", err)
@@ -223,8 +284,284 @@ func (r *SettingsRepo) IsSensitiveQueryAccessReviewer(ctx context.Context, userI
 	return r.containsUserID(ctx, settingSensitiveQueryAccessReviewers, userID)
 }
 
+func (r *SettingsRepo) RequireNonSensitiveExportReview(ctx context.Context) (bool, error) {
+	value, err := r.getBool(ctx, settingRequireNonSensitiveExportRev)
+	if err != nil {
+		return true, err
+	}
+	if value == nil {
+		return true, nil
+	}
+	return *value, nil
+}
+
+func (r *SettingsRepo) ListApprovalPolicies(ctx context.Context) ([]model.ApprovalPolicy, error) {
+	var rows []struct {
+		WorkflowType       model.ApprovalWorkflowType `db:"workflow_type"`
+		ReviewerUserIDs    string                     `db:"reviewer_user_ids"`
+		ReviewerAuthGroups string                     `db:"reviewer_auth_groups"`
+		Enabled            bool                       `db:"enabled"`
+	}
+	if err := r.db.SelectContext(ctx, &rows, `SELECT workflow_type, reviewer_user_ids, reviewer_auth_groups, enabled FROM approval_policies ORDER BY workflow_type`); err != nil {
+		return nil, fmt.Errorf("list approval policies: %w", err)
+	}
+	if len(rows) == 0 {
+		return defaultApprovalPolicies(), nil
+	}
+	policiesByType := make(map[model.ApprovalWorkflowType]model.ApprovalPolicy, len(rows))
+	for _, row := range rows {
+		var userIDs []uint64
+		if row.ReviewerUserIDs != "" {
+			if err := json.Unmarshal([]byte(row.ReviewerUserIDs), &userIDs); err != nil {
+				return nil, fmt.Errorf("decode approval policy users %s: %w", row.WorkflowType, err)
+			}
+		}
+		var authGroups []model.AuthGroup
+		if row.ReviewerAuthGroups != "" {
+			if err := json.Unmarshal([]byte(row.ReviewerAuthGroups), &authGroups); err != nil {
+				return nil, fmt.Errorf("decode approval policy auth groups %s: %w", row.WorkflowType, err)
+			}
+		}
+		policiesByType[row.WorkflowType] = model.ApprovalPolicy{
+			WorkflowType:       row.WorkflowType,
+			ReviewerUserIDs:    userIDs,
+			ReviewerAuthGroups: authGroups,
+			Enabled:            row.Enabled,
+		}
+	}
+	policies := defaultApprovalPolicies()
+	for index, policy := range policies {
+		if stored, ok := policiesByType[policy.WorkflowType]; ok {
+			policies[index] = stored
+		}
+	}
+	return policies, nil
+}
+
+func (r *SettingsRepo) GetApprovalPolicy(ctx context.Context, workflowType model.ApprovalWorkflowType) (*model.ApprovalPolicy, error) {
+	policies, err := r.ListApprovalPolicies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range policies {
+		if policies[i].WorkflowType == workflowType {
+			return &policies[i], nil
+		}
+	}
+	return nil, nil
+}
+
 func (r *SettingsRepo) GetLarkAppSecret(ctx context.Context) (string, error) {
 	return r.getEncryptedString(ctx, settingLarkAppSecret)
+}
+
+func (r *SettingsRepo) ListWorkflowRules(ctx context.Context) ([]model.WorkflowRule, error) {
+	var rows []struct {
+		ID                 uint64           `db:"id"`
+		RuleName           string           `db:"rule_name"`
+		TicketType         model.TicketType `db:"ticket_type"`
+		DBConnectionID     *uint64          `db:"db_connection_id"`
+		ExportSensitivity  *string          `db:"export_sensitivity"`
+		ApprovalEnabled    bool             `db:"approval_enabled"`
+		ApprovalAuthGroups string           `db:"approval_auth_groups"`
+		ExecutorAuthGroups string           `db:"executor_auth_groups"`
+		Priority           int              `db:"priority"`
+		Enabled            bool             `db:"enabled"`
+	}
+	if err := r.db.SelectContext(ctx, &rows, `
+		SELECT id, rule_name, ticket_type, db_connection_id, export_sensitivity,
+		       approval_enabled, approval_auth_groups, executor_auth_groups, priority, enabled
+		FROM workflow_rules
+		ORDER BY priority ASC, id ASC
+	`); err != nil {
+		return nil, fmt.Errorf("list workflow rules: %w", err)
+	}
+	rules := make([]model.WorkflowRule, 0, len(rows))
+	for _, row := range rows {
+		approvalGroups, err := decodeAuthGroups(row.ApprovalAuthGroups)
+		if err != nil {
+			return nil, fmt.Errorf("decode workflow rule approval groups %d: %w", row.ID, err)
+		}
+		executorGroups, err := decodeAuthGroups(row.ExecutorAuthGroups)
+		if err != nil {
+			return nil, fmt.Errorf("decode workflow rule executor groups %d: %w", row.ID, err)
+		}
+		rules = append(rules, model.WorkflowRule{
+			ID:                 row.ID,
+			RuleName:           row.RuleName,
+			TicketType:         row.TicketType,
+			DBConnectionID:     row.DBConnectionID,
+			ExportSensitivity:  row.ExportSensitivity,
+			ApprovalEnabled:    row.ApprovalEnabled,
+			ApprovalAuthGroups: approvalGroups,
+			ExecutorAuthGroups: executorGroups,
+			Priority:           row.Priority,
+			Enabled:            row.Enabled,
+		})
+	}
+	return rules, nil
+}
+
+func (r *SettingsRepo) ReplaceWorkflowRules(ctx context.Context, rules []model.WorkflowRule) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin workflow rules tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := replaceWorkflowRules(ctx, tx, rules); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit workflow rules tx: %w", err)
+	}
+	tx = nil
+	return nil
+}
+
+func (r *SettingsRepo) MatchWorkflowRule(ctx context.Context, ticketType model.TicketType, dbConnectionID *uint64, exportSensitivity *string) (*model.WorkflowRule, error) {
+	rules, err := r.ListWorkflowRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var best *model.WorkflowRule
+	bestScore := -1
+	for i := range rules {
+		rule := &rules[i]
+		if !rule.Enabled || rule.TicketType != ticketType {
+			continue
+		}
+		if rule.DBConnectionID != nil {
+			if dbConnectionID == nil || *rule.DBConnectionID != *dbConnectionID {
+				continue
+			}
+		}
+		if rule.ExportSensitivity != nil {
+			if exportSensitivity == nil || *rule.ExportSensitivity != *exportSensitivity {
+				continue
+			}
+		}
+		score := 0
+		if rule.DBConnectionID != nil {
+			score += 2
+		}
+		if rule.ExportSensitivity != nil {
+			score++
+		}
+		if best == nil || score > bestScore || (score == bestScore && (rule.Priority < best.Priority || (rule.Priority == best.Priority && rule.ID < best.ID))) {
+			copyRule := *rule
+			best = &copyRule
+			bestScore = score
+		}
+	}
+	return best, nil
+}
+
+func defaultApprovalPolicies() []model.ApprovalPolicy {
+	return []model.ApprovalPolicy{
+		{WorkflowType: model.ApprovalWorkflowDDL, ReviewerAuthGroups: []model.AuthGroup{model.AuthGroupDataOwner}, Enabled: true},
+		{WorkflowType: model.ApprovalWorkflowDML, ReviewerAuthGroups: []model.AuthGroup{model.AuthGroupDataOwner}, Enabled: true},
+		{WorkflowType: model.ApprovalWorkflowRedisCommand, ReviewerAuthGroups: []model.AuthGroup{model.AuthGroupDataOwner}, Enabled: true},
+		{WorkflowType: model.ApprovalWorkflowQueryAccess, ReviewerAuthGroups: []model.AuthGroup{model.AuthGroupDataOwner}, Enabled: true},
+		{WorkflowType: model.ApprovalWorkflowSQLExportNormal, ReviewerAuthGroups: []model.AuthGroup{model.AuthGroupSecurity}, Enabled: true},
+		{WorkflowType: model.ApprovalWorkflowSQLExportSensitive, ReviewerAuthGroups: []model.AuthGroup{model.AuthGroupSecurity}, Enabled: true},
+		{WorkflowType: model.ApprovalWorkflowSensitiveQueryAccess, ReviewerAuthGroups: []model.AuthGroup{model.AuthGroupSecurity}, Enabled: true},
+	}
+}
+
+func replaceApprovalPolicies(ctx context.Context, tx *sqlx.Tx, policies []model.ApprovalPolicy) error {
+	if len(policies) == 0 {
+		policies = defaultApprovalPolicies()
+	}
+	now := timeutil.NowUTC()
+	for _, policy := range policies {
+		userIDsRaw, err := json.Marshal(policy.ReviewerUserIDs)
+		if err != nil {
+			return fmt.Errorf("encode approval policy users %s: %w", policy.WorkflowType, err)
+		}
+		authGroupsRaw, err := json.Marshal(policy.ReviewerAuthGroups)
+		if err != nil {
+			return fmt.Errorf("encode approval policy auth groups %s: %w", policy.WorkflowType, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO approval_policies (workflow_type, reviewer_user_ids, reviewer_auth_groups, enabled, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?)
+			 ON DUPLICATE KEY UPDATE reviewer_user_ids = VALUES(reviewer_user_ids), reviewer_auth_groups = VALUES(reviewer_auth_groups), enabled = VALUES(enabled), updated_at = VALUES(updated_at)`,
+			policy.WorkflowType, string(userIDsRaw), string(authGroupsRaw), policy.Enabled, now, now,
+		); err != nil {
+			return fmt.Errorf("upsert approval policy %s: %w", policy.WorkflowType, err)
+		}
+	}
+	return nil
+}
+
+func replaceWorkflowRules(ctx context.Context, tx *sqlx.Tx, rules []model.WorkflowRule) error {
+	now := timeutil.NowUTC()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_rules`); err != nil {
+		return fmt.Errorf("delete workflow rules: %w", err)
+	}
+	for _, rule := range rules {
+		rule.ApprovalAuthGroups = normalizeAuthGroups(rule.ApprovalAuthGroups)
+		rule.ExecutorAuthGroups = normalizeAuthGroups(rule.ExecutorAuthGroups)
+		approvalRaw, err := json.Marshal(rule.ApprovalAuthGroups)
+		if err != nil {
+			return fmt.Errorf("encode workflow rule approval groups %s: %w", rule.RuleName, err)
+		}
+		executorRaw, err := json.Marshal(rule.ExecutorAuthGroups)
+		if err != nil {
+			return fmt.Errorf("encode workflow rule executor groups %s: %w", rule.RuleName, err)
+		}
+		if strings.TrimSpace(rule.RuleName) == "" {
+			rule.RuleName = string(rule.TicketType)
+		}
+		if rule.Priority == 0 {
+			rule.Priority = 100
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO workflow_rules
+			 (rule_name, ticket_type, db_connection_id, export_sensitivity, approval_enabled, approval_auth_groups, executor_auth_groups, priority, enabled, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			rule.RuleName, rule.TicketType, rule.DBConnectionID, rule.ExportSensitivity, rule.ApprovalEnabled,
+			string(approvalRaw), string(executorRaw), rule.Priority, rule.Enabled, now, now,
+		); err != nil {
+			return fmt.Errorf("insert workflow rule %s: %w", rule.RuleName, err)
+		}
+	}
+	return nil
+}
+
+func decodeAuthGroups(raw string) ([]model.AuthGroup, error) {
+	if strings.TrimSpace(raw) == "" {
+		return []model.AuthGroup{}, nil
+	}
+	var groups []model.AuthGroup
+	if err := json.Unmarshal([]byte(raw), &groups); err != nil {
+		return nil, err
+	}
+	return normalizeAuthGroups(groups), nil
+}
+
+func normalizeAuthGroups(groups []model.AuthGroup) []model.AuthGroup {
+	seen := make(map[model.AuthGroup]struct{}, len(groups))
+	normalized := make([]model.AuthGroup, 0, len(groups))
+	for _, group := range groups {
+		group = model.AuthGroup(strings.TrimSpace(string(group)))
+		if group == "" {
+			continue
+		}
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		normalized = append(normalized, group)
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		return normalized[i] < normalized[j]
+	})
+	return normalized
 }
 
 func (r *SettingsRepo) containsUserID(ctx context.Context, key string, userID uint64) (bool, error) {

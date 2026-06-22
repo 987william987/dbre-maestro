@@ -14,15 +14,18 @@ DBRE Maestro 的權限設計，不是單純把每個按鈕綁一個 permission�
 
 ## 核心做法
 
-平台採兩層控制：
+平台採三個軸線控制：
 
 ```text
 Permission 決定：
-  1. 看不看得到功能頁
-  2. 能不能觸發某類動作
+  1. 看不看得到功能頁，也就是 page entry permission
+  2. 能不能觸發某類動作，也就是 operation permission
 
 DB Scope 決定：
   3. 這個動作可以作用在哪些 DB connection
+
+Workflow Rules 決定：
+  4. 某類工單送出後，路由給哪些有效審批人與執行人
 ```
 
 ## 原則一：導航頁對應頁面可查看 / 可編輯
@@ -47,11 +50,17 @@ DB Scope 決定：
 
 這三個子頁都屬於同一個 RBAC workspace，因此共用 `users.read` / `users.write`。
 
-## 原則二：工作台能力用功能 permission，資料範圍用 DB Scope
+## 原則二：工作台入口與工作流動作分開
 
-`SQL Editor` 與 `Tickets` 不適合單純用 `read/write` 表達，因為它們不是 CRUD 頁面，而是工作流入口。
+`SQL Editor` 與 `Tickets` 不是 CRUD 頁面，但仍需要清楚分開「能進頁面」與「能做動作」。
 
-因此平台改用動作型 permission：
+頁面入口：
+
+- `tickets.read`：可進入 Tickets workspace，並查看自己被允許看到的工單
+- `sql_editor.read`：可進入 SQL Editor workspace
+- `scheduled_sql_reports.read`：可進入 Scheduled SQL Reports，查看報表與 run history
+
+工作流與操作能力：
 
 - `sql_editor.query`
 - `sql_editor.export`
@@ -61,23 +70,26 @@ DB Scope 決定：
 - `tickets.apply`
 - `tickets.review`
 - `tickets.execute`
+- `scheduled_sql_reports.write`
 
 其中：
 
-- 只要使用者有 `sql_editor.query`，就可以進入 SQL Editor
-- 只要使用者有 `tickets.apply`，就可以看到 Tickets 工作台並建立 DDL / DML / Redis / Query Access 工單
+- 有 `sql_editor.read` 才能進入 SQL Editor；有 `sql_editor.query` 才能實際查詢
+- 有 `tickets.read` 才能進入 Tickets workspace；有 `tickets.apply` 才能建立一般工單
 - 但可作用的連線清單，仍由使用者的 DB Scope 決定
 
 也就是「能做這類事」與「能對哪個 DB 做這件事」是兩個獨立軸線。
 
-## 為什麼 `tickets.apply` 包含 read
+## Tickets 的入口與建單權限
 
-目前 `tickets.apply` 被視為工單工作台的最小可用權限，理由很直接：
+Tickets workspace 入口使用 `tickets.read`，建單使用 `tickets.apply`。
 
-- 不存在只看工單但完全不能送工單的常見場景
-- 建單人需要回頭看自己提交的工單、審核結果與執行狀態
+`tickets.apply` 目前只代表能建立以下一般工單：
 
-所以 Tickets 頁的 route guard 不是 `tickets.read`，而是整個 ticket workspace 權限集合之一。
+- `ddl`
+- `dml`
+- `redis`
+- `query_access`
 
 同樣地，`query_access` 雖然是新的工單類型，但不是新的獨立頁面模組：
 
@@ -87,6 +99,33 @@ DB Scope 決定：
 - 審批 / 提前回收沿用 `tickets.review`
 
 這樣可以直接復用既有的 ticket list、ticket detail、notification、audit log 與 workflow。
+
+`sql_export` 與 `sensitive_query_access` 是 SQL Editor 情境工單，不應從 `POST /api/tickets` 直接建立：
+
+- `sql_export` 由 SQL Editor 的 export 流程建立，操作權限是 `sql_editor.export`
+- `sensitive_query_access` 由 SQL Editor 的敏感查詢申請流程建立，操作權限是 `sql_editor.sensitive_apply`
+
+## Workflow Rules 是路由，不是授權
+
+Workflow Rules 決定每一種 workflow 的候選審批人與執行人，例如 auth group 清單、DB connection scope 與 priority。它不取代 permission。
+
+有效審批人必須同時滿足：
+
+- 屬於 Workflow Rules 指定的 auth group
+- 使用者仍為 active
+- 具備該 workflow 需要的 review permission
+
+目前 review permission 對應如下：
+
+| Workflow | 必要審批權限 |
+|---|---|
+| DDL / DML / Redis / Query Access | `tickets.review` |
+| Normal SQL Export / Sensitive SQL Export | `sql_editor.export_review` |
+| Sensitive Query Access | `sql_editor.sensitive_review` |
+
+因此 DBA 即使有 `tickets.review`，如果沒有被 Workflow Rules 指定為某 workflow 的 reviewer，也不會成為該 workflow 的有效審批人。反過來說，只被 rule 指定但沒有對應 review permission，也不會成為有效審批人。
+
+Settings 儲存 Workflow Rules 時會檢查啟用 rule；若 rule 無法解析出有效審批人或執行人，會拒絕儲存並提示管理者修正。建立 ticket 後若 workflow resolution 仍遇到缺失，工單可進入 `needs_admin_attention`，由 admin 修正 rule 後重新解析。
 
 ## Resources 子頁的角色
 
@@ -124,6 +163,21 @@ DB Scope 決定：
 
 這些權限是 workflow 權限，而不是頁面權限。
 
+## Admin 與 All Permissions 規則
+
+平台有兩種「全權限」來源：
+
+- `users.is_protected = true` 的 admin user
+- `auth_groups.is_all_permissions = true` 的 admin auth group
+
+這兩種身分在產品語意上都代表「永有所有權限」。因此新增任何功能時，不應在 handler 或 service 裡自行手寫 `username == admin`、`group_key == admin` 或類似判斷，而必須走統一 helper：
+
+- 頁面 / API permission：使用 `GetEffectivePermissionKeys()`
+- DB Scope：使用 `GetEffectiveDBConnectionIDs()`
+- 額外 grant 類能力，例如 query access：在檢查 grant 前先使用 `HasAllPermissions()`
+
+這條規則的目的，是避免新功能新增了額外授權表後，admin user 或 admin auth group 反而被細粒度 grant 擋住。
+
 ## 工單入口模型
 
 Tickets 系統允許不同 ticket type 擁有不同入口，但最後都收斂到同一套工單管理模型。
@@ -159,12 +213,13 @@ Tickets 系統允許不同 ticket type 擁有不同入口，但最後都收斂�
 
 - 頁面權限與工作流權限分工清楚
 - SQL Editor / Tickets 能共用 DB Scope 機制
+- Workflow Rules 可以彈性路由不同 workflow 的審批人與執行人
 - RBAC 不需要為每個資料庫硬切角色
 
 代價是：
 
 - permission 名稱數量會增加
-- 新增功能時，需要同步更新前端導航、route guard、後端 middleware 與說明文件
+- 新增功能時，需要同步更新前端導航、route guard、後端 middleware、Workflow Rules 與說明文件
 
 ## 相關文件
 
@@ -172,3 +227,4 @@ Tickets 系統允許不同 ticket type 擁有不同入口，但最後都收斂�
 - [Users / RBAC](../reference/users-and-rbac.md)
 - [Tickets](../reference/tickets.md)
 - [SQL Editor](../reference/sql-editor.md)
+- [Workflow Rules](../reference/workflow-rules.md)

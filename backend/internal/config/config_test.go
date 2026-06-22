@@ -34,6 +34,95 @@ func TestLoadUsesDefaultPoolProfiles(t *testing.T) {
 	}
 }
 
+func TestLoadForcesSecureRefreshCookieInProduction(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("APP_ENV", "production")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !cfg.RefreshCookieSecure {
+		t.Fatal("RefreshCookieSecure = false, want true for production")
+	}
+}
+
+func TestLoadDoesNotAllowDisablingSecureRefreshCookieInProduction(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("REFRESH_COOKIE_SECURE", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !cfg.RefreshCookieSecure {
+		t.Fatal("RefreshCookieSecure = false, want true because production forces secure cookies")
+	}
+}
+
+func TestLoadAllowsForcingSecureRefreshCookieOutsideProduction(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("REFRESH_COOKIE_SECURE", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !cfg.RefreshCookieSecure {
+		t.Fatal("RefreshCookieSecure = false, want true when explicitly enabled")
+	}
+}
+
+func TestLoadDefaultsMFAEnforcementByEnvironment(t *testing.T) {
+	setRequiredEnv(t)
+
+	devCfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() development error = %v", err)
+	}
+	if devCfg.MFAEnforcement != "disabled" {
+		t.Fatalf("development MFAEnforcement = %q, want disabled", devCfg.MFAEnforcement)
+	}
+
+	setRequiredEnv(t)
+	t.Setenv("APP_ENV", "production")
+	prodCfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() production error = %v", err)
+	}
+	if prodCfg.MFAEnforcement != "required_for_admins" {
+		t.Fatalf("production MFAEnforcement = %q, want required_for_admins", prodCfg.MFAEnforcement)
+	}
+}
+
+func TestLoadAllowsMFAEnforcementOverride(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("MFA_ENFORCEMENT", "disabled")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.MFAEnforcement != "disabled" {
+		t.Fatalf("MFAEnforcement = %q, want disabled", cfg.MFAEnforcement)
+	}
+}
+
+func TestLoadRejectsInvalidMFAEnforcement(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("MFA_ENFORCEMENT", "optional")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want invalid MFA_ENFORCEMENT error")
+	}
+}
+
 func TestLoadOverridesPoolProfilesFromEnv(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("DB_POOL_QUERY_MAX_OPEN", "20")

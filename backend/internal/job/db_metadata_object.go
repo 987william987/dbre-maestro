@@ -17,6 +17,7 @@ const (
 	objectSchedulerPollInterval      = time.Minute
 	objectJobConnectionWorkers       = 4
 	postgresReservedDatabaseRDSAdmin = "rdsadmin"
+	objectJobName                    = "db_metadata_object"
 )
 
 func shouldSkipPostgresMetadataDatabase(name string) bool {
@@ -30,7 +31,6 @@ type DBMetadataObjectJob struct {
 	logger    *slog.Logger
 
 	mu        sync.Mutex
-	lastRunAt time.Time
 	isRunning bool
 }
 
@@ -55,7 +55,6 @@ func (j *DBMetadataObjectJob) Start(ctx context.Context) {
 	ticker := time.NewTicker(objectSchedulerPollInterval)
 	defer ticker.Stop()
 
-	j.runIfDue(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -76,17 +75,32 @@ func (j *DBMetadataObjectJob) runIfDue(ctx context.Context) {
 		return
 	}
 
-	intervalMinutes := settings.DBMetadataObjectSyncIntervalMins
-	if intervalMinutes <= 0 {
-		intervalMinutes = 60
+	schedule, err := parseCronSchedule(settings.DBMetadataObjectCron)
+	if err != nil {
+		j.logger.Warn("db metadata objects: invalid cron", "cron", settings.DBMetadataObjectCron, "err", err)
+		return
+	}
+	location, err := time.LoadLocation(strings.TrimSpace(settings.DBMetadataCronTimezone))
+	if err != nil {
+		j.logger.Warn("db metadata objects: invalid timezone", "timezone", settings.DBMetadataCronTimezone, "err", err)
+		return
+	}
+	now := time.Now().In(location)
+	if !schedule.matches(now) {
+		return
+	}
+	scheduledAt := scheduledMinute(now).UTC()
+	state, err := j.snapshots.GetJobRun(ctx, objectJobName)
+	if err != nil {
+		j.logger.Warn("db metadata objects: load job state failed", "err", err)
+		return
+	}
+	if state != nil && state.LastScheduledAt != nil && state.LastScheduledAt.Equal(scheduledAt) {
+		return
 	}
 
 	j.mu.Lock()
 	if j.isRunning {
-		j.mu.Unlock()
-		return
-	}
-	if !j.lastRunAt.IsZero() && time.Since(j.lastRunAt) < time.Duration(intervalMinutes)*time.Minute {
 		j.mu.Unlock()
 		return
 	}
@@ -96,13 +110,20 @@ func (j *DBMetadataObjectJob) runIfDue(ctx context.Context) {
 	defer func() {
 		j.mu.Lock()
 		j.isRunning = false
-		j.lastRunAt = time.Now()
 		j.mu.Unlock()
 	}()
 
+	if err := j.snapshots.MarkJobStarted(ctx, objectJobName, scheduledAt); err != nil {
+		j.logger.Warn("db metadata objects: mark start failed", "err", err)
+		return
+	}
 	if err := j.RunOnce(ctx, settings); err != nil {
+		_ = j.snapshots.MarkJobFinished(ctx, objectJobName, false, err.Error())
 		j.logger.Warn("db metadata objects: run failed", "err", err)
 		return
+	}
+	if err := j.snapshots.MarkJobFinished(ctx, objectJobName, true, ""); err != nil {
+		j.logger.Warn("db metadata objects: mark finish failed", "err", err)
 	}
 }
 
@@ -249,6 +270,7 @@ func (j *DBMetadataObjectJob) collectMySQLObjects(
 	rows, err := db.QueryContext(queryCtx, `SELECT
 		TABLE_SCHEMA,
 		TABLE_NAME,
+		IFNULL(TABLE_ROWS, 0) AS TABLE_ROWS,
 		IFNULL(DATA_LENGTH, 0) AS DATA_LENGTH,
 		IFNULL(INDEX_LENGTH, 0) AS INDEX_LENGTH
 	FROM information_schema.TABLES
@@ -264,9 +286,10 @@ func (j *DBMetadataObjectJob) collectMySQLObjects(
 	for rows.Next() {
 		var databaseName string
 		var tableName string
+		var rowCount int64
 		var dataSize int64
 		var indexSize int64
-		if err := rows.Scan(&databaseName, &tableName, &dataSize, &indexSize); err != nil {
+		if err := rows.Scan(&databaseName, &tableName, &rowCount, &dataSize, &indexSize); err != nil {
 			return nil, fmt.Errorf("scan mysql object row for connection %d: %w", conn.ID, err)
 		}
 		items = append(items, model.DBObjectSnapshot{
@@ -279,6 +302,7 @@ func (j *DBMetadataObjectJob) collectMySQLObjects(
 			DatabaseName:   databaseName,
 			SchemaName:     databaseName,
 			TableName:      tableName,
+			RowCount:       rowCount,
 			DataSizeBytes:  dataSize,
 			IndexSizeBytes: indexSize,
 		})
@@ -346,6 +370,7 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 		rows, err := targetDB.QueryContext(queryCtx, `SELECT
 			schemaname,
 			relname,
+			COALESCE(n_live_tup, 0) AS row_count,
 			pg_relation_size(format('%I.%I', schemaname, relname)::regclass) AS data_size_bytes,
 			pg_indexes_size(format('%I.%I', schemaname, relname)::regclass) AS index_size_bytes
 		FROM pg_stat_user_tables
@@ -359,9 +384,10 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 		for rows.Next() {
 			var schemaName string
 			var tableName string
+			var rowCount int64
 			var dataSize int64
 			var indexSize int64
-			if err := rows.Scan(&schemaName, &tableName, &dataSize, &indexSize); err != nil {
+			if err := rows.Scan(&schemaName, &tableName, &rowCount, &dataSize, &indexSize); err != nil {
 				rows.Close()
 				cancel()
 				_ = targetDB.Close()
@@ -377,6 +403,7 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 				DatabaseName:   databaseName,
 				SchemaName:     schemaName,
 				TableName:      tableName,
+				RowCount:       rowCount,
 				DataSizeBytes:  dataSize,
 				IndexSizeBytes: indexSize,
 			})

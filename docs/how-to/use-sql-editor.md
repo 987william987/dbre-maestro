@@ -5,7 +5,8 @@
 ## Prerequisites
 
 - 你已登入系統
-- 你擁有 `sql_editor.query`
+- 你擁有 `sql_editor.read`
+- 若要執行查詢，你還需要 `sql_editor.query`
 - 你的帳號已被授權至少一個 DB connection scope
 - 若要送 export / sensitive access，還需要對應動作 permission
 
@@ -13,7 +14,7 @@
 
 1. 打開 `SQL Editor` 頁面。
 
-   頁面路徑是 `/sql-editor`。如果你看不到這個頁面，先確認是否有 `sql_editor.query`。
+   頁面路徑是 `/sql-editor`。如果你看不到這個頁面，先確認是否有 `sql_editor.read`。
 
 2. 在左側資產樹選擇資料源與目標物件。
 
@@ -52,7 +53,7 @@
 
 7. 若查詢結果需要匯出，點擊匯出相關操作並建立 export 工單。
 
-   你需要 `sql_editor.export`。匯出不是立即下載，而是走工單審核流程。
+   你需要 `sql_editor.export`。匯出會建立工單；敏感導出永遠需要審批，普通導出是否需要審批由 Settings 控制。
 
 8. 若查詢命中敏感欄位且需要看原值，建立 sensitive access 工單。
 
@@ -74,6 +75,7 @@
 可能原因：
 
 - 沒有 `sql_editor.query`
+- 有 `sql_editor.read` 但沒有 `sql_editor.query`
 - 有權限，但沒有任何 DB Scope
 
 ### Query timeout

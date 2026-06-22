@@ -2,12 +2,14 @@ import { apiClient } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type {
   QueryAccessScopeMode,
+  QueryAccessEffect,
   QueryAccessTicketItem,
   Ticket,
   TicketDetail,
   TicketReviewResult,
   TicketStatus,
   TicketType,
+  WorkflowDashboardSummary,
 } from '@/shared/types/ticket'
 
 type TicketsResponse = {
@@ -39,6 +41,12 @@ type CreateTicketPayload = {
   items?: Array<{
     database_name: string
     table_name?: string | null
+  }>
+  rules?: Array<{
+    effect: QueryAccessEffect
+    connection_id: number
+    database_pattern: string
+    table_pattern: string
   }>
 }
 
@@ -98,7 +106,7 @@ export async function listTickets(params: ListTicketsParams = {}) {
   }
 }
 
-export async function getTicket(id: string) {
+export async function getTicket(id: string): Promise<TicketDetail> {
   return apiClient.get<TicketDetail>(`/tickets/${id}`).then((response) => ({
     ...response,
     executions: Array.isArray(response.executions) ? response.executions : [],
@@ -111,6 +119,7 @@ export async function getTicket(id: string) {
       reviewers: Array.isArray(response.workflow_participants?.reviewers) ? response.workflow_participants.reviewers : [],
       executors: Array.isArray(response.workflow_participants?.executors) ? response.workflow_participants.executors : [],
     },
+    workflow_resolution_trace: response.workflow_resolution_trace ?? null,
   }))
 }
 
@@ -125,28 +134,42 @@ export async function createTicket(payload: CreateTicketPayload) {
   return apiClient.post<Ticket>('/tickets', payload)
 }
 
-export async function approveTicket(id: number, comment?: string) {
-  return apiClient.post<Ticket>(`/tickets/${id}/approve`, {
+export async function approveTicket(ticketRef: string | number, comment?: string) {
+  return apiClient.post<Ticket>(`/tickets/${ticketRef}/approve`, {
     comment: comment?.trim() ? comment : null,
   })
 }
 
-export async function rejectTicket(id: number, reason: string) {
-  return apiClient.post<Ticket>(`/tickets/${id}/reject`, {
+export async function rejectTicket(ticketRef: string | number, reason: string) {
+  return apiClient.post<Ticket>(`/tickets/${ticketRef}/reject`, {
     reason,
   })
 }
 
-export async function withdrawTicket(id: number) {
-  return apiClient.post<Ticket>(`/tickets/${id}/withdraw`)
+export async function withdrawTicket(ticketRef: string | number) {
+  return apiClient.post<Ticket>(`/tickets/${ticketRef}/withdraw`)
 }
 
-export async function executeTicket(id: number) {
-  return apiClient.post<Ticket>(`/tickets/${id}/execute`)
+export async function executeTicket(ticketRef: string | number) {
+  return apiClient.post<Ticket>(`/tickets/${ticketRef}/execute`)
 }
 
-export async function revokeTicket(id: number) {
-  return apiClient.post<Ticket>(`/tickets/${id}/revoke`)
+export async function revokeTicket(ticketRef: string | number) {
+  return apiClient.post<Ticket>(`/tickets/${ticketRef}/revoke`)
+}
+
+export async function retryWorkflowResolution(ticketRef: string | number) {
+  return apiClient.post<{ ticket: Ticket }>(`/tickets/${ticketRef}/retry-workflow-resolution`)
+}
+
+export async function retryWorkflowResolutionBatch(ticketIDs?: number[]) {
+  return apiClient.post<{ results: Array<Record<string, unknown>> }>('/tickets/retry-workflow-resolution-batch', {
+    ticket_ids: ticketIDs ?? [],
+  })
+}
+
+export async function getWorkflowDashboardSummary() {
+  return apiClient.get<{ summary: WorkflowDashboardSummary }>('/tickets/workflow-dashboard-summary')
 }
 
 export async function listConnections() {

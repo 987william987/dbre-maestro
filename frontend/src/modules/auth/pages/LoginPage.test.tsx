@@ -20,7 +20,7 @@ describe('LoginPage', () => {
   })
 
   it('送出帳密後會呼叫 login 並導向首頁路由', async () => {
-    const login = vi.fn().mockResolvedValue(undefined)
+    const login = vi.fn().mockResolvedValue({ status: 'authenticated' })
 
     mockedUseAuth.mockReturnValue({
       status: 'anonymous',
@@ -28,6 +28,7 @@ describe('LoginPage', () => {
       user: null,
       accessToken: null,
       login,
+      verifyMFA: vi.fn(),
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
@@ -58,6 +59,7 @@ describe('LoginPage', () => {
       user: null,
       accessToken: null,
       login,
+      verifyMFA: vi.fn(),
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
@@ -82,6 +84,7 @@ describe('LoginPage', () => {
       user: null,
       accessToken: null,
       login: vi.fn(),
+      verifyMFA: vi.fn(),
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
@@ -95,5 +98,40 @@ describe('LoginPage', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Setup Wizard' })).not.toBeInTheDocument()
     })
+  })
+
+  it('高權限帳號首次登入時顯示 MFA 設定流程', async () => {
+    const login = vi.fn().mockResolvedValue({
+      status: 'mfa_required',
+      mfaToken: 'mfa-token',
+      setupRequired: true,
+      mfaSecret: 'JBSWY3DPEHPK3PXP',
+      qrDataURL: 'data:image/png;base64,test',
+    })
+
+    mockedUseAuth.mockReturnValue({
+      status: 'anonymous',
+      isAuthenticated: false,
+      user: null,
+      accessToken: null,
+      login,
+      verifyMFA: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. admin'), { target: { value: 'admin' } })
+    fireEvent.change(screen.getByPlaceholderText('Enter your password'), { target: { value: 'Password1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(await screen.findByText('Set up MFA')).toBeInTheDocument()
+    expect(screen.getByText('JBSWY3DPEHPK3PXP')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('000000')).toBeInTheDocument()
   })
 })

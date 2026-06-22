@@ -63,6 +63,55 @@ func TestSendToRecipientUsesOpenID(t *testing.T) {
 	}
 }
 
+func TestSendToRecipientRefreshesInvalidTenantToken(t *testing.T) {
+	var tokenRequests int
+	var messageRequests int
+
+	client := NewClient(Config{
+		Mode:      ModeApp,
+		AppID:     "cli_test",
+		AppSecret: "secret_test",
+	})
+	client.http = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch {
+			case req.URL.String() == "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal":
+				tokenRequests++
+				if tokenRequests == 1 {
+					return jsonResponse(http.StatusOK, `{"code":0,"tenant_access_token":"stale-token","expire":7200}`), nil
+				}
+				return jsonResponse(http.StatusOK, `{"code":0,"tenant_access_token":"fresh-token","expire":7200}`), nil
+			case strings.HasPrefix(req.URL.String(), "https://open.larksuite.com/open-apis/im/v1/messages"):
+				messageRequests++
+				if got := req.Header.Get("Authorization"); got == "Bearer stale-token" {
+					return jsonResponse(http.StatusOK, `{"code":99991663,"msg":"Invalid access token for authorization. Please make a request with token attached."}`), nil
+				}
+				if got := req.Header.Get("Authorization"); got != "Bearer fresh-token" {
+					t.Fatalf("Authorization = %q, want fresh token", got)
+				}
+				return jsonResponse(http.StatusOK, `{"code":0,"msg":"success"}`), nil
+			default:
+				t.Fatalf("unexpected request: %s", req.URL.String())
+				return nil, nil
+			}
+		}),
+	}
+
+	result := client.SendToRecipient(context.Background(), "ou_test_recipient", Message{Title: "ticket", Body: "hello"})
+	if result.Err != nil {
+		t.Fatalf("expected success after token refresh, got error: %v", result.Err)
+	}
+	if result.Attempts != 2 {
+		t.Fatalf("Attempts = %d, want 2", result.Attempts)
+	}
+	if tokenRequests != 2 {
+		t.Fatalf("tokenRequests = %d, want 2", tokenRequests)
+	}
+	if messageRequests != 2 {
+		t.Fatalf("messageRequests = %d, want 2", messageRequests)
+	}
+}
+
 func TestBuildTextWithTicketNoUsesNewLineLayout(t *testing.T) {
 	client := NewClient(Config{Mode: ModeWebhook, WebhookURL: "https://example.invalid"})
 

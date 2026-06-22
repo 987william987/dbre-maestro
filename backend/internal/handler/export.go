@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/masking"
@@ -30,12 +29,14 @@ type ExportHandler struct {
 	dbConns             *repository.DBConnectionRepo
 	users               *repository.UserRepo
 	audit               *repository.AuditRepo
+	settings            *repository.SettingsRepo
 	queryAccess         *queryaccess.Service
 	masking             *maskingRuntime
 	notifRepo           *repository.NotificationRepo
 	broker              *realtime.Broker
 	lark                *notification.Dispatcher
-	downloadRateLimiter *requestRateLimiter
+	notifications       *NotificationRouter
+	downloadRateLimiter requestRateLimiter
 	appBaseURL          string
 }
 
@@ -45,6 +46,7 @@ func NewExportHandler(
 	dbConns *repository.DBConnectionRepo,
 	users *repository.UserRepo,
 	audit *repository.AuditRepo,
+	settings *repository.SettingsRepo,
 	queryAccessRepo *repository.QueryAccessRepo,
 	maskingRules *repository.MaskingRuleRepo,
 	whitelist *repository.MaskingWhitelistRepo,
@@ -60,60 +62,25 @@ func NewExportHandler(
 		dbConns:             dbConns,
 		users:               users,
 		audit:               audit,
-		queryAccess:         queryaccess.NewService(queryAccessRepo),
+		settings:            settings,
+		queryAccess:         queryaccess.NewService(queryAccessRepo, users),
 		masking:             newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		notifRepo:           notifRepo,
 		broker:              broker,
 		lark:                lark,
+		notifications:       NewNotificationRouter(notifRepo, audit, broker, lark),
 		downloadRateLimiter: newRequestRateLimiter(3, time.Minute),
 		appBaseURL:          strings.TrimRight(appBaseURL, "/"),
 	}
 }
 
-type requestRateLimiter struct {
-	mu      sync.Mutex
-	limit   int
-	window  time.Duration
-	history map[string][]time.Time
-}
-
-func newRequestRateLimiter(limit int, window time.Duration) *requestRateLimiter {
-	return &requestRateLimiter{
-		limit:   limit,
-		window:  window,
-		history: make(map[string][]time.Time),
-	}
-}
-
-func (l *requestRateLimiter) Allow(key string, now time.Time) bool {
-	if l == nil || key == "" || l.limit <= 0 || l.window <= 0 {
-		return true
-	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	cutoff := now.Add(-l.window)
-	current := l.history[key]
-	filtered := current[:0]
-	for _, hitAt := range current {
-		if hitAt.After(cutoff) {
-			filtered = append(filtered, hitAt)
-		}
-	}
-	if len(filtered) >= l.limit {
-		l.history[key] = append([]time.Time(nil), filtered...)
-		return false
-	}
-
-	filtered = append(filtered, now)
-	l.history[key] = append([]time.Time(nil), filtered...)
-	return true
-}
-
 func buildTicketNotificationBody(ticket *model.Ticket, connName *string, currentStatus, nextAction, detail, link string) string {
 	parts := []string{
+		fmt.Sprintf("工單類型：%s", exportTicketTypeLabel(ticket.TicketType)),
 		fmt.Sprintf("目前狀態：%s", currentStatus),
+	}
+	if ticket.TicketType == model.TicketTypeSQLExport && ticket.ContainsSensitive != nil {
+		parts = append(parts, fmt.Sprintf("導出類型：%s", exportSensitivityLabel(*ticket.ContainsSensitive)))
 	}
 	if nextAction != "" {
 		parts = append(parts, fmt.Sprintf("待執行操作：%s", nextAction))
@@ -131,6 +98,32 @@ func buildTicketNotificationBody(ticket *model.Ticket, connName *string, current
 		parts = append(parts, fmt.Sprintf("工單連結：%s", strings.TrimSpace(link)))
 	}
 	return strings.Join(parts, "\n")
+}
+
+func exportSensitivityLabel(containsSensitive bool) string {
+	if containsSensitive {
+		return "敏感數據導出"
+	}
+	return "普通數據導出"
+}
+
+func exportTicketTypeLabel(ticketType model.TicketType) string {
+	switch ticketType {
+	case model.TicketTypeDDL:
+		return "DDL"
+	case model.TicketTypeDML:
+		return "DML"
+	case model.TicketTypeRedisCommand:
+		return "REDIS_COMMAND"
+	case model.TicketTypeQueryAccess:
+		return "QUERY_ACCESS"
+	case model.TicketTypeSQLExport:
+		return "SQL_EXPORT"
+	case model.TicketTypeSensitiveQueryAccess:
+		return "SENSITIVE_QUERY_ACCESS"
+	default:
+		return strings.ToUpper(string(ticketType))
+	}
 }
 
 func exportTicketStateLabel(status model.TicketStatus) string {
@@ -153,13 +146,15 @@ func exportTicketStateLabel(status model.TicketStatus) string {
 		return "已停止"
 	case model.TicketStatusInterrupted:
 		return "已中斷"
+	case model.TicketStatusNeedsAdminAttention:
+		return "需要管理員處理"
 	default:
 		return string(status)
 	}
 }
 
-func (h *ExportHandler) ticketLink(ticketID uint64) string {
-	path := fmt.Sprintf("/tickets/%d", ticketID)
+func (h *ExportHandler) ticketLink(ticketNo string) string {
+	path := fmt.Sprintf("/tickets/%s", ticketNo)
 	if h.appBaseURL == "" {
 		return path
 	}
@@ -179,44 +174,6 @@ func (h *ExportHandler) loadTicketNotificationContext(ctx context.Context, ticke
 		return nil
 	}
 	return &conn.Name
-}
-
-func (h *ExportHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body, ticketNo string) {
-	if h.lark == nil || len(userIDs) == 0 {
-		return
-	}
-	result := h.lark.NotifyUsers(ctx, userIDs, notification.Message{Title: title, Body: body, TicketNo: ticketNo})
-	if result.Err != nil {
-		h.audit.Log(ctx, repository.AuditEntry{
-			ActionType: "notification_failure",
-			Details:    map[string]any{"err": result.Err.Error(), "attempts": result.Attempts},
-		})
-	}
-}
-
-func (h *ExportHandler) sendInApp(ctx context.Context, userID uint64, notifType, title, body, resType string, resID uint64) {
-	if h.notifRepo == nil {
-		return
-	}
-	notificationID, err := h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
-	if err != nil {
-		return
-	}
-	publishNotificationCreated(ctx, h.broker, h.notifRepo, userID, notificationID)
-}
-
-func (h *ExportHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body, ticketNo string) {
-	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorExportReview})
-	if err != nil {
-		return
-	}
-	for _, reviewerID := range reviewerIDs {
-		if reviewerID == submitterID {
-			continue
-		}
-		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticketID)
-		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body, ticketNo)
-	}
 }
 
 // POST /exports
@@ -276,20 +233,106 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "analyze export query failed: "+err.Error())
 		return
 	}
+	containsSensitive := analysis.ContainsSensitive
 	title := fmt.Sprintf("SQL Export / %s", conn.Name)
-	description := fmt.Sprintf("由 SQL Editor 建立的導出申請。Sensitive=%t", analysis.ContainsSensitive)
+	description := fmt.Sprintf("由 SQL Editor 建立的導出申請。Sensitive=%t", containsSensitive)
 	ticket, err := h.tickets.CreateWithScopes(r.Context(), &model.Ticket{
-		Title:          title,
-		Description:    &description,
-		SQLContent:     req.SQLContent,
-		TicketType:     model.TicketTypeSQLExport,
-		DBConnectionID: &req.DBConnectionID,
-		DatabaseName:   nullableTrimmedString(req.DatabaseName),
-		SubmitterID:    userID,
+		Title:             title,
+		Description:       &description,
+		SQLContent:        req.SQLContent,
+		TicketType:        model.TicketTypeSQLExport,
+		ContainsSensitive: &containsSensitive,
+		DBConnectionID:    &req.DBConnectionID,
+		DatabaseName:      nullableTrimmedString(req.DatabaseName),
+		SubmitterID:       userID,
 	}, analysis.Scopes)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "create export ticket failed")
 		return
+	}
+	resolution, err := resolveTicketWorkflow(r.Context(), h.settings, h.users, ticket)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "resolve export workflow failed")
+		return
+	}
+	if err := h.tickets.SaveWorkflowSnapshot(r.Context(), ticket.ID, resolution); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "save export workflow snapshot failed")
+		return
+	}
+	if resolution == nil || resolution.ErrorCode != "" {
+		comment := "Workflow resolution failed."
+		if resolution != nil && resolution.ErrorMessage != "" {
+			comment = resolution.ErrorMessage
+		}
+		if _, err := h.tickets.UpdateStatus(r.Context(), ticket.ID, model.TicketStatusPendingReview, model.TicketStatusNeedsAdminAttention, nil, &comment, nil); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "mark export workflow attention failed")
+			return
+		}
+		if updated, err := h.tickets.GetByID(r.Context(), ticket.ID); err == nil && updated != nil {
+			ticket = updated
+		}
+		h.audit.Log(r.Context(), repository.AuditEntry{
+			ActorID:      &userID,
+			ActorName:    middleware.UsernameFromCtx(r.Context()),
+			ActionType:   "workflow_resolution_failed",
+			ResourceType: "ticket",
+			ResourceID:   &ticket.ID,
+			Details:      workflowAuditDetails(ticket, resolution),
+			IPAddress:    clientIP(r),
+		})
+		connName := h.loadTicketNotificationContext(r.Context(), ticket)
+		body := buildTicketNotificationBody(ticket, connName, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.TicketNo))
+		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
+			RecipientIDs: resolution.AdminUserIDs,
+			ActorID:      &userID,
+			NotifType:    "ticket_needs_admin_attention",
+			Title:        "工單需要管理員處理",
+			Body:         body,
+		})
+		publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
+		jsonCreated(w, map[string]any{
+			"ticket_id":          ticket.ID,
+			"ticket_no":          ticket.TicketNo,
+			"status":             string(ticket.Status),
+			"contains_sensitive": containsSensitive,
+			"scope_count":        len(analysis.Scopes),
+		})
+		return
+	}
+	if !resolution.ApprovalEnabled {
+		comment := "Auto-approved because workflow rule approval is disabled."
+		ok, err := h.tickets.UpdateStatus(r.Context(), ticket.ID, model.TicketStatusPendingReview, model.TicketStatusApproved, nil, &comment, nil)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "auto-approve export ticket failed")
+			return
+		}
+		if !ok {
+			jsonErr(w, http.StatusConflict, "ticket status changed concurrently")
+			return
+		}
+		updated, err := h.tickets.GetByID(r.Context(), ticket.ID)
+		if err != nil || updated == nil {
+			jsonErr(w, http.StatusInternalServerError, "load auto-approved export ticket failed")
+			return
+		}
+		ticket = updated
+		if _, err := h.ensureReadyExportRequest(r.Context(), ticket); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "create ready export failed")
+			return
+		}
+		h.audit.Log(r.Context(), repository.AuditEntry{
+			ActorID:      &userID,
+			ActorName:    middleware.UsernameFromCtx(r.Context()),
+			ActionType:   "ticket_auto_approve",
+			ResourceType: "ticket",
+			ResourceID:   &ticket.ID,
+			Details: map[string]any{
+				"ticket_type":        ticket.TicketType,
+				"contains_sensitive": containsSensitive,
+				"workflow_rule_id":   *resolution.RuleID,
+			},
+			IPAddress: clientIP(r),
+		})
 	}
 
 	h.audit.Log(r.Context(), repository.AuditEntry{
@@ -298,29 +341,96 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "ticket_submit",
 		ResourceType: "ticket",
 		ResourceID:   &ticket.ID,
-		Details:      map[string]any{"ticket_type": ticket.TicketType, "contains_sensitive": analysis.ContainsSensitive},
-		IPAddress:    clientIP(r),
+		Details: map[string]any{
+			"ticket_type":        ticket.TicketType,
+			"contains_sensitive": containsSensitive,
+		},
+		IPAddress: clientIP(r),
 	})
 	connName := h.loadTicketNotificationContext(r.Context(), ticket)
-	body := buildTicketNotificationBody(
-		ticket,
-		connName,
-		exportTicketStateLabel(ticket.Status),
-		"請審核是否通過此工單",
-		"提交人已送出工單，等待 reviewer 處理。",
-		h.ticketLink(ticket.ID),
-	)
-	h.sendInApp(r.Context(), userID, "ticket_submitted", fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo), body, "ticket", ticket.ID)
-	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
-	publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
+	if resolution.ApprovalEnabled {
+		body := buildTicketNotificationBody(
+			ticket,
+			connName,
+			exportTicketStateLabel(ticket.Status),
+			"請審核是否通過此工單",
+			"提交人已送出工單，等待 reviewer 處理。",
+			h.ticketLink(ticket.TicketNo),
+		)
+		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
+			RecipientIDs: []uint64{userID},
+			ActorID:      &userID,
+			NotifyActor:  true,
+			NotifType:    "ticket_submitted",
+			Title:        fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo),
+			Body:         body,
+		})
+		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
+			RecipientIDs: resolution.ApprovalUserIDs,
+			ActorID:      &userID,
+			NotifType:    "ticket_pending_review",
+			Title:        exportPendingReviewTitle(),
+			Body:         body,
+		})
+	} else {
+		body := buildTicketNotificationBody(
+			ticket,
+			connName,
+			exportTicketStateLabel(ticket.Status),
+			"普通導出已自動通過",
+			"此導出不包含敏感欄位，且目前設定不要求普通導出審批。",
+			h.ticketLink(ticket.TicketNo),
+		)
+		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
+			RecipientIDs: []uint64{userID},
+			ActorID:      &userID,
+			NotifyActor:  true,
+			NotifType:    "ticket_auto_approved",
+			Title:        fmt.Sprintf("普通匯出已建立：%s", ticket.TicketNo),
+			Body:         body,
+		})
+	}
+	publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":          ticket.ID,
 		"ticket_no":          ticket.TicketNo,
 		"status":             string(ticket.Status),
-		"contains_sensitive": analysis.ContainsSensitive,
+		"contains_sensitive": containsSensitive,
 		"scope_count":        len(analysis.Scopes),
 	})
+}
+
+func (h *ExportHandler) ensureReadyExportRequest(ctx context.Context, ticket *model.Ticket) (*model.ExportRequest, error) {
+	if ticket.DBConnectionID == nil {
+		return nil, fmt.Errorf("export ticket has no db connection")
+	}
+	existing, err := h.exports.GetByTicketID(ctx, ticket.ID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return existing, nil
+	}
+
+	exportTicketID := ticket.ID
+	id, token, err := h.exports.Create(ctx, &model.ExportRequest{
+		TicketID:       &exportTicketID,
+		RequesterID:    ticket.SubmitterID,
+		SQLContent:     ticket.SQLContent,
+		DBConnectionID: *ticket.DBConnectionID,
+	}, model.ExportStatusReady)
+	if err != nil {
+		return nil, err
+	}
+	req, err := h.exports.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if req != nil && req.DownloadToken == "" {
+		req.DownloadToken = token
+	}
+	return req, nil
 }
 
 // GET /exports
@@ -378,8 +488,15 @@ func (h *ExportHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	})
 
 	approveBody := fmt.Sprintf("Export request #%d was approved. Please download it before it expires.", id)
-	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已通過", approveBody, "")
-	h.sendInApp(r.Context(), req.RequesterID, "export_approved", "導出申請已通過", approveBody, "export", id)
+	h.notifications.Send(r.Context(), NotificationRoute{
+		RecipientIDs: []uint64{req.RequesterID},
+		NotifType:    "export_approved",
+		Title:        "導出申請已通過",
+		Body:         approveBody,
+		ResourceType: "export",
+		ResourceID:   id,
+		NotifyActor:  true,
+	})
 
 	jsonOK(w, map[string]any{
 		"id":           id,
@@ -423,8 +540,15 @@ func (h *ExportHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	})
 
 	rejectBody := fmt.Sprintf("Export request #%d was rejected.", id)
-	h.notifyLarkUsers(r.Context(), []uint64{req.RequesterID}, "導出申請已拒絕", rejectBody, "")
-	h.sendInApp(r.Context(), req.RequesterID, "export_rejected", "導出申請已拒絕", rejectBody, "export", id)
+	h.notifications.Send(r.Context(), NotificationRoute{
+		RecipientIDs: []uint64{req.RequesterID},
+		NotifType:    "export_rejected",
+		Title:        "導出申請已拒絕",
+		Body:         rejectBody,
+		ResourceType: "export",
+		ResourceID:   id,
+		NotifyActor:  true,
+	})
 
 	w.WriteHeader(http.StatusNoContent)
 }

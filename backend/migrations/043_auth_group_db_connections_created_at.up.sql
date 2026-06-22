@@ -1,0 +1,2 @@
+ALTER TABLE auth_group_db_connections
+    ADD COLUMN created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6);

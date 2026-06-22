@@ -1,11 +1,6 @@
 package handler
 
-import (
-	"context"
-
-	"github.com/dbre-maestro/maestro/internal/model"
-	"github.com/dbre-maestro/maestro/internal/repository"
-)
+import "github.com/dbre-maestro/maestro/internal/model"
 
 const (
 	permissionTicketReview          = "tickets.review"
@@ -13,15 +8,6 @@ const (
 	permissionSQLEditorExportReview = "sql_editor.export_review"
 	permissionSQLEditorSensitiveRev = "sql_editor.sensitive_review"
 )
-
-func ticketWorkspaceRealtimePermissions() []string {
-	return []string{
-		permissionTicketReview,
-		permissionTicketExecute,
-		permissionSQLEditorExportReview,
-		permissionSQLEditorSensitiveRev,
-	}
-}
 
 func reviewPermissionsForTicket(ticketType model.TicketType) []string {
 	switch ticketType {
@@ -34,9 +20,15 @@ func reviewPermissionsForTicket(ticketType model.TicketType) []string {
 	}
 }
 
-func listActiveUserIDsByPermissions(ctx context.Context, users *repository.UserRepo, permissionKeys []string) ([]uint64, error) {
-	if users == nil || len(permissionKeys) == 0 {
-		return []uint64{}, nil
+func reviewPermissionsForWorkflow(workflowType model.ApprovalWorkflowType) []string {
+	switch workflowType {
+	case model.ApprovalWorkflowSQLExportNormal, model.ApprovalWorkflowSQLExportSensitive:
+		return []string{permissionSQLEditorExportReview}
+	case model.ApprovalWorkflowSensitiveQueryAccess:
+		return []string{permissionSQLEditorSensitiveRev}
+	case model.ApprovalWorkflowDDL, model.ApprovalWorkflowDML, model.ApprovalWorkflowRedisCommand, model.ApprovalWorkflowQueryAccess:
+		return []string{permissionTicketReview}
+	default:
+		return nil
 	}
-	return users.ListActiveUserIDsByPermissionKeys(ctx, permissionKeys)
 }

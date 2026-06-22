@@ -13,6 +13,11 @@ var allowedTransitions = map[model.TicketStatus][]model.TicketStatus{
 		model.TicketStatusApproved,
 		model.TicketStatusRejected,
 		model.TicketStatusWithdrawn,
+		model.TicketStatusNeedsAdminAttention,
+	},
+	model.TicketStatusNeedsAdminAttention: {
+		model.TicketStatusPendingReview,
+		model.TicketStatusApproved,
 	},
 	model.TicketStatusApproved: {
 		model.TicketStatusPendingExecution,

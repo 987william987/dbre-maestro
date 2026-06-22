@@ -26,6 +26,7 @@
 | `MYSQL_ROOT_PASSWORD` | Meta DB root 密碼 | migration / 初始化用途 |
 | `DBRE_ENCRYPTION_KEY` | 加密 DB 連線密碼、敏感設定 | 32-byte AES key，base64 編碼 |
 | `JWT_SECRET` | JWT 簽章密鑰 | 任意高熵字串 |
+| `MFA_ENFORCEMENT` | MFA 強制策略 | `disabled` 或 `required_for_admins` |
 
 ## 可選項
 
@@ -35,6 +36,7 @@
 | `APP_BASE_URL` | 前端站台 base URL，供通知內工單連結使用 | `http://localhost:5173` |
 | `MIGRATION_DSN` | migration 專用 DSN | 若未指定，跟 app DSN 同邏輯 |
 | `LARK_WEBHOOK_URL` | Lark webhook fallback | 僅在未配置 Settings 內的 Lark App 時使用 |
+| `REFRESH_COOKIE_SECURE` | 非 production 環境強制 refresh cookie Secure | production 永遠強制 Secure |
 | `AWS_PROFILE` | DB metadata inventory 使用的 AWS profile | `default` |
 | `AWS_SDK_LOAD_CONFIG` | 啟用 shared config | Compose 預設 `1` |
 
@@ -142,13 +144,15 @@
 | `sql_editor_postgres_statement_timeout_ms` | `25000` | PostgreSQL session `statement_timeout` |
 | `lark_app_id` | `""` | Lark App ID |
 | `lark_app_secret` | `""` | Lark App Secret，加密保存且不會回填明文 |
+| `require_non_sensitive_export_review` | `true` | 普通 SQL Export 是否需要審批 |
 | `db_metadata_inventory_enabled` | `true` | 是否啟用 inventory scan |
 | `db_metadata_inventory_regions` | `[]` | AWS 掃描 region 清單 |
 | `db_metadata_inventory_engines` | `aurora-mysql, aurora-postgresql, redis` | engine 篩選 |
-| `db_metadata_inventory_sync_interval_minutes` | `5` | inventory scan 間隔 |
+| `db_metadata_inventory_cron` | `0 9 * * *` | inventory scan cron |
 | `db_metadata_object_enabled` | `true` | 是否啟用 object scan |
 | `db_metadata_object_enabled_connection_ids` | `[]` | object scan 目標連線 |
-| `db_metadata_object_sync_interval_minutes` | `60` | object scan 間隔 |
+| `db_metadata_object_cron` | `0 10 * * *` | object scan cron |
+| `db_metadata_cron_timezone` | `Asia/Taipei` | metadata scan cron 時區 |
 
 ## AWS 本機驗證
 
@@ -189,6 +193,7 @@ MYSQL_APP_PASSWORD=changeme_app
 MYSQL_ROOT_PASSWORD=changeme_root
 DBRE_ENCRYPTION_KEY=BASE64_32_BYTE_KEY
 JWT_SECRET=long-random-string
+MFA_ENFORCEMENT=disabled
 AWS_PROFILE=default
 
 DB_POOL_QUERY_MAX_OPEN=10
@@ -202,5 +207,7 @@ DB_POOL_SHADOW_VALIDATION_MAX_OPEN=1
 ## 相關文件
 
 - [平台 Settings](settings.md)
+- [登入安全與 Session](auth-and-sessions.md)
+- [AWS EKS 部署流程](../how-to/deploy-to-aws-eks.md)
 - [本機開發教學](../tutorials/getting-started-local-dev.md)
 - [架構總覽](../explanation/architecture-overview.md)

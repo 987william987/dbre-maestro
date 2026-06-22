@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -45,8 +46,37 @@ func timeoutExceptEventStream(timeout time.Duration) func(http.Handler) http.Han
 	}
 }
 
+func resetMFABreakGlass(ctx context.Context, users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, username string) error {
+	user, err := users.GetByUsername(ctx, username)
+	if err != nil {
+		return fmt.Errorf("load user: %w", err)
+	}
+	if user == nil {
+		return fmt.Errorf("user %q not found", username)
+	}
+	if err := users.ResetMFA(ctx, user.ID); err != nil {
+		return fmt.Errorf("reset mfa: %w", err)
+	}
+	if err := sessions.RevokeAllForUser(ctx, user.ID); err != nil {
+		return fmt.Errorf("revoke sessions: %w", err)
+	}
+	if audit != nil {
+		_ = audit.Log(ctx, repository.AuditEntry{
+			ActorName:    "break_glass",
+			ActionType:   "user_mfa_reset_break_glass",
+			ResourceType: "user",
+			ResourceID:   &user.ID,
+			Details: map[string]any{
+				"username": user.Username,
+			},
+		})
+	}
+	return nil
+}
+
 func main() {
 	migrateOnly := flag.Bool("migrate-only", false, "run migrations and exit")
+	resetMFAUsername := flag.String("reset-mfa-username", "", "break-glass reset MFA for a username and exit")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -107,9 +137,17 @@ func main() {
 		slog.Warn("crash recovery: marked tickets as interrupted", "count", n)
 	}
 
-	userRepo := repository.NewUserRepo(metaDB)
+	userRepo := repository.NewUserRepo(metaDB, cfg.EncryptionKey)
 	sessionRepo := repository.NewSessionRepo(metaDB)
 	auditRepo := repository.NewAuditRepo(metaDB)
+	if strings.TrimSpace(*resetMFAUsername) != "" {
+		if err := resetMFABreakGlass(context.Background(), userRepo, sessionRepo, auditRepo, strings.TrimSpace(*resetMFAUsername)); err != nil {
+			slog.Error("break-glass mfa reset failed", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("break-glass mfa reset complete", "username", strings.TrimSpace(*resetMFAUsername))
+		return
+	}
 	dbConnRepo := repository.NewDBConnectionRepo(metaDB, cfg.EncryptionKey)
 	exportRepo := repository.NewExportRepo(metaDB)
 	queryArtifactRepo := repository.NewQueryArtifactRepo(metaDB)
@@ -118,6 +156,7 @@ func main() {
 	authGroupRepo := repository.NewAuthGroupRepo(metaDB)
 	settingsRepo := repository.NewSettingsRepo(metaDB, cfg.EncryptionKey)
 	dbMetadataRepo := repository.NewDBMetadataRepo(metaDB)
+	scheduledReportRepo := repository.NewScheduledSQLReportRepo(metaDB)
 
 	larkDispatcher := notification.NewDispatcher(settingsRepo, userRepo, cfg.LarkWebhookURL)
 	if cfg.LarkWebhookURL != "" {
@@ -135,31 +174,35 @@ func main() {
 	}
 
 	healthH := handler.NewHealthHandler(metaDB)
-	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret)
-	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL)
+	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret, cfg.RefreshCookieSecure, cfg.MFAEnforcement)
+	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL)
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo)
-	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
+	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
 	auditH := handler.NewAuditHandler(auditRepo)
 	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
 	sqlReviewRuleH := handler.NewSQLReviewRuleHandler(sqlReviewRuleRepo, auditRepo)
 	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, settingsRepo, queryAccessRepo, maskingEngine, whitelistRepo, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
 	userH := handler.NewUserHandler(userRepo, authGroupRepo, sessionRepo, auditRepo, dbConnRepo)
+	queryAccessAdminH := handler.NewQueryAccessAdminHandler(queryAccessRepo, userRepo, authGroupRepo, auditRepo)
 	metadataH := handler.NewMetadataHandler(dbConnRepo, userRepo)
 	authGroupH := handler.NewAuthGroupHandler(authGroupRepo, userRepo, auditRepo)
 	notifH := handler.NewNotificationHandler(notifRepo)
 	eventStreamH := handler.NewEventStreamHandler(eventBroker)
 	whitelistH := handler.NewMaskingWhitelistHandler(dbConnRepo, whitelistRepo, auditRepo)
-	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, dbConnRepo, auditRepo)
+	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, authGroupRepo, dbConnRepo, auditRepo)
 	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo, settingsRepo)
+	scheduledReportH := handler.NewScheduledSQLReportHandler(scheduledReportRepo, dbConnRepo, userRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, ticketRepo, maskingEngine, auditRepo, larkDispatcher)
 	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
 	objectJob := job.NewDBMetadataObjectJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
 
 	// Background scheduler: poll every 30s for due scheduled tickets
 	go runScheduler(ticketRepo, dbConnRepo, ticketH)
+	go runScheduledSQLReportScheduler(scheduledReportH)
 	go inventoryJob.Start(context.Background())
 	go objectJob.Start(context.Background())
 
 	r := chi.NewRouter()
+	r.Use(middleware.SecurityHeaders(cfg.AppEnv == "production"))
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
 	r.Use(chimw.Logger)
@@ -173,6 +216,7 @@ func main() {
 		r.Post("/setup", authH.Setup)
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/login", authH.Login)
+			r.Post("/mfa/verify", authH.VerifyMFA)
 			r.Post("/refresh", authH.Refresh)
 			r.With(
 				middleware.RequireAuth(cfg.JWTSecret),
@@ -183,6 +227,18 @@ func main() {
 				middleware.RequireAuth(cfg.JWTSecret),
 				middleware.RequireActiveUser(userRepo),
 			).Post("/logout", authH.Logout)
+			r.With(
+				middleware.RequireAuth(cfg.JWTSecret),
+				middleware.RequireActiveUser(userRepo),
+			).Get("/sessions", authH.ListSessions)
+			r.With(
+				middleware.RequireAuth(cfg.JWTSecret),
+				middleware.RequireActiveUser(userRepo),
+			).Delete("/sessions", authH.RevokeSessions)
+			r.With(
+				middleware.RequireAuth(cfg.JWTSecret),
+				middleware.RequireActiveUser(userRepo),
+			).Delete("/sessions/{id}", authH.RevokeSession)
 		})
 
 		r.Route("/exports", func(r chi.Router) {
@@ -222,8 +278,15 @@ func main() {
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireUsersRead).Get("/", userH.List)
 			r.With(requireUsersRead).Get("/db-connections", userH.ListDBConnections)
+			r.With(requireUsersRead).Get("/query-access-rules", queryAccessAdminH.List)
+			r.With(requireUsersWrite).Post("/query-access-rules", queryAccessAdminH.Create)
+			r.With(requireUsersWrite).Post("/query-access-rules/{id}/revoke", queryAccessAdminH.Revoke)
 			r.With(requireUsersWrite).Post("/", userH.Create)
 			r.With(requireUsersRead).Get("/{id}", userH.Get)
+			r.With(requireUsersRead).Get("/{id}/sessions", userH.ListSessions)
+			r.With(requireUsersWrite).Delete("/{id}/sessions", userH.RevokeSessions)
+			r.With(requireUsersWrite).Delete("/{id}/sessions/{sessionID}", userH.RevokeSession)
+			r.With(requireUsersWrite).Post("/{id}/mfa/reset", userH.ResetMFA)
 			r.With(requireUsersWrite).Patch("/{id}", userH.Patch)
 			r.With(requireUsersWrite).Delete("/{id}", userH.Delete)
 			r.With(requireUsersWrite).Post("/{id}/memberships", userH.AddMembership)
@@ -240,6 +303,12 @@ func main() {
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSettingsRead).Get("/", settingsH.Get)
 			r.With(requireSettingsRead).Get("/db-connections", settingsH.ListDBConnections)
+			r.With(requireSettingsRead).Get("/approval-resolution", settingsH.ApprovalResolution)
+			r.With(requireSettingsRead).Get("/workflow-rules", settingsH.ListWorkflowRules)
+			r.With(requireSettingsWrite).Put("/workflow-rules", settingsH.ReplaceWorkflowRules)
+			r.With(requireSettingsRead).Post("/workflow-rules/preview", settingsH.PreviewWorkflowRule)
+			r.With(requireSettingsRead).Post("/workflow-rules/effective-preview", settingsH.PreviewWorkflowRules)
+			r.With(requireSettingsRead).Post("/workflow-rules/simulate", settingsH.SimulateWorkflowRule)
 			r.With(requireSettingsWrite).Patch("/", settingsH.Patch)
 		})
 
@@ -302,13 +371,26 @@ func main() {
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSQLEditorQuery).Get("/connections", queryH.ListConnections)
-			r.With(requireSQLEditorQuery).Get("/constraints", queryH.Constraints)
+			r.With(requireSQLEditorRead).Get("/constraints", queryH.Constraints)
 			r.With(requireSQLEditorQuery).Post("/", queryH.Execute)
 			r.With(requireSQLEditorSensitiveApply).Post("/sensitive-access", queryH.CreateSensitiveAccessTicket)
 			r.With(requireSQLEditorQuery).Get("/history", queryH.ListHistory)
 			r.With(requireSQLEditorQuery).Get("/saved-queries", queryH.ListSavedQueries)
 			r.With(requireSQLEditorQuery).Post("/saved-queries", queryH.CreateSavedQuery)
 			r.With(requireSQLEditorQuery).Delete("/saved-queries/{id}", queryH.DeleteSavedQuery)
+		})
+
+		r.Route("/scheduled-sql-reports", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireScheduledSQLReportsRead).Get("/", scheduledReportH.List)
+			r.With(requireScheduledSQLReportsRead).Get("/connections", scheduledReportH.ListConnections)
+			r.With(requireScheduledSQLReportsRead).Get("/recipients", scheduledReportH.ListRecipients)
+			r.With(requireScheduledSQLReportsWrite).Post("/", scheduledReportH.Create)
+			r.With(requireScheduledSQLReportsRead).Get("/{id}", scheduledReportH.Get)
+			r.With(requireScheduledSQLReportsWrite).Patch("/{id}", scheduledReportH.Update)
+			r.With(requireScheduledSQLReportsWrite).Delete("/{id}", scheduledReportH.Delete)
 		})
 
 		r.Route("/db-connections/{id}/metadata", func(r chi.Router) {
@@ -325,20 +407,23 @@ func main() {
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 
-			r.With(requireTicketsWorkspaceRead).Get("/", ticketH.List)
+			r.With(requireTicketsRead).Get("/", ticketH.List)
+			r.With(requireTicketsRead).Get("/workflow-dashboard-summary", ticketH.WorkflowDashboardSummary)
 			r.With(requireTicketsApply).Get("/connections", ticketH.ListConnections)
 			r.With(requireTicketsApply).Get("/connections/{id}/databases", ticketH.ListDatabases)
 			r.With(requireTicketsApply).Post("/review", ticketH.ReviewSQL)
+			r.With(requireSettingsWrite).Post("/retry-workflow-resolution-batch", ticketH.RetryWorkflowResolutionBatch)
 			r.With(requireTicketsApply).Post("/", ticketH.Create)
 
 			r.Route("/{id}", func(r chi.Router) {
-				r.With(requireTicketsWorkspaceRead).Get("/", ticketH.Get)
+				r.With(requireTicketsRead).Get("/", ticketH.Get)
 				r.With(requireTicketWorkflowReview).Post("/approve", ticketH.Approve)
 				r.With(requireTicketWorkflowReject).Post("/reject", ticketH.Reject)
 				r.With(requireTicketsApply).Post("/withdraw", ticketH.Withdraw)
 				r.With(requireSensitiveReview).Post("/revoke", ticketH.Revoke)
 				r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)
 				r.With(requireTicketsExecute).Post("/stop", ticketH.Stop)
+				r.With(requireSettingsWrite).Post("/retry-workflow-resolution", ticketH.RetryWorkflowResolution)
 			})
 		})
 
@@ -416,6 +501,16 @@ func runScheduler(tickets *repository.TicketRepo, dbConns *repository.DBConnecti
 	}
 }
 
+func runScheduledSQLReportScheduler(reportH *handler.ScheduledSQLReportHandler) {
+	ticker := time.NewTicker(scheduledSQLReportSchedulerPollInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		reportH.RunDueReports(context.Background())
+	}
+}
+
+const scheduledSQLReportSchedulerPollInterval = time.Minute
+
 func requireUsersRead(next http.Handler) http.Handler {
 	return middleware.RequirePermission("users.read", "users.write")(next)
 }
@@ -449,6 +544,15 @@ func requireSQLReviewWrite(next http.Handler) http.Handler {
 func requireSQLEditorQuery(next http.Handler) http.Handler {
 	return middleware.RequirePermission("sql_editor.query")(next)
 }
+func requireSQLEditorRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission("sql_editor.read")(next)
+}
+func requireScheduledSQLReportsRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission("scheduled_sql_reports.read", "scheduled_sql_reports.write")(next)
+}
+func requireScheduledSQLReportsWrite(next http.Handler) http.Handler {
+	return middleware.RequirePermission("scheduled_sql_reports.write")(next)
+}
 func requireSQLEditorSensitiveApply(next http.Handler) http.Handler {
 	return middleware.RequirePermission("sql_editor.sensitive_apply")(next)
 }
@@ -461,6 +565,9 @@ func requireSQLEditorExportReview(next http.Handler) http.Handler {
 func requireTicketsApply(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.apply")(next)
 }
+func requireTicketsRead(next http.Handler) http.Handler {
+	return middleware.RequirePermission("tickets.read")(next)
+}
 func requireTicketsReview(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.review")(next)
 }
@@ -468,15 +575,7 @@ func requireTicketsExecute(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.execute")(next)
 }
 func requireTicketsWorkspaceRead(next http.Handler) http.Handler {
-	return middleware.RequirePermission(
-		"tickets.apply",
-		"tickets.review",
-		"tickets.execute",
-		"sql_editor.export",
-		"sql_editor.export_review",
-		"sql_editor.sensitive_apply",
-		"sql_editor.sensitive_review",
-	)(next)
+	return middleware.RequirePermission("tickets.read")(next)
 }
 func requireTicketWorkflowReview(next http.Handler) http.Handler {
 	return middleware.RequirePermission("tickets.review", "sql_editor.export_review", "sql_editor.sensitive_review")(next)

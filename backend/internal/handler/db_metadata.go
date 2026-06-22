@@ -56,31 +56,33 @@ func (h *DBMetadataHandler) ListObjects(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	allowedConnectionIDs, err := h.allowedObjectSnapshotConnectionIDs(r.Context())
+	allowedConnections, err := h.allowedObjectSnapshotConnections(r.Context())
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "load object scan scope failed")
 		return
 	}
+	allowedConnectionIDs := connectionIDSet(allowedConnections)
 	items = filterObjectSnapshotsByConnectionIDs(items, allowedConnectionIDs)
 
 	jsonOK(w, map[string]any{
-		"items": items,
-		"total": len(items),
+		"items":              items,
+		"total":              len(items),
+		"connection_options": objectSnapshotConnectionOptions(allowedConnections),
 	})
 }
 
-func (h *DBMetadataHandler) allowedObjectSnapshotConnectionIDs(ctx context.Context) (map[uint64]struct{}, error) {
+func (h *DBMetadataHandler) allowedObjectSnapshotConnections(ctx context.Context) ([]model.DBConnection, error) {
 	settings, err := h.settings.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !settings.DBMetadataObjectEnabled {
-		return map[uint64]struct{}{}, nil
+		return []model.DBConnection{}, nil
 	}
 
 	selectedIDs := normalizeAllowedConnectionIDs(settings.DBMetadataObjectEnabledConnectionIDs)
 	if len(selectedIDs) == 0 {
-		return map[uint64]struct{}{}, nil
+		return []model.DBConnection{}, nil
 	}
 
 	connections, err := h.dbConns.List(ctx)
@@ -88,7 +90,7 @@ func (h *DBMetadataHandler) allowedObjectSnapshotConnectionIDs(ctx context.Conte
 		return nil, err
 	}
 
-	allowed := make(map[uint64]struct{}, len(selectedIDs))
+	allowed := make([]model.DBConnection, 0, len(selectedIDs))
 	for _, conn := range connections {
 		if _, ok := selectedIDs[conn.ID]; !ok {
 			continue
@@ -96,7 +98,7 @@ func (h *DBMetadataHandler) allowedObjectSnapshotConnectionIDs(ctx context.Conte
 		if !isSupportedObjectSnapshotDBType(conn.DBType) {
 			continue
 		}
-		allowed[conn.ID] = struct{}{}
+		allowed = append(allowed, conn)
 	}
 	return allowed, nil
 }
@@ -134,6 +136,32 @@ func filterObjectSnapshotsByConnectionIDs(items []model.DBObjectSnapshot, allowe
 		filtered = append(filtered, item)
 	}
 	return filtered
+}
+
+func connectionIDSet(connections []model.DBConnection) map[uint64]struct{} {
+	allowed := make(map[uint64]struct{}, len(connections))
+	for _, conn := range connections {
+		allowed[conn.ID] = struct{}{}
+	}
+	return allowed
+}
+
+type objectSnapshotConnectionOption struct {
+	ID     uint64 `json:"id"`
+	Name   string `json:"name"`
+	DBType string `json:"db_type"`
+}
+
+func objectSnapshotConnectionOptions(connections []model.DBConnection) []objectSnapshotConnectionOption {
+	options := make([]objectSnapshotConnectionOption, 0, len(connections))
+	for _, conn := range connections {
+		options = append(options, objectSnapshotConnectionOption{
+			ID:     conn.ID,
+			Name:   conn.Name,
+			DBType: conn.DBType,
+		})
+	}
+	return options
 }
 
 func mapInventorySnapshot(snapshot model.CloudDBInventorySnapshot, connections []model.DBConnection) (string, []string) {

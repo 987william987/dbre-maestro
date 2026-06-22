@@ -61,19 +61,20 @@ func writeQueryExecutionError(w http.ResponseWriter, err error, operation string
 }
 
 type QueryHandler struct {
-	dbConns      *repository.DBConnectionRepo
-	users        *repository.UserRepo
-	maskingRules *repository.MaskingRuleRepo
-	audit        *repository.AuditRepo
-	artifacts    *repository.QueryArtifactRepo
-	tickets      *repository.TicketRepo
-	settings     *repository.SettingsRepo
-	queryAccess  *queryaccess.Service
-	masking      *maskingRuntime
-	notifRepo    *repository.NotificationRepo
-	broker       *realtime.Broker
-	lark         *notification.Dispatcher
-	appBaseURL   string
+	dbConns       *repository.DBConnectionRepo
+	users         *repository.UserRepo
+	maskingRules  *repository.MaskingRuleRepo
+	audit         *repository.AuditRepo
+	artifacts     *repository.QueryArtifactRepo
+	tickets       *repository.TicketRepo
+	settings      *repository.SettingsRepo
+	queryAccess   *queryaccess.Service
+	masking       *maskingRuntime
+	notifRepo     *repository.NotificationRepo
+	broker        *realtime.Broker
+	lark          *notification.Dispatcher
+	notifications *NotificationRouter
+	appBaseURL    string
 }
 
 type sqlEditorConstraintsResponse struct {
@@ -107,19 +108,20 @@ func NewQueryHandler(
 	appBaseURL string,
 ) *QueryHandler {
 	return &QueryHandler{
-		dbConns:      dbConns,
-		users:        users,
-		maskingRules: maskingRules,
-		audit:        audit,
-		artifacts:    artifacts,
-		tickets:      tickets,
-		settings:     settings,
-		queryAccess:  queryaccess.NewService(queryAccessRepo),
-		masking:      newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
-		notifRepo:    notifRepo,
-		broker:       broker,
-		lark:         lark,
-		appBaseURL:   strings.TrimRight(appBaseURL, "/"),
+		dbConns:       dbConns,
+		users:         users,
+		maskingRules:  maskingRules,
+		audit:         audit,
+		artifacts:     artifacts,
+		tickets:       tickets,
+		settings:      settings,
+		queryAccess:   queryaccess.NewService(queryAccessRepo, users),
+		masking:       newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
+		notifRepo:     notifRepo,
+		broker:        broker,
+		lark:          lark,
+		notifications: NewNotificationRouter(notifRepo, audit, broker, lark),
+		appBaseURL:    strings.TrimRight(appBaseURL, "/"),
 	}
 }
 
@@ -156,53 +158,12 @@ func (h *QueryHandler) loadSQLEditorTimeoutSettings(ctx context.Context) sqlEdit
 	return settings
 }
 
-func (h *QueryHandler) sendInApp(ctx context.Context, userID uint64, notifType, title, body, resType string, resID uint64) {
-	if h.notifRepo == nil {
-		return
-	}
-	notificationID, err := h.notifRepo.Create(ctx, userID, notifType, title, body, &resType, &resID)
-	if err != nil {
-		return
-	}
-	publishNotificationCreated(ctx, h.broker, h.notifRepo, userID, notificationID)
-}
-
-func (h *QueryHandler) notifyLarkUsers(ctx context.Context, userIDs []uint64, title, body, ticketNo string) {
-	if h.lark == nil || len(userIDs) == 0 {
-		return
-	}
-	result := h.lark.NotifyUsers(ctx, userIDs, notification.Message{Title: title, Body: body, TicketNo: ticketNo})
-	if result.Err != nil {
-		h.audit.Log(ctx, repository.AuditEntry{
-			ActionType: "notification_failure",
-			Details: map[string]any{
-				"err":      result.Err.Error(),
-				"attempts": result.Attempts,
-			},
-		})
-	}
-}
-
-func (h *QueryHandler) ticketLink(ticketID uint64) string {
-	path := fmt.Sprintf("/tickets/%d", ticketID)
+func (h *QueryHandler) ticketLink(ticketNo string) string {
+	path := fmt.Sprintf("/tickets/%s", ticketNo)
 	if h.appBaseURL == "" {
 		return path
 	}
 	return h.appBaseURL + path
-}
-
-func (h *QueryHandler) notifyReviewers(ctx context.Context, ticketID, submitterID uint64, title, body, ticketNo string) {
-	reviewerIDs, err := listActiveUserIDsByPermissions(ctx, h.users, []string{permissionSQLEditorSensitiveRev})
-	if err != nil {
-		return
-	}
-	for _, reviewerID := range reviewerIDs {
-		if reviewerID == submitterID {
-			continue
-		}
-		h.sendInApp(ctx, reviewerID, "ticket_pending_review", title, body, "ticket", ticketID)
-		h.notifyLarkUsers(ctx, []uint64{reviewerID}, title, body, ticketNo)
-	}
 }
 
 // GET /query/connections
@@ -439,6 +400,53 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		jsonErr(w, http.StatusInternalServerError, "create sensitive access ticket failed")
 		return
 	}
+	resolution, err := resolveTicketWorkflow(r.Context(), h.settings, h.users, ticket)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "resolve sensitive access workflow failed")
+		return
+	}
+	if err := h.tickets.SaveWorkflowSnapshot(r.Context(), ticket.ID, resolution); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "save sensitive access workflow snapshot failed")
+		return
+	}
+	if resolution == nil || resolution.ErrorCode != "" {
+		comment := "Workflow resolution failed."
+		if resolution != nil && resolution.ErrorMessage != "" {
+			comment = resolution.ErrorMessage
+		}
+		if _, err := h.tickets.UpdateStatus(r.Context(), ticket.ID, model.TicketStatusPendingReview, model.TicketStatusNeedsAdminAttention, nil, &comment, nil); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "mark sensitive access workflow attention failed")
+			return
+		}
+		if updated, err := h.tickets.GetByID(r.Context(), ticket.ID); err == nil && updated != nil {
+			ticket = updated
+		}
+		h.audit.Log(r.Context(), repository.AuditEntry{
+			ActorID:      &userID,
+			ActorName:    middleware.UsernameFromCtx(r.Context()),
+			ActionType:   "workflow_resolution_failed",
+			ResourceType: "ticket",
+			ResourceID:   &ticket.ID,
+			Details:      workflowAuditDetails(ticket, resolution),
+			IPAddress:    clientIP(r),
+		})
+		body := buildTicketNotificationBody(ticket, &conn.Name, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.TicketNo))
+		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
+			RecipientIDs: resolution.AdminUserIDs,
+			ActorID:      &userID,
+			NotifType:    "ticket_needs_admin_attention",
+			Title:        "工單需要管理員處理",
+			Body:         body,
+		})
+		publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
+		jsonCreated(w, map[string]any{
+			"ticket_id":   ticket.ID,
+			"ticket_no":   ticket.TicketNo,
+			"status":      string(ticket.Status),
+			"scope_count": len(analysis.Scopes),
+		})
+		return
+	}
 
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
@@ -460,10 +468,16 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		exportTicketStateLabel(model.TicketStatusPendingReview),
 		"請審核是否通過此工單",
 		"提交人已送出工單，等待 reviewer 處理。",
-		h.ticketLink(ticket.ID),
+		h.ticketLink(ticket.TicketNo),
 	)
-	h.notifyReviewers(r.Context(), ticket.ID, userID, exportPendingReviewTitle(), body, ticket.TicketNo)
-	publishTicketRealtimeEvent(r.Context(), h.broker, h.users, ticket, &userID)
+	h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
+		RecipientIDs: resolution.ApprovalUserIDs,
+		ActorID:      &userID,
+		NotifType:    "ticket_pending_review",
+		Title:        exportPendingReviewTitle(),
+		Body:         body,
+	})
+	publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
 
 	jsonCreated(w, map[string]any{
 		"ticket_id":   ticket.ID,

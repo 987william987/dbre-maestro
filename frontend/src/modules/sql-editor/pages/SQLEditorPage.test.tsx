@@ -91,7 +91,7 @@ describe('SQLEditorPage', () => {
         username: 'admin',
         authGroups: ['admin'],
         authGroupDetails: [],
-        permissions: [],
+        permissions: ['sql_editor.read', 'sql_editor.query', 'sql_editor.export', 'sql_editor.sensitive_apply'],
         dbConnectionIds: [1],
         protected: false,
         isActive: true,
@@ -308,7 +308,7 @@ describe('SQLEditorPage', () => {
         username: 'admin',
         authGroups: ['admin'],
         authGroupDetails: [],
-        permissions: ['sql_editor.sensitive_apply'],
+        permissions: ['sql_editor.read', 'sql_editor.query', 'sql_editor.sensitive_apply'],
         dbConnectionIds: [1],
         protected: false,
         isActive: true,
@@ -526,7 +526,7 @@ describe('SQLEditorPage', () => {
         username: 'reader',
         authGroups: ['reader'],
         authGroupDetails: [],
-        permissions: ['sql_editor.query'],
+        permissions: ['sql_editor.read', 'sql_editor.query'],
         dbConnectionIds: [1],
         protected: false,
         isActive: true,
@@ -594,7 +594,7 @@ describe('SQLEditorPage', () => {
         username: 'no-resource',
         authGroups: ['reader'],
         authGroupDetails: [],
-        permissions: ['sql_editor.query'],
+        permissions: ['sql_editor.read', 'sql_editor.query'],
         dbConnectionIds: [],
         protected: false,
         isActive: true,
@@ -674,7 +674,7 @@ describe('SQLEditorPage', () => {
         username: 'admin',
         authGroups: ['admin'],
         authGroupDetails: [],
-        permissions: ['global.sensitive'],
+        permissions: ['sql_editor.read', 'sql_editor.query', 'global.sensitive'],
         dbConnectionIds: [1],
         protected: false,
         isActive: true,
@@ -756,6 +756,31 @@ describe('SQLEditorPage', () => {
 
     await waitFor(() => {
       expect(screen.getAllByText('query failed: syntax error')).toHaveLength(1)
+    })
+    expect(screen.getByRole('button', { name: 'Query Access' }).parentElement).not.toHaveAttribute('data-attention-active')
+  })
+
+  it('缺 Query Access 時只保留常駐 Query Access 入口', async () => {
+    mockedExecuteQuery.mockRejectedValue(new ApiError(422, 'You do not have query access to maestro.tickets', null))
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(screen.getByText('Run Query'))
+
+    expect(await screen.findByText('You do not have query access to maestro.tickets')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Query Access' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Apply Query Access' })).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Query Access' }).parentElement).toHaveAttribute('data-attention-active', 'true')
     })
   })
 
@@ -929,7 +954,7 @@ describe('SQLEditorPage', () => {
         username: 'admin',
         authGroups: ['admin'],
         authGroupDetails: [],
-        permissions: ['sql_editor.query'],
+        permissions: ['sql_editor.read', 'sql_editor.query'],
         dbConnectionIds: [2],
         protected: false,
         isActive: true,
@@ -1021,7 +1046,7 @@ describe('SQLEditorPage', () => {
         username: 'admin',
         authGroups: ['admin'],
         authGroupDetails: [],
-        permissions: ['sql_editor.query'],
+        permissions: ['sql_editor.read', 'sql_editor.query'],
         dbConnectionIds: [5],
         protected: false,
         isActive: true,
@@ -1090,7 +1115,7 @@ describe('SQLEditorPage', () => {
         username: 'admin',
         authGroups: ['admin'],
         authGroupDetails: [],
-        permissions: ['sql_editor.query'],
+        permissions: ['sql_editor.read', 'sql_editor.query'],
         dbConnectionIds: [4],
         protected: false,
         isActive: true,
@@ -1159,7 +1184,7 @@ describe('SQLEditorPage', () => {
         username: 'admin',
         authGroups: ['admin'],
         authGroupDetails: [],
-        permissions: ['sql_editor.query'],
+        permissions: ['sql_editor.read', 'sql_editor.query'],
         dbConnectionIds: [3],
         protected: false,
         isActive: true,
@@ -1233,7 +1258,7 @@ describe('SQLEditorPage', () => {
         username: 'admin',
         authGroups: ['admin'],
         authGroupDetails: [],
-        permissions: ['sql_editor.query'],
+        permissions: ['sql_editor.read', 'sql_editor.query'],
         dbConnectionIds: [6],
         protected: false,
         isActive: true,

@@ -42,6 +42,7 @@ function renderShell(initialEntry = '/tickets') {
             <Route path="/users" element={<div>users page</div>} />
             <Route path="/users/groups" element={<div>auth groups page</div>} />
             <Route path="/users/resources" element={<div>resources page</div>} />
+            <Route path="/users/query-access" element={<div>query access page</div>} />
             <Route path="/db-metadata/inventory" element={<div>inventory page</div>} />
             <Route path="/db-metadata/objects" element={<div>objects page</div>} />
           </Route>
@@ -81,6 +82,7 @@ describe('AppShell notifications', () => {
           body: '工單 T-101 等待審核',
           resource_type: 'ticket',
           resource_id: 101,
+          resource_ref: 'T-101',
           is_read: false,
           created_at: new Date().toISOString(),
         },
@@ -127,7 +129,7 @@ describe('AppShell notifications', () => {
         username: 'dba',
         authGroups: ['dba'],
         authGroupDetails: [],
-        permissions: ['tickets.apply', 'db_metadata.read'],
+        permissions: ['tickets.read', 'tickets.apply', 'db_metadata.read'],
         dbConnectionIds: [],
         protected: false,
         isActive: true,
@@ -157,7 +159,7 @@ describe('AppShell notifications', () => {
         username: 'operator',
         authGroups: ['operator'],
         authGroupDetails: [],
-        permissions: ['tickets.apply'],
+        permissions: ['tickets.read', 'tickets.apply'],
         dbConnectionIds: [],
         protected: false,
         isActive: true,
@@ -236,5 +238,32 @@ describe('AppShell notifications', () => {
     await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
     expect(screen.getByRole('button', { name: /Users/i })).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getAllByText('Resources').length).toBeGreaterThan(0)
+  })
+
+  it('users query access 路由會展開 Users 導航並顯示 Query Access', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'admin',
+        authGroups: ['admin'],
+        authGroupDetails: [],
+        permissions: ['users.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/users/query-access')
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: /Users/i })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getAllByText('Query Access').length).toBeGreaterThan(0)
   })
 })

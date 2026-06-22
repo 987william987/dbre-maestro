@@ -178,7 +178,7 @@ describe('NewTicketPage', () => {
         database_name: 'orders',
       })
     })
-    expect(mockedNavigate).toHaveBeenCalledWith('/tickets/99', { replace: true })
+    expect(mockedNavigate).toHaveBeenCalledWith('/tickets/T-099', { replace: true })
   })
 
   it('shows database index selector for redis tickets', async () => {

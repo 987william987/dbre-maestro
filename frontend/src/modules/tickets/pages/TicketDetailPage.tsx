@@ -1,12 +1,12 @@
 import { startTransition, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Check, ChevronDown, Download, Loader2, Play, Send, ShieldCheck, ShieldX, X } from 'lucide-react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
-import type { Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants } from '@/shared/types/ticket'
+import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants } from '@/shared/types/ticket'
 import type { AuditLog } from '@/shared/types/audit'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
@@ -14,7 +14,7 @@ import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useToast } from '@/shared/ui/ToastContext'
-import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, revokeTicket, withdrawTicket } from '@/modules/tickets/api'
+import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, retryWorkflowResolution, revokeTicket, withdrawTicket } from '@/modules/tickets/api'
 
 function DetailTable({
   headers,
@@ -61,6 +61,10 @@ function formatTicketActor(name: string | null | undefined, id: number | null | 
   return '—'
 }
 
+function formatIDList(ids: number[]) {
+  return ids.length > 0 ? ids.join(', ') : '—'
+}
+
 function formatExecutionDuration(startedAt?: string | null, completedAt?: string | null) {
   if (!startedAt || !completedAt) {
     return '—'
@@ -105,6 +109,68 @@ function formatTicketTypeLabel(ticketType: string) {
     default:
       return ticketType
   }
+}
+
+function formatQueryAccessDuration(minutes?: number | null) {
+  switch (minutes) {
+    case 1440:
+      return '1 day'
+    case 10080:
+      return '1 week'
+    case 43200:
+      return '1 month'
+    case 525600:
+      return '1 year'
+    case 1576800:
+      return '3 years'
+    default:
+      return minutes != null ? `${minutes} minutes` : '—'
+  }
+}
+
+function formatQueryAccessPattern(value?: string | null, allLabel = 'All') {
+  if (!value || value === '*') {
+    return allLabel
+  }
+  return value
+}
+
+function formatQueryAccessConnection(item: QueryAccessTicketItem) {
+  return item.db_connection_name || `Connection #${item.connection_id}`
+}
+
+function formatQueryAccessRuleSummary(item: QueryAccessTicketItem) {
+  const action = item.effect === 'deny' ? 'Exclude' : 'Grant'
+  const database = formatQueryAccessPattern(item.database_pattern || item.database_name, 'all databases')
+  const table = formatQueryAccessPattern(item.table_pattern || item.table_name, 'all tables')
+  return `${action} ${formatQueryAccessConnection(item)} / ${database} / ${table}`
+}
+
+function summarizeQueryAccessConnections(items: QueryAccessTicketItem[]) {
+  const names = Array.from(new Set(items.map(formatQueryAccessConnection)))
+  if (names.length === 0) {
+    return '—'
+  }
+  if (names.length === 1) {
+    return names[0]
+  }
+  return `${names[0]} + ${names.length - 1} more`
+}
+
+function summarizeQueryAccessScope(items: QueryAccessTicketItem[]) {
+  if (items.length === 0) {
+    return '—'
+  }
+  const allowInstanceCount = items.filter((item) => item.effect !== 'deny' && (item.database_pattern || item.database_name) === '*' && (item.table_pattern || item.table_name || '*') === '*').length
+  const denyCount = items.filter((item) => item.effect === 'deny').length
+  const parts = [`${items.length} rule${items.length > 1 ? 's' : ''}`]
+  if (allowInstanceCount > 0) {
+    parts.push(`${allowInstanceCount} instance-level grant${allowInstanceCount > 1 ? 's' : ''}`)
+  }
+  if (denyCount > 0) {
+    parts.push(`${denyCount} exclusion${denyCount > 1 ? 's' : ''}`)
+  }
+  return parts.join(', ')
 }
 
 function formatActivityAction(actionType: string) {
@@ -181,6 +247,7 @@ function extractRealtimeTicketID(detail: unknown): string | null {
       notification?: {
         resource_type?: string | null
         resource_id?: number | null
+        resource_ref?: string | null
       } | null
     } | null
   }
@@ -192,6 +259,9 @@ function extractRealtimeTicketID(detail: unknown): string | null {
 
   if (eventDetail.event === 'notification.created') {
     const notification = eventDetail.data?.notification
+    if (notification?.resource_type === 'ticket' && notification.resource_ref) {
+      return notification.resource_ref
+    }
     if (notification?.resource_type === 'ticket' && notification.resource_id != null) {
       return String(notification.resource_id)
     }
@@ -453,6 +523,7 @@ function WorkflowTimeline({
 
 export function TicketDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const { user } = useAuth()
   const { pushToast } = useToast()
   const [detail, setDetail] = useState<TicketDetail | null>(null)
@@ -460,7 +531,7 @@ export function TicketDetailPage() {
   const [error, setError] = useState('')
   const [comment, setComment] = useState('')
   const [reason, setReason] = useState('')
-  const [acting, setActing] = useState<'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke' | null>(null)
+  const [acting, setActing] = useState<'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke' | 'retry_workflow' | null>(null)
   const [confirmAction, setConfirmAction] = useState<'withdraw' | 'execute' | 'revoke' | null>(null)
   const [downloadingExport, setDownloadingExport] = useState(false)
   const [otherDetailsOpen, setOtherDetailsOpen] = useState(false)
@@ -487,6 +558,9 @@ export function TicketDetailPage() {
           startTransition(() => {
             setDetail(nextDetail)
           })
+          if (id !== nextDetail.ticket.ticket_no) {
+            navigate(`/tickets/${nextDetail.ticket.ticket_no}`, { replace: true })
+          }
         }
       } catch (loadError) {
         if (active) {
@@ -504,7 +578,7 @@ export function TicketDetailPage() {
     return () => {
       active = false
     }
-  }, [id])
+  }, [id, navigate])
 
   useEffect(() => {
     if (!id) {
@@ -513,7 +587,11 @@ export function TicketDetailPage() {
 
     const handleRealtime = (event: Event) => {
       const realtimeEvent = event as CustomEvent<unknown>
-      if (extractRealtimeTicketID(realtimeEvent.detail) !== id) {
+      const realtimeTicketRef = extractRealtimeTicketID(realtimeEvent.detail)
+      const currentTicket = detail?.ticket
+      const matchesTicket = realtimeTicketRef === id ||
+        (currentTicket != null && (realtimeTicketRef === String(currentTicket.id) || realtimeTicketRef === currentTicket.ticket_no))
+      if (!matchesTicket) {
         return
       }
       void reloadTicket({ background: true })
@@ -523,7 +601,7 @@ export function TicketDetailPage() {
     return () => {
       window.removeEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
     }
-  }, [id])
+  }, [detail?.ticket, id])
 
   useEffect(() => {
     const nextStatus = detail?.ticket.status ?? null
@@ -553,9 +631,13 @@ export function TicketDetailPage() {
   const canWithdraw = detail?.capabilities?.can_withdraw ?? false
   const canExecute = detail?.capabilities?.can_execute ?? false
   const canRevoke = detail?.capabilities?.can_revoke ?? false
+  const canRetryWorkflow = detail?.capabilities?.can_retry_workflow_resolution ?? false
   const exportDownloadURL = detail?.export_request?.download_url ?? null
   const statementResults = detail ? buildStatementResults(detail) : []
-  const hasActionPanel = canReview || canWithdraw || canExecute || canReject || canRevoke || (ticket?.ticket_type === 'sql_export' && detail?.capabilities.can_download_export && exportDownloadURL)
+  const queryAccessItems = detail?.query_access_items ?? []
+  const queryAccessConnections = summarizeQueryAccessConnections(queryAccessItems)
+  const queryAccessScopeSummary = summarizeQueryAccessScope(queryAccessItems)
+  const hasActionPanel = canReview || canWithdraw || canExecute || canReject || canRevoke || canRetryWorkflow || (ticket?.ticket_type === 'sql_export' && detail?.capabilities.can_download_export && exportDownloadURL)
   const shouldShowActionPanel = hasActionPanel && !['completed', 'failed', 'rejected', 'withdrawn', 'stopped', 'interrupted'].includes(ticket?.status ?? '')
   const showExecutionActions = (ticket?.status === 'approved' && canReject) ||
     (ticket?.status === 'pending_execution' && (canExecute || canReject)) ||
@@ -582,7 +664,7 @@ export function TicketDetailPage() {
   }
 
   async function runAction(
-    type: 'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke',
+    type: 'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke' | 'retry_workflow',
     action: () => Promise<Ticket | void>,
   ) {
     setActing(type)
@@ -684,8 +766,8 @@ export function TicketDetailPage() {
                 headers={['Ticket Type', 'DB Connection', 'Database', 'Submitter', 'Reviewer', 'Executor', 'Description', 'Current Status']}
                 rows={[[
                   formatTicketTypeLabel(ticket.ticket_type),
-                  ticket.db_connection_name || ticket.db_connection_id || 'Not specified',
-                  ticket.database_name || '—',
+                  ticket.ticket_type === 'query_access' ? queryAccessConnections : ticket.db_connection_name || ticket.db_connection_id || 'Not specified',
+                  ticket.ticket_type === 'query_access' ? queryAccessScopeSummary : ticket.database_name || '—',
                   formatTicketActor(ticket.submitter_name, ticket.submitter_id),
                   formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null),
                   formatTicketActor(ticket.executor_name, ticket.executor_id ?? null),
@@ -699,10 +781,10 @@ export function TicketDetailPage() {
               <div className="px-4 pb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Query Access Details</p>
                 <DetailTable
-                  headers={['Scope Mode', 'Approved Duration', 'Approved Until', 'Revoked At', 'Revoked By']}
+                  headers={['Rule Count', 'Access Duration', 'Approved Until', 'Revoked At', 'Revoked By']}
                   rows={[[
-                    detail.query_access_items[0]?.scope_mode ?? '—',
-                    ticket.approved_duration_minutes != null ? `${ticket.approved_duration_minutes} minutes` : '—',
+                    queryAccessItems.length,
+                    formatQueryAccessDuration(ticket.approved_duration_minutes),
                     ticket.approved_until ? formatDateTime(ticket.approved_until, true) : '—',
                     ticket.revoked_at ? formatDateTime(ticket.revoked_at, true) : '—',
                     formatTicketActor(ticket.revoked_by_name, ticket.revoked_by ?? null),
@@ -713,25 +795,60 @@ export function TicketDetailPage() {
                     <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
                       <tr>
                         <th className="px-4 py-3">ID</th>
-                        <th className="px-4 py-3">Scope</th>
+                        <th className="px-4 py-3">Effect</th>
+                        <th className="px-4 py-3">Connection</th>
                         <th className="px-4 py-3">Database</th>
                         <th className="px-4 py-3">Table</th>
+                        <th className="px-4 py-3">Summary</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border bg-white text-[13px] text-ink">
-                      {detail.query_access_items.map((item) => (
+                      {queryAccessItems.map((item) => (
                         <tr key={item.id}>
                           <td className="px-4 py-3 align-top">{item.id}</td>
-                          <td className="px-4 py-3 align-top">{item.scope_mode}</td>
-                          <td className="px-4 py-3 align-top">{item.database_name}</td>
-                          <td className="px-4 py-3 align-top">{item.table_name || '—'}</td>
+                          <td className="px-4 py-3 align-top">
+                            <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
+                              item.effect === 'deny' ? 'bg-red-50 text-danger' : 'bg-emerald-50 text-emerald-700'
+                            }`}>
+                              {item.effect === 'deny' ? 'Deny' : 'Allow'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 align-top">{formatQueryAccessConnection(item)}</td>
+                          <td className="px-4 py-3 align-top">{item.database_pattern === '*' ? 'All Databases' : item.database_pattern || item.database_name}</td>
+                          <td className="px-4 py-3 align-top">{item.table_pattern === '*' ? 'All Tables' : item.table_pattern || item.table_name || '—'}</td>
+                          <td className="px-4 py-3 align-top">{formatQueryAccessRuleSummary(item)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               </div>
-            ) : statementResults.length === 0 ? (
+            ) : null}
+
+            {detail.workflow_resolution_trace ? (
+              <div className="px-4 pb-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Workflow Resolution Trace</p>
+                <DetailTable
+                  headers={['Rule', 'Approval Required', 'Reviewers', 'Executors', 'Admins', 'Error', 'Resolved At']}
+                  rows={[[
+                    detail.workflow_resolution_trace.workflow_rule_name || detail.workflow_resolution_trace.workflow_rule_id || '—',
+                    detail.workflow_resolution_trace.approval_enabled ? 'Yes' : 'No',
+                    formatIDList(detail.workflow_resolution_trace.approval_user_ids),
+                    formatIDList(detail.workflow_resolution_trace.executor_user_ids),
+                    formatIDList(detail.workflow_resolution_trace.admin_user_ids),
+                    detail.workflow_resolution_trace.error_message || detail.workflow_resolution_trace.error_code || '—',
+                    formatDateTime(detail.workflow_resolution_trace.resolved_at, true),
+                  ]]}
+                />
+                {detail.workflow_resolution_trace.resolution_trace ? (
+                  <pre className="mt-3 max-h-64 overflow-auto rounded-xl border border-border bg-panel-soft p-3 font-mono text-[12px] leading-6 text-ink">
+                    {JSON.stringify(detail.workflow_resolution_trace.resolution_trace, null, 2)}
+                  </pre>
+                ) : null}
+              </div>
+            ) : null}
+
+            {ticket.ticket_type === 'query_access' ? null : statementResults.length === 0 ? (
               <div className="px-4 pb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">SQL Content</p>
                 <pre className="mt-2 overflow-x-auto rounded-xl border border-border bg-panel-soft p-4 font-mono text-[13px] leading-7 text-ink">
@@ -802,7 +919,7 @@ export function TicketDetailPage() {
                           <button
                             type="button"
                             disabled={acting !== null}
-                            onClick={() => void runAction('approve', () => approveTicket(ticket.id, comment))}
+                            onClick={() => void runAction('approve', () => approveTicket(ticket.ticket_no, comment))}
                             className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {acting === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
@@ -821,7 +938,7 @@ export function TicketDetailPage() {
                           <button
                             type="button"
                             disabled={acting !== null || reason.trim() === ''}
-                            onClick={() => void runAction('reject', () => rejectTicket(ticket.id, reason.trim()))}
+                            onClick={() => void runAction('reject', () => rejectTicket(ticket.ticket_no, reason.trim()))}
                             className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
@@ -848,6 +965,20 @@ export function TicketDetailPage() {
                       >
                         {acting === 'withdraw' ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
                         Withdraw Ticket
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {canRetryWorkflow && ticket.status === 'needs_admin_attention' ? (
+                    <div className="p-0">
+                      <button
+                        type="button"
+                        disabled={acting !== null}
+                        onClick={() => void runAction('retry_workflow', () => retryWorkflowResolution(ticket.ticket_no).then((response) => response.ticket))}
+                        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 text-[13px] font-bold text-orange-700 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {acting === 'retry_workflow' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                        Retry Workflow Resolution
                       </button>
                     </div>
                   ) : null}
@@ -883,7 +1014,7 @@ export function TicketDetailPage() {
                               <button
                                 type="button"
                                 disabled={acting !== null || reason.trim() === ''}
-                                onClick={() => void runAction('reject', () => rejectTicket(ticket.id, reason.trim()))}
+                                onClick={() => void runAction('reject', () => rejectTicket(ticket.ticket_no, reason.trim()))}
                                 className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
@@ -1001,13 +1132,13 @@ export function TicketDetailPage() {
         onConfirm={() => {
           if (!ticket) return
           if (confirmAction === 'withdraw') {
-            void runAction('withdraw', () => withdrawTicket(ticket.id)).finally(() => setConfirmAction(null))
+            void runAction('withdraw', () => withdrawTicket(ticket.ticket_no)).finally(() => setConfirmAction(null))
           }
           if (confirmAction === 'execute') {
-            void runAction('execute', () => executeTicket(ticket.id)).finally(() => setConfirmAction(null))
+            void runAction('execute', () => executeTicket(ticket.ticket_no)).finally(() => setConfirmAction(null))
           }
           if (confirmAction === 'revoke') {
-            void runAction('revoke', () => revokeTicket(ticket.id)).finally(() => setConfirmAction(null))
+            void runAction('revoke', () => revokeTicket(ticket.ticket_no)).finally(() => setConfirmAction(null))
           }
         }}
       />

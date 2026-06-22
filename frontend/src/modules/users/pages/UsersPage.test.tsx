@@ -11,6 +11,13 @@ vi.mock('@/modules/users/api', () => ({
   patchUser: vi.fn(),
   deleteUser: vi.fn(),
   listUserDBConnections: vi.fn(),
+  listUserSessions: vi.fn(),
+  revokeUserSession: vi.fn(),
+  revokeUserSessions: vi.fn(),
+  resetUserMFA: vi.fn(),
+  listQueryAccessRules: vi.fn(),
+  createQueryAccessRule: vi.fn(),
+  revokeQueryAccessRule: vi.fn(),
 }))
 
 vi.mock('@/modules/db-connections/api', () => ({
@@ -27,7 +34,7 @@ vi.mock('@/modules/auth-groups/api', () => ({
 
 import { createAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
 import { getDBConnectionBindings } from '@/modules/db-connections/api'
-import { createUser, deleteUser, getUser, listUserDBConnections, listUsers, patchUser } from '@/modules/users/api'
+import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccessRules, listUserDBConnections, listUserSessions, listUsers, patchUser, resetUserMFA, revokeQueryAccessRule, revokeUserSession, revokeUserSessions } from '@/modules/users/api'
 
 const mockedListUsers = vi.mocked(listUsers)
 const mockedGetUser = vi.mocked(getUser)
@@ -35,6 +42,13 @@ const mockedCreateUser = vi.mocked(createUser)
 const mockedPatchUser = vi.mocked(patchUser)
 const mockedDeleteUser = vi.mocked(deleteUser)
 const mockedListUserDBConnections = vi.mocked(listUserDBConnections)
+const mockedListUserSessions = vi.mocked(listUserSessions)
+const mockedRevokeUserSession = vi.mocked(revokeUserSession)
+const mockedRevokeUserSessions = vi.mocked(revokeUserSessions)
+const mockedResetUserMFA = vi.mocked(resetUserMFA)
+const mockedListQueryAccessRules = vi.mocked(listQueryAccessRules)
+const mockedCreateQueryAccessRule = vi.mocked(createQueryAccessRule)
+const mockedRevokeQueryAccessRule = vi.mocked(revokeQueryAccessRule)
 const mockedListAuthGroups = vi.mocked(listAuthGroups)
 const mockedGetAuthGroup = vi.mocked(getAuthGroup)
 const mockedCreateAuthGroup = vi.mocked(createAuthGroup)
@@ -85,6 +99,30 @@ describe('UsersPage', () => {
     vi.restoreAllMocks()
     mockedListUsers.mockResolvedValue({ users: [] })
     mockedListUserDBConnections.mockResolvedValue({ connections: [] })
+    mockedListUserSessions.mockResolvedValue({ sessions: [] })
+    mockedRevokeUserSession.mockResolvedValue(undefined)
+    mockedRevokeUserSessions.mockResolvedValue(undefined)
+    mockedResetUserMFA.mockResolvedValue(undefined)
+    mockedListQueryAccessRules.mockResolvedValue({ rules: [] })
+    mockedCreateQueryAccessRule.mockResolvedValue({
+      id: 1,
+      subject_type: 'user',
+      subject_id: 1,
+      effect: 'allow',
+      connection_id: 1,
+      database_pattern: '*',
+      table_pattern: '*',
+      granted_via: 'manual',
+      source_ticket_id: null,
+      expires_at: '2026-06-11T00:00:00Z',
+      revoked_at: null,
+      revoked_by: null,
+      created_by: 1,
+      updated_by: 1,
+      created_at: '2026-06-10T00:00:00Z',
+      updated_at: '2026-06-10T00:00:00Z',
+    })
+    mockedRevokeQueryAccessRule.mockResolvedValue({ ok: true })
     mockedGetDBConnectionBindings.mockResolvedValue({
       db_connection_id: 1,
       direct_users: [],
@@ -433,6 +471,90 @@ describe('UsersPage', () => {
         db_connection_ids: [],
       })
     })
+  })
+
+  it('auth group 編輯新增 DB scope 後會送出 patch', async () => {
+    mockedListUserDBConnections.mockResolvedValue({
+      connections: [
+        {
+          id: 11,
+          name: 'analytics',
+          db_type: 'mysql',
+          host: 'db.internal',
+          port: 3306,
+          username: 'readonly',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          created_by: 1,
+          created_at: '2026-06-10T00:00:00Z',
+          updated_at: '2026-06-10T00:00:00Z',
+        },
+      ],
+    })
+    mockedGetAuthGroup.mockImplementation(async (group) => ({
+      id: 4,
+      name: String(group),
+      label: 'Developer',
+      description: '',
+      system_defined: true,
+      protected: false,
+      users: [],
+      permissions: [],
+      db_connection_ids: [],
+      created_at: '2026-06-10T00:00:00Z',
+      updated_at: '2026-06-11T00:00:00Z',
+    }))
+
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Auth Groups' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Manage' }))[0])
+    fireEvent.change(await screen.findByPlaceholderText('Search connection name, type, database'), { target: { value: 'analytics' } })
+    const addButtons = screen.getAllByRole('button', { name: 'Add' })
+    fireEvent.click(addButtons[addButtons.length - 1])
+    fireEvent.click(screen.getByRole('button', { name: 'Save Auth Group' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Save Changes' }))[0])
+
+    await waitFor(() => {
+      expect(mockedPatchAuthGroup).toHaveBeenCalledWith('developer', {
+        name: 'Developer',
+        description: '',
+        user_ids: [],
+        permissions: [],
+        db_connection_ids: [11],
+      })
+    })
+  })
+
+  it('auth group 儲存失敗時會關閉確認彈窗並顯示錯誤', async () => {
+    mockedPatchAuthGroup.mockRejectedValue(new Error('network down'))
+    mockedGetAuthGroup.mockImplementation(async (group) => ({
+      id: 4,
+      name: String(group),
+      label: 'Developer',
+      description: '',
+      system_defined: true,
+      protected: false,
+      users: [],
+      permissions: ['tickets.apply'],
+      db_connection_ids: [],
+      created_at: '2026-06-10T00:00:00Z',
+      updated_at: '2026-06-11T00:00:00Z',
+    }))
+
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Auth Groups' }))
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Manage' }))[0])
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Tickets Apply' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Auth Group' }))
+    expect(await screen.findByText('Confirm Save Auth Group Changes')).toBeInTheDocument()
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Save Changes' }))[0])
+
+    await waitFor(() => {
+      expect(screen.queryByText('Confirm Save Auth Group Changes')).not.toBeInTheDocument()
+    })
+    expect(screen.getAllByText('Failed to update the auth group.')).toHaveLength(2)
   })
 
   it('使用者刪除會先標記，最後儲存才真的送出', async () => {

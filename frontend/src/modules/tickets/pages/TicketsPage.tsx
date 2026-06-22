@@ -30,6 +30,7 @@ const STATUS_OPTIONS: Array<{ value: '' | TicketStatus; label: string }> = [
   { value: 'failed', label: 'Failed' },
   { value: 'stopped', label: 'Stopped' },
   { value: 'interrupted', label: 'Interrupted' },
+  { value: 'needs_admin_attention', label: 'Needs Admin Attention' },
 ]
 
 const TYPE_OPTIONS: Array<{ value: '' | TicketType; label: string }> = [
@@ -258,7 +259,7 @@ export function TicketsPage() {
                   >
                     <td className="px-4 py-3.5 align-top">
                       <Link
-                        to={`/tickets/${ticket.id}`}
+                        to={`/tickets/${ticket.ticket_no}`}
                         className="inline-flex rounded-md border border-transparent px-1.5 py-1 font-mono text-[12px] font-semibold text-accent transition hover:border-accent/15 hover:bg-accent-soft hover:text-blue-700"
                       >
                         {ticket.ticket_no}

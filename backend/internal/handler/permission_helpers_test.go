@@ -43,22 +43,3 @@ func TestReviewPermissionsForTicket(t *testing.T) {
 		})
 	}
 }
-
-func TestTicketWorkspaceRealtimePermissions(t *testing.T) {
-	got := ticketWorkspaceRealtimePermissions()
-	want := []string{
-		permissionTicketReview,
-		permissionTicketExecute,
-		permissionSQLEditorExportReview,
-		permissionSQLEditorSensitiveRev,
-	}
-
-	if len(got) != len(want) {
-		t.Fatalf("permission count = %d, want %d", len(got), len(want))
-	}
-	for index := range got {
-		if got[index] != want[index] {
-			t.Fatalf("permission[%d] = %q, want %q", index, got[index], want[index])
-		}
-	}
-}

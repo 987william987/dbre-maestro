@@ -168,6 +168,7 @@ describe('DBConnectionsPage', () => {
     selectOption('DB Type', 'Redis')
     fireEvent.change(screen.getByLabelText('Readonly Host'), { target: { value: 'redis.internal' } })
     fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
+    fireEvent.change(screen.getByLabelText('Readwrite Password'), { target: { value: 'write-secret' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create Connection' }))
 
     await waitFor(() => expect(mockedCreateDBConnection).toHaveBeenCalledWith({
@@ -183,7 +184,10 @@ describe('DBConnectionsPage', () => {
       username: '',
       password: 'secret',
       ssl_mode: 'prefer',
-      credentials: [{ credential_role: 'readonly', username: '', password: 'secret' }],
+      credentials: [
+        { credential_role: 'readonly', username: '', password: 'secret' },
+        { credential_role: 'readwrite', username: '', password: 'write-secret' },
+      ],
     }))
   })
 

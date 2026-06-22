@@ -52,12 +52,43 @@ func (r *SessionRepo) GetByTokenHash(ctx context.Context, hash string) (*model.S
 	return &s, err
 }
 
+func (r *SessionRepo) ListForUser(ctx context.Context, userID uint64) ([]model.Session, error) {
+	return r.ListForUserLimit(ctx, userID, 0)
+}
+
+func (r *SessionRepo) ListForUserLimit(ctx context.Context, userID uint64, limit int) ([]model.Session, error) {
+	var sessions []model.Session
+	query := `SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC`
+	args := []any{userID}
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	err := r.db.SelectContext(ctx, &sessions, query, args...)
+	return sessions, err
+}
+
 func (r *SessionRepo) Revoke(ctx context.Context, tokenHash string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL`,
 		timeutil.NowUTC(), tokenHash,
 	)
 	return err
+}
+
+func (r *SessionRepo) RevokeByIDForUser(ctx context.Context, sessionID, userID uint64) (bool, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL`,
+		timeutil.NowUTC(), sessionID, userID,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 func (r *SessionRepo) RevokeAllForUser(ctx context.Context, userID uint64) error {

@@ -5,16 +5,17 @@ import "time"
 type TicketStatus string
 
 const (
-	TicketStatusPendingReview    TicketStatus = "pending_review"
-	TicketStatusApproved         TicketStatus = "approved"
-	TicketStatusRejected         TicketStatus = "rejected"
-	TicketStatusWithdrawn        TicketStatus = "withdrawn"
-	TicketStatusPendingExecution TicketStatus = "pending_execution"
-	TicketStatusExecuting        TicketStatus = "executing"
-	TicketStatusCompleted        TicketStatus = "completed"
-	TicketStatusFailed           TicketStatus = "failed"
-	TicketStatusStopped          TicketStatus = "stopped"
-	TicketStatusInterrupted      TicketStatus = "interrupted"
+	TicketStatusPendingReview       TicketStatus = "pending_review"
+	TicketStatusApproved            TicketStatus = "approved"
+	TicketStatusRejected            TicketStatus = "rejected"
+	TicketStatusWithdrawn           TicketStatus = "withdrawn"
+	TicketStatusPendingExecution    TicketStatus = "pending_execution"
+	TicketStatusExecuting           TicketStatus = "executing"
+	TicketStatusCompleted           TicketStatus = "completed"
+	TicketStatusFailed              TicketStatus = "failed"
+	TicketStatusStopped             TicketStatus = "stopped"
+	TicketStatusInterrupted         TicketStatus = "interrupted"
+	TicketStatusNeedsAdminAttention TicketStatus = "needs_admin_attention"
 )
 
 type TicketType string
@@ -35,6 +36,7 @@ type Ticket struct {
 	Description             *string      `db:"description"      json:"description,omitempty"`
 	SQLContent              string       `db:"sql_content"      json:"sql_content"`
 	TicketType              TicketType   `db:"ticket_type"      json:"ticket_type"`
+	ContainsSensitive       *bool        `db:"contains_sensitive" json:"contains_sensitive,omitempty"`
 	DBConnectionID          *uint64      `db:"db_connection_id" json:"db_connection_id,omitempty"`
 	DatabaseName            *string      `db:"database_name"    json:"database_name,omitempty"`
 	Status                  TicketStatus `db:"status"           json:"status"`
@@ -94,4 +96,20 @@ type TicketReviewResult struct {
 	Status           string    `db:"status"            json:"status"`
 	Message          *string   `db:"message"           json:"message,omitempty"`
 	CreatedAt        time.Time `db:"created_at"        json:"created_at"`
+}
+
+type TicketWorkflowSnapshot struct {
+	TicketID        uint64    `db:"ticket_id" json:"ticket_id"`
+	RuleID          *uint64   `db:"workflow_rule_id" json:"workflow_rule_id,omitempty"`
+	RuleName        string    `db:"workflow_rule_name" json:"workflow_rule_name"`
+	ApprovalEnabled bool      `db:"approval_enabled" json:"approval_enabled"`
+	ApprovalUserIDs []uint64  `json:"approval_user_ids"`
+	ExecutorUserIDs []uint64  `json:"executor_user_ids"`
+	AdminUserIDs    []uint64  `json:"admin_user_ids"`
+	ErrorCode       string    `db:"error_code" json:"error_code,omitempty"`
+	ErrorMessage    string    `db:"error_message" json:"error_message,omitempty"`
+	ResolutionTrace string    `db:"resolution_trace" json:"resolution_trace"`
+	ResolvedAt      time.Time `db:"resolved_at" json:"resolved_at"`
+	CreatedAt       time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt       time.Time `db:"updated_at" json:"updated_at"`
 }

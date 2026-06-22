@@ -34,6 +34,7 @@ import { formatDateTime } from '@/shared/lib/format'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataColumn, MetadataDefinition, MetadataItem, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
+import { AttentionPulse } from '@/shared/ui/AttentionPulse'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
@@ -712,6 +713,8 @@ export function SQLEditorPage() {
   const { user } = useAuth()
   const { pushToast } = useToast()
   const hasSensitiveOverride = Boolean(user?.permissions.includes('global.sensitive'))
+  const canQuery = Boolean(user?.permissions.includes('sql_editor.query'))
+  const canExport = Boolean(user?.permissions.includes('sql_editor.export'))
   const canApplySensitiveAccess = Boolean(user?.permissions.includes('sql_editor.sensitive_apply'))
   const accessibleConnectionIDs = user?.dbConnectionIds ?? []
   const [connections, setConnections] = useState<DBConnection[]>([])
@@ -729,11 +732,18 @@ export function SQLEditorPage() {
   const [requestConfirmState, setRequestConfirmState] = useState<QueryRequestConfirmState | null>(null)
   const [sensitiveAccessDurationDialog, setSensitiveAccessDurationDialog] = useState<SensitiveAccessDurationDialogState | null>(null)
   const [editorHeights, setEditorHeights] = useState<Record<string, string>>({})
+  const [queryAccessAttentionKeys, setQueryAccessAttentionKeys] = useState<Record<string, number>>({})
 
   useEffect(() => {
     let active = true
 
     async function loadConnections() {
+      if (!canQuery) {
+        setConnections([])
+        setConnectionsLoading(false)
+        setConnectionsError('')
+        return
+      }
       setConnectionsLoading(true)
       setConnectionsError('')
       try {
@@ -759,10 +769,17 @@ export function SQLEditorPage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [canQuery])
 
   useEffect(() => {
     let active = true
+    if (!canQuery) {
+      setHistory([])
+      setSavedQueries([])
+      return () => {
+        active = false
+      }
+    }
 
     async function loadQueryConstraints() {
       try {
@@ -782,7 +799,7 @@ export function SQLEditorPage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [canQuery, pushToast])
 
   useEffect(() => {
     let active = true
@@ -876,6 +893,7 @@ export function SQLEditorPage() {
   const activeTabRunning = activeTab ? runningTabIDs.includes(activeTab.id) : false
   const activeTabExporting = activeTab ? exportingTabIDs.includes(activeTab.id) : false
   const activeTabCreatingSensitiveAccess = activeTab ? sensitiveAccessTabIDs.includes(activeTab.id) : false
+  const activeQueryAccessAttentionKey = activeTab ? queryAccessAttentionKeys[activeTab.id] : undefined
   const activeEditorHeight = activeTab ? (editorHeights[activeTab.id] ?? `${EDITOR_MIN_HEIGHT}px`) : `${EDITOR_MIN_HEIGHT}px`
   const queryConstraintBadges = useMemo(() => {
     const effectiveTimeoutSeconds = Math.min(
@@ -1257,6 +1275,10 @@ export function SQLEditorPage() {
   }
 
   async function executeEditorSQL(mode: 'run' | 'explain') {
+    if (!canQuery) {
+      updateActiveTab({ error: 'SQL query permission is required to run queries.' })
+      return
+    }
     const sqlToExecute = activeExecutionSQL
     if (!activeTab?.connectionId || !sqlToExecute) {
       updateActiveTab({ error: 'Select a database connection and enter a query first.' })
@@ -1288,6 +1310,12 @@ export function SQLEditorPage() {
         error: message,
         result: null,
       })
+      if (tabSnapshot.connectionId && isQueryAccessDeniedMessage(message)) {
+        setQueryAccessAttentionKeys((current) => ({
+          ...current,
+          [tabID]: (current[tabID] ?? 0) + 1,
+        }))
+      }
     } finally {
       setRunningTabIDs((current) => current.filter((id) => id !== tabID))
     }
@@ -1413,6 +1441,9 @@ export function SQLEditorPage() {
   }
 
   function openExportConfirm() {
+    if (!canExport) {
+      return
+    }
     const state = buildRequestConfirmState('export')
     if (!state) {
       return
@@ -2066,7 +2097,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={handleExplainQuery}
-                      disabled={activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
+                      disabled={!canQuery || activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
                       className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {activeTabRunning ? 'Running...' : 'Explain'}
@@ -2074,7 +2105,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={handleRunQuery}
-                      disabled={activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
+                      disabled={!canQuery || activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
                       className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Play className="h-4 w-4" />
@@ -2175,14 +2206,16 @@ export function SQLEditorPage() {
                     >
                       {activeTabCreatingSensitiveAccess ? 'Submitting...' : 'Sensitive Access'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={openQueryAccessTicket}
-                      disabled={!activeTab.connectionId}
-                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Query Access
-                    </button>
+                    <AttentionPulse activeKey={activeQueryAccessAttentionKey} disabled={!activeTab.connectionId}>
+                      <button
+                        type="button"
+                        onClick={openQueryAccessTicket}
+                        disabled={!activeTab.connectionId}
+                        className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Query Access
+                      </button>
+                    </AttentionPulse>
                     <div className="relative">
                       <button
                         type="button"
@@ -2226,7 +2259,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={openExportConfirm}
-                      disabled={activeTabExporting || !activeTab.connectionId || !activeExecutionSQL}
+                      disabled={!canExport || activeTabExporting || !activeTab.connectionId || !activeExecutionSQL}
                       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Download className="h-4 w-4" />
@@ -2250,18 +2283,6 @@ export function SQLEditorPage() {
                 {activeTab.error ? (
                   <div className="mt-3 space-y-2">
                     <InlineAlert>{activeTab.error}</InlineAlert>
-                    {isQueryAccessDeniedMessage(activeTab.error) ? (
-                      <div className="flex justify-start">
-                        <button
-                          type="button"
-                          onClick={openQueryAccessTicket}
-                          disabled={!activeTab.connectionId}
-                          className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          Apply Query Access
-                        </button>
-                      </div>
-                    ) : null}
                   </div>
                 ) : null}
 

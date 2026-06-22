@@ -9,7 +9,7 @@ import { getSetupStatus } from '@/shared/setup/api'
 // Types
 // ────────────────────────────────────────────────────────────────────────────
 
-type Step = 0 | 1 | 2 | 3  // welcome | account | notifications | complete
+type Step = 0 | 1 | 2  // welcome | account | complete
 
 interface AccountForm {
   username: string
@@ -30,7 +30,7 @@ const PASSWORD_RULES: PasswordRule[] = [
   { label: 'Number',                 test: p => /[0-9]/.test(p) },
 ]
 
-const STEP_LABELS = ['Welcome', 'Admin account', 'Notifications', 'Done'] as const
+const STEP_LABELS = ['Welcome', 'Admin account', 'Done'] as const
 
 // ────────────────────────────────────────────────────────────────────────────
 // Sub-components
@@ -48,19 +48,80 @@ function StepProgress({ current }: { current: Step }) {
             i > current   && 'text-faint',
           )}>
             {i < current
-              ? <CheckCircle2 className="w-4 h-4 text-success" strokeWidth={2.5} />
-              : <Circle className={cn('w-4 h-4', i === current ? 'text-accent' : 'text-border-strong')} strokeWidth={2.5} />
+              ? <CheckCircle2 className="h-4 w-4 text-success" strokeWidth={2.5} />
+              : <Circle className={cn('h-4 w-4', i === current ? 'text-accent' : 'text-border-strong')} strokeWidth={2.5} />
             }
             <span className="hidden sm:inline">{label}</span>
           </div>
           {i < STEP_LABELS.length - 1 && (
             <div className={cn(
-              'w-6 h-px mx-1 transition-colors',
+              'mx-1 h-px w-6 transition-colors',
               i < current ? 'bg-success' : 'bg-border',
             )} />
           )}
         </div>
       ))}
+    </div>
+  )
+}
+
+function StepShell({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={cn('flex w-full flex-col', className)}>
+      {children}
+    </div>
+  )
+}
+
+function ActionRow({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
+      {children}
+    </div>
+  )
+}
+
+function PasswordVisibilityButton({
+  show,
+  onClick,
+}: {
+  show: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className="absolute right-3 top-1/2 -translate-y-1/2 text-faint hover:text-muted"
+      onClick={onClick}
+      aria-label={show ? 'Hide password' : 'Show password'}
+    >
+      {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+    </button>
+  )
+}
+
+function PasswordRules({ password }: { password: string }) {
+  if (!password) {
+    return null
+  }
+
+  return (
+    <div className="mt-1 grid gap-1 sm:grid-cols-2">
+      {PASSWORD_RULES.map(rule => {
+        const passed = rule.test(password)
+        return (
+          <span
+            key={rule.label}
+            className={cn(
+              'flex min-w-0 items-center gap-1 text-[11px]',
+              passed ? 'text-success' : 'text-faint',
+            )}
+          >
+            <CheckCircle2 className={cn('h-3 w-3 shrink-0', passed ? 'text-success' : 'text-faint')} strokeWidth={2.5} />
+            <span className="min-w-0 truncate">{rule.label}</span>
+          </span>
+        )
+      })}
     </div>
   )
 }
@@ -120,37 +181,37 @@ function Button({ variant = 'primary', className, children, ...props }: {
 
 function WelcomeStep({ onNext }: { onNext: () => void }) {
   return (
-    <div className="flex flex-col items-center text-center gap-6 py-4">
-      <div className="w-16 h-16 rounded-card bg-brand flex items-center justify-center shadow-card">
-        <span className="text-white text-2xl font-display font-black">M</span>
+    <StepShell className="items-center gap-6 py-4 text-center">
+      <div className="flex h-16 w-16 items-center justify-center rounded-card bg-brand shadow-card">
+        <span className="font-display text-2xl font-black text-white">M</span>
       </div>
 
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-display font-black text-ink tracking-tight">
+        <h1 className="font-display text-2xl font-black tracking-tight text-ink">
           Welcome to DBRE Maestro
         </h1>
-        <p className="text-muted text-sm max-w-sm">
+        <p className="max-w-sm text-sm text-muted">
           Database security governance — unified ticket review, query control, and audit logging.
         </p>
       </div>
 
-      <ul className="flex flex-col gap-2 text-left text-sm text-muted w-full max-w-xs">
+      <ul className="flex w-full max-w-xs flex-col gap-2 text-left text-sm text-muted">
         {[
           'Centralized DDL/DML ticket review workflow',
           'Automatic query masking for sensitive columns',
           'Full audit log — every action is recorded',
         ].map((item, i) => (
           <li key={i} className="flex items-start gap-2">
-            <CheckCircle2 className="w-4 h-4 text-success mt-0.5 shrink-0" strokeWidth={2.5} />
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" strokeWidth={2.5} />
             <span>{item}</span>
           </li>
         ))}
       </ul>
 
-      <Button className="w-full max-w-xs h-10 text-base" onClick={onNext}>
+      <Button className="h-10 w-full max-w-xs text-base" onClick={onNext}>
         Get started →
       </Button>
-    </div>
+    </StepShell>
   )
 }
 
@@ -243,10 +304,10 @@ function AccountStep({
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <StepShell className="gap-5">
       <div>
-        <h2 className="text-xl font-display font-black text-ink">Set up admin account</h2>
-        <p className="text-xs text-muted mt-1">This is the platform's sole Admin account, used to manage other users after first login.</p>
+        <h2 className="font-display text-xl font-black text-ink">Set up admin account</h2>
+        <p className="mt-1 text-xs text-muted">Create the first Admin account. It can manage users, permissions, database assets, and platform settings.</p>
       </div>
 
       <FieldGroup label="Username" error={touched.username ? errors.username : ''}>
@@ -281,30 +342,9 @@ function AccountStep({
             className="pr-10"
             autoComplete="new-password"
           />
-          <button
-            type="button"
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-faint hover:text-muted"
-            onClick={() => setShowPassword(v => !v)}
-          >
-            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
+          <PasswordVisibilityButton show={showPassword} onClick={() => setShowPassword(v => !v)} />
         </div>
-        {form.password && (
-          <div className="grid grid-cols-2 gap-1 mt-1">
-            {PASSWORD_RULES.map(rule => (
-              <span
-                key={rule.label}
-                className={cn(
-                  'flex items-center gap-1 text-[11px]',
-                  rule.test(form.password) ? 'text-success' : 'text-faint',
-                )}
-              >
-                <CheckCircle2 className={cn('w-3 h-3', rule.test(form.password) ? 'text-success' : 'text-faint')} strokeWidth={2.5} />
-                {rule.label}
-              </span>
-            ))}
-          </div>
-        )}
+        <PasswordRules password={form.password} />
       </FieldGroup>
 
       <FieldGroup label="Confirm password" error={touched.confirmPassword ? errors.confirmPassword : ''}>
@@ -324,62 +364,16 @@ function AccountStep({
         </div>
       )}
 
-      <div className="flex justify-between pt-1">
+      <ActionRow>
         <Button variant="ghost" onClick={onBack}>← Back</Button>
         <Button onClick={handleSubmit} disabled={loading}>
           {loading
-            ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating…</>
+            ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</>
             : 'Create account →'
           }
         </Button>
-      </div>
-    </div>
-  )
-}
-
-function NotificationsStep({
-  onNext,
-  onBack,
-}: {
-  onNext: () => void
-  onBack: () => void
-}) {
-  return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h2 className="text-xl font-display font-black text-ink">Notifications <span className="text-sm font-sans font-normal text-muted">(optional)</span></h2>
-        <p className="text-xs text-muted mt-1">Notify team members via Lark Bot when ticket status changes.</p>
-      </div>
-
-      <div className="rounded-card border border-border bg-panel-soft p-4 flex flex-col gap-3">
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-control bg-brand flex items-center justify-center shrink-0 mt-0.5">
-            <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
-            </svg>
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-ink">Lark Webhook</p>
-            <p className="text-xs text-muted mt-0.5">
-              Add an Incoming Webhook Bot to your Lark group, then set the Webhook URL as an environment variable.
-            </p>
-          </div>
-        </div>
-
-        <div className="rounded-control bg-panel-soft px-3 py-2 font-mono text-xs text-ink">
-          LARK_WEBHOOK_URL=https://open.larksuite.com/open-apis/bot/v2/hook/...
-        </div>
-
-        <p className="text-[11px] text-muted">
-          Add this variable to your <code className="font-mono bg-page px-1 rounded">.env</code> file and restart the service. You can also configure it later in server settings.
-        </p>
-      </div>
-
-      <div className="flex justify-between pt-1">
-        <Button variant="ghost" onClick={onBack}>← Back</Button>
-        <Button onClick={onNext}>Finish setup →</Button>
-      </div>
-    </div>
+      </ActionRow>
+    </StepShell>
   )
 }
 
@@ -387,21 +381,21 @@ function CompleteStep({ username }: { username: string }) {
   const navigate = useNavigate()
 
   return (
-    <div className="flex flex-col items-center text-center gap-6 py-4">
-      <div className="w-16 h-16 rounded-full bg-success-soft flex items-center justify-center">
-        <CheckCircle2 className="w-9 h-9 text-success" strokeWidth={2} />
+    <StepShell className="items-center gap-6 py-4 text-center">
+      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-success-soft">
+        <CheckCircle2 className="h-9 w-9 text-success" strokeWidth={2} />
       </div>
 
       <div className="flex flex-col gap-2">
-        <h2 className="text-2xl font-display font-black text-ink">Setup complete!</h2>
-        <p className="text-muted text-sm max-w-xs">
+        <h2 className="font-display text-2xl font-black text-ink">Setup complete!</h2>
+        <p className="max-w-xs text-sm text-muted">
           Admin account <code className="font-mono bg-page px-1.5 py-0.5 rounded-pill text-ink text-xs">{username}</code> has been created.
           You can now sign in and start using DBRE Maestro.
         </p>
       </div>
 
-      <div className="flex flex-col gap-2 text-left text-xs text-muted bg-panel-soft border border-border rounded-card px-4 py-3 w-full max-w-xs">
-        <p className="font-semibold text-ink text-[11px] uppercase tracking-wide">First steps after login</p>
+      <div className="flex w-full max-w-xs flex-col gap-2 rounded-card border border-border bg-panel-soft px-4 py-3 text-left text-xs text-muted">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-ink">First steps after login</p>
         <ul className="flex flex-col gap-1">
           {[
             'Invite DBAs and ticket reviewers',
@@ -409,16 +403,17 @@ function CompleteStep({ username }: { username: string }) {
             'Configure masking rules for sensitive columns',
           ].map((tip, i) => (
             <li key={i} className="flex items-start gap-1.5">
-              <span className="text-faint mt-0.5">›</span> {tip}
+              <span className="mt-0.5 shrink-0 text-faint">›</span>
+              <span>{tip}</span>
             </li>
           ))}
         </ul>
       </div>
 
-      <Button className="w-full max-w-xs h-10 text-base" onClick={() => navigate('/login')}>
+      <Button className="h-10 w-full max-w-xs text-base" onClick={() => navigate('/login')}>
         Go to login →
       </Button>
-    </div>
+    </StepShell>
   )
 }
 
@@ -469,7 +464,7 @@ export function SetupWizard() {
     )
   }
 
-  const next = () => setStep(s => (s < 3 ? (s + 1) as Step : s))
+  const next = () => setStep(s => (s < 2 ? (s + 1) as Step : s))
   const back = () => setStep(s => (s > 0 ? (s - 1) as Step : s))
 
   return (
@@ -478,25 +473,22 @@ export function SetupWizard() {
         <h1 className="font-display text-2xl font-black tracking-tight text-ink">DBRE Maestro</h1>
       </div>
 
-      <div className="w-full max-w-md rounded-card border border-border bg-panel px-8 py-8 shadow-card flex flex-col gap-6">
-        {/* Step progress */}
+      <div className="flex w-full max-w-md flex-col gap-6 rounded-card border border-border bg-panel px-8 py-8 shadow-card">
         <div className="flex justify-end">
           <StepProgress current={step} />
         </div>
 
-        <div className="h-px bg-border -mx-8" />
+        <div className="-mx-8 h-px bg-border" />
 
-        {/* Step content */}
         <div className="min-h-[320px]">
           {step === 0 && <WelcomeStep onNext={next} />}
           {step === 1 && (
             <AccountStep
-              onNext={(username) => { setAdminUsername(username); next() }}
+              onNext={(username) => { setAdminUsername(username); setStep(2) }}
               onBack={back}
             />
           )}
-          {step === 2 && <NotificationsStep onNext={next} onBack={back} />}
-          {step === 3 && <CompleteStep username={adminUsername} />}
+          {step === 2 && <CompleteStep username={adminUsername} />}
         </div>
       </div>
     </div>

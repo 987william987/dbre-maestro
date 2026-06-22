@@ -7,13 +7,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/dbre-maestro/maestro/internal/crypto"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
 type UserRepo struct {
-	db *sqlx.DB
+	db     *sqlx.DB
+	encKey []byte
 }
 
 type AuthGroupRecord struct {
@@ -29,8 +31,12 @@ type ResourceBoundUser struct {
 	Username string `db:"username" json:"username"`
 }
 
-func NewUserRepo(db *sqlx.DB) *UserRepo {
-	return &UserRepo{db: db}
+func NewUserRepo(db *sqlx.DB, encKey ...[]byte) *UserRepo {
+	var key []byte
+	if len(encKey) > 0 {
+		key = encKey[0]
+	}
+	return &UserRepo{db: db, encKey: key}
 }
 
 func (r *UserRepo) Create(ctx context.Context, username, email, larkRecipient, passwordHash string, isProtected bool) (*model.User, error) {
@@ -114,6 +120,70 @@ func (r *UserRepo) GetAuthGroups(ctx context.Context, userID uint64) ([]model.Au
 	return groups, err
 }
 
+func (r *UserRepo) RequiresMFA(ctx context.Context, user *model.User) (bool, error) {
+	if user == nil {
+		return false, nil
+	}
+	if user.IsProtected {
+		return true, nil
+	}
+	groups, err := r.GetAuthGroups(ctx, user.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, group := range groups {
+		if group == model.AuthGroupAdmin {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *UserRepo) StoreMFASecret(ctx context.Context, userID uint64, secret string) error {
+	if len(r.encKey) == 0 {
+		return errors.New("user mfa encryption key is not configured")
+	}
+	encrypted, err := crypto.Encrypt(r.encKey, []byte(secret))
+	if err != nil {
+		return fmt.Errorf("encrypt mfa secret: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx,
+		`UPDATE users SET mfa_secret_encrypted = ?, mfa_enabled = 0, mfa_enabled_at = NULL, updated_at = ? WHERE id = ?`,
+		encrypted, timeutil.NowUTC(), userID,
+	)
+	return err
+}
+
+func (r *UserRepo) DecryptMFASecret(user *model.User) (string, error) {
+	if user == nil || len(user.MFASecret) == 0 {
+		return "", nil
+	}
+	if len(r.encKey) == 0 {
+		return "", errors.New("user mfa encryption key is not configured")
+	}
+	plain, err := crypto.Decrypt(r.encKey, user.MFASecret)
+	if err != nil {
+		return "", fmt.Errorf("decrypt mfa secret: %w", err)
+	}
+	return string(plain), nil
+}
+
+func (r *UserRepo) EnableMFA(ctx context.Context, userID uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE users SET mfa_enabled = 1, mfa_enabled_at = ?, updated_at = ? WHERE id = ? AND mfa_secret_encrypted IS NOT NULL`,
+		timeutil.NowUTC(), timeutil.NowUTC(), userID,
+	)
+	return err
+}
+
+func (r *UserRepo) ResetMFA(ctx context.Context, userID uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE users SET mfa_enabled = 0, mfa_secret_encrypted = NULL, mfa_enabled_at = NULL, updated_at = ? WHERE id = ?`,
+		timeutil.NowUTC(), userID,
+	)
+	return err
+}
+
 func (r *UserRepo) GetAuthGroupRecords(ctx context.Context, userID uint64) ([]AuthGroupRecord, error) {
 	var groups []AuthGroupRecord
 	err := r.db.SelectContext(ctx, &groups, `
@@ -137,41 +207,31 @@ func (r *UserRepo) GetAuthGroupRecords(ctx context.Context, userID uint64) ([]Au
 	return groups, err
 }
 
-func (r *UserRepo) GetEffectivePermissionKeys(ctx context.Context, userID uint64) ([]string, error) {
-	user, err := r.GetByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if user != nil && user.IsProtected {
-		var permissionKeys []string
-		err := r.db.SelectContext(ctx, &permissionKeys, `SELECT permission_key FROM permissions ORDER BY permission_key`)
-		return permissionKeys, err
-	}
+func (r *UserRepo) GetEffectiveAuthGroupIDs(ctx context.Context, userID uint64) ([]uint64, error) {
+	var ids []uint64
+	err := r.db.SelectContext(ctx, &ids, `
+		SELECT DISTINCT id FROM (
+			SELECT ag.id
+			FROM auth_groups ag
+			INNER JOIN user_auth_groups uag ON uag.auth_group_id = ag.id
+			WHERE uag.user_id = ? AND (uag.expires_at IS NULL OR uag.expires_at > ?)
+			UNION
+			SELECT ag.id
+			FROM auth_groups ag
+			INNER JOIN auth_group_memberships agm ON agm.auth_group = ag.group_key
+			WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+		) AS effective_auth_groups
+		ORDER BY id
+	`, userID, timeutil.NowUTC(), userID, timeutil.NowUTC())
+	return ids, err
+}
 
-	// Check if the user belongs to any group with is_all_permissions = 1.
-	var inAllPermissionsGroup bool
-	err = r.db.GetContext(ctx, &inAllPermissionsGroup, `
-		SELECT EXISTS (
-			SELECT 1 FROM auth_groups ag
-			WHERE ag.is_all_permissions = 1
-			  AND (
-			    EXISTS (
-			      SELECT 1 FROM user_auth_groups uag
-			      WHERE uag.auth_group_id = ag.id AND uag.user_id = ?
-			        AND (uag.expires_at IS NULL OR uag.expires_at > NOW())
-			    )
-			    OR EXISTS (
-			      SELECT 1 FROM auth_group_memberships agm
-			      WHERE agm.auth_group = ag.group_key AND agm.user_id = ?
-			        AND (agm.expires_at IS NULL OR agm.expires_at > NOW())
-			    )
-			  )
-		)
-	`, userID, userID)
+func (r *UserRepo) GetEffectivePermissionKeys(ctx context.Context, userID uint64) ([]string, error) {
+	hasAllPermissions, err := r.HasAllPermissions(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	if inAllPermissionsGroup {
+	if hasAllPermissions {
 		var permissionKeys []string
 		err := r.db.SelectContext(ctx, &permissionKeys, `SELECT permission_key FROM permissions ORDER BY permission_key`)
 		return permissionKeys, err
@@ -201,6 +261,37 @@ func (r *UserRepo) GetEffectivePermissionKeys(ctx context.Context, userID uint64
 		ORDER BY permission_key
 	`, userID, userID, timeutil.NowUTC(), userID, timeutil.NowUTC())
 	return permissionKeys, err
+}
+
+func (r *UserRepo) HasAllPermissions(ctx context.Context, userID uint64) (bool, error) {
+	user, err := r.GetByID(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if user != nil && user.IsProtected {
+		return true, nil
+	}
+
+	var hasAllPermissions bool
+	err = r.db.GetContext(ctx, &hasAllPermissions, `
+		SELECT EXISTS (
+			SELECT 1 FROM auth_groups ag
+			WHERE ag.is_all_permissions = 1
+			  AND (
+			    EXISTS (
+			      SELECT 1 FROM user_auth_groups uag
+			      WHERE uag.auth_group_id = ag.id AND uag.user_id = ?
+			        AND (uag.expires_at IS NULL OR uag.expires_at > ?)
+			    )
+			    OR EXISTS (
+			      SELECT 1 FROM auth_group_memberships agm
+			      WHERE agm.auth_group = ag.group_key AND agm.user_id = ?
+			        AND (agm.expires_at IS NULL OR agm.expires_at > ?)
+			    )
+			  )
+		)
+	`, userID, timeutil.NowUTC(), userID, timeutil.NowUTC())
+	return hasAllPermissions, err
 }
 
 func (r *UserRepo) ListActiveUserIDsByPermissionKeys(ctx context.Context, permissionKeys []string) ([]uint64, error) {
@@ -263,11 +354,11 @@ func (r *UserRepo) ListActiveUserIDsByPermissionKeys(ctx context.Context, permis
 }
 
 func (r *UserRepo) GetEffectiveDBConnectionIDs(ctx context.Context, userID uint64) ([]uint64, error) {
-	user, err := r.GetByID(ctx, userID)
+	hasAllPermissions, err := r.HasAllPermissions(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	if user != nil && user.IsProtected {
+	if hasAllPermissions {
 		var allIDs []uint64
 		if err := r.db.SelectContext(ctx, &allIDs, `
 			SELECT id

@@ -14,6 +14,7 @@ type contextKey string
 const (
 	CtxUserID      contextKey = "user_id"
 	CtxUsername    contextKey = "username"
+	CtxSessionID   contextKey = "session_id"
 	CtxPermissions contextKey = "permissions"
 )
 
@@ -34,6 +35,7 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 
 			ctx := context.WithValue(r.Context(), CtxUserID, claims.UserID)
 			ctx = context.WithValue(ctx, CtxUsername, claims.Username)
+			ctx = context.WithValue(ctx, CtxSessionID, claims.SessionID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -93,6 +95,11 @@ func UserIDFromCtx(ctx context.Context) uint64 {
 
 func UsernameFromCtx(ctx context.Context) string {
 	v, _ := ctx.Value(CtxUsername).(string)
+	return v
+}
+
+func SessionIDFromCtx(ctx context.Context) uint64 {
+	v, _ := ctx.Value(CtxSessionID).(uint64)
 	return v
 }
 

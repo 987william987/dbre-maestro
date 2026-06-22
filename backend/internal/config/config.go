@@ -13,19 +13,23 @@ import (
 )
 
 type Config struct {
-	Port           string
-	DBDSN          string
-	MigrationDSN   string
-	JWTSecret      []byte
-	EncryptionKey  []byte
-	AppBaseURL     string
-	LarkWebhookURL string // optional; empty = Lark notifications disabled
-	PoolProfiles   map[pool.Profile]pool.ProfileConfig
+	Port                string
+	AppEnv              string
+	MFAEnforcement      string
+	DBDSN               string
+	MigrationDSN        string
+	JWTSecret           []byte
+	EncryptionKey       []byte
+	AppBaseURL          string
+	RefreshCookieSecure bool
+	LarkWebhookURL      string // optional; empty = Lark notifications disabled
+	PoolProfiles        map[pool.Profile]pool.ProfileConfig
 }
 
 func Load() (*Config, error) {
 	c := &Config{
 		Port:         getEnv("PORT", "8080"),
+		AppEnv:       normalizeAppEnv(getEnv("APP_ENV", "development")),
 		DBDSN:        os.Getenv("DB_DSN"),
 		MigrationDSN: os.Getenv("MIGRATION_DSN"),
 		AppBaseURL:   strings.TrimRight(os.Getenv("APP_BASE_URL"), "/"),
@@ -37,6 +41,7 @@ func Load() (*Config, error) {
 			pool.ProfileShadowValidation: pool.DefaultConfigForProfile(pool.ProfileShadowValidation),
 		},
 	}
+	c.MFAEnforcement = defaultMFAEnforcement(c.AppEnv)
 
 	if c.DBDSN == "" {
 		return nil, errors.New("DB_DSN is required")
@@ -66,6 +71,20 @@ func Load() (*Config, error) {
 	}
 
 	c.LarkWebhookURL = os.Getenv("LARK_WEBHOOK_URL")
+	if raw := os.Getenv("MFA_ENFORCEMENT"); raw != "" {
+		c.MFAEnforcement = normalizeMFAEnforcement(raw)
+		if c.MFAEnforcement == "" {
+			return nil, errors.New("MFA_ENFORCEMENT must be disabled or required_for_admins")
+		}
+	}
+	c.RefreshCookieSecure = c.AppEnv == "production"
+	if raw := os.Getenv("REFRESH_COOKIE_SECURE"); raw != "" {
+		secure, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("REFRESH_COOKIE_SECURE must be a boolean: %w", err)
+		}
+		c.RefreshCookieSecure = c.RefreshCookieSecure || secure
+	}
 
 	if err := loadPoolProfileConfig(c); err != nil {
 		return nil, err
@@ -74,11 +93,39 @@ func Load() (*Config, error) {
 	return c, nil
 }
 
+func defaultMFAEnforcement(appEnv string) string {
+	if appEnv == "production" {
+		return "required_for_admins"
+	}
+	return "disabled"
+}
+
+func normalizeMFAEnforcement(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "disabled", "required_for_admins":
+		return normalized
+	default:
+		return ""
+	}
+}
+
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
 	return fallback
+}
+
+func normalizeAppEnv(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "prod" {
+		return "production"
+	}
+	if normalized == "" {
+		return "development"
+	}
+	return normalized
 }
 
 func loadPoolProfileConfig(c *Config) error {

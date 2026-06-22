@@ -9,10 +9,10 @@ import (
 	"github.com/dbre-maestro/maestro/internal/middleware"
 )
 
-func TestRequireTicketsWorkspaceReadAllowsTicketsApply(t *testing.T) {
+func TestRequireTicketsWorkspaceReadAllowsTicketsRead(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/tickets", nil)
-	req = req.WithContext(context.WithValue(req.Context(), middleware.CtxPermissions, []string{"tickets.apply"}))
+	req = req.WithContext(context.WithValue(req.Context(), middleware.CtxPermissions, []string{"tickets.read"}))
 
 	called := false
 	handler := requireTicketsWorkspaceRead(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -22,30 +22,25 @@ func TestRequireTicketsWorkspaceReadAllowsTicketsApply(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	if !called {
-		t.Fatal("handler should be called for tickets.apply")
+		t.Fatal("handler should be called for tickets.read")
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
 
-func TestRequireTicketsWorkspaceReadAllowsSensitiveApply(t *testing.T) {
+func TestRequireTicketsWorkspaceReadRejectsTicketsApply(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/tickets", nil)
-	req = req.WithContext(context.WithValue(req.Context(), middleware.CtxPermissions, []string{"sql_editor.sensitive_apply"}))
+	req = req.WithContext(context.WithValue(req.Context(), middleware.CtxPermissions, []string{"tickets.apply"}))
 
-	called := false
 	handler := requireTicketsWorkspaceRead(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
 		w.WriteHeader(http.StatusOK)
 	}))
 	handler.ServeHTTP(rec, req)
 
-	if !called {
-		t.Fatal("handler should be called for sql_editor.sensitive_apply")
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
 	}
 }
 

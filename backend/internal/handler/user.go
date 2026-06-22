@@ -120,12 +120,32 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
 	if req.Username == "" || req.Email == "" || req.Password == "" {
 		jsonErr(w, http.StatusUnprocessableEntity, "username, email, and password are required")
 		return
 	}
 	if err := validatePassword(req.Password); err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	existingUsername, err := h.users.GetByUsername(r.Context(), req.Username)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "check username failed")
+		return
+	}
+	if existingUsername != nil {
+		jsonErr(w, http.StatusConflict, "username already exists")
+		return
+	}
+	existingEmail, err := h.users.GetByEmail(r.Context(), req.Email)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "check email failed")
+		return
+	}
+	if existingEmail != nil {
+		jsonErr(w, http.StatusConflict, "email already exists")
 		return
 	}
 
@@ -224,6 +244,153 @@ func (h *UserHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"direct_permissions":       directPermissions,
 		"direct_db_connection_ids": directDBConnectionIDs,
 	})
+}
+
+// GET /users/{id}/sessions — Admin only
+func (h *UserHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	if h.sessions == nil {
+		jsonErr(w, http.StatusInternalServerError, "session repo unavailable")
+		return
+	}
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	sessions, err := h.sessions.ListForUserLimit(r.Context(), id, sessionListLimit)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load sessions failed")
+		return
+	}
+	if sessions == nil {
+		sessions = []model.Session{}
+	}
+	jsonOK(w, map[string]any{"sessions": sessions})
+}
+
+// DELETE /users/{id}/sessions/{sessionID} — Admin only
+func (h *UserHandler) RevokeSession(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	sessionID, err := strconv.ParseUint(chi.URLParam(r, "sessionID"), 10, 64)
+	if err != nil || sessionID == 0 {
+		jsonErr(w, http.StatusBadRequest, "invalid session id")
+		return
+	}
+	if h.sessions == nil {
+		jsonErr(w, http.StatusInternalServerError, "session repo unavailable")
+		return
+	}
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	revoked, err := h.sessions.RevokeByIDForUser(r.Context(), sessionID, id)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "revoke session failed")
+		return
+	}
+	if !revoked {
+		jsonErr(w, http.StatusNotFound, "session not found")
+		return
+	}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "user_session_revoke",
+		ResourceType: "user",
+		ResourceID:   &id,
+		Details: map[string]any{
+			"session_id": sessionID,
+			"username":   user.Username,
+		},
+		IPAddress: clientIP(r),
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DELETE /users/{id}/sessions — Admin only
+func (h *UserHandler) RevokeSessions(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	if h.sessions == nil {
+		jsonErr(w, http.StatusInternalServerError, "session repo unavailable")
+		return
+	}
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if err := h.sessions.RevokeAllForUser(r.Context(), id); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "revoke sessions failed")
+		return
+	}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "user_session_revoke_all",
+		ResourceType: "user",
+		ResourceID:   &id,
+		Details: map[string]any{
+			"username": user.Username,
+		},
+		IPAddress: clientIP(r),
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /users/{id}/mfa/reset — Admin only
+func (h *UserHandler) ResetMFA(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	if h.sessions == nil {
+		jsonErr(w, http.StatusInternalServerError, "session repo unavailable")
+		return
+	}
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if err := h.users.ResetMFA(r.Context(), id); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "reset mfa failed")
+		return
+	}
+	if err := h.sessions.RevokeAllForUser(r.Context(), id); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "revoke sessions failed")
+		return
+	}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "user_mfa_reset",
+		ResourceType: "user",
+		ResourceID:   &id,
+		Details: map[string]any{
+			"username": user.Username,
+		},
+		IPAddress: clientIP(r),
+	})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // POST /users/{id}/memberships — Admin only

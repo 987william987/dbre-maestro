@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,11 +12,34 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/dbre-maestro/maestro/internal/auth"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/repository"
+	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 )
+
+type auditDetailsReason string
+
+func (m auditDetailsReason) Match(v driver.Value) bool {
+	var raw []byte
+	switch value := v.(type) {
+	case []byte:
+		raw = value
+	case string:
+		raw = []byte(value)
+	default:
+		return false
+	}
+	var details struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(raw, &details); err != nil {
+		return false
+	}
+	return details.Reason == string(m)
+}
 
 func authUserRows(isActive bool) *sqlmock.Rows {
 	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
@@ -49,7 +74,7 @@ func TestAuthHandlerMe(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
 			AddRow(userID, "alice", "alice@example.com", "hash", 0, 0, 1, now, now))
 	mock.ExpectQuery(`SELECT EXISTS \(`).
-		WithArgs(userID, userID).
+		WithArgs(userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(`SELECT DISTINCT permission_key FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
@@ -60,6 +85,9 @@ func TestAuthHandlerMe(t *testing.T) {
 		WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
 			AddRow(userID, "alice", "alice@example.com", "hash", 0, 0, 1, now, now))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs(userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(`SELECT DISTINCT db_connection_id FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"db_connection_id"}).
@@ -174,7 +202,7 @@ func TestAuthHandlerMeReturnsEmptyArrayForNoGroups(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
 			AddRow(userID, "bob", "bob@example.com", "hash", 0, 0, 1, now, now))
 	mock.ExpectQuery(`SELECT EXISTS \(`).
-		WithArgs(userID, userID).
+		WithArgs(userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(`SELECT DISTINCT permission_key FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
@@ -183,6 +211,9 @@ func TestAuthHandlerMeReturnsEmptyArrayForNoGroups(t *testing.T) {
 		WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
 			AddRow(userID, "bob", "bob@example.com", "hash", 0, 0, 1, now, now))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs(userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(`SELECT DISTINCT db_connection_id FROM`).
 		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"db_connection_id"}))
@@ -295,6 +326,276 @@ func TestAuthHandlerLoginDisabledUserReturnsForbidden(t *testing.T) {
 	}
 }
 
+func TestAuthHandlerLoginInvalidCredentialsWritesAudit(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB), []byte("secret"))
+
+	mock.ExpectQuery(`SELECT \* FROM users WHERE username = \?`).
+		WithArgs("missing").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(`INSERT INTO audit_logs \(actor_id, actor_name, action_type, resource_type, resource_id, details, ip_address, created_at\)`).
+		WithArgs(nil, "missing", "login_failed", "auth", nil, auditDetailsReason("invalid_credentials"), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"username":"missing","password":"Password1"}`))
+	req.RemoteAddr = "10.0.0.9:12345"
+	rec := httptest.NewRecorder()
+	handler.Login(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid credentials") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerLoginDisabledUserWritesAudit(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB), []byte("secret"))
+
+	mock.ExpectQuery(`SELECT \* FROM users WHERE username = \?`).
+		WithArgs("alice").
+		WillReturnRows(authUserRows(false))
+	mock.ExpectExec(`INSERT INTO audit_logs \(actor_id, actor_name, action_type, resource_type, resource_id, details, ip_address, created_at\)`).
+		WithArgs(sqlmock.AnyArg(), "alice", "login_failed", "auth", nil, auditDetailsReason("disabled_user"), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"username":"alice","password":"Password1"}`))
+	req.RemoteAddr = "10.0.0.10:12345"
+	rec := httptest.NewRecorder()
+	handler.Login(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	if !strings.Contains(rec.Body.String(), "user is disabled") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerLoginRateLimit(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), nil, []byte("secret"))
+	handler.loginRateLimiter = newRequestRateLimiter(1, time.Minute)
+
+	mock.ExpectQuery(`SELECT \* FROM users WHERE username = \?`).
+		WithArgs("alice").
+		WillReturnError(sql.ErrNoRows)
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"username":"alice","password":"Password1"}`))
+	firstReq.RemoteAddr = "10.0.0.1:12345"
+	firstRec := httptest.NewRecorder()
+	handler.Login(firstRec, firstReq)
+	if firstRec.Code != http.StatusUnauthorized {
+		t.Fatalf("first status = %d, want %d", firstRec.Code, http.StatusUnauthorized)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"username":"alice","password":"Password1"}`))
+	secondReq.RemoteAddr = "10.0.0.1:12345"
+	secondRec := httptest.NewRecorder()
+	handler.Login(secondRec, secondReq)
+	if secondRec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d, want %d", secondRec.Code, http.StatusTooManyRequests)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerRefreshRateLimit(t *testing.T) {
+	handler := NewAuthHandler(nil, nil, nil, []byte("secret"))
+	handler.refreshRateLimiter = newRequestRateLimiter(1, time.Minute)
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
+	firstReq.RemoteAddr = "10.0.0.2:12345"
+	firstRec := httptest.NewRecorder()
+	handler.Refresh(firstRec, firstReq)
+	if firstRec.Code != http.StatusUnauthorized {
+		t.Fatalf("first status = %d, want %d", firstRec.Code, http.StatusUnauthorized)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
+	secondReq.RemoteAddr = "10.0.0.2:12345"
+	secondRec := httptest.NewRecorder()
+	handler.Refresh(secondRec, secondReq)
+	if secondRec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d, want %d", secondRec.Code, http.StatusTooManyRequests)
+	}
+}
+
+func TestAuthHandlerRefreshTokenReuseRevokesAllSessions(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), nil, []byte("secret"))
+	rawToken := "stolen-refresh-token"
+	tokenHash := auth.HashRefreshToken(rawToken)
+	userID := uint64(7)
+	sessionID := uint64(99)
+	now := time.Now().UTC()
+	revokedAt := now.Add(-time.Minute)
+
+	mock.ExpectQuery(`SELECT \* FROM sessions WHERE token_hash = \?`).
+		WithArgs(tokenHash).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "token_hash", "user_agent", "ip_address", "expires_at", "revoked_at", "created_at"}).
+			AddRow(sessionID, userID, tokenHash, "browser", "10.0.0.3", now.Add(time.Hour), revokedAt, now.Add(-time.Hour)))
+	mock.ExpectExec(`UPDATE sessions SET revoked_at = \? WHERE user_id = \? AND revoked_at IS NULL`).
+		WithArgs(sqlmock.AnyArg(), userID).
+		WillReturnResult(sqlmock.NewResult(0, 3))
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
+	req.AddCookie(&http.Cookie{Name: "refresh_token", Value: rawToken})
+	rec := httptest.NewRecorder()
+	handler.Refresh(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].MaxAge != -1 {
+		t.Fatalf("refresh cookie was not cleared: %#v", cookies)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerRefreshTokenReuseWithinGraceDoesNotRevokeAllSessions(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), nil, []byte("secret"))
+	rawToken := "recently-rotated-refresh-token"
+	tokenHash := auth.HashRefreshToken(rawToken)
+	userID := uint64(7)
+	sessionID := uint64(100)
+	now := time.Now().UTC()
+	revokedAt := now.Add(-5 * time.Second)
+
+	mock.ExpectQuery(`SELECT \* FROM sessions WHERE token_hash = \?`).
+		WithArgs(tokenHash).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "token_hash", "user_agent", "ip_address", "expires_at", "revoked_at", "created_at"}).
+			AddRow(sessionID, userID, tokenHash, "browser", "10.0.0.3", now.Add(time.Hour), revokedAt, now.Add(-time.Hour)))
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
+	req.AddCookie(&http.Cookie{Name: "refresh_token", Value: rawToken})
+	rec := httptest.NewRecorder()
+	handler.Refresh(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if !strings.Contains(rec.Body.String(), "stale refresh token") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerListSessionsDoesNotExposeTokenHash(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(nil, repository.NewSessionRepo(sqlxDB), nil, []byte("secret"))
+	userID := uint64(7)
+	now := time.Date(2026, 6, 22, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`SELECT \* FROM sessions WHERE user_id = \? ORDER BY created_at DESC LIMIT \?`).
+		WithArgs(userID, 20).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "token_hash", "user_agent", "ip_address", "expires_at", "revoked_at", "created_at"}).
+			AddRow(11, userID, "secret-token-hash", "browser", "10.0.0.8", now.Add(time.Hour), nil, now))
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/sessions", nil)
+	ctx := context.WithValue(req.Context(), middleware.CtxUserID, userID)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	handler.ListSessions(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "secret-token-hash") || strings.Contains(rec.Body.String(), "token_hash") {
+		t.Fatalf("session response exposed token hash: %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerRevokeSessionScopesToCurrentUser(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(nil, repository.NewSessionRepo(sqlxDB), nil, []byte("secret"))
+	userID := uint64(7)
+	sessionID := uint64(11)
+
+	mock.ExpectExec(`UPDATE sessions SET revoked_at = \? WHERE id = \? AND user_id = \? AND revoked_at IS NULL`).
+		WithArgs(sqlmock.AnyArg(), sessionID, userID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	router := chi.NewRouter()
+	router.Delete("/auth/sessions/{id}", handler.RevokeSession)
+	req := httptest.NewRequest(http.MethodDelete, "/auth/sessions/11", nil)
+	ctx := context.WithValue(req.Context(), middleware.CtxUserID, userID)
+	ctx = context.WithValue(ctx, middleware.CtxUsername, "alice")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestAuthHandlerLogoutClearsRefreshCookieUnderAPINamespace(t *testing.T) {
 	handler := NewAuthHandler(nil, nil, nil, nil)
 
@@ -315,5 +616,24 @@ func TestAuthHandlerLogoutClearsRefreshCookieUnderAPINamespace(t *testing.T) {
 	}
 	if cookies[0].MaxAge != -1 {
 		t.Fatalf("cookie MaxAge = %d, want -1", cookies[0].MaxAge)
+	}
+}
+
+func TestAuthHandlerLogoutClearsSecureRefreshCookieWhenConfigured(t *testing.T) {
+	handler := NewAuthHandler(nil, nil, nil, nil, true)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	rec := httptest.NewRecorder()
+	handler.Logout(rec, req)
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cookies len = %d, want 1", len(cookies))
+	}
+	if !cookies[0].Secure {
+		t.Fatal("cookie Secure = false, want true")
+	}
+	if cookies[0].SameSite != http.SameSiteStrictMode {
+		t.Fatalf("cookie SameSite = %v, want Strict", cookies[0].SameSite)
 	}
 }

@@ -1,11 +1,5 @@
 export const TICKET_WORKSPACE_PERMISSIONS = [
-  'tickets.apply',
-  'tickets.review',
-  'tickets.execute',
-  'sql_editor.export',
-  'sql_editor.export_review',
-  'sql_editor.sensitive_apply',
-  'sql_editor.sensitive_review',
+  'tickets.read',
 ] as const
 
 export function hasAnyPermission(userPermissions: string[], allowedPermissions: readonly string[]) {
@@ -16,8 +10,11 @@ export function defaultRouteForPermissions(userPermissions: string[]) {
   if (hasAnyPermission(userPermissions, TICKET_WORKSPACE_PERMISSIONS)) {
     return '/tickets'
   }
-  if (userPermissions.includes('sql_editor.query')) {
+  if (userPermissions.includes('sql_editor.read')) {
     return '/sql-editor'
+  }
+  if (userPermissions.includes('scheduled_sql_reports.read') || userPermissions.includes('scheduled_sql_reports.write')) {
+    return '/scheduled-sql-reports'
   }
   if (userPermissions.includes('users.read') || userPermissions.includes('users.write')) {
     return '/users'

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, BriefcaseBusiness, ChevronDown, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
+import { Bell, BriefcaseBusiness, CalendarClock, ChevronDown, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -14,6 +14,7 @@ type NavLeafItem = {
   to: string
   label: string
   icon: typeof Ticket
+  allowed?: (permissions: string[]) => boolean
 }
 
 type NavItem = {
@@ -34,15 +35,22 @@ const NAV_ITEMS: NavItem[] = [
     to: '/tickets',
     children: [
       { to: '/tickets', label: 'All Tickets', icon: Ticket },
-      { to: '/tickets/new', label: 'New Ticket', icon: FilePlus2 },
+      { to: '/tickets/new', label: 'New Ticket', icon: FilePlus2, allowed: (permissions) => permissions.includes('tickets.apply') },
     ],
   },
   {
     key: 'sql-editor',
     label: 'SQL Editor',
     icon: SquareTerminal,
-    allowed: (permissions) => permissions.includes('sql_editor.query'),
+    allowed: (permissions) => permissions.includes('sql_editor.read'),
     to: '/sql-editor',
+  },
+  {
+    key: 'scheduled-sql-reports',
+    label: 'Scheduled Reports',
+    icon: CalendarClock,
+    allowed: (permissions) => permissions.includes('scheduled_sql_reports.read') || permissions.includes('scheduled_sql_reports.write'),
+    to: '/scheduled-sql-reports',
   },
   {
     key: 'users',
@@ -54,6 +62,7 @@ const NAV_ITEMS: NavItem[] = [
       { to: '/users', label: 'Users', icon: Users },
       { to: '/users/groups', label: 'Auth Groups', icon: Users },
       { to: '/users/resources', label: 'Resources', icon: Users },
+      { to: '/users/query-access', label: 'Query Access', icon: Users },
     ],
   },
   {
@@ -112,7 +121,7 @@ const NAV_ITEMS: NavItem[] = [
 const NAV_GROUPS = [
   {
     title: 'Workbench',
-    items: ['/tickets', '/tickets/new', '/sql-editor'],
+    items: ['/tickets', '/tickets/new', '/sql-editor', '/scheduled-sql-reports'],
   },
   {
     title: 'Governance',
@@ -290,13 +299,19 @@ export function AppShell() {
     }
 
     setNotificationOpen(false)
-    if (notification.resource_type === 'ticket' && notification.resource_id) {
-      navigate(`/tickets/${notification.resource_id}`)
+    if (notification.resource_type === 'ticket' && notification.resource_ref) {
+      navigate(`/tickets/${notification.resource_ref}`)
     }
   }
 
   const navItems = useMemo(
-    () => NAV_ITEMS.filter((item) => item.allowed(user.permissions)),
+    () =>
+      NAV_ITEMS
+        .filter((item) => item.allowed(user.permissions))
+        .map((item) => ({
+          ...item,
+          children: item.children?.filter((child) => child.allowed == null || child.allowed(user.permissions)),
+        })),
     [user.permissions],
   )
   const activeNavItem = useMemo(
@@ -592,6 +607,18 @@ export function AppShell() {
                   </div>
 
                   <div className="my-1 h-px bg-border" />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      navigate('/account/sessions')
+                    }}
+                    className="flex h-8 w-full items-center justify-between rounded-md px-2 text-[12px] font-medium text-ink transition-colors hover:bg-panel-soft"
+                  >
+                    <span>Sessions</span>
+                    <ShieldCheck className="h-3.5 w-3.5 text-muted" />
+                  </button>
 
                   <button
                     type="button"
