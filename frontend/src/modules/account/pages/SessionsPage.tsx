@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
 import { listAccountSessions, revokeAccountSession, revokeAllAccountSessions, type AccountSession } from '@/modules/account/api'
 import { ApiError } from '@/shared/api/client'
@@ -6,7 +6,10 @@ import { formatDateTime } from '@/shared/lib/format'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
+import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
+
+const SESSION_PAGE_SIZE = 5
 
 export function SessionsPage() {
   const { pushToast } = useToast()
@@ -14,6 +17,8 @@ export function SessionsPage() {
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState<number | 'all' | null>(null)
   const [error, setError] = useState('')
+  const [sessionOffset, setSessionOffset] = useState(0)
+  const pagedSessions = useMemo(() => sessions.slice(sessionOffset, sessionOffset + SESSION_PAGE_SIZE), [sessionOffset, sessions])
 
   async function loadSessions(options?: { background?: boolean }) {
     if (!options?.background) {
@@ -23,6 +28,7 @@ export function SessionsPage() {
     try {
       const response = await listAccountSessions()
       setSessions(response.sessions)
+      setSessionOffset((current) => Math.min(current, Math.max(0, Math.floor(Math.max(response.sessions.length - 1, 0) / SESSION_PAGE_SIZE) * SESSION_PAGE_SIZE)))
     } catch (loadError) {
       setError(loadError instanceof ApiError ? loadError.message : 'Failed to load sessions.')
     } finally {
@@ -105,66 +111,75 @@ export function SessionsPage() {
           {sessions.length === 0 ? (
             <div className="px-4 py-6 text-[13px] text-muted">No sessions found.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full border-collapse text-left text-[13px]">
-                <thead className="bg-panel-soft text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">
-                  <tr>
-                    <th className="whitespace-nowrap px-4 py-3">Session</th>
-                    <th className="whitespace-nowrap px-4 py-3">IP</th>
-                    <th className="whitespace-nowrap px-4 py-3">Created</th>
-                    <th className="whitespace-nowrap px-4 py-3">Expires</th>
-                    <th className="whitespace-nowrap px-4 py-3">Status</th>
-                    <th className="whitespace-nowrap px-4 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border bg-white">
-                  {sessions.map((session) => {
-                    const revoked = session.revoked_at != null
-                    return (
-                      <tr key={session.id} className="align-top text-ink">
-                        <td className="max-w-[460px] px-4 py-3">
-                          <div className="flex items-start gap-2">
-                            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="font-semibold">Session #{session.id}</p>
-                                {session.is_current ? (
-                                  <span className="inline-flex rounded-full border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
-                                    Current
-                                  </span>
-                                ) : null}
+            <>
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-collapse text-left text-[13px]">
+                  <thead className="bg-panel-soft text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">
+                    <tr>
+                      <th className="whitespace-nowrap px-4 py-3">Session</th>
+                      <th className="whitespace-nowrap px-4 py-3">IP</th>
+                      <th className="whitespace-nowrap px-4 py-3">Created</th>
+                      <th className="whitespace-nowrap px-4 py-3">Expires</th>
+                      <th className="whitespace-nowrap px-4 py-3">Status</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border bg-white">
+                    {pagedSessions.map((session) => {
+                      const revoked = session.revoked_at != null
+                      return (
+                        <tr key={session.id} className="align-top text-ink">
+                          <td className="max-w-[460px] px-4 py-3">
+                            <div className="flex items-start gap-2">
+                              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-semibold">Session #{session.id}</p>
+                                  {session.is_current ? (
+                                    <span className="inline-flex rounded-full border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                                      Current
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <p className="mt-1 truncate text-[12px] text-muted" title={session.user_agent ?? ''}>
+                                  {session.user_agent || 'Unknown user agent'}
+                                </p>
                               </div>
-                              <p className="mt-1 truncate text-[12px] text-muted" title={session.user_agent ?? ''}>
-                                {session.user_agent || 'Unknown user agent'}
-                              </p>
                             </div>
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-muted">{session.ip_address || '-'}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-muted">{formatDateTime(session.created_at)}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-muted">{formatDateTime(session.expires_at)}</td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] ${revoked ? 'border-slate-200 bg-slate-100 text-slate-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
-                            {revoked ? 'Revoked' : 'Active'}
-                          </span>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-right">
-                          <button
-                            type="button"
-                            disabled={acting !== null || revoked || session.is_current}
-                            onClick={() => void handleRevoke(session.id)}
-                            className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-white px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Revoke
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-muted">{session.ip_address || '-'}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-muted">{formatDateTime(session.created_at)}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-muted">{formatDateTime(session.expires_at)}</td>
+                          <td className="whitespace-nowrap px-4 py-3">
+                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] ${revoked ? 'border-slate-200 bg-slate-100 text-slate-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                              {revoked ? 'Revoked' : 'Active'}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right">
+                            <button
+                              type="button"
+                              disabled={acting !== null || revoked || session.is_current}
+                              onClick={() => void handleRevoke(session.id)}
+                              className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-white px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Revoke
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination
+                total={sessions.length}
+                pageSize={SESSION_PAGE_SIZE}
+                offset={sessionOffset}
+                count={pagedSessions.length}
+                onChange={setSessionOffset}
+              />
+            </>
           )}
         </section>
       )}

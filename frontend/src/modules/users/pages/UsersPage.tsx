@@ -61,6 +61,7 @@ const PERMISSION_METADATA: PermissionOption[] = [
   { key: 'global.sensitive', module: 'Global', action: 'Sensitive', label: 'Global Sensitive', description: 'Bypass masking rules permanently to view sensitive data.' },
 ]
 const PAGE_SIZE = 20
+const SESSION_PAGE_SIZE = 5
 
 const PERMISSION_INDEX = new Map(PERMISSION_METADATA.map((item) => [item.key, item] as const))
 
@@ -176,6 +177,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   const [saving, setSaving] = useState(false)
   const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null)
   const [selectedUserSessions, setSelectedUserSessions] = useState<AccountSession[]>([])
+  const [selectedUserSessionsOffset, setSelectedUserSessionsOffset] = useState(0)
   const [sessionsLoading, setSessionsLoading] = useState(false)
   const [sessionsActing, setSessionsActing] = useState<number | 'all' | null>(null)
   const [mfaResetting, setMFAResetting] = useState(false)
@@ -271,6 +273,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     setSaving(false)
     setSelectedUser(null)
     setSelectedUserSessions([])
+    setSelectedUserSessionsOffset(0)
     setSessionsLoading(false)
     setSessionsActing(null)
     setMFAResetting(false)
@@ -291,6 +294,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     setDrawerError('')
     setSelectedUser(null)
     setSelectedUserSessions([])
+    setSelectedUserSessionsOffset(0)
     setSelectedAuthGroup(null)
     setConfirmState(null)
     setUserDraft(EMPTY_USER_DRAFT)
@@ -309,6 +313,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       const [detail, sessionsResponse] = await Promise.all([getUser(userId), listUserSessions(userId)])
       setSelectedUser(detail)
       setSelectedUserSessions(sessionsResponse.sessions)
+      setSelectedUserSessionsOffset(0)
       setUserDraft({
         username: detail.username,
         email: detail.email,
@@ -334,6 +339,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     try {
       const response = await listUserSessions(userId)
       setSelectedUserSessions(response.sessions)
+      setSelectedUserSessionsOffset((current) => Math.min(current, Math.max(0, Math.floor(Math.max(response.sessions.length - 1, 0) / SESSION_PAGE_SIZE) * SESSION_PAGE_SIZE)))
     } catch (loadError) {
       setDrawerError(loadError instanceof ApiError ? loadError.message : 'Failed to load user sessions.')
     } finally {
@@ -720,6 +726,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   const pagedQueryAccessRules = useMemo(
     () => queryAccessRules.slice(queryAccessOffset, queryAccessOffset + PAGE_SIZE),
     [queryAccessOffset, queryAccessRules],
+  )
+  const pagedSelectedUserSessions = useMemo(
+    () => selectedUserSessions.slice(selectedUserSessionsOffset, selectedUserSessionsOffset + SESSION_PAGE_SIZE),
+    [selectedUserSessions, selectedUserSessionsOffset],
   )
   const currentPageCount = viewMode === 'users'
     ? pagedUsers.length
@@ -1451,51 +1461,60 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       ) : selectedUserSessions.length === 0 ? (
                         <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">No sessions found.</div>
                       ) : (
-                        <div className="overflow-x-auto rounded-lg border border-border">
-                          <table className="min-w-full border-collapse text-left text-[12px]">
-                            <thead className="bg-panel-soft text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">
-                              <tr>
-                                <th className="whitespace-nowrap px-3 py-2">Session</th>
-                                <th className="whitespace-nowrap px-3 py-2">IP</th>
-                                <th className="whitespace-nowrap px-3 py-2">Created</th>
-                                <th className="whitespace-nowrap px-3 py-2">Expires</th>
-                                <th className="whitespace-nowrap px-3 py-2">Status</th>
-                                <th className="whitespace-nowrap px-3 py-2 text-right">Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border bg-white">
-                              {selectedUserSessions.map((session) => {
-                                const revoked = session.revoked_at != null
-                                return (
-                                  <tr key={session.id} className="align-top">
-                                    <td className="max-w-[260px] px-3 py-2">
-                                      <p className="font-semibold text-ink">Session #{session.id}</p>
-                                      <p className="mt-1 truncate text-[11px] text-muted" title={session.user_agent ?? ''}>
-                                        {session.user_agent || 'Unknown user agent'}
-                                      </p>
-                                    </td>
-                                    <td className="whitespace-nowrap px-3 py-2 text-muted">{session.ip_address || '-'}</td>
-                                    <td className="whitespace-nowrap px-3 py-2 text-muted">{formatDateTime(session.created_at)}</td>
-                                    <td className="whitespace-nowrap px-3 py-2 text-muted">{formatDateTime(session.expires_at)}</td>
-                                    <td className="whitespace-nowrap px-3 py-2">
-                                      <Tag label={revoked ? 'Revoked' : 'Active'} tone={revoked ? 'default' : 'success'} />
-                                    </td>
-                                    <td className="whitespace-nowrap px-3 py-2 text-right">
-                                      <button
-                                        type="button"
-                                        onClick={() => void handleRevokeUserSession(session.id)}
-                                        disabled={sessionsActing !== null || revoked}
-                                        className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-white px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:opacity-50"
-                                      >
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                        Revoke
-                                      </button>
-                                    </td>
-                                  </tr>
-                                )
-                              })}
-                            </tbody>
-                          </table>
+                        <div className="grid gap-3">
+                          <div className="overflow-x-auto rounded-lg border border-border">
+                            <table className="min-w-full border-collapse text-left text-[12px]">
+                              <thead className="bg-panel-soft text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">
+                                <tr>
+                                  <th className="whitespace-nowrap px-3 py-2">Session</th>
+                                  <th className="whitespace-nowrap px-3 py-2">IP</th>
+                                  <th className="whitespace-nowrap px-3 py-2">Created</th>
+                                  <th className="whitespace-nowrap px-3 py-2">Expires</th>
+                                  <th className="whitespace-nowrap px-3 py-2">Status</th>
+                                  <th className="whitespace-nowrap px-3 py-2 text-right">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-border bg-white">
+                                {pagedSelectedUserSessions.map((session) => {
+                                  const revoked = session.revoked_at != null
+                                  return (
+                                    <tr key={session.id} className="align-top">
+                                      <td className="max-w-[260px] px-3 py-2">
+                                        <p className="font-semibold text-ink">Session #{session.id}</p>
+                                        <p className="mt-1 truncate text-[11px] text-muted" title={session.user_agent ?? ''}>
+                                          {session.user_agent || 'Unknown user agent'}
+                                        </p>
+                                      </td>
+                                      <td className="whitespace-nowrap px-3 py-2 text-muted">{session.ip_address || '-'}</td>
+                                      <td className="whitespace-nowrap px-3 py-2 text-muted">{formatDateTime(session.created_at)}</td>
+                                      <td className="whitespace-nowrap px-3 py-2 text-muted">{formatDateTime(session.expires_at)}</td>
+                                      <td className="whitespace-nowrap px-3 py-2">
+                                        <Tag label={revoked ? 'Revoked' : 'Active'} tone={revoked ? 'default' : 'success'} />
+                                      </td>
+                                      <td className="whitespace-nowrap px-3 py-2 text-right">
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleRevokeUserSession(session.id)}
+                                          disabled={sessionsActing !== null || revoked}
+                                          className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-white px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:opacity-50"
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                          Revoke
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          <Pagination
+                            total={selectedUserSessions.length}
+                            pageSize={SESSION_PAGE_SIZE}
+                            offset={selectedUserSessionsOffset}
+                            count={pagedSelectedUserSessions.length}
+                            onChange={setSelectedUserSessionsOffset}
+                          />
                         </div>
                       )}
                     </CardSection>

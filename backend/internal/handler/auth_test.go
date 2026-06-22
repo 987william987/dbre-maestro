@@ -539,8 +539,8 @@ func TestAuthHandlerListSessionsDoesNotExposeTokenHash(t *testing.T) {
 	userID := uint64(7)
 	now := time.Date(2026, 6, 22, 10, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`SELECT \* FROM sessions WHERE user_id = \? ORDER BY created_at DESC`).
-		WithArgs(userID).
+	mock.ExpectQuery(`SELECT \* FROM sessions WHERE user_id = \? ORDER BY created_at DESC LIMIT \?`).
+		WithArgs(userID, 20).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "token_hash", "user_agent", "ip_address", "expires_at", "revoked_at", "created_at"}).
 			AddRow(11, userID, "secret-token-hash", "browser", "10.0.0.8", now.Add(time.Hour), nil, now))
 

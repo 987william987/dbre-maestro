@@ -53,11 +53,18 @@ func (r *SessionRepo) GetByTokenHash(ctx context.Context, hash string) (*model.S
 }
 
 func (r *SessionRepo) ListForUser(ctx context.Context, userID uint64) ([]model.Session, error) {
+	return r.ListForUserLimit(ctx, userID, 0)
+}
+
+func (r *SessionRepo) ListForUserLimit(ctx context.Context, userID uint64, limit int) ([]model.Session, error) {
 	var sessions []model.Session
-	err := r.db.SelectContext(ctx, &sessions,
-		`SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC`,
-		userID,
-	)
+	query := `SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC`
+	args := []any{userID}
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	err := r.db.SelectContext(ctx, &sessions, query, args...)
 	return sessions, err
 }
 

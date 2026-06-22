@@ -34,6 +34,7 @@ type AuthHandler struct {
 const (
 	refreshCookiePath       = "/api/auth/refresh"
 	refreshReuseGraceWindow = 30 * time.Second
+	sessionListLimit        = 20
 )
 
 func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, jwtSecret []byte, refreshCookieSecure ...bool) *AuthHandler {
@@ -419,7 +420,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
-	sessions, err := h.sessions.ListForUser(r.Context(), userID)
+	sessions, err := h.sessions.ListForUserLimit(r.Context(), userID, sessionListLimit)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "load sessions failed")
 		return

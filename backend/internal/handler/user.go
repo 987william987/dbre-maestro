@@ -262,7 +262,7 @@ func (h *UserHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "user not found")
 		return
 	}
-	sessions, err := h.sessions.ListForUser(r.Context(), id)
+	sessions, err := h.sessions.ListForUserLimit(r.Context(), id, sessionListLimit)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "load sessions failed")
 		return
