@@ -208,5 +208,6 @@ DB_POOL_SHADOW_VALIDATION_MAX_OPEN=1
 
 - [平台 Settings](settings.md)
 - [登入安全與 Session](auth-and-sessions.md)
+- [AWS EKS 部署流程](../how-to/deploy-to-aws-eks.md)
 - [本機開發教學](../tutorials/getting-started-local-dev.md)
 - [架構總覽](../explanation/architecture-overview.md)

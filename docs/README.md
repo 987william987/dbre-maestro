@@ -17,6 +17,7 @@
 - [How to 建立與執行 Tickets](how-to/create-and-execute-tickets.md)
 - [How to 設定 Workflow Rules](how-to/configure-workflow-rules.md)
 - [How to 建立 Scheduled SQL Report](how-to/create-scheduled-sql-report.md)
+- [How to 部署到 AWS EKS](how-to/deploy-to-aws-eks.md)
 - [How to 設定 Masking Rules](how-to/configure-masking-rules.md)
 - [How to 綁定使用者 Lark Open ID](how-to/bind-lark-open-id.md)
 

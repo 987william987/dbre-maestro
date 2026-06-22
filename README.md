@@ -24,6 +24,7 @@ DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL / DML /
 - [架構總覽](docs/explanation/architecture-overview.md)
 - [權限模型說明](docs/explanation/permission-model.md)
 - [Workflow Rules 設定教學](docs/how-to/configure-workflow-rules.md)
+- [AWS EKS 部署流程](docs/how-to/deploy-to-aws-eks.md)
 - [本機開發教學](docs/tutorials/getting-started-local-dev.md)
 - [登入安全與 Session](docs/reference/auth-and-sessions.md)
 - [SQL Editor 參考](docs/reference/sql-editor.md)
