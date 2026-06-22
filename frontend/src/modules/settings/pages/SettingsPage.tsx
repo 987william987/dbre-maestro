@@ -9,6 +9,7 @@ import type { DBConnection } from '@/shared/types/dbConnection'
 import type { ApprovalPolicy, PlatformSettings, WorkflowRule } from '@/shared/types/settings'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
+import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import { Switch } from '@/shared/ui/Switch'
 import { useToast } from '@/shared/ui/ToastContext'
@@ -436,28 +437,28 @@ function WorkflowRuleEditor({
         />
         <label className="grid gap-2 text-[12px] font-semibold text-muted">
           <span>Ticket type</span>
-          <select
+          <DropdownSelect
+            ariaLabel={`Workflow rule ${index + 1} ticket type`}
             value={rule.ticket_type}
-            onChange={(event) => onChange({ ticket_type: event.target.value as WorkflowRule['ticket_type'] })}
-            className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
-          >
-            {WORKFLOW_TICKET_TYPES.map((ticketType) => (
-              <option key={ticketType} value={ticketType}>{WORKFLOW_TICKET_TYPE_LABELS[ticketType]}</option>
-            ))}
-          </select>
+            onChange={(value) => onChange({ ticket_type: value as WorkflowRule['ticket_type'] })}
+            options={WORKFLOW_TICKET_TYPES.map((ticketType) => ({
+              value: ticketType,
+              label: WORKFLOW_TICKET_TYPE_LABELS[ticketType],
+            }))}
+          />
         </label>
         <label className="grid gap-2 text-[12px] font-semibold text-muted">
           <span>DB connection</span>
-          <select
-            value={rule.db_connection_id ?? ''}
-            onChange={(event) => onChange({ db_connection_id: event.target.value === '' ? null : Number(event.target.value) })}
-            className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
-          >
-            <option value="">All connections</option>
-            {connections.map((connection) => (
-              <option key={connection.id} value={connection.id}>{connection.name}</option>
-            ))}
-          </select>
+          <DropdownSelect
+            ariaLabel={`Workflow rule ${index + 1} DB connection`}
+            value={rule.db_connection_id == null ? '' : String(rule.db_connection_id)}
+            onChange={(value) => onChange({ db_connection_id: value === '' ? null : Number(value) })}
+            options={[
+              { value: '', label: 'All connections' },
+              ...connections.map((connection) => ({ value: String(connection.id), label: connection.name })),
+            ]}
+            menuClassName="max-h-[360px] overflow-y-auto"
+          />
         </label>
         <Field
           label="Priority"
@@ -497,14 +498,15 @@ function WorkflowRuleEditor({
           {rule.ticket_type === 'sql_export' ? (
             <label className="grid gap-2 text-[12px] font-semibold text-muted">
               <span>Export sensitivity</span>
-              <select
+              <DropdownSelect
+                ariaLabel={`Workflow rule ${index + 1} export sensitivity`}
                 value={rule.export_sensitivity ?? 'normal'}
-                onChange={(event) => onChange({ export_sensitivity: event.target.value as 'normal' | 'sensitive' })}
-                className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
-              >
-                <option value="normal">Normal</option>
-                <option value="sensitive">Sensitive</option>
-              </select>
+                onChange={(value) => onChange({ export_sensitivity: value as 'normal' | 'sensitive' })}
+                options={[
+                  { value: 'normal', label: 'Normal' },
+                  { value: 'sensitive', label: 'Sensitive' },
+                ]}
+              />
             </label>
           ) : null}
           <div className="rounded-lg border border-border bg-panel-soft px-3 py-2 text-[11px] leading-5 text-muted">

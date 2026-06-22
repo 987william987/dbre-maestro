@@ -935,8 +935,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     <p className="text-[12px] text-muted">Create fallback rules for a user or auth group. Use * for all databases or all tables.</p>
                   </div>
                 </div>
-                <div className="grid gap-3 lg:grid-cols-[150px_minmax(0,1fr)_120px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_140px_auto]">
-                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                <div className="grid gap-3 lg:grid-cols-[140px_minmax(170px,0.8fr)_110px_260px_170px_170px_120px_auto] xl:grid-cols-[150px_minmax(190px,0.9fr)_120px_300px_190px_190px_130px_auto]">
+                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Subject Type
                     <DropdownSelect
                       ariaLabel="Query Access Subject Type"
@@ -949,7 +949,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       ]}
                     />
                   </label>
-                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Subject
                     <DropdownSelect
                       ariaLabel="Query Access Subject"
@@ -964,7 +964,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       ]}
                     />
                   </label>
-                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Effect
                     <DropdownSelect
                       ariaLabel="Query Access Effect"
@@ -977,7 +977,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       ]}
                     />
                   </label>
-                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     DB Connection
                     <DropdownSelect
                       ariaLabel="Query Access DB Connection"
@@ -988,9 +988,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         { value: '', label: 'Not Selected' },
                         ...connections.map((connection) => ({ value: String(connection.id), label: getConnectionLabel(connection.id, connections) })),
                       ]}
+                      menuClassName="max-h-[360px] overflow-y-auto"
                     />
                   </label>
-                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Database
                     <input
                       value={queryAccessRuleDraft.databasePattern}
@@ -1000,7 +1001,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       disabled={savingQueryAccessRule}
                     />
                   </label>
-                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Table
                     <input
                       value={queryAccessRuleDraft.tablePattern}
@@ -1010,7 +1011,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       disabled={savingQueryAccessRule}
                     />
                   </label>
-                  <label className="grid gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Duration
                     <DropdownSelect
                       ariaLabel="Query Access Duration"
