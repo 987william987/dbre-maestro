@@ -123,6 +123,54 @@ func TestLoadRejectsInvalidMFAEnforcement(t *testing.T) {
 	}
 }
 
+func TestLoadReadsStaticDir(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("STATIC_DIR", " /app/public ")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.StaticDir != "/app/public" {
+		t.Fatalf("StaticDir = %q, want /app/public", cfg.StaticDir)
+	}
+}
+
+func TestLoadDefaultsRunMigrationsOnStartup(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.RunMigrationsOnStartup {
+		t.Fatal("RunMigrationsOnStartup = false, want true")
+	}
+}
+
+func TestLoadAllowsDisablingStartupMigrations(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("RUN_MIGRATIONS_ON_STARTUP", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.RunMigrationsOnStartup {
+		t.Fatal("RunMigrationsOnStartup = true, want false")
+	}
+}
+
+func TestLoadRejectsInvalidRunMigrationsOnStartup(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("RUN_MIGRATIONS_ON_STARTUP", "sometimes")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want invalid RUN_MIGRATIONS_ON_STARTUP error")
+	}
+}
+
 func TestLoadOverridesPoolProfilesFromEnv(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("DB_POOL_QUERY_MAX_OPEN", "20")

@@ -94,12 +94,16 @@ func main() {
 		migrationsPath = filepath.Join("backend", "migrations")
 	}
 
-	slog.Info("running migrations")
-	if err := db.RunMigrations(cfg.MigrationDSN, migrationsPath); err != nil {
-		slog.Error("migration failed", "err", err)
-		os.Exit(1)
+	if *migrateOnly || cfg.RunMigrationsOnStartup {
+		slog.Info("running migrations")
+		if err := db.RunMigrations(cfg.MigrationDSN, migrationsPath); err != nil {
+			slog.Error("migration failed", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("migrations complete")
+	} else {
+		slog.Info("startup migrations disabled")
 	}
-	slog.Info("migrations complete")
 
 	if *migrateOnly {
 		return
@@ -442,6 +446,7 @@ func main() {
 			r.Get("/stream", eventStreamH.Stream)
 		})
 	})
+	registerStaticFiles(r, cfg.StaticDir)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Port),
@@ -471,6 +476,33 @@ func main() {
 
 func dbxFromStdlib(raw *sql.DB) *sqlx.DB {
 	return sqlx.NewDb(raw, "mysql")
+}
+
+func registerStaticFiles(r chi.Router, staticDir string) {
+	staticDir = strings.TrimSpace(staticDir)
+	if staticDir == "" {
+		return
+	}
+
+	fileServer := http.FileServer(http.Dir(staticDir))
+	indexPath := filepath.Join(staticDir, "index.html")
+	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/api/") {
+			http.NotFound(w, req)
+			return
+		}
+
+		requested := filepath.Clean(strings.TrimPrefix(req.URL.Path, "/"))
+		if requested != "." && !strings.HasPrefix(requested, "..") {
+			fullPath := filepath.Join(staticDir, requested)
+			if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+				fileServer.ServeHTTP(w, req)
+				return
+			}
+		}
+
+		http.ServeFile(w, req, indexPath)
+	})
 }
 
 // runScheduler polls every 30 seconds for scheduled tickets whose scheduled_at has passed,

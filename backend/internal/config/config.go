@@ -13,26 +13,30 @@ import (
 )
 
 type Config struct {
-	Port                string
-	AppEnv              string
-	MFAEnforcement      string
-	DBDSN               string
-	MigrationDSN        string
-	JWTSecret           []byte
-	EncryptionKey       []byte
-	AppBaseURL          string
-	RefreshCookieSecure bool
-	LarkWebhookURL      string // optional; empty = Lark notifications disabled
-	PoolProfiles        map[pool.Profile]pool.ProfileConfig
+	Port                   string
+	AppEnv                 string
+	MFAEnforcement         string
+	DBDSN                  string
+	MigrationDSN           string
+	JWTSecret              []byte
+	EncryptionKey          []byte
+	AppBaseURL             string
+	StaticDir              string
+	RunMigrationsOnStartup bool
+	RefreshCookieSecure    bool
+	LarkWebhookURL         string // optional; empty = Lark notifications disabled
+	PoolProfiles           map[pool.Profile]pool.ProfileConfig
 }
 
 func Load() (*Config, error) {
 	c := &Config{
-		Port:         getEnv("PORT", "8080"),
-		AppEnv:       normalizeAppEnv(getEnv("APP_ENV", "development")),
-		DBDSN:        os.Getenv("DB_DSN"),
-		MigrationDSN: os.Getenv("MIGRATION_DSN"),
-		AppBaseURL:   strings.TrimRight(os.Getenv("APP_BASE_URL"), "/"),
+		Port:                   getEnv("PORT", "8080"),
+		AppEnv:                 normalizeAppEnv(getEnv("APP_ENV", "development")),
+		DBDSN:                  os.Getenv("DB_DSN"),
+		MigrationDSN:           os.Getenv("MIGRATION_DSN"),
+		AppBaseURL:             strings.TrimRight(os.Getenv("APP_BASE_URL"), "/"),
+		StaticDir:              strings.TrimSpace(os.Getenv("STATIC_DIR")),
+		RunMigrationsOnStartup: true,
 		PoolProfiles: map[pool.Profile]pool.ProfileConfig{
 			pool.ProfileQuery:            pool.DefaultConfigForProfile(pool.ProfileQuery),
 			pool.ProfileExec:             pool.DefaultConfigForProfile(pool.ProfileExec),
@@ -71,6 +75,13 @@ func Load() (*Config, error) {
 	}
 
 	c.LarkWebhookURL = os.Getenv("LARK_WEBHOOK_URL")
+	if raw := os.Getenv("RUN_MIGRATIONS_ON_STARTUP"); raw != "" {
+		runMigrations, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("RUN_MIGRATIONS_ON_STARTUP must be a boolean: %w", err)
+		}
+		c.RunMigrationsOnStartup = runMigrations
+	}
 	if raw := os.Getenv("MFA_ENFORCEMENT"); raw != "" {
 		c.MFAEnforcement = normalizeMFAEnforcement(raw)
 		if c.MFAEnforcement == "" {
