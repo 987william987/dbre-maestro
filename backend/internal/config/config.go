@@ -13,30 +13,35 @@ import (
 )
 
 type Config struct {
-	Port                   string
-	AppEnv                 string
-	MFAEnforcement         string
-	DBDSN                  string
-	MigrationDSN           string
-	JWTSecret              []byte
-	EncryptionKey          []byte
-	AppBaseURL             string
-	StaticDir              string
-	RunMigrationsOnStartup bool
-	RefreshCookieSecure    bool
-	LarkWebhookURL         string // optional; empty = Lark notifications disabled
-	PoolProfiles           map[pool.Profile]pool.ProfileConfig
+	Port                      string
+	AppEnv                    string
+	MFAEnforcement            string
+	DBDSN                     string
+	MigrationDSN              string
+	JWTSecret                 []byte
+	EncryptionKey             []byte
+	AppBaseURL                string
+	StaticDir                 string
+	RunMigrationsOnStartup    bool
+	AWSSecretsManagerEnabled  bool
+	AWSSecretsManagerRegion   string
+	AWSSecretsManagerSecretID string
+	RefreshCookieSecure       bool
+	LarkWebhookURL            string // optional; empty = Lark notifications disabled
+	PoolProfiles              map[pool.Profile]pool.ProfileConfig
 }
 
 func Load() (*Config, error) {
 	c := &Config{
-		Port:                   getEnv("PORT", "8080"),
-		AppEnv:                 normalizeAppEnv(getEnv("APP_ENV", "development")),
-		DBDSN:                  os.Getenv("DB_DSN"),
-		MigrationDSN:           os.Getenv("MIGRATION_DSN"),
-		AppBaseURL:             strings.TrimRight(os.Getenv("APP_BASE_URL"), "/"),
-		StaticDir:              strings.TrimSpace(os.Getenv("STATIC_DIR")),
-		RunMigrationsOnStartup: true,
+		Port:                      getEnv("PORT", "8080"),
+		AppEnv:                    normalizeAppEnv(getEnv("APP_ENV", "development")),
+		DBDSN:                     os.Getenv("DB_DSN"),
+		MigrationDSN:              os.Getenv("MIGRATION_DSN"),
+		AppBaseURL:                strings.TrimRight(os.Getenv("APP_BASE_URL"), "/"),
+		StaticDir:                 strings.TrimSpace(os.Getenv("STATIC_DIR")),
+		RunMigrationsOnStartup:    true,
+		AWSSecretsManagerRegion:   strings.TrimSpace(os.Getenv("AWS_SM_REGION")),
+		AWSSecretsManagerSecretID: strings.TrimSpace(os.Getenv("AWS_SM_SECRET_ID")),
 		PoolProfiles: map[pool.Profile]pool.ProfileConfig{
 			pool.ProfileQuery:            pool.DefaultConfigForProfile(pool.ProfileQuery),
 			pool.ProfileExec:             pool.DefaultConfigForProfile(pool.ProfileExec),
@@ -47,30 +52,27 @@ func Load() (*Config, error) {
 	}
 	c.MFAEnforcement = defaultMFAEnforcement(c.AppEnv)
 
-	if c.DBDSN == "" {
-		return nil, errors.New("DB_DSN is required")
+	if raw := os.Getenv("AWS_SM_ENABLE"); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("AWS_SM_ENABLE must be a boolean: %w", err)
+		}
+		c.AWSSecretsManagerEnabled = enabled
 	}
 
 	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		return nil, errors.New("JWT_SECRET is required")
+	if jwtSecret != "" {
+		c.JWTSecret = []byte(jwtSecret)
 	}
-	c.JWTSecret = []byte(jwtSecret)
 
 	encKey := os.Getenv("DBRE_ENCRYPTION_KEY")
-	if encKey == "" {
-		return nil, errors.New("DBRE_ENCRYPTION_KEY is required")
+	if encKey != "" {
+		if err := c.SetEncryptionKey(encKey); err != nil {
+			return nil, err
+		}
 	}
-	key, err := base64.StdEncoding.DecodeString(encKey)
-	if err != nil {
-		return nil, errors.New("DBRE_ENCRYPTION_KEY must be base64-encoded 32 bytes")
-	}
-	if len(key) != 32 {
-		return nil, errors.New("DBRE_ENCRYPTION_KEY must decode to exactly 32 bytes")
-	}
-	c.EncryptionKey = key
 
-	if c.MigrationDSN == "" {
+	if c.MigrationDSN == "" && !c.AWSSecretsManagerEnabled {
 		c.MigrationDSN = c.DBDSN
 	}
 
@@ -100,8 +102,44 @@ func Load() (*Config, error) {
 	if err := loadPoolProfileConfig(c); err != nil {
 		return nil, err
 	}
+	if !c.AWSSecretsManagerEnabled {
+		if err := c.ValidateRequiredSecrets(); err != nil {
+			return nil, err
+		}
+	}
 
 	return c, nil
+}
+
+func (c *Config) SetEncryptionKey(value string) error {
+	key, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return errors.New("DBRE_ENCRYPTION_KEY must be base64-encoded 32 bytes")
+	}
+	if len(key) != 32 {
+		return errors.New("DBRE_ENCRYPTION_KEY must decode to exactly 32 bytes")
+	}
+	c.EncryptionKey = key
+	return nil
+}
+
+func (c *Config) ValidateRequiredSecrets() error {
+	if c.DBDSN == "" {
+		return errors.New("DB_DSN is required")
+	}
+	if len(c.JWTSecret) == 0 {
+		return errors.New("JWT_SECRET is required")
+	}
+	if len(c.EncryptionKey) == 0 {
+		return errors.New("DBRE_ENCRYPTION_KEY is required")
+	}
+	if len(c.EncryptionKey) != 32 {
+		return errors.New("DBRE_ENCRYPTION_KEY must decode to exactly 32 bytes")
+	}
+	if c.MigrationDSN == "" {
+		c.MigrationDSN = c.DBDSN
+	}
+	return nil
 }
 
 func defaultMFAEnforcement(appEnv string) string {
