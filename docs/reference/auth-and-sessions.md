@@ -51,6 +51,18 @@ MFA 由部署環境變數控制：
 
 高權限帳號首次登入時，如果尚未啟用 MFA，登入流程會進入 MFA setup。使用者掃描 QR code 或輸入 setup key 後，提交 6 位 TOTP code；驗證成功才會建立正式 session。
 
+每個 user 的 MFA secret 獨立存放在該 user 記錄上。把一般 user 加入 admin group 後，若該 user 尚未啟用 MFA，下次登入會產生該 user 專屬的 QR code / setup key；不會共用原始 `admin` 帳號的驗證碼。
+
+MFA setup QR code / setup key 等同長期 TOTP secret。任何人取得同一個 QR code 或 setup key，都能在自己的 authenticator app 產生同一組 6 位驗證碼。正式環境不應把 QR code 截圖保存到共用文件、ticket、群組或 wiki。
+
+正式環境建議：
+
+- 初始 `admin` 帳號只用於 bootstrap
+- 每位管理員建立獨立 user
+- 將管理員各自加入 admin group
+- 每位管理員各自完成 MFA setup
+- 不共用同一個 admin 帳號、密碼或 MFA QR code
+
 ## MFA Recovery
 
 平台提供兩種 recovery：
@@ -74,6 +86,8 @@ go run ./cmd/server -reset-mfa-username admin
 ```
 
 Reset MFA 會清除該使用者 MFA secret、停用 MFA 狀態、撤銷現有 sessions，並寫入 audit log。
+
+擁有 `users.write` 權限的 admin 可以 reset 其他 user 的 MFA，也可以 reset 自己的 MFA。Self-reset 會撤銷自己的 sessions，因此操作後需要重新登入並重新完成 MFA setup。正式環境建議至少保留兩個獨立 admin 帳號，讓管理員可以互相協助 reset MFA；若所有 admin 都無法登入，再使用 break-glass CLI。
 
 ## Session 管理
 

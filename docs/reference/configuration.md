@@ -37,6 +37,7 @@
 | `PORT` | App 服務 port | `8080` |
 | `APP_BASE_URL` | 前端站台 base URL，供通知內工單連結使用 | `http://localhost:5173` |
 | `MIGRATION_DSN` | migration 專用 DSN | 若未指定，跟 app DSN 同邏輯 |
+| `RUN_MIGRATIONS_ON_STARTUP` | 啟動 app server 前是否自動執行 migration | `true` |
 | `AWS_SM_ENABLE` | 啟用 AWS Secrets Manager 讀取敏感設定 | `false` |
 | `AWS_SM_REGION` | AWS Secrets Manager region | 無 |
 | `AWS_SM_SECRET_ID` | AWS Secrets Manager secret id | 無 |
@@ -69,6 +70,18 @@ Secret JSON 至少需要：
 `MIGRATION_DSN` 可省略；省略時會 fallback 到 `DB_DSN`。正式環境建議提供獨立 migration DSN。
 
 DB pool 參數不是 secret，仍由 env / ConfigMap / values 管理。
+
+## Migration 啟動策略
+
+`RUN_MIGRATIONS_ON_STARTUP=true` 時，app server 啟動前會先用 `MIGRATION_DSN` 執行 `backend/migrations`。這是預設值，適合本機開發與單副本測試環境。
+
+`RUN_MIGRATIONS_ON_STARTUP=false` 時，Deployment Pod 啟動不會自動跑 migration。多副本或正式環境建議使用這個設定，並改由 Kubernetes Job 執行：
+
+```bash
+/app/maestro -migrate-only
+```
+
+修改 `RUN_MIGRATIONS_ON_STARTUP` 後需要重啟 Pod 才會生效。
 
 ## DB Pool Profile 環境變數
 

@@ -21,7 +21,7 @@
 | Frontend Docker image | 目前是 Vite dev server image，不適合 production |
 | Kubernetes manifests | 尚未提供 |
 | Helm chart / Kustomize | 尚未提供 |
-| Migration command | `./maestro -migrate-only` |
+| Migration command | `/app/maestro -migrate-only` |
 | Health check | `GET /api/health` |
 
 正式部署 frontend 前，需先補其中一種方案：
@@ -64,6 +64,7 @@ Backend Pod 至少需要：
 | `MIGRATION_DSN` | migration 專用連線，權限通常高於 app user；`AWS_SM_ENABLE=true` 時建議由 secret payload 提供 |
 | `DBRE_ENCRYPTION_KEY` | base64 32-byte key；`AWS_SM_ENABLE=true` 時由 secret payload 提供 |
 | `JWT_SECRET` | JWT 簽章 secret；`AWS_SM_ENABLE=true` 時由 secret payload 提供 |
+| `RUN_MIGRATIONS_ON_STARTUP` | 是否在 Deployment Pod 啟動時執行 migration；預設 `true` |
 | `MFA_ENFORCEMENT` | production 建議 `required_for_admins` |
 | `REFRESH_COOKIE_SECURE` | production 必須等同 `true`；程式會強制 |
 
@@ -134,6 +135,51 @@ secretsmanager:GetSecretValue
 
 `DBRE_ENCRYPTION_KEY` 一旦用於加密既有資料，不可隨意更換；更換前需要設計資料重加密流程。
 
+## ArgoCD deploy.envs 範例
+
+devops pipeline 會更新 image tag，但通常不會自動新增 runtime env。每個環境的 `deploy.envs` 需要在 ArgoCD values 裡配置。
+
+sre-test 初期最小建議：
+
+```yaml
+deploy:
+  envs:
+    AWS_SM_ENABLE: "true"
+    AWS_SM_REGION: "ap-northeast-1"
+    AWS_SM_SECRET_ID: "/testnet/dbre-maestro/default"
+    APP_ENV: "sre-test"
+    MFA_ENFORCEMENT: "disabled"
+    RUN_MIGRATIONS_ON_STARTUP: "true"
+```
+
+上述設定假設 test 仍使用單副本，並由 Deployment Pod 啟動時執行 migration。若 test 已建立 migration Job，建議改成：
+
+```yaml
+    RUN_MIGRATIONS_ON_STARTUP: "false"
+```
+
+production 建議：
+
+```yaml
+deploy:
+  envs:
+    AWS_SM_ENABLE: "true"
+    AWS_SM_REGION: "ap-northeast-1"
+    AWS_SM_SECRET_ID: "/prod/dbre-maestro/default"
+    APP_ENV: "production"
+    MFA_ENFORCEMENT: "required_for_admins"
+    REFRESH_COOKIE_SECURE: "true"
+    RUN_MIGRATIONS_ON_STARTUP: "false"
+```
+
+production 必須先由 migration Job 執行：
+
+```bash
+/app/maestro -migrate-only
+```
+
+DB pool 參數已有保守預設，通常不需要一開始配置。若需要調整連線數，可在同一個 `deploy.envs` 補 `DB_POOL_*`；修改後需要 rollout Pod 才會生效。
+
 ## Image 建置與推送
 
 Backend image：
@@ -153,27 +199,133 @@ npm run build
 
 ## Migration 流程
 
-目前 backend 啟動時會自動執行 migrations，且也支援：
+backend 支援兩種 migration 執行方式：
 
-```bash
-./maestro -migrate-only
+```text
+RUN_MIGRATIONS_ON_STARTUP=true
 ```
 
-EKS 建議流程：
+Pod 啟動時先用 `MIGRATION_DSN` 執行 migration，再啟動 server。這是預設值，適合本機開發與單副本測試環境。
+
+```bash
+/app/maestro -migrate-only
+```
+
+只執行 migration，成功後退出。這適合 Kubernetes Job 或一次性維運命令。
+
+### 模式 A：單副本簡化部署
+
+適用於：
+
+- sre-test 初期
+- production 初期希望先降低流程複雜度
+- 可接受單副本短暫不可用
+- 尚未建立 migration Job 流程
+
+配置：
+
+```yaml
+replicaCount: 1
+
+deploy:
+  envs:
+    RUN_MIGRATIONS_ON_STARTUP: "true"
+```
+
+流程：
+
+1. 建立或更新 AWS Secrets Manager secret
+2. 確認 `MIGRATION_DSN` 可用且權限足夠
+3. rollout 單副本 Deployment
+4. Pod 啟動時自動執行 migration
+5. migration 成功後 server 啟動
+6. 檢查 `/api/health`
+7. 檢查 `schema_migrations`
+
+正常重啟時，程式仍會進入 migration check；若 `schema_migrations` 已是最新且 `dirty=false`，`golang-migrate` 會回報 no change，不會重跑所有 SQL。若新 image 帶了新的 migration，Pod 啟動時會自動套用尚未執行的 migration。
+
+限制：
+
+- 單副本沒有 HA，node drain 或 Pod 重啟會有短暫不可用
+- Deployment Pod 長期持有 `MIGRATION_DSN`
+- 未來擴多副本前必須關閉 startup migration
+- 若新版本 migration 失敗，Pod 會啟動失敗，需要先處理 migration dirty state
+
+### 模式 B：Job 標準部署
+
+適用於：
+
+- production 穩定流程
+- 多副本 Deployment
+- 需要避免多 Pod 同時執行 migration
+- 需要將 migration 與 app rollout 分開審核
+
+流程：
 
 1. 先建立或更新 ConfigMap / Secret
-2. 用同一個 backend image 啟動 Kubernetes Job 執行 `./maestro -migrate-only`
-3. migration 成功後再 rollout backend Deployment
-4. rollout 完成後檢查 `/api/health`
+2. 用同一個 backend image 啟動 Kubernetes Job 執行 `/app/maestro -migrate-only`
+3. backend Deployment 設定 `RUN_MIGRATIONS_ON_STARTUP=false`
+4. migration 成功後再 rollout backend Deployment
+5. rollout 完成後檢查 `/api/health`
 
-注意：目前 app 啟動仍會執行 migration。若 backend replicas 大於 1，rolling update 期間可能有多個 Pod 同時嘗試 migration。正式環境建議後續補一個開關，讓 Deployment 可關閉 startup migration，只由 migration Job 負責。
+Job command：
 
-在該開關完成前，正式 rollout 應保守處理：
+```bash
+/app/maestro -migrate-only
+```
 
-- migration Job 先跑完
-- backend Deployment 初期使用 `replicas: 1`
-- 確認 migration 無 dirty state
-- 再擴 replicas
+Deployment 配置：
+
+```yaml
+deploy:
+  envs:
+    RUN_MIGRATIONS_ON_STARTUP: "false"
+```
+
+Job 成功後再 rollout Deployment。若 Job 失敗，不應 rollout app，應先查看 Job logs 並處理 DB、secret、權限或 dirty state 問題。
+
+### 從單副本切換到多副本
+
+可以先用單副本簡化部署完成第一次初始化，再切到多副本：
+
+1. 初次部署：
+
+```text
+replicaCount=1
+RUN_MIGRATIONS_ON_STARTUP=true
+```
+
+2. 確認 migration 完成：
+
+```sql
+SELECT version, dirty FROM schema_migrations;
+```
+
+`dirty` 必須為 `false`。
+
+3. 切換 Deployment：
+
+```text
+replicaCount=2
+RUN_MIGRATIONS_ON_STARTUP=false
+```
+
+4. ArgoCD sync / rollout。
+
+之後每次新版本包含 migration 時，應先用 migration Job 跑 `/app/maestro -migrate-only`，再 rollout 多副本 Deployment。
+
+不要只把 `replicaCount` 從 1 改成 2+ 而保留 `RUN_MIGRATIONS_ON_STARTUP=true`。即使多數情況會 no-op，遇到新 migration 或 rolling update 時仍有多 Pod 同時搶 migration 的風險。
+
+### 不建議人工貼 SQL
+
+不建議把 `backend/migrations/*.up.sql` 手工貼到 MySQL 當常規流程。原因：
+
+- `golang-migrate` 會維護 `schema_migrations` 的 version / dirty state
+- 手工執行容易漏跑、順序錯或失敗後狀態不一致
+- 部分 migration 不是完全 idempotent
+- 本專案 migration 包含 `GRANT` / `REVOKE`，仍需要 migration admin 權限
+
+若 emergency 情境必須由 DBA 手工處理，需同步維護 `schema_migrations`，並確認最新 version 與 `dirty=false`。常規流程應使用 app image 的 `/app/maestro -migrate-only` 或單副本 startup migration。
 
 ## Backend Deployment 要點
 
