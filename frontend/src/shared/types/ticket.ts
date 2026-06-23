@@ -130,6 +130,11 @@ export type TicketWorkflowTrace = {
   approval_user_ids: number[]
   executor_user_ids: number[]
   admin_user_ids: number[]
+  approval_users?: Array<{ id: number; username: string }>
+  executor_users?: Array<{ id: number; username: string }>
+  admin_users?: Array<{ id: number; username: string }>
+  missing_approval_groups?: Array<{ group_key: string; name: string }>
+  missing_executor_groups?: Array<{ group_key: string; name: string }>
   error_code?: string
   error_message?: string
   resolved_at: string
