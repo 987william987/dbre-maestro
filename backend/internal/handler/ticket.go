@@ -33,6 +33,7 @@ type TicketHandler struct {
 	settings           *repository.SettingsRepo
 	dbConns            *repository.DBConnectionRepo
 	users              *repository.UserRepo
+	authGroups         *repository.AuthGroupRepo
 	masking            *maskingRuntime
 	sqlReviewRules     *repository.SQLReviewRuleRepo
 	shadowValidationDB *sqlx.DB
@@ -58,17 +59,32 @@ type ticketWorkflowParticipants struct {
 	Executors []string `json:"executors"`
 }
 
+type workflowTraceUser struct {
+	ID       uint64 `json:"id"`
+	Username string `json:"username"`
+}
+
+type workflowTraceAuthGroup struct {
+	GroupKey string `json:"group_key"`
+	Name     string `json:"name"`
+}
+
 type ticketWorkflowTrace struct {
-	RuleID          *uint64         `json:"workflow_rule_id,omitempty"`
-	RuleName        string          `json:"workflow_rule_name"`
-	ApprovalEnabled bool            `json:"approval_enabled"`
-	ApprovalUserIDs []uint64        `json:"approval_user_ids"`
-	ExecutorUserIDs []uint64        `json:"executor_user_ids"`
-	AdminUserIDs    []uint64        `json:"admin_user_ids"`
-	ErrorCode       string          `json:"error_code,omitempty"`
-	ErrorMessage    string          `json:"error_message,omitempty"`
-	ResolvedAt      time.Time       `json:"resolved_at"`
-	ResolutionTrace json.RawMessage `json:"resolution_trace,omitempty"`
+	RuleID                *uint64                  `json:"workflow_rule_id,omitempty"`
+	RuleName              string                   `json:"workflow_rule_name"`
+	ApprovalEnabled       bool                     `json:"approval_enabled"`
+	ApprovalUserIDs       []uint64                 `json:"approval_user_ids"`
+	ExecutorUserIDs       []uint64                 `json:"executor_user_ids"`
+	AdminUserIDs          []uint64                 `json:"admin_user_ids"`
+	ApprovalUsers         []workflowTraceUser      `json:"approval_users"`
+	ExecutorUsers         []workflowTraceUser      `json:"executor_users"`
+	AdminUsers            []workflowTraceUser      `json:"admin_users"`
+	MissingApprovalGroups []workflowTraceAuthGroup `json:"missing_approval_groups"`
+	MissingExecutorGroups []workflowTraceAuthGroup `json:"missing_executor_groups"`
+	ErrorCode             string                   `json:"error_code,omitempty"`
+	ErrorMessage          string                   `json:"error_message,omitempty"`
+	ResolvedAt            time.Time                `json:"resolved_at"`
+	ResolutionTrace       json.RawMessage          `json:"resolution_trace,omitempty"`
 }
 
 type ticketReviewItem struct {
@@ -204,6 +220,7 @@ func NewTicketHandler(
 	settings *repository.SettingsRepo,
 	dbConns *repository.DBConnectionRepo,
 	users *repository.UserRepo,
+	authGroups *repository.AuthGroupRepo,
 	maskingRules *repository.MaskingRuleRepo,
 	whitelist *repository.MaskingWhitelistRepo,
 	engine *masking.Engine,
@@ -222,6 +239,7 @@ func NewTicketHandler(
 		settings:           settings,
 		dbConns:            dbConns,
 		users:              users,
+		authGroups:         authGroups,
 		masking:            newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		sqlReviewRules:     sqlReviewRules,
 		shadowValidationDB: shadowValidationDB,
@@ -1181,16 +1199,18 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		auditLogs = []model.AuditLog{}
 	}
 	var workflowTrace *ticketWorkflowTrace
-	if allowed, err := h.canViewWorkflowTrace(r.Context(), userID); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "ticket workflow trace check failed")
-		return
-	} else if allowed {
-		trace, err := h.loadWorkflowTrace(r.Context(), ticket)
-		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "get ticket workflow trace failed")
+	if ticket.Status == model.TicketStatusNeedsAdminAttention {
+		if allowed, err := h.canViewWorkflowTrace(r.Context(), userID); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "ticket workflow trace check failed")
 			return
+		} else if allowed {
+			trace, err := h.loadWorkflowTrace(r.Context(), ticket)
+			if err != nil {
+				jsonErr(w, http.StatusInternalServerError, "get ticket workflow trace failed")
+				return
+			}
+			workflowTrace = trace
 		}
-		workflowTrace = trace
 	}
 
 	jsonOK(w, map[string]any{
@@ -1247,11 +1267,15 @@ func (h *TicketHandler) loadWorkflowParticipants(ctx context.Context, ticket *mo
 }
 
 func (h *TicketHandler) canViewWorkflowTrace(ctx context.Context, userID uint64) (bool, error) {
-	if middleware.HasPermission(ctx, "settings.write") {
-		return true, nil
-	}
 	if h.users == nil || userID == 0 {
 		return false, nil
+	}
+	user, err := h.users.GetByID(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if user != nil && (user.Username == "admin" || user.IsProtected) {
+		return true, nil
 	}
 	groups, err := h.users.GetAuthGroups(ctx, userID)
 	if err != nil {
@@ -1290,7 +1314,115 @@ func (h *TicketHandler) loadWorkflowTrace(ctx context.Context, ticket *model.Tic
 	if strings.TrimSpace(snapshot.ResolutionTrace) != "" {
 		trace.ResolutionTrace = json.RawMessage(snapshot.ResolutionTrace)
 	}
+	trace.ApprovalUsers, err = h.lookupWorkflowTraceUsers(ctx, trace.ApprovalUserIDs)
+	if err != nil {
+		return nil, err
+	}
+	trace.ExecutorUsers, err = h.lookupWorkflowTraceUsers(ctx, trace.ExecutorUserIDs)
+	if err != nil {
+		return nil, err
+	}
+	trace.AdminUsers, err = h.lookupWorkflowTraceUsers(ctx, trace.AdminUserIDs)
+	if err != nil {
+		return nil, err
+	}
+	missingApprovalGroups, missingExecutorGroups := extractMissingWorkflowGroups(snapshot.ResolutionTrace)
+	trace.MissingApprovalGroups, err = h.lookupWorkflowTraceAuthGroups(ctx, missingApprovalGroups)
+	if err != nil {
+		return nil, err
+	}
+	trace.MissingExecutorGroups, err = h.lookupWorkflowTraceAuthGroups(ctx, missingExecutorGroups)
+	if err != nil {
+		return nil, err
+	}
 	return trace, nil
+}
+
+func extractMissingWorkflowGroups(raw string) ([]string, []string) {
+	if strings.TrimSpace(raw) == "" {
+		return []string{}, []string{}
+	}
+	var payload struct {
+		MissingApprovalGroups []string `json:"missing_approval_groups"`
+		MissingExecutorGroups []string `json:"missing_executor_groups"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return []string{}, []string{}
+	}
+	return payload.MissingApprovalGroups, payload.MissingExecutorGroups
+}
+
+func (h *TicketHandler) lookupWorkflowTraceUsers(ctx context.Context, userIDs []uint64) ([]workflowTraceUser, error) {
+	if len(userIDs) == 0 {
+		return []workflowTraceUser{}, nil
+	}
+	if h.users == nil {
+		users := make([]workflowTraceUser, 0, len(userIDs))
+		for _, id := range userIDs {
+			users = append(users, workflowTraceUser{ID: id, Username: strconv.FormatUint(id, 10)})
+		}
+		return users, nil
+	}
+	records, err := h.users.ListByIDs(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[uint64]string, len(records))
+	for _, user := range records {
+		byID[user.ID] = user.Username
+	}
+	users := make([]workflowTraceUser, 0, len(userIDs))
+	for _, id := range userIDs {
+		username := byID[id]
+		if strings.TrimSpace(username) == "" {
+			username = strconv.FormatUint(id, 10)
+		}
+		users = append(users, workflowTraceUser{ID: id, Username: username})
+	}
+	return users, nil
+}
+
+func (h *TicketHandler) lookupWorkflowTraceAuthGroups(ctx context.Context, groupKeys []string) ([]workflowTraceAuthGroup, error) {
+	if len(groupKeys) == 0 {
+		return []workflowTraceAuthGroup{}, nil
+	}
+	uniqueKeys := make([]string, 0, len(groupKeys))
+	seen := make(map[string]struct{}, len(groupKeys))
+	for _, groupKey := range groupKeys {
+		normalized := strings.TrimSpace(groupKey)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		uniqueKeys = append(uniqueKeys, normalized)
+	}
+	if h.authGroups == nil {
+		groups := make([]workflowTraceAuthGroup, 0, len(uniqueKeys))
+		for _, groupKey := range uniqueKeys {
+			groups = append(groups, workflowTraceAuthGroup{GroupKey: groupKey, Name: groupKey})
+		}
+		return groups, nil
+	}
+	records, err := h.authGroups.ListByKeys(ctx, uniqueKeys)
+	if err != nil {
+		return nil, err
+	}
+	byKey := make(map[string]string, len(records))
+	for _, group := range records {
+		byKey[group.GroupKey] = group.Name
+	}
+	groups := make([]workflowTraceAuthGroup, 0, len(uniqueKeys))
+	for _, groupKey := range uniqueKeys {
+		name := byKey[groupKey]
+		if strings.TrimSpace(name) == "" {
+			name = groupKey
+		}
+		groups = append(groups, workflowTraceAuthGroup{GroupKey: groupKey, Name: name})
+	}
+	return groups, nil
 }
 
 // POST /tickets/{id}/retry-workflow-resolution

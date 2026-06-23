@@ -64,6 +64,27 @@ func (r *AuthGroupRepo) GetByKey(ctx context.Context, groupKey string) (*AuthGro
 	return &group, err
 }
 
+func (r *AuthGroupRepo) ListByKeys(ctx context.Context, groupKeys []string) ([]AuthGroupEntity, error) {
+	if len(groupKeys) == 0 {
+		return []AuthGroupEntity{}, nil
+	}
+	query, args, err := sqlx.In(`
+		SELECT id, group_key, name, description, is_system, is_protected, is_all_permissions,
+		       DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
+		       DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
+		FROM auth_groups
+		WHERE group_key IN (?)
+		ORDER BY group_key
+	`, groupKeys)
+	if err != nil {
+		return nil, err
+	}
+	query = r.db.Rebind(query)
+	var groups []AuthGroupEntity
+	err = r.db.SelectContext(ctx, &groups, query, args...)
+	return groups, err
+}
+
 func (r *AuthGroupRepo) ListPermissionKeys(ctx context.Context, authGroupID uint64) ([]string, error) {
 	var keys []string
 	err := r.db.SelectContext(ctx, &keys, `
