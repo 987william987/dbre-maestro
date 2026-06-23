@@ -13,6 +13,8 @@
 
 ## How-To
 
+- [How to RD 使用 DBRE Maestro](how-to/rd-user-guide.md)
+- [How to DBA/Admin 管理 DBRE Maestro](how-to/dba-admin-user-guide.md)
 - [How to 使用 SQL Editor](how-to/use-sql-editor.md)
 - [How to 建立與執行 Tickets](how-to/create-and-execute-tickets.md)
 - [How to 設定 Workflow Rules](how-to/configure-workflow-rules.md)

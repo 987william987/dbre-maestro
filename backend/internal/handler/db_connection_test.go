@@ -298,6 +298,7 @@ func TestTicketHandlerCreateRejectsSQLEditorTicketTypes(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		"",
 	)
 

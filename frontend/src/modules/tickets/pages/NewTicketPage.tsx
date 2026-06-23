@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { format as formatSQL } from 'sql-formatter'
 import { ApiError } from '@/shared/api/client'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
+import { ExpandableSql, ExpandableText } from '@/shared/ui/ExpandableSql'
 import { PageIntro } from '@/shared/ui/PageIntro'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataResponse } from '@/shared/types/sqlEditor'
@@ -76,6 +77,22 @@ function normalizeTableOptions(response: MetadataResponse, databaseName: string)
         tableName: item.name,
       } satisfies QueryAccessTableOption
     })
+}
+
+function ReviewResultColumnGroup() {
+  return (
+    <colgroup>
+      <col className="w-16" />
+      <col className="w-[360px]" />
+      <col className="w-28" />
+      <col className="w-24" />
+      <col className="w-20" />
+      <col className="w-20" />
+      <col className="w-28" />
+      <col className="w-24" />
+      <col className="w-48" />
+    </colgroup>
+  )
 }
 
 function parseQueryAccessDuration(rawValue: string) {
@@ -781,32 +798,39 @@ export function NewTicketPage() {
                 <div className="px-4 pt-4">
                   <p className="text-[12px] font-semibold text-ink">Parser Results</p>
                   <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-                    <table className="min-w-full border-collapse">
+                    <table className="min-w-[1060px] w-full table-fixed border-collapse">
+                      <ReviewResultColumnGroup />
                       <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
                         <tr>
-                          <th className="px-4 py-3">ID</th>
-                          <th className="px-4 py-3">{ticketType === 'redis_command' ? 'Command' : 'SQL'}</th>
-                          <th className="px-4 py-3">Statement Kind</th>
-                          <th className="px-4 py-3">Object Type</th>
-                          <th className="px-4 py-3">Status</th>
-                          <th className="px-4 py-3">Message</th>
+                          <th className="px-3 py-3">ID</th>
+                          <th className="px-3 py-3">{ticketType === 'redis_command' ? 'Command' : 'SQL'}</th>
+                          <th className="px-3 py-3">Method</th>
+                          <th className="px-3 py-3">Stage</th>
+                          <th className="px-3 py-3">Kind</th>
+                          <th className="px-3 py-3">Object</th>
+                          <th className="px-3 py-3">Scan / Impact Rows</th>
+                          <th className="px-3 py-3">Status</th>
+                          <th className="px-3 py-3">Message</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border text-[13px] text-ink">
                         {parserResults.map((result, index) => (
                           <tr key={`parser-${result.seq}-${index}`}>
-                            <td className="px-4 py-3 align-top">{result.seq}</td>
-                            <td className="px-4 py-3 align-top font-mono text-[12px]">{result.sql_stmt}</td>
-                            <td className="px-4 py-3 align-top">{result.statement_kind || '—'}</td>
-                            <td className="px-4 py-3 align-top">{result.object_type || '—'}</td>
-                            <td className="px-4 py-3 align-top">
+                            <td className="px-3 py-3 align-top">{result.seq}</td>
+                            <td className="px-3 py-3 align-top"><ExpandableSql value={result.sql_stmt} label={ticketType === 'redis_command' ? 'command' : 'SQL'} /></td>
+                            <td className="px-3 py-3 align-top">—</td>
+                            <td className="px-3 py-3 align-top">—</td>
+                            <td className="px-3 py-3 align-top">{result.statement_kind || '—'}</td>
+                            <td className="px-3 py-3 align-top">{result.object_type || '—'}</td>
+                            <td className="px-3 py-3 align-top">—</td>
+                            <td className="px-3 py-3 align-top">
                               <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
                                 result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
                               }`}>
                                 {result.status}
                               </span>
                             </td>
-                            <td className="px-4 py-3 align-top text-muted">{result.message || '—'}</td>
+                            <td className="px-3 py-3 align-top"><ExpandableText value={result.message} /></td>
                           </tr>
                         ))}
                       </tbody>
@@ -819,38 +843,39 @@ export function NewTicketPage() {
                 <div className="px-4 py-4">
                   <p className="text-[12px] font-semibold text-ink">Validation Results</p>
                   <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-                    <table className="min-w-full border-collapse">
+                    <table className="min-w-[1060px] w-full table-fixed border-collapse">
+                      <ReviewResultColumnGroup />
                       <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
                         <tr>
-                          <th className="px-4 py-3">ID</th>
-                          <th className="px-4 py-3">{ticketType === 'redis_command' ? 'Command' : 'SQL'}</th>
-                          <th className="px-4 py-3">Method</th>
-                          <th className="px-4 py-3">Stage</th>
-                          <th className="px-4 py-3">Kind</th>
-                          <th className="px-4 py-3">Object</th>
-                          <th className="px-4 py-3">Scan / Impact Rows</th>
-                          <th className="px-4 py-3">Status</th>
-                          <th className="px-4 py-3">Message</th>
+                          <th className="px-3 py-3">ID</th>
+                          <th className="px-3 py-3">{ticketType === 'redis_command' ? 'Command' : 'SQL'}</th>
+                          <th className="px-3 py-3">Method</th>
+                          <th className="px-3 py-3">Stage</th>
+                          <th className="px-3 py-3">Kind</th>
+                          <th className="px-3 py-3">Object</th>
+                          <th className="px-3 py-3">Scan / Impact Rows</th>
+                          <th className="px-3 py-3">Status</th>
+                          <th className="px-3 py-3">Message</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border text-[13px] text-ink">
                         {validationResults.map((result, index) => (
                           <tr key={`validation-${result.seq}-${index}`}>
-                            <td className="px-4 py-3 align-top">{result.seq}</td>
-                            <td className="px-4 py-3 align-top font-mono text-[12px]">{result.sql_stmt}</td>
-                            <td className="px-4 py-3 align-top">{result.validation_method || '—'}</td>
-                            <td className="px-4 py-3 align-top">{result.validation_stage || '—'}</td>
-                            <td className="px-4 py-3 align-top">{result.statement_kind || '—'}</td>
-                            <td className="px-4 py-3 align-top">{result.object_type || '—'}</td>
-                            <td className="px-4 py-3 align-top">{result.scan_rows}</td>
-                            <td className="px-4 py-3 align-top">
+                            <td className="px-3 py-3 align-top">{result.seq}</td>
+                            <td className="px-3 py-3 align-top"><ExpandableSql value={result.sql_stmt} label={ticketType === 'redis_command' ? 'command' : 'SQL'} /></td>
+                            <td className="px-3 py-3 align-top">{result.validation_method || '—'}</td>
+                            <td className="px-3 py-3 align-top">{result.validation_stage || '—'}</td>
+                            <td className="px-3 py-3 align-top">{result.statement_kind || '—'}</td>
+                            <td className="px-3 py-3 align-top">{result.object_type || '—'}</td>
+                            <td className="px-3 py-3 align-top">{result.scan_rows}</td>
+                            <td className="px-3 py-3 align-top">
                               <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
                                 result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
                               }`}>
                                 {result.status}
                               </span>
                             </td>
-                            <td className="px-4 py-3 align-top text-muted">{result.message || '—'}</td>
+                            <td className="px-3 py-3 align-top"><ExpandableText value={result.message} /></td>
                           </tr>
                         ))}
                       </tbody>
