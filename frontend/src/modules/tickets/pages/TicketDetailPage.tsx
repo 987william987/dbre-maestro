@@ -6,7 +6,8 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
-import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants } from '@/shared/types/ticket'
+import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants, TicketWorkflowTrace } from '@/shared/types/ticket'
+import type { CurrentUser } from '@/shared/types/auth'
 import type { AuditLog } from '@/shared/types/audit'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
@@ -61,8 +62,75 @@ function formatTicketActor(name: string | null | undefined, id: number | null | 
   return '—'
 }
 
-function formatIDList(ids: number[]) {
-  return ids.length > 0 ? ids.join(', ') : '—'
+function isAdminUser(user: CurrentUser) {
+  return user.username === 'admin' || user.protected || user.authGroups.includes('admin') || user.authGroupDetails.some((group) => group.group_key === 'admin')
+}
+
+function formatResolvedUsers(ids: number[], names: string[]) {
+  const visibleNames = names.map((name) => name.trim()).filter(Boolean)
+  if (visibleNames.length > 0) {
+    const suffix = ids.length > visibleNames.length ? ` (${ids.length} users)` : ''
+    return `${visibleNames.join(', ')}${suffix}`
+  }
+  if (ids.length > 0) {
+    return `${ids.length} user${ids.length > 1 ? 's' : ''}`
+  }
+  return '—'
+}
+
+function getTraceStringArray(trace: unknown, key: string) {
+  if (!trace || typeof trace !== 'object' || Array.isArray(trace)) {
+    return []
+  }
+  const value = (trace as Record<string, unknown>)[key]
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+}
+
+function formatMissingGroups(trace: TicketWorkflowTrace) {
+  const approvalGroups = getTraceStringArray(trace.resolution_trace, 'missing_approval_groups')
+  const executorGroups = getTraceStringArray(trace.resolution_trace, 'missing_executor_groups')
+  const parts = [
+    approvalGroups.length > 0 ? `Approval: ${approvalGroups.join(', ')}` : '',
+    executorGroups.length > 0 ? `Execution: ${executorGroups.join(', ')}` : '',
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' | ') : '—'
+}
+
+function DebugWorkflowResolutionTrace({
+  trace,
+  participants,
+}: {
+  trace: TicketWorkflowTrace
+  participants: TicketWorkflowParticipants
+}) {
+  return (
+    <div className="mt-3">
+      <DetailTable
+        headers={['Rule', 'Approval Required', 'Reviewers', 'Executors', 'Admin Escalation', 'Missing Groups', 'Error', 'Resolved At']}
+        rows={[[
+          trace.workflow_rule_name || trace.workflow_rule_id || '—',
+          trace.approval_enabled ? 'Yes' : 'No',
+          formatResolvedUsers(trace.approval_user_ids, participants.reviewers),
+          formatResolvedUsers(trace.executor_user_ids, participants.executors),
+          trace.admin_user_ids.length > 0 ? `${trace.admin_user_ids.length} admin user${trace.admin_user_ids.length > 1 ? 's' : ''}` : '—',
+          formatMissingGroups(trace),
+          trace.error_message || trace.error_code || '—',
+          formatDateTime(trace.resolved_at, true),
+        ]]}
+      />
+      {trace.resolution_trace ? (
+        <details className="mt-3 rounded-xl border border-border bg-panel-soft px-4 py-3">
+          <summary className="cursor-pointer text-[12px] font-semibold text-muted">Raw resolution trace</summary>
+          <pre className="mt-3 max-h-64 overflow-auto font-mono text-[12px] leading-6 text-ink">
+            {JSON.stringify(trace.resolution_trace, null, 2)}
+          </pre>
+        </details>
+      ) : null}
+    </div>
+  )
 }
 
 function formatExecutionDuration(startedAt?: string | null, completedAt?: string | null) {
@@ -535,6 +603,7 @@ export function TicketDetailPage() {
   const [confirmAction, setConfirmAction] = useState<'withdraw' | 'execute' | 'revoke' | null>(null)
   const [downloadingExport, setDownloadingExport] = useState(false)
   const [otherDetailsOpen, setOtherDetailsOpen] = useState(false)
+  const [debugTraceOpen, setDebugTraceOpen] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [statusTransitioning, setStatusTransitioning] = useState(false)
   const previousStatusRef = useRef<string | null>(null)
@@ -642,6 +711,7 @@ export function TicketDetailPage() {
   const showExecutionActions = (ticket?.status === 'approved' && canReject) ||
     (ticket?.status === 'pending_execution' && (canExecute || canReject)) ||
     ((ticket?.ticket_type === 'sensitive_query_access' || ticket?.ticket_type === 'query_access') && ticket?.status === 'approved' && canRevoke)
+  const canViewWorkflowTrace = isAdminUser(user)
 
   async function reloadTicket(options?: { background?: boolean }) {
     if (!id) {
@@ -822,29 +892,6 @@ export function TicketDetailPage() {
                     </tbody>
                   </table>
                 </div>
-              </div>
-            ) : null}
-
-            {detail.workflow_resolution_trace ? (
-              <div className="px-4 pb-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Workflow Resolution Trace</p>
-                <DetailTable
-                  headers={['Rule', 'Approval Required', 'Reviewers', 'Executors', 'Admins', 'Error', 'Resolved At']}
-                  rows={[[
-                    detail.workflow_resolution_trace.workflow_rule_name || detail.workflow_resolution_trace.workflow_rule_id || '—',
-                    detail.workflow_resolution_trace.approval_enabled ? 'Yes' : 'No',
-                    formatIDList(detail.workflow_resolution_trace.approval_user_ids),
-                    formatIDList(detail.workflow_resolution_trace.executor_user_ids),
-                    formatIDList(detail.workflow_resolution_trace.admin_user_ids),
-                    detail.workflow_resolution_trace.error_message || detail.workflow_resolution_trace.error_code || '—',
-                    formatDateTime(detail.workflow_resolution_trace.resolved_at, true),
-                  ]]}
-                />
-                {detail.workflow_resolution_trace.resolution_trace ? (
-                  <pre className="mt-3 max-h-64 overflow-auto rounded-xl border border-border bg-panel-soft p-3 font-mono text-[12px] leading-6 text-ink">
-                    {JSON.stringify(detail.workflow_resolution_trace.resolution_trace, null, 2)}
-                  </pre>
-                ) : null}
               </div>
             ) : null}
 
@@ -1094,6 +1141,26 @@ export function TicketDetailPage() {
                     <ScopeRow key={scope.id} scope={scope} />
                   ))}
                 </div>
+              </div>
+            ) : null}
+
+            {canViewWorkflowTrace && detail.workflow_resolution_trace ? (
+              <div className="px-4 pb-4">
+                <button
+                  type="button"
+                  onClick={() => setDebugTraceOpen((current) => !current)}
+                  className="inline-flex items-center gap-1.5 text-left"
+                  aria-expanded={debugTraceOpen}
+                >
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">Debug / Resolution Trace</span>
+                  <ChevronDown className={`h-4 w-4 text-muted transition-transform ${debugTraceOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {debugTraceOpen ? (
+                  <DebugWorkflowResolutionTrace
+                    trace={detail.workflow_resolution_trace}
+                    participants={detail.workflow_participants}
+                  />
+                ) : null}
               </div>
             ) : null}
           </section>

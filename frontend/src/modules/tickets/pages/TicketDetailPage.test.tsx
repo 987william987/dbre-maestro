@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Ticket, TicketDetail } from '@/shared/types/ticket'
@@ -243,6 +243,90 @@ describe('TicketDetailPage role visibility', () => {
     await waitFor(() => expect(screen.getByText('SQL Content')).toBeInTheDocument())
     expect(screen.queryByText('審核操作')).not.toBeInTheDocument()
     expect(screen.queryByText('執行流程')).not.toBeInTheDocument()
+  })
+
+  it('非 admin 使用者不顯示 workflow resolution debug trace', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail(baseTicket, {
+      workflow_resolution_trace: {
+        workflow_rule_id: 15,
+        workflow_rule_name: 'Global DDL',
+        approval_enabled: true,
+        approval_user_ids: [2],
+        executor_user_ids: [3],
+        admin_user_ids: [],
+        error_code: '',
+        error_message: '',
+        resolved_at: '2026-06-23T13:24:45Z',
+        resolution_trace: {
+          missing_approval_groups: ['data_owner'],
+          missing_executor_groups: [],
+        },
+      },
+    }))
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('SQL Content')).toBeInTheDocument())
+    expect(screen.queryByText('Debug / Resolution Trace')).not.toBeInTheDocument()
+    expect(screen.queryByText('Workflow Resolution Trace')).not.toBeInTheDocument()
+    expect(screen.queryByText('Global DDL')).not.toBeInTheDocument()
+  })
+
+  it('admin 可在底部展開可讀的 workflow resolution debug trace', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 2, username: 'admin_sre', authGroups: ['admin'], authGroupDetails: [], permissions: ['tickets.review'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail(baseTicket, {
+      workflow_participants: {
+        reviewers: ['reviewer.bob'],
+        executors: ['dba.cindy'],
+      },
+      workflow_resolution_trace: {
+        workflow_rule_id: 15,
+        workflow_rule_name: 'Global DDL',
+        approval_enabled: true,
+        approval_user_ids: [2],
+        executor_user_ids: [3],
+        admin_user_ids: [4],
+        error_code: '',
+        error_message: '',
+        resolved_at: '2026-06-23T13:24:45Z',
+        resolution_trace: {
+          missing_approval_groups: ['data_owner'],
+          missing_executor_groups: [],
+        },
+      },
+    }))
+
+    renderPage()
+
+    const toggle = await screen.findByRole('button', { name: /Debug \/ Resolution Trace/i })
+    expect(screen.queryByText('Global DDL')).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+
+    expect(screen.getByText('Global DDL')).toBeInTheDocument()
+    expect(screen.getAllByText('reviewer.bob').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('dba.cindy').length).toBeGreaterThan(0)
+    expect(screen.getByText('1 admin user')).toBeInTheDocument()
+    expect(screen.getByText('Approval: data_owner')).toBeInTheDocument()
+    expect(screen.getByText('Raw resolution trace')).toBeInTheDocument()
+    expect(screen.queryByText('Workflow Resolution Trace')).not.toBeInTheDocument()
   })
 
   it('sql export submitter 在 ready export 存在時可看到下載入口', async () => {
