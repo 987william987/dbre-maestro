@@ -171,6 +171,46 @@ func TestLoadRejectsInvalidRunMigrationsOnStartup(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsInvalidAWSSecretsManagerEnable(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("AWS_SM_ENABLE", "sometimes")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want invalid AWS_SM_ENABLE error")
+	}
+}
+
+func TestLoadDefersRequiredSecretsWhenAWSSecretsManagerEnabled(t *testing.T) {
+	t.Setenv("AWS_SM_ENABLE", "true")
+	t.Setenv("AWS_SM_REGION", "ap-northeast-1")
+	t.Setenv("AWS_SM_SECRET_ID", "/sre-test/dbre-maestro")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.AWSSecretsManagerEnabled {
+		t.Fatal("AWSSecretsManagerEnabled = false, want true")
+	}
+	if cfg.AWSSecretsManagerRegion != "ap-northeast-1" {
+		t.Fatalf("AWSSecretsManagerRegion = %q, want ap-northeast-1", cfg.AWSSecretsManagerRegion)
+	}
+	if cfg.AWSSecretsManagerSecretID != "/sre-test/dbre-maestro" {
+		t.Fatalf("AWSSecretsManagerSecretID = %q, want /sre-test/dbre-maestro", cfg.AWSSecretsManagerSecretID)
+	}
+}
+
+func TestValidateRequiredSecretsRequiresDBDSNOutsideAWSSecretsManager(t *testing.T) {
+	t.Setenv("JWT_SECRET", "jwt-secret")
+	t.Setenv("DBRE_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want DB_DSN required")
+	}
+}
+
 func TestLoadOverridesPoolProfilesFromEnv(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("DB_POOL_QUERY_MAX_OPEN", "20")

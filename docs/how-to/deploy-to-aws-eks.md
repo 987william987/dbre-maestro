@@ -57,10 +57,13 @@ Backend Pod 至少需要：
 | `APP_ENV` | `staging` 或 `production` |
 | `PORT` | 預設 `8080` |
 | `APP_BASE_URL` | 前端公開 URL，用於通知內連結 |
-| `DB_DSN` | app user 連線 Meta DB |
-| `MIGRATION_DSN` | migration 專用連線，權限通常高於 app user |
-| `DBRE_ENCRYPTION_KEY` | base64 32-byte key |
-| `JWT_SECRET` | JWT 簽章 secret |
+| `AWS_SM_ENABLE` | EKS/devops 環境建議 `true`，由 app 從 AWS Secrets Manager 讀敏感值 |
+| `AWS_SM_REGION` | AWS Secrets Manager region，例如 `ap-northeast-1` |
+| `AWS_SM_SECRET_ID` | DBRE Maestro app secret id |
+| `DB_DSN` | app user 連線 Meta DB；`AWS_SM_ENABLE=true` 時由 secret payload 提供 |
+| `MIGRATION_DSN` | migration 專用連線，權限通常高於 app user；`AWS_SM_ENABLE=true` 時建議由 secret payload 提供 |
+| `DBRE_ENCRYPTION_KEY` | base64 32-byte key；`AWS_SM_ENABLE=true` 時由 secret payload 提供 |
+| `JWT_SECRET` | JWT 簽章 secret；`AWS_SM_ENABLE=true` 時由 secret payload 提供 |
 | `MFA_ENFORCEMENT` | production 建議 `required_for_admins` |
 | `REFRESH_COOKIE_SECURE` | production 必須等同 `true`；程式會強制 |
 
@@ -77,11 +80,40 @@ Lark App ID / Secret 建議透過平台 Settings 管理，不建議寫死在 ima
 - RDS 密碼
 - Lark App Secret
 
-建議做法：
+devops EKS 標準做法是 app 透過 IRSA 直接讀 AWS Secrets Manager。Deployment 需要注入：
+
+```text
+AWS_SM_ENABLE=true
+AWS_SM_REGION=ap-northeast-1
+AWS_SM_SECRET_ID=<secret-id>
+```
+
+Secrets Manager payload 至少需要：
+
+```json
+{
+  "DB_DSN": "maestro_app:<password>@tcp(<host>:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC",
+  "MIGRATION_DSN": "root:<password>@tcp(<host>:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC",
+  "DBRE_ENCRYPTION_KEY": "BASE64_32_BYTE_KEY",
+  "JWT_SECRET": "long-random-string"
+}
+```
+
+`MIGRATION_DSN` 可省略；未提供時程式會 fallback 到 `DB_DSN`。正式環境仍建議提供獨立 migration DSN，避免 app user 擁有 schema migration 所需的高權限。
+
+DB pool 參數不是 secret，應繼續由 env / ConfigMap / values 管理，不放進 Secrets Manager。
+
+IRSA policy 至少需要允許該 secret：
+
+```text
+secretsmanager:GetSecretValue
+```
+
+一般化 secret 管理流程：
 
 1. 在 AWS Secrets Manager 建立每個環境獨立 secret
-2. 用 External Secrets Operator 或等價機制同步成 Kubernetes Secret
-3. Deployment 只從 Kubernetes Secret 注入 env
+2. 透過 IRSA 讓 Pod service account 讀取該 secret
+3. Deployment 注入 `AWS_SM_ENABLE`、`AWS_SM_REGION`、`AWS_SM_SECRET_ID`
 4. production 與 staging 使用不同 secret 值
 
 `DBRE_ENCRYPTION_KEY` 一旦用於加密既有資料，不可隨意更換；更換前需要設計資料重加密流程。

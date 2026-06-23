@@ -24,6 +24,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
+	"github.com/dbre-maestro/maestro/internal/secrets"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/jmoiron/sqlx"
@@ -86,6 +87,14 @@ func main() {
 	if err != nil {
 		slog.Error("config error", "err", err)
 		os.Exit(1)
+	}
+	if cfg.AWSSecretsManagerEnabled {
+		slog.Info("aws secrets manager enabled", "secret_id", cfg.AWSSecretsManagerSecretID)
+		if err := secrets.LoadApplicationSecretsFromAWS(context.Background(), cfg); err != nil {
+			slog.Error("load aws secrets manager secret failed", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("aws secrets manager secret loaded", "secret_id", cfg.AWSSecretsManagerSecretID)
 	}
 
 	migrationsPath := filepath.Join("migrations")

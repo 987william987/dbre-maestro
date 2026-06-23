@@ -8,12 +8,14 @@
 
 1. `.env`
 2. `docker-compose.yml`
-3. 平台內的 `Settings` 頁面與 `platform_settings` 表
+3. AWS Secrets Manager（EKS/devops 環境）
+4. 平台內的 `Settings` 頁面與 `platform_settings` 表
 
 責任分工如下：
 
-- `.env`：本機或部署時提供密鑰、密碼與 container runtime 參數
+- `.env`：本機開發提供密鑰、密碼與 container runtime 參數
 - `docker-compose.yml`：把 `.env` 的值映射進 container
+- AWS Secrets Manager：EKS/devops 環境提供 `DB_DSN`、`MIGRATION_DSN`、`DBRE_ENCRYPTION_KEY`、`JWT_SECRET`
 - `platform_settings`：平台運行中可調整的產品設定，例如 SQL Editor timeout 與 metadata scan
 
 ## `.env` 必填項
@@ -35,10 +37,38 @@
 | `PORT` | App 服務 port | `8080` |
 | `APP_BASE_URL` | 前端站台 base URL，供通知內工單連結使用 | `http://localhost:5173` |
 | `MIGRATION_DSN` | migration 專用 DSN | 若未指定，跟 app DSN 同邏輯 |
+| `AWS_SM_ENABLE` | 啟用 AWS Secrets Manager 讀取敏感設定 | `false` |
+| `AWS_SM_REGION` | AWS Secrets Manager region | 無 |
+| `AWS_SM_SECRET_ID` | AWS Secrets Manager secret id | 無 |
 | `LARK_WEBHOOK_URL` | Lark webhook fallback | 僅在未配置 Settings 內的 Lark App 時使用 |
 | `REFRESH_COOKIE_SECURE` | 非 production 環境強制 refresh cookie Secure | production 永遠強制 Secure |
 | `AWS_PROFILE` | DB metadata inventory 使用的 AWS profile | `default` |
 | `AWS_SDK_LOAD_CONFIG` | 啟用 shared config | Compose 預設 `1` |
+
+## AWS Secrets Manager payload
+
+EKS/devops 環境建議設定：
+
+```text
+AWS_SM_ENABLE=true
+AWS_SM_REGION=ap-northeast-1
+AWS_SM_SECRET_ID=<secret-id>
+```
+
+Secret JSON 至少需要：
+
+```json
+{
+  "DB_DSN": "maestro_app:<password>@tcp(<host>:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC",
+  "MIGRATION_DSN": "root:<password>@tcp(<host>:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC",
+  "DBRE_ENCRYPTION_KEY": "BASE64_32_BYTE_KEY",
+  "JWT_SECRET": "long-random-string"
+}
+```
+
+`MIGRATION_DSN` 可省略；省略時會 fallback 到 `DB_DSN`。正式環境建議提供獨立 migration DSN。
+
+DB pool 參數不是 secret，仍由 env / ConfigMap / values 管理。
 
 ## DB Pool Profile 環境變數
 
