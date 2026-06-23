@@ -56,7 +56,7 @@ Backend Pod 至少需要：
 |---|---|
 | `APP_ENV` | `staging` 或 `production` |
 | `PORT` | 預設 `8080` |
-| `APP_BASE_URL` | 前端公開 URL，用於通知內連結 |
+| `APP_BASE_URL` | 前端公開 URL，用於站內信與 Lark 工單連結，例如 `https://dbre-maestro-test.tskyrocket.xyz` |
 | `AWS_SM_ENABLE` | EKS/devops 環境建議 `true`，由 app 從 AWS Secrets Manager 讀敏感值 |
 | `AWS_SM_REGION` | AWS Secrets Manager region，例如 `ap-northeast-1` |
 | `AWS_SM_SECRET_ID` | DBRE Maestro app secret id |
@@ -69,6 +69,8 @@ Backend Pod 至少需要：
 | `REFRESH_COOKIE_SECURE` | production 必須等同 `true`；程式會強制 |
 
 Lark App ID / Secret 建議透過平台 Settings 管理，不建議寫死在 image。
+
+`APP_BASE_URL` 不是 secret，應放在 ArgoCD values / `deploy.envs`。如果未配置，通知內容中的工單連結會退回相對路徑，例如 `/tickets/TK-...`，站內信與 Lark 都不會帶域名。修改 `APP_BASE_URL` 後需要 rollout Pod；已經產生的舊通知內容不會自動回填。
 
 ## Secret 管理
 
@@ -148,6 +150,7 @@ deploy:
     AWS_SM_REGION: "ap-northeast-1"
     AWS_SM_SECRET_ID: "/testnet/dbre-maestro/default"
     APP_ENV: "sre-test"
+    APP_BASE_URL: "https://dbre-maestro-test.tskyrocket.xyz"
     MFA_ENFORCEMENT: "disabled"
     RUN_MIGRATIONS_ON_STARTUP: "true"
 ```
@@ -167,6 +170,7 @@ deploy:
     AWS_SM_REGION: "ap-northeast-1"
     AWS_SM_SECRET_ID: "/prod/dbre-maestro/default"
     APP_ENV: "production"
+    APP_BASE_URL: "https://dbre-maestro.<prod-domain>"
     MFA_ENFORCEMENT: "required_for_admins"
     REFRESH_COOKIE_SECURE: "true"
     RUN_MIGRATIONS_ON_STARTUP: "false"
@@ -369,6 +373,7 @@ Test 環境可設定：
 
 ```text
 APP_ENV=staging
+APP_BASE_URL=https://dbre-maestro-test.tskyrocket.xyz
 MFA_ENFORCEMENT=disabled
 ```
 
@@ -395,6 +400,7 @@ Production 建議設定：
 
 ```text
 APP_ENV=production
+APP_BASE_URL=https://dbre-maestro.<prod-domain>
 MFA_ENFORCEMENT=required_for_admins
 ```
 
@@ -420,6 +426,7 @@ Rollback 需要分成 image rollback 與 database rollback。
 - production refresh cookie 有 Secure
 - admin MFA 行為符合 `MFA_ENFORCEMENT`
 - Tickets list / detail / action API 授權正常
+- 站內信與 Lark 的工單連結帶完整 `APP_BASE_URL` 域名
 - SQL Editor query access 正常
 - Scheduled SQL Reports 可建立且 run history 正常
 - Lark App 通知可定向送達
