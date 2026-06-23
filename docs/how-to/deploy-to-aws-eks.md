@@ -99,6 +99,22 @@ Secrets Manager payload 至少需要：
 }
 ```
 
+產生 `DBRE_ENCRYPTION_KEY`：
+
+```bash
+openssl rand -base64 32
+```
+
+`DBRE_ENCRYPTION_KEY` 必須是 base64 編碼後可解出 32 bytes 的值。也可以在本 repo 用 `make gen-key` 產生同等格式。
+
+產生 `JWT_SECRET`：
+
+```bash
+openssl rand -base64 48
+```
+
+`JWT_SECRET` 不要求固定格式，但必須是高熵隨機字串。
+
 `MIGRATION_DSN` 可省略；未提供時程式會 fallback 到 `DB_DSN`。正式環境仍建議提供獨立 migration DSN，避免 app user 擁有 schema migration 所需的高權限。
 
 DB pool 參數不是 secret，應繼續由 env / ConfigMap / values 管理，不放進 Secrets Manager。
