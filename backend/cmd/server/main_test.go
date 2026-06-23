@@ -4,9 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/dbre-maestro/maestro/internal/middleware"
+	"github.com/go-chi/chi/v5"
 )
 
 func TestRequireTicketsWorkspaceReadAllowsTicketsRead(t *testing.T) {
@@ -56,5 +59,74 @@ func TestRequireTicketsWorkspaceReadRejectsUnrelatedPermission(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestRegisterStaticFilesServesAsset(t *testing.T) {
+	staticDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(staticDir, "assets"), 0o755); err != nil {
+		t.Fatalf("mkdir assets: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("index"), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "assets", "app.js"), []byte("console.log('ok')"), 0o644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+
+	r := chi.NewRouter()
+	registerStaticFiles(r, staticDir)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Body.String(); got != "console.log('ok')" {
+		t.Fatalf("body = %q, want asset body", got)
+	}
+}
+
+func TestRegisterStaticFilesFallsBackToIndexForSPARoutes(t *testing.T) {
+	staticDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("index"), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+
+	r := chi.NewRouter()
+	registerStaticFiles(r, staticDir)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/tickets/TK-20260622-ABC123", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Body.String(); got != "index" {
+		t.Fatalf("body = %q, want index fallback", got)
+	}
+}
+
+func TestRegisterStaticFilesDoesNotFallbackForAPIRoutes(t *testing.T) {
+	staticDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("index"), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+
+	r := chi.NewRouter()
+	registerStaticFiles(r, staticDir)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/not-exist", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if got := rec.Body.String(); got == "index" {
+		t.Fatal("api route should not receive SPA fallback")
 	}
 }
