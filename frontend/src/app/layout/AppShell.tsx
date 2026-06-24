@@ -366,8 +366,10 @@ export function AppShell() {
     <div className="flex h-screen text-ink">
       <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
         <div className="flex h-16 items-center gap-3 px-5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand text-white">
-            <span className="text-sm font-bold">M</span>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-transparent">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+              <path d="M3 20 L3 4 L12 13 L21 4 L21 20" />
+            </svg>
           </div>
           <div className="min-w-0">
             <p className="truncate text-[14px] font-semibold leading-tight text-ink">DBRE Maestro</p>
