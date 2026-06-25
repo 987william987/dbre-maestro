@@ -302,6 +302,19 @@ func (r *QueryAccessRepo) ListRules(ctx context.Context) ([]model.QueryAccessRul
 	return rules, nil
 }
 
+func (r *QueryAccessRepo) GetRule(ctx context.Context, ruleID uint64) (*model.QueryAccessRule, error) {
+	var rule model.QueryAccessRule
+	if err := r.db.GetContext(ctx, &rule, `
+		SELECT id, subject_type, subject_id, effect, connection_id, database_pattern, table_pattern,
+		       granted_via, source_ticket_id, expires_at, revoked_at, revoked_by, created_by, updated_by, created_at, updated_at
+		FROM query_access_rules
+		WHERE id = ?
+	`, ruleID); err != nil {
+		return nil, fmt.Errorf("get query access rule: %w", err)
+	}
+	return &rule, nil
+}
+
 func (r *QueryAccessRepo) CreateManualRule(ctx context.Context, rule model.QueryAccessRule, actorID uint64) (*model.QueryAccessRule, error) {
 	rule.Effect = normalizeQueryAccessEffect(rule.Effect)
 	rule.DatabasePattern = normalizePattern(rule.DatabasePattern)
@@ -322,6 +335,57 @@ func (r *QueryAccessRepo) CreateManualRule(ctx context.Context, rule model.Query
 		return nil, fmt.Errorf("create manual query access rule: %w", err)
 	}
 	id, _ := res.LastInsertId()
+	rule.ID = uint64(id)
+	rule.GrantedVia = "manual"
+	rule.CreatedBy = &actorID
+	rule.UpdatedBy = &actorID
+	rule.CreatedAt = now
+	rule.UpdatedAt = now
+	return &rule, nil
+}
+
+func (r *QueryAccessRepo) ReplaceManualRule(ctx context.Context, oldRuleID uint64, rule model.QueryAccessRule, actorID uint64) (*model.QueryAccessRule, error) {
+	rule.Effect = normalizeQueryAccessEffect(rule.Effect)
+	rule.DatabasePattern = normalizePattern(rule.DatabasePattern)
+	rule.TablePattern = normalizePattern(rule.TablePattern)
+	if rule.SubjectType != model.QueryAccessSubjectTypeUser && rule.SubjectType != model.QueryAccessSubjectTypeAuthGroup {
+		return nil, fmt.Errorf("invalid query access subject_type")
+	}
+	if rule.SubjectID == 0 || rule.ConnectionID == 0 {
+		return nil, fmt.Errorf("subject_id and connection_id are required")
+	}
+	now := timeutil.NowUTC()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin replace query access rule tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx, `
+		UPDATE query_access_rules
+		SET revoked_at = ?, revoked_by = ?, updated_by = ?, updated_at = ?
+		WHERE id = ? AND revoked_at IS NULL
+	`, now, actorID, actorID, now, oldRuleID)
+	if err != nil {
+		return nil, fmt.Errorf("revoke old query access rule: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return nil, fmt.Errorf("query access rule not found or already revoked")
+	}
+
+	insertRes, err := tx.ExecContext(ctx, `
+		INSERT INTO query_access_rules
+		 (subject_type, subject_id, effect, connection_id, database_pattern, table_pattern, granted_via, source_ticket_id, expires_at, revoked_at, revoked_by, created_by, updated_by, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 'manual', NULL, ?, NULL, NULL, ?, ?, ?, ?)
+	`, rule.SubjectType, rule.SubjectID, rule.Effect, rule.ConnectionID, rule.DatabasePattern, rule.TablePattern, rule.ExpiresAt, actorID, actorID, now, now)
+	if err != nil {
+		return nil, fmt.Errorf("create replacement query access rule: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit replace query access rule tx: %w", err)
+	}
+	id, _ := insertRes.LastInsertId()
 	rule.ID = uint64(id)
 	rule.GrantedVia = "manual"
 	rule.CreatedBy = &actorID

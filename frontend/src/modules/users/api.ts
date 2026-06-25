@@ -164,6 +164,10 @@ export function createQueryAccessRule(payload: CreateQueryAccessRulePayload) {
   return apiClient.post<QueryAccessRule>('/users/query-access-rules', payload)
 }
 
+export function updateQueryAccessRule(id: number, payload: CreateQueryAccessRulePayload) {
+  return apiClient.put<QueryAccessRule>(`/users/query-access-rules/${id}`, payload)
+}
+
 export function revokeQueryAccessRule(id: number) {
   return apiClient.post<{ ok: boolean }>(`/users/query-access-rules/${id}/revoke`)
 }

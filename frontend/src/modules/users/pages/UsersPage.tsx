@@ -4,7 +4,8 @@ import { Database, Info, KeyRound, Loader2, Plus, RefreshCw, Shield, Trash2, Use
 import { useNavigate } from 'react-router-dom'
 import { createAuthGroup, deleteAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
 import { getDBConnectionBindings } from '@/modules/db-connections/api'
-import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccessRules, listUserDBConnections, listUserSessions, listUsers, patchUser, resetUserMFA, revokeQueryAccessRule, revokeUserSession, revokeUserSessions } from '@/modules/users/api'
+import { listMetadata } from '@/modules/sql-editor/api'
+import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccessRules, listUserDBConnections, listUserSessions, listUsers, patchUser, resetUserMFA, revokeQueryAccessRule, revokeUserSession, revokeUserSessions, updateQueryAccessRule } from '@/modules/users/api'
 import type { QueryAccessRule } from '@/modules/users/api'
 import type { AccountSession } from '@/modules/account/api'
 import { ApiError } from '@/shared/api/client'
@@ -62,6 +63,7 @@ const PERMISSION_METADATA: PermissionOption[] = [
 ]
 const PAGE_SIZE = 20
 const SESSION_PAGE_SIZE = 5
+const CUSTOM_SCOPE_VALUE = '__custom__'
 
 const PERMISSION_INDEX = new Map(PERMISSION_METADATA.map((item) => [item.key, item] as const))
 
@@ -154,6 +156,21 @@ const EMPTY_QUERY_ACCESS_RULE_DRAFT: QueryAccessRuleDraft = {
   durationMinutes: String(24 * 60),
 }
 
+function scopeSelectValue(pattern: string, options: string[]) {
+  if (pattern === '*') {
+    return '*'
+  }
+  return options.includes(pattern) ? pattern : CUSTOM_SCOPE_VALUE
+}
+
+function minutesUntil(value?: string | null) {
+  if (!value) {
+    return String(24 * 60)
+  }
+  const minutes = Math.ceil((new Date(value).getTime() - Date.now()) / 60000)
+  return String(Math.max(1, minutes))
+}
+
 export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode }) {
   const { pushToast } = useToast()
   const navigate = useNavigate()
@@ -168,6 +185,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   const [queryAccessRules, setQueryAccessRules] = useState<QueryAccessRule[]>([])
   const [queryAccessOffset, setQueryAccessOffset] = useState(0)
   const [queryAccessRuleDraft, setQueryAccessRuleDraft] = useState<QueryAccessRuleDraft>(EMPTY_QUERY_ACCESS_RULE_DRAFT)
+  const [editingQueryAccessRuleID, setEditingQueryAccessRuleID] = useState<number | null>(null)
+  const [queryAccessDatabases, setQueryAccessDatabases] = useState<string[]>([])
+  const [queryAccessTables, setQueryAccessTables] = useState<string[]>([])
+  const [queryAccessMetadataLoading, setQueryAccessMetadataLoading] = useState(false)
   const [savingQueryAccessRule, setSavingQueryAccessRule] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -199,6 +220,76 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   useEffect(() => {
     setViewMode(initialView)
   }, [initialView])
+
+  useEffect(() => {
+    const connectionID = Number(queryAccessRuleDraft.connectionID)
+    if (!connectionID) {
+      setQueryAccessDatabases([])
+      setQueryAccessTables([])
+      return
+    }
+    let active = true
+    setQueryAccessMetadataLoading(true)
+    listMetadata(connectionID)
+      .then((response) => {
+        if (!active) {
+          return
+        }
+        const databases = response.items
+          .filter((item) => item.kind === 'database' || item.kind === 'schema')
+          .map((item) => item.database || item.schema || item.name)
+          .filter((name, index, values) => name.trim() !== '' && values.indexOf(name) === index)
+        setQueryAccessDatabases(databases)
+      })
+      .catch(() => {
+        if (active) {
+          setQueryAccessDatabases([])
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setQueryAccessMetadataLoading(false)
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [queryAccessRuleDraft.connectionID])
+
+  useEffect(() => {
+    const connectionID = Number(queryAccessRuleDraft.connectionID)
+    const database = queryAccessRuleDraft.databasePattern.trim()
+    if (!connectionID || database === '' || database === '*') {
+      setQueryAccessTables([])
+      return
+    }
+    let active = true
+    setQueryAccessMetadataLoading(true)
+    listMetadata(connectionID, { database })
+      .then((response) => {
+        if (!active) {
+          return
+        }
+        const tables = response.items
+          .filter((item) => item.kind === 'table')
+          .map((item) => item.name)
+          .filter((name, index, values) => name.trim() !== '' && values.indexOf(name) === index)
+        setQueryAccessTables(tables)
+      })
+      .catch(() => {
+        if (active) {
+          setQueryAccessTables([])
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setQueryAccessMetadataLoading(false)
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [queryAccessRuleDraft.connectionID, queryAccessRuleDraft.databasePattern])
 
   async function bootstrap() {
     setLoading(true)
@@ -673,7 +764,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     setSavingQueryAccessRule(true)
     setError('')
     try {
-      await createQueryAccessRule({
+      const payload = {
         subject_type: queryAccessRuleDraft.subjectType,
         subject_id: Number(queryAccessRuleDraft.subjectID),
         effect: queryAccessRuleDraft.effect,
@@ -681,15 +772,40 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         database_pattern: queryAccessRuleDraft.databasePattern.trim(),
         table_pattern: queryAccessRuleDraft.tablePattern.trim(),
         duration_minutes: Number(queryAccessRuleDraft.durationMinutes),
-      })
+      }
+      if (editingQueryAccessRuleID == null) {
+        await createQueryAccessRule(payload)
+      } else {
+        await updateQueryAccessRule(editingQueryAccessRuleID, payload)
+      }
       await reloadAll()
       setQueryAccessRuleDraft(EMPTY_QUERY_ACCESS_RULE_DRAFT)
-      pushToast('Query access rule created', 'success')
+      setEditingQueryAccessRuleID(null)
+      pushToast(editingQueryAccessRuleID == null ? 'Query access rule created' : 'Query access rule updated', 'success')
     } catch (createError) {
-      setError(createError instanceof ApiError ? createError.message : 'Failed to create query access rule.')
+      setError(createError instanceof ApiError ? createError.message : 'Failed to save query access rule.')
     } finally {
       setSavingQueryAccessRule(false)
     }
+  }
+
+  function handleEditQueryAccessRule(rule: QueryAccessRule) {
+    setEditingQueryAccessRuleID(rule.id)
+    setQueryAccessRuleDraft({
+      subjectType: rule.subject_type,
+      subjectID: String(rule.subject_id),
+      effect: rule.effect,
+      connectionID: String(rule.connection_id),
+      databasePattern: rule.database_pattern,
+      tablePattern: rule.table_pattern,
+      durationMinutes: minutesUntil(rule.expires_at),
+    })
+    setError('')
+  }
+
+  function handleCancelEditQueryAccessRule() {
+    setEditingQueryAccessRuleID(null)
+    setQueryAccessRuleDraft(EMPTY_QUERY_ACCESS_RULE_DRAFT)
   }
 
   async function handleRevokeQueryAccessRule(ruleID: number) {
@@ -727,6 +843,18 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     () => queryAccessRules.slice(queryAccessOffset, queryAccessOffset + PAGE_SIZE),
     [queryAccessOffset, queryAccessRules],
   )
+  const databaseScopeValue = scopeSelectValue(queryAccessRuleDraft.databasePattern, queryAccessDatabases)
+  const tableScopeValue = scopeSelectValue(queryAccessRuleDraft.tablePattern, queryAccessTables)
+  const databaseScopeOptions = [
+    { value: '*', label: 'All databases (*)' },
+    ...queryAccessDatabases.map((database) => ({ value: database, label: database })),
+    { value: CUSTOM_SCOPE_VALUE, label: 'Custom...' },
+  ]
+  const tableScopeOptions = [
+    { value: '*', label: 'All tables (*)' },
+    ...queryAccessTables.map((table) => ({ value: table, label: table })),
+    { value: CUSTOM_SCOPE_VALUE, label: 'Custom...' },
+  ]
   const pagedSelectedUserSessions = useMemo(
     () => selectedUserSessions.slice(selectedUserSessionsOffset, selectedUserSessionsOffset + SESSION_PAGE_SIZE),
     [selectedUserSessions, selectedUserSessionsOffset],
@@ -1019,11 +1147,11 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                 <div className="mb-4 flex items-center gap-2">
                   <KeyRound className="h-4 w-4 text-accent" />
                   <div>
-                    <p className="text-[13px] font-semibold text-ink">Manual Query Access Rule</p>
-                    <p className="text-[12px] text-muted">Create fallback rules for a user or auth group. Use * for all databases or all tables.</p>
+                    <p className="text-[13px] font-semibold text-ink">{editingQueryAccessRuleID == null ? 'Manual Query Access Rule' : `Edit Query Access Rule #${editingQueryAccessRuleID}`}</p>
+                    <p className="text-[12px] text-muted">Create fallback rules for a user or auth group. * means all; other values are exact names, not fuzzy matches.</p>
                   </div>
                 </div>
-                <div className="grid gap-3 lg:grid-cols-[140px_minmax(170px,0.8fr)_110px_260px_170px_170px_120px_auto] xl:grid-cols-[150px_minmax(190px,0.9fr)_120px_300px_190px_190px_130px_auto]">
+                <div className="grid gap-3 lg:grid-cols-[140px_minmax(170px,0.8fr)_110px_260px_minmax(170px,0.7fr)_minmax(170px,0.7fr)_120px_auto] xl:grid-cols-[150px_minmax(190px,0.9fr)_120px_300px_minmax(190px,0.75fr)_minmax(190px,0.75fr)_130px_auto]">
                   <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Subject Type
                     <DropdownSelect
@@ -1070,7 +1198,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     <DropdownSelect
                       ariaLabel="Query Access DB Connection"
                       value={queryAccessRuleDraft.connectionID}
-                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, connectionID: value }))}
+                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, connectionID: value, databasePattern: '*', tablePattern: '*' }))}
                       disabled={savingQueryAccessRule}
                       options={[
                         { value: '', label: 'Not Selected' },
@@ -1081,23 +1209,47 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                   </label>
                   <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Database
-                    <input
-                      value={queryAccessRuleDraft.databasePattern}
-                      onChange={(event) => setQueryAccessRuleDraft((current) => ({ ...current, databasePattern: event.target.value }))}
-                      className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] font-medium normal-case tracking-normal text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                      placeholder="*"
-                      disabled={savingQueryAccessRule}
+                    <DropdownSelect
+                      ariaLabel="Query Access Database"
+                      value={databaseScopeValue}
+                      onChange={(value) => setQueryAccessRuleDraft((current) => ({
+                        ...current,
+                        databasePattern: value === CUSTOM_SCOPE_VALUE ? '' : value,
+                        tablePattern: '*',
+                      }))}
+                      disabled={savingQueryAccessRule || queryAccessRuleDraft.connectionID === ''}
+                      options={databaseScopeOptions}
+                      menuClassName="max-h-[320px] overflow-y-auto"
                     />
+                    {databaseScopeValue === CUSTOM_SCOPE_VALUE ? (
+                      <input
+                        value={queryAccessRuleDraft.databasePattern}
+                        onChange={(event) => setQueryAccessRuleDraft((current) => ({ ...current, databasePattern: event.target.value, tablePattern: '*' }))}
+                        className="h-9 rounded-lg border border-border bg-panel-soft px-3 text-[13px] font-medium normal-case tracking-normal text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                        placeholder="Exact database name"
+                        disabled={savingQueryAccessRule}
+                      />
+                    ) : null}
                   </label>
                   <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Table
-                    <input
-                      value={queryAccessRuleDraft.tablePattern}
-                      onChange={(event) => setQueryAccessRuleDraft((current) => ({ ...current, tablePattern: event.target.value }))}
-                      className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] font-medium normal-case tracking-normal text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                      placeholder="*"
-                      disabled={savingQueryAccessRule}
+                    <DropdownSelect
+                      ariaLabel="Query Access Table"
+                      value={tableScopeValue}
+                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, tablePattern: value === CUSTOM_SCOPE_VALUE ? '' : value }))}
+                      disabled={savingQueryAccessRule || queryAccessRuleDraft.connectionID === '' || queryAccessRuleDraft.databasePattern.trim() === ''}
+                      options={tableScopeOptions}
+                      menuClassName="max-h-[320px] overflow-y-auto"
                     />
+                    {tableScopeValue === CUSTOM_SCOPE_VALUE ? (
+                      <input
+                        value={queryAccessRuleDraft.tablePattern}
+                        onChange={(event) => setQueryAccessRuleDraft((current) => ({ ...current, tablePattern: event.target.value }))}
+                        className="h-9 rounded-lg border border-border bg-panel-soft px-3 text-[13px] font-medium normal-case tracking-normal text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                        placeholder="Exact table name"
+                        disabled={savingQueryAccessRule}
+                      />
+                    ) : null}
                   </label>
                   <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Duration
@@ -1109,15 +1261,30 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       options={QUERY_ACCESS_DURATION_OPTIONS}
                     />
                   </label>
-                  <button
-                    type="submit"
-                    disabled={savingQueryAccessRule}
-                    className="inline-flex h-10 items-center justify-center gap-2 self-end rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Add
-                  </button>
+                  <div className="flex items-center gap-2 self-end">
+                    {editingQueryAccessRuleID != null ? (
+                      <button
+                        type="button"
+                        onClick={handleCancelEditQueryAccessRule}
+                        disabled={savingQueryAccessRule}
+                        className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-white px-3 text-[12px] font-bold text-ink shadow-soft transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                    <button
+                      type="submit"
+                      disabled={savingQueryAccessRule}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Plus className="h-4 w-4" />
+                      {editingQueryAccessRuleID == null ? 'Add' : 'Save'}
+                    </button>
+                  </div>
                 </div>
+                <p className="mt-3 text-[11px] text-muted">
+                  {queryAccessMetadataLoading ? 'Loading metadata options...' : `Scope preview: ${getConnectionLabel(Number(queryAccessRuleDraft.connectionID), connections)} / ${queryAccessRuleDraft.databasePattern || '—'} / ${queryAccessRuleDraft.tablePattern || '—'}`}
+                </p>
               </form>
 
               <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
@@ -1157,6 +1324,15 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                               <Tag label={active ? 'active' : rule.revoked_at ? 'revoked' : 'expired'} tone={active ? 'success' : 'default'} />
                             </td>
                             <td className="px-3 py-3">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditQueryAccessRule(rule)}
+                                  disabled={!active || savingQueryAccessRule}
+                                  className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  Edit
+                                </button>
                               <button
                                 type="button"
                                 onClick={() => void handleRevokeQueryAccessRule(rule.id)}
@@ -1165,6 +1341,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                               >
                                 Revoke
                               </button>
+                              </div>
                             </td>
                           </tr>
                         )

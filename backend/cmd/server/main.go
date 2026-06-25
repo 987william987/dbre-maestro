@@ -293,6 +293,7 @@ func main() {
 			r.With(requireUsersRead).Get("/db-connections", userH.ListDBConnections)
 			r.With(requireUsersRead).Get("/query-access-rules", queryAccessAdminH.List)
 			r.With(requireUsersWrite).Post("/query-access-rules", queryAccessAdminH.Create)
+			r.With(requireUsersWrite).Put("/query-access-rules/{id}", queryAccessAdminH.Update)
 			r.With(requireUsersWrite).Post("/query-access-rules/{id}/revoke", queryAccessAdminH.Revoke)
 			r.With(requireUsersWrite).Post("/", userH.Create)
 			r.With(requireUsersRead).Get("/{id}", userH.Get)
