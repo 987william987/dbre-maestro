@@ -263,12 +263,17 @@ func collectRedisInventory(ctx context.Context, client *elasticache.Client, regi
 			rawPayload, _ := json.Marshal(cluster)
 			rawPayloadString := string(rawPayload)
 			tags := elasticacheResourceTags(ctx, client, valueString(cluster.ARN))
+			replicationGroupID := strings.TrimSpace(valueString(cluster.ReplicationGroupId))
+			if replicationGroupID == "" {
+				replicationGroupID = valueString(cluster.CacheClusterId)
+			}
 			items = append(items, model.CloudDBInventorySnapshot{
 				Provider:           "aws",
 				Engine:             engine,
 				Region:             region,
 				AZ:                 stringPtr(az),
-				DBIdentifier:       valueString(cluster.CacheClusterId),
+				DBIdentifier:       replicationGroupID,
+				ClusterIdentifier:  stringPtr(replicationGroupID),
 				InstanceIdentifier: stringPtr(valueString(cluster.CacheClusterId)),
 				Role:               stringPtr("primary"),
 				EngineVersion:      stringPtr(valueString(cluster.EngineVersion)),
