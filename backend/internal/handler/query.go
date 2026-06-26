@@ -753,26 +753,15 @@ func executeSingleSQLStatement(
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	cols, err := rows.Columns()
 	if err != nil {
+		rows.Close()
 		return nil, err
 	}
 
 	origins := inferColumnOriginsFromLabels(cols, effectiveQueryDatabaseName(conn, queryCtx))
 	dependencies := dependenciesFromOrigins(origins)
-	if shouldResolveMySQLOrigins(cols) {
-		resolvedColumns, err := resolveMySQLLineageForStatement(ctx, conn, pinnedConn, statement, cols, queryCtx)
-		if err == nil && len(resolvedColumns) == len(cols) {
-			origins = make([]masking.ColumnOrigin, len(resolvedColumns))
-			dependencies = make([][]masking.ColumnOrigin, len(resolvedColumns))
-			for i, column := range resolvedColumns {
-				origins[i] = column.Origin
-				dependencies[i] = append([]masking.ColumnOrigin(nil), column.Dependencies...)
-			}
-		}
-	}
 	result := &masking.QueryResult{
 		Columns:      buildDisplayColumns(cols, origins),
 		RawColumns:   cols,
@@ -796,7 +785,30 @@ func executeSingleSQLStatement(
 		}
 		result.Rows = append(result.Rows, vals)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	if shouldResolveMySQLOrigins(cols) {
+		resolvedColumns, err := resolveMySQLLineageForStatement(ctx, conn, pinnedConn, statement, cols, queryCtx)
+		if err == nil && len(resolvedColumns) == len(cols) {
+			origins = make([]masking.ColumnOrigin, len(resolvedColumns))
+			dependencies = make([][]masking.ColumnOrigin, len(resolvedColumns))
+			for i, column := range resolvedColumns {
+				origins[i] = column.Origin
+				dependencies[i] = append([]masking.ColumnOrigin(nil), column.Dependencies...)
+			}
+			result.Origins = origins
+			result.Dependencies = dependencies
+			result.Columns = buildDisplayColumns(cols, origins)
+		}
+	}
+
+	return result, nil
 }
 
 func executeSinglePostgresStatement(

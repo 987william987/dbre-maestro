@@ -32,6 +32,7 @@ type DBMetadataObjectJob struct {
 
 	mu        sync.Mutex
 	isRunning bool
+	writeMu   sync.Mutex
 }
 
 func NewDBMetadataObjectJob(
@@ -241,12 +242,18 @@ func (j *DBMetadataObjectJob) syncConnection(ctx context.Context, conn *model.DB
 		return err
 	}
 
-	if err := j.snapshots.ReplaceObjectSnapshotsForConnection(ctx, snapshotAt, resolvedConn.ID, items); err != nil {
+	if err := j.replaceObjectSnapshotsForConnection(ctx, snapshotAt, resolvedConn.ID, items); err != nil {
 		return fmt.Errorf("replace object snapshots for connection %d: %w", resolvedConn.ID, err)
 	}
 
 	j.logger.Info("db metadata objects: connection synced", "connection_id", resolvedConn.ID, "connection_name", resolvedConn.Name, "count", len(items))
 	return nil
+}
+
+func (j *DBMetadataObjectJob) replaceObjectSnapshotsForConnection(ctx context.Context, snapshotAt time.Time, connectionID uint64, items []model.DBObjectSnapshot) error {
+	j.writeMu.Lock()
+	defer j.writeMu.Unlock()
+	return j.snapshots.ReplaceObjectSnapshotsForConnection(ctx, snapshotAt, connectionID, items)
 }
 
 func (j *DBMetadataObjectJob) collectMySQLObjects(
