@@ -84,6 +84,7 @@ const storage = new Map<string, string>()
 describe('SQLEditorPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    vi.clearAllMocks()
     storage.clear()
     mockedUseAuth.mockReturnValue({
       user: {
@@ -238,6 +239,34 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
     expect(screen.getAllByText(/Query \d+/)).toHaveLength(1)
     expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT 1;')
+  })
+
+  it('依照目前選取的連線類型顯示 SQL Editor timeout', async () => {
+    mockedGetQueryConstraints.mockResolvedValueOnce({
+      default_limit: 200,
+      max_limit: 1000,
+      app_timeout_seconds: 60,
+      mysql_max_execution_time_ms: 45000,
+      postgres_statement_timeout_ms: 25000,
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByText('Timeout 60s')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(await screen.findByText('Primary MySQL'))
+    expect(await screen.findByText('Timeout 45s')).toBeInTheDocument()
+    await waitFor(() => expect(mockedListMetadata).toHaveBeenCalledWith(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    expect(screen.queryByText('Selected')).not.toBeInTheDocument()
   })
 
   it('執行查詢後會先顯示匯出確認窗，確認後才建立匯出請求', async () => {
@@ -620,7 +649,15 @@ describe('SQLEditorPage', () => {
     expect(screen.getByText('No matching assets.')).toBeInTheDocument()
   })
 
-  it('只有在使用者手動展開 root connection 時才載入 metadata', async () => {
+  it('選取實例後會自動載入第一層 database', async () => {
+    mockedListMetadata.mockResolvedValueOnce({
+      db_type: 'mysql',
+      level: 'database',
+      items: [
+        { kind: 'database', name: 'maestro' },
+      ],
+    })
+
     render(
       <MemoryRouter>
         <ToastProvider>
@@ -633,14 +670,12 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
 
-    expect(mockedListMetadata).not.toHaveBeenCalled()
-
-    fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
-
     await waitFor(() => {
       expect(mockedListMetadata).toHaveBeenCalledTimes(1)
       expect(mockedListMetadata).toHaveBeenCalledWith(1)
     })
+    expect(screen.queryByLabelText('Toggle Primary MySQL')).not.toBeInTheDocument()
+    expect(screen.getByText('maestro')).toBeInTheDocument()
   })
 
   it('metadata 載入失敗時只顯示前端暫時訊息，不外露底層錯誤', async () => {
@@ -661,7 +696,6 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
-    fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
 
     expect(await screen.findByText('Metadata is temporarily unavailable. Please try again later.')).toBeInTheDocument()
     expect(screen.queryByText(/pg_hba\.conf rejects connection/i)).not.toBeInTheDocument()
@@ -824,10 +858,9 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
-    fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
 
     expect(await screen.findByText('maestro')).toBeInTheDocument()
-    fireEvent.click(screen.getByLabelText('Toggle maestro'))
+    fireEvent.click(screen.getByText('maestro'))
     expect(await screen.findByText('tickets')).toBeInTheDocument()
     fireEvent.click(screen.getByText('tickets'))
 
@@ -1029,11 +1062,9 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Shared MySQL'))
-    fireEvent.click(screen.getByLabelText('Toggle Shared MySQL'))
 
     await waitFor(() => {
       expect(mockedListMetadata).toHaveBeenCalledWith(2)
-      expect(screen.getAllByText('Shared MySQL').length).toBeGreaterThan(0)
       expect(screen.getByText('analytics')).toBeInTheDocument()
     })
   })
@@ -1097,11 +1128,9 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Configured MySQL'))
-    fireEvent.click(screen.getByLabelText('Toggle Configured MySQL'))
 
     await waitFor(() => {
       expect(mockedListMetadata).toHaveBeenCalledWith(5)
-      expect(screen.getAllByText('Configured MySQL').length).toBeGreaterThan(0)
       expect(screen.getByText('analytics')).toBeInTheDocument()
       expect(screen.getAllByText('maestro').length).toBeGreaterThan(0)
     })
@@ -1166,11 +1195,9 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Shared Postgres'))
-    fireEvent.click(screen.getByLabelText('Toggle Shared Postgres'))
 
     await waitFor(() => {
       expect(mockedListMetadata).toHaveBeenCalledWith(4)
-      expect(screen.getAllByText('Shared Postgres').length).toBeGreaterThan(0)
       expect(screen.getByText('analytics')).toBeInTheDocument()
       expect(screen.getAllByText('postgres').length).toBeGreaterThan(0)
     })
@@ -1235,7 +1262,6 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Search MySQL'))
-    fireEvent.click(screen.getByLabelText('Toggle Search MySQL'))
 
     await waitFor(() => {
       expect(screen.getByText('analytics')).toBeInTheDocument()
@@ -1394,7 +1420,6 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
-    fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
     fireEvent.click(await screen.findByText('analytics'))
     fireEvent.click(screen.getByText('Run Query'))
     await waitFor(() => {
@@ -1410,7 +1435,6 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByText('New Tab'))
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
-    fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
     fireEvent.click(await screen.findByText('maestro'))
     fireEvent.click(screen.getByText('Run Query'))
     await waitFor(() => {
@@ -1481,9 +1505,8 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
-    fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
     fireEvent.click(await screen.findByText('dev_edgex_ops_intelligence'))
-    fireEvent.click(screen.getByLabelText('Toggle dev_edgex_ops_intelligence'))
+    fireEvent.click(screen.getByText('dev_edgex_ops_intelligence'))
     fireEvent.click(await screen.findByText('t_activity_delivery_attempt'))
 
     expect(screen.getByText('t_activity_delivery_outbox')).toBeInTheDocument()
@@ -1515,7 +1538,6 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByText('New Tab'))
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
-    fireEvent.click(screen.getByLabelText('Toggle Primary MySQL'))
 
     expect(await screen.findByText('Metadata is temporarily unavailable. Please try again later.')).toBeInTheDocument()
 

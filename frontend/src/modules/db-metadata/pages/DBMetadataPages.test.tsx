@@ -55,7 +55,9 @@ describe('DBMetadata pages', () => {
           az: 'ap-northeast-1a',
           role: 'writer',
           instance_class: 'db.r6g.large',
-          db_identifier: 'orders-primary',
+          db_identifier: 'orders-primary-instance',
+          cluster_identifier: 'orders-cluster',
+          instance_identifier: 'orders-primary-instance',
           instance_endpoint: 'orders-primary.cluster.local',
           cluster_reader_endpoint: 'orders-reader.cluster.local',
           cluster_endpoint: null,
@@ -73,7 +75,9 @@ describe('DBMetadata pages', () => {
           az: 'ap-northeast-1c',
           role: 'reader',
           instance_class: 'db.r6g.xlarge',
-          db_identifier: 'ledger-replica',
+          db_identifier: 'ledger-replica-instance',
+          cluster_identifier: 'ledger-cluster',
+          instance_identifier: 'ledger-replica-instance',
           instance_endpoint: 'ledger-replica.cluster.local',
           cluster_reader_endpoint: 'ledger-reader.cluster.local',
           cluster_endpoint: null,
@@ -91,19 +95,21 @@ describe('DBMetadata pages', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('orders-primary')).toBeInTheDocument())
-    expect(screen.getByText('ledger-replica')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('orders-cluster')).toBeInTheDocument())
+    expect(screen.getByText('orders-primary-instance')).toBeInTheDocument()
+    expect(screen.getByText('ledger-cluster')).toBeInTheDocument()
+    expect(screen.getByText('ledger-replica-instance')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Inventory endpoint search'), { target: { value: 'ledger-reader' } })
 
-    expect(screen.queryByText('orders-primary')).not.toBeInTheDocument()
-    expect(screen.getAllByText('ledger-replica').length).toBeGreaterThan(0)
+    expect(screen.queryByText('orders-cluster')).not.toBeInTheDocument()
+    expect(screen.getByText('ledger-cluster')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Version Search'), { target: { value: '16' } })
     fireEvent.change(screen.getByLabelText('Size Search'), { target: { value: 'xlarge' } })
     fireEvent.change(screen.getByLabelText('Tags Search'), { target: { value: 'stage' } })
 
-    expect(screen.getAllByText('ledger-replica').length).toBeGreaterThan(0)
+    expect(screen.getByText('ledger-cluster')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Visible Columns' }))
     fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Last Synced' }))
