@@ -2,6 +2,7 @@ package sqlreview
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -17,89 +18,91 @@ const (
 	redisCategoryUnknown     redisCommandCategory = "unknown"
 )
 
-var redisCommandCategories = map[string]redisCommandCategory{
-	"GET":              redisCategoryRead,
-	"MGET":             redisCategoryRead,
-	"GETRANGE":         redisCategoryRead,
-	"STRLEN":           redisCategoryRead,
-	"HGET":             redisCategoryRead,
-	"HMGET":            redisCategoryRead,
-	"HGETALL":          redisCategoryRead,
-	"HKEYS":            redisCategoryRead,
-	"HVALS":            redisCategoryRead,
-	"HLEN":             redisCategoryRead,
-	"HEXISTS":          redisCategoryRead,
-	"LRANGE":           redisCategoryRead,
-	"LLEN":             redisCategoryRead,
-	"LINDEX":           redisCategoryRead,
-	"SMEMBERS":         redisCategoryRead,
-	"SCARD":            redisCategoryRead,
-	"SISMEMBER":        redisCategoryRead,
-	"SMISMEMBER":       redisCategoryRead,
-	"SRANDMEMBER":      redisCategoryRead,
-	"ZRANGE":           redisCategoryRead,
-	"ZRANGEBYSCORE":    redisCategoryRead,
-	"ZRANGEBYLEX":      redisCategoryRead,
-	"ZREVRANGE":        redisCategoryRead,
-	"ZREVRANGEBYSCORE": redisCategoryRead,
-	"ZCARD":            redisCategoryRead,
-	"ZSCORE":           redisCategoryRead,
-	"ZMSCORE":          redisCategoryRead,
-	"ZRANK":            redisCategoryRead,
-	"ZCOUNT":           redisCategoryRead,
-	"KEYS":             redisCategoryRead,
-	"SCAN":             redisCategoryRead,
-	"HSCAN":            redisCategoryRead,
-	"SSCAN":            redisCategoryRead,
-	"ZSCAN":            redisCategoryRead,
-	"TYPE":             redisCategoryRead,
-	"TTL":              redisCategoryRead,
-	"PTTL":             redisCategoryRead,
-	"EXISTS":           redisCategoryRead,
-	"OBJECT":           redisCategoryRead,
-	"INFO":             redisCategoryRead,
-	"DBSIZE":           redisCategoryRead,
-	"PING":             redisCategoryRead,
-	"TIME":             redisCategoryRead,
-	"MEMORY":           redisCategoryRead,
+const maxRedisScanCount = 200
 
-	"SET":         redisCategoryWrite,
-	"MSET":        redisCategoryWrite,
-	"DEL":         redisCategoryWrite,
-	"INCR":        redisCategoryWrite,
-	"DECR":        redisCategoryWrite,
-	"EXPIRE":      redisCategoryWrite,
-	"HSET":        redisCategoryWrite,
-	"HMSET":       redisCategoryWrite,
-	"LPUSH":       redisCategoryWrite,
-	"RPUSH":       redisCategoryWrite,
-	"SADD":        redisCategoryWrite,
-	"ZADD":        redisCategoryWrite,
-	"FLUSHDB":     redisCategoryDangerous,
-	"FLUSHALL":    redisCategoryDangerous,
-	"SHUTDOWN":    redisCategoryDangerous,
-	"CONFIG":      redisCategoryDangerous,
-	"DEBUG":       redisCategoryDangerous,
-	"MULTI":       redisCategoryTransaction,
-	"EXEC":        redisCategoryTransaction,
-	"DISCARD":     redisCategoryTransaction,
-	"WATCH":       redisCategoryTransaction,
-	"UNWATCH":     redisCategoryTransaction,
-	"EVAL":        redisCategoryScripting,
-	"EVALSHA":     redisCategoryScripting,
-	"SCRIPT":      redisCategoryScripting,
-	"FUNCTION":    redisCategoryScripting,
-	"ACL":         redisCategoryAdmin,
-	"CLIENT":      redisCategoryAdmin,
-	"COMMAND":     redisCategoryAdmin,
-	"LATENCY":     redisCategoryAdmin,
-	"MODULE":      redisCategoryAdmin,
-	"MONITOR":     redisCategoryAdmin,
-	"PSUBSCRIBE":  redisCategoryAdmin,
-	"PUBLISH":     redisCategoryAdmin,
-	"PUBSUB":      redisCategoryAdmin,
-	"SUBSCRIBE":   redisCategoryAdmin,
-	"UNSUBSCRIBE": redisCategoryAdmin,
+var redisCommandCategories = map[string]redisCommandCategory{
+	"GET":         redisCategoryRead,
+	"MGET":        redisCategoryRead,
+	"GETRANGE":    redisCategoryRead,
+	"STRLEN":      redisCategoryRead,
+	"HGET":        redisCategoryRead,
+	"HMGET":       redisCategoryRead,
+	"HLEN":        redisCategoryRead,
+	"HEXISTS":     redisCategoryRead,
+	"LLEN":        redisCategoryRead,
+	"LINDEX":      redisCategoryRead,
+	"SCARD":       redisCategoryRead,
+	"SISMEMBER":   redisCategoryRead,
+	"SMISMEMBER":  redisCategoryRead,
+	"SRANDMEMBER": redisCategoryRead,
+	"ZCARD":       redisCategoryRead,
+	"ZSCORE":      redisCategoryRead,
+	"ZMSCORE":     redisCategoryRead,
+	"ZRANK":       redisCategoryRead,
+	"ZCOUNT":      redisCategoryRead,
+	"SCAN":        redisCategoryRead,
+	"HSCAN":       redisCategoryRead,
+	"SSCAN":       redisCategoryRead,
+	"ZSCAN":       redisCategoryRead,
+	"TYPE":        redisCategoryRead,
+	"TTL":         redisCategoryRead,
+	"PTTL":        redisCategoryRead,
+	"EXISTS":      redisCategoryRead,
+	"PING":        redisCategoryRead,
+
+	"SET":              redisCategoryWrite,
+	"MSET":             redisCategoryWrite,
+	"DEL":              redisCategoryWrite,
+	"INCR":             redisCategoryWrite,
+	"DECR":             redisCategoryWrite,
+	"EXPIRE":           redisCategoryWrite,
+	"HSET":             redisCategoryWrite,
+	"HMSET":            redisCategoryWrite,
+	"LPUSH":            redisCategoryWrite,
+	"RPUSH":            redisCategoryWrite,
+	"SADD":             redisCategoryWrite,
+	"ZADD":             redisCategoryWrite,
+	"KEYS":             redisCategoryDangerous,
+	"HGETALL":          redisCategoryDangerous,
+	"HKEYS":            redisCategoryDangerous,
+	"HVALS":            redisCategoryDangerous,
+	"LRANGE":           redisCategoryDangerous,
+	"SMEMBERS":         redisCategoryDangerous,
+	"ZRANGE":           redisCategoryDangerous,
+	"ZRANGEBYSCORE":    redisCategoryDangerous,
+	"ZRANGEBYLEX":      redisCategoryDangerous,
+	"ZREVRANGE":        redisCategoryDangerous,
+	"ZREVRANGEBYSCORE": redisCategoryDangerous,
+	"OBJECT":           redisCategoryDangerous,
+	"INFO":             redisCategoryDangerous,
+	"DBSIZE":           redisCategoryDangerous,
+	"TIME":             redisCategoryDangerous,
+	"MEMORY":           redisCategoryDangerous,
+	"FLUSHDB":          redisCategoryDangerous,
+	"FLUSHALL":         redisCategoryDangerous,
+	"SHUTDOWN":         redisCategoryDangerous,
+	"CONFIG":           redisCategoryDangerous,
+	"DEBUG":            redisCategoryDangerous,
+	"MULTI":            redisCategoryTransaction,
+	"EXEC":             redisCategoryTransaction,
+	"DISCARD":          redisCategoryTransaction,
+	"WATCH":            redisCategoryTransaction,
+	"UNWATCH":          redisCategoryTransaction,
+	"EVAL":             redisCategoryScripting,
+	"EVALSHA":          redisCategoryScripting,
+	"SCRIPT":           redisCategoryScripting,
+	"FUNCTION":         redisCategoryScripting,
+	"ACL":              redisCategoryAdmin,
+	"CLIENT":           redisCategoryAdmin,
+	"COMMAND":          redisCategoryAdmin,
+	"LATENCY":          redisCategoryAdmin,
+	"MODULE":           redisCategoryAdmin,
+	"MONITOR":          redisCategoryAdmin,
+	"PSUBSCRIBE":       redisCategoryAdmin,
+	"PUBLISH":          redisCategoryAdmin,
+	"PUBSUB":           redisCategoryAdmin,
+	"SUBSCRIBE":        redisCategoryAdmin,
+	"UNSUBSCRIBE":      redisCategoryAdmin,
 }
 
 var redisTicketAllowedCommands = map[string]struct{}{
@@ -114,13 +117,16 @@ var redisTicketAllowedCommands = map[string]struct{}{
 
 // CheckRedisReadOnly returns an error if the command is not in the read-only whitelist.
 func CheckRedisReadOnly(cmdLine string) error {
-	cmd, _, err := ParseRedisCommand(cmdLine)
+	cmd, args, err := ParseRedisCommand(cmdLine)
 	if err != nil {
 		return err
 	}
 	category := categorizeRedisCommand(cmd)
 	switch category {
 	case redisCategoryRead:
+		if err := validateRedisReadOnlyArgs(cmd, args); err != nil {
+			return err
+		}
 		return nil
 	case redisCategoryWrite, redisCategoryDangerous, redisCategoryTransaction, redisCategoryScripting, redisCategoryAdmin:
 		return fmt.Errorf("command %q is not allowed in SQL Editor (category: %s)", cmd, category)
@@ -153,6 +159,40 @@ func CheckRedisTicketCommand(cmdLine string) error {
 		return err
 	}
 	return nil
+}
+
+func validateRedisReadOnlyArgs(cmd string, args []string) error {
+	switch cmd {
+	case "SCAN", "HSCAN", "SSCAN", "ZSCAN":
+		count, ok, err := redisScanCount(args)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("%s requires COUNT between 1 and %d", cmd, maxRedisScanCount)
+		}
+		if count < 1 || count > maxRedisScanCount {
+			return fmt.Errorf("%s COUNT must be between 1 and %d", cmd, maxRedisScanCount)
+		}
+	}
+	return nil
+}
+
+func redisScanCount(args []string) (int, bool, error) {
+	for i := 0; i < len(args); i++ {
+		if !strings.EqualFold(args[i], "COUNT") {
+			continue
+		}
+		if i+1 >= len(args) {
+			return 0, true, fmt.Errorf("COUNT requires a numeric value")
+		}
+		count, err := strconv.Atoi(args[i+1])
+		if err != nil {
+			return 0, true, fmt.Errorf("COUNT requires a numeric value")
+		}
+		return count, true, nil
+	}
+	return 0, false, nil
 }
 
 func categorizeRedisCommand(cmd string) redisCommandCategory {

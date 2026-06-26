@@ -47,10 +47,81 @@ func TestCheckRedisReadOnly(t *testing.T) {
 		}
 	})
 
+	t.Run("allows scan commands with count at or below limit", func(t *testing.T) {
+		for _, cmdLine := range []string{
+			"SCAN 0 COUNT 200",
+			"SCAN 0 MATCH user:* COUNT 50",
+			"HSCAN profile:1 0 COUNT 200",
+			"SSCAN online-users 0 count 100",
+			"ZSCAN leaderboard 0 MATCH user:* COUNT 1",
+		} {
+			if err := CheckRedisReadOnly(cmdLine); err != nil {
+				t.Fatalf("CheckRedisReadOnly(%q) error = %v", cmdLine, err)
+			}
+		}
+	})
+
+	t.Run("blocks scan commands without bounded count", func(t *testing.T) {
+		for _, cmdLine := range []string{
+			"SCAN 0",
+			"SCAN 0 COUNT 201",
+			"SCAN 0 COUNT 0",
+			"SCAN 0 COUNT many",
+			"SCAN 0 COUNT",
+			"HSCAN profile:1 0",
+			"SSCAN online-users 0 COUNT 1000",
+			"ZSCAN leaderboard 0 COUNT -1",
+		} {
+			if err := CheckRedisReadOnly(cmdLine); err == nil {
+				t.Fatalf("CheckRedisReadOnly(%q) expected error, got nil", cmdLine)
+			}
+		}
+	})
+
 	t.Run("blocks write command", func(t *testing.T) {
 		err := CheckRedisReadOnly("SET user:1 alice")
 		if err == nil {
 			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("blocks keys command", func(t *testing.T) {
+		err := CheckRedisReadOnly("KEYS *")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("blocks unbounded collection dump commands", func(t *testing.T) {
+		for _, cmdLine := range []string{
+			"HGETALL profile:1",
+			"HKEYS profile:1",
+			"HVALS profile:1",
+			"LRANGE queue 0 -1",
+			"SMEMBERS online-users",
+			"ZRANGE leaderboard 0 -1",
+			"ZRANGEBYSCORE leaderboard -inf +inf",
+			"ZRANGEBYLEX names - +",
+			"ZREVRANGE leaderboard 0 -1",
+			"ZREVRANGEBYSCORE leaderboard +inf -inf",
+		} {
+			if err := CheckRedisReadOnly(cmdLine); err == nil {
+				t.Fatalf("CheckRedisReadOnly(%q) expected error, got nil", cmdLine)
+			}
+		}
+	})
+
+	t.Run("blocks redis introspection commands", func(t *testing.T) {
+		for _, cmdLine := range []string{
+			"INFO",
+			"DBSIZE",
+			"OBJECT ENCODING user:1",
+			"MEMORY USAGE user:1",
+			"TIME",
+		} {
+			if err := CheckRedisReadOnly(cmdLine); err == nil {
+				t.Fatalf("CheckRedisReadOnly(%q) expected error, got nil", cmdLine)
+			}
 		}
 	})
 

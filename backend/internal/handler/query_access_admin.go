@@ -98,6 +98,95 @@ func (h *QueryAccessAdminHandler) Create(w http.ResponseWriter, r *http.Request)
 	jsonCreated(w, rule)
 }
 
+func (h *QueryAccessAdminHandler) Update(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id == 0 {
+		jsonErr(w, http.StatusBadRequest, "invalid query access rule id")
+		return
+	}
+	var req struct {
+		SubjectType     model.QueryAccessSubjectType `json:"subject_type"`
+		SubjectID       uint64                       `json:"subject_id"`
+		Effect          model.QueryAccessEffect      `json:"effect"`
+		ConnectionID    uint64                       `json:"connection_id"`
+		DatabasePattern string                       `json:"database_pattern"`
+		TablePattern    string                       `json:"table_pattern"`
+		DurationMinutes int                          `json:"duration_minutes"`
+	}
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Effect != model.QueryAccessEffectAllow && req.Effect != model.QueryAccessEffectDeny {
+		jsonErr(w, http.StatusUnprocessableEntity, "effect must be allow or deny")
+		return
+	}
+	durationMinutes, err := normalizeQueryAccessDurationMinutes(req.DurationMinutes)
+	if err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	if err := h.validateSubjectDBScope(r.Context(), req.SubjectType, req.SubjectID, req.ConnectionID); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	oldRule, err := h.queryAccess.GetRule(r.Context(), id)
+	if err != nil {
+		jsonErr(w, http.StatusNotFound, "query access rule not found")
+		return
+	}
+	if oldRule.RevokedAt != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "query access rule is already revoked")
+		return
+	}
+
+	expiresAt := time.Now().UTC().Add(time.Duration(durationMinutes) * time.Minute)
+	actorID := middleware.UserIDFromCtx(r.Context())
+	rule, err := h.queryAccess.ReplaceManualRule(r.Context(), id, model.QueryAccessRule{
+		SubjectType:     req.SubjectType,
+		SubjectID:       req.SubjectID,
+		Effect:          req.Effect,
+		ConnectionID:    req.ConnectionID,
+		DatabasePattern: req.DatabasePattern,
+		TablePattern:    req.TablePattern,
+		ExpiresAt:       &expiresAt,
+	}, actorID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "update query access rule failed")
+		return
+	}
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "query_access_rule_update",
+		ResourceType: "query_access_rule",
+		ResourceID:   &rule.ID,
+		Details: map[string]any{
+			"replaced_rule_id": id,
+			"old": map[string]any{
+				"subject_type":     oldRule.SubjectType,
+				"subject_id":       oldRule.SubjectID,
+				"effect":           oldRule.Effect,
+				"connection_id":    oldRule.ConnectionID,
+				"database_pattern": oldRule.DatabasePattern,
+				"table_pattern":    oldRule.TablePattern,
+				"expires_at":       oldRule.ExpiresAt,
+			},
+			"new": map[string]any{
+				"subject_type":     rule.SubjectType,
+				"subject_id":       rule.SubjectID,
+				"effect":           rule.Effect,
+				"connection_id":    rule.ConnectionID,
+				"database_pattern": rule.DatabasePattern,
+				"table_pattern":    rule.TablePattern,
+				"expires_at":       expiresAt,
+			},
+		},
+		IPAddress: clientIP(r),
+	})
+	jsonOK(w, rule)
+}
+
 func (h *QueryAccessAdminHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id == 0 {
