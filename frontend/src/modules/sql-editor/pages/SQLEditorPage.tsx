@@ -2122,15 +2122,15 @@ export function SQLEditorPage() {
                   className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
                 />
               </label>
-              <div className="mt-3 min-h-0 flex-1 overflow-auto pt-1">
+              <div className="mt-1 min-h-0 flex-1 overflow-auto">
                 {connectionsLoading ? (
-                  <p className="px-1 py-2 text-[12px] text-muted">Loading connections...</p>
+                  <p className="px-1 py-1 text-[12px] text-muted">Loading connections...</p>
                 ) : activeSearchingAssets || activeExplorerRootLoading ? (
-                  <p className="px-1 py-2 text-[12px] text-muted">Searching assets...</p>
+                  <p className="px-1 py-1 text-[12px] text-muted">Searching assets...</p>
                 ) : !activeConnection || activeExplorerNodes.length === 0 ? (
-                  <p className="px-1 py-2 text-[12px] text-muted">No DB connections available.</p>
+                  <p className="px-1 py-1 text-[12px] text-muted">No DB connections available.</p>
                 ) : renderedExplorerNodes.length === 0 ? (
-                  <p className="px-1 py-2 text-[12px] text-muted">No matching assets.</p>
+                  <p className="px-1 py-1 text-[12px] text-muted">No matching assets.</p>
                 ) : (
                   <AssetTree
                     nodes={renderedExplorerNodes}
