@@ -1127,6 +1127,17 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 		IPAddress: clientIP(r),
 	})
 
+	if h.artifacts != nil {
+		_, _ = h.artifacts.AddHistory(r.Context(), &model.QueryHistoryEntry{
+			UserID:           userID,
+			DBConnectionID:   conn.ID,
+			DBConnectionName: conn.Name,
+			RedisDBIndex:     &dbIndex,
+			SQLContent:       cmdLine,
+			DurationMs:       durationMs,
+		})
+	}
+
 	jsonOK(w, map[string]any{
 		"columns":     result.Columns,
 		"rows":        result.Rows,
