@@ -188,6 +188,53 @@ func TestExecuteSQLQueryRunsMultiStatementsSequentially(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryResolvesMySQLLineageAfterRowsAreClosed(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("USE `analytics`").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("SET SESSION max_execution_time = 25000").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT DATE_FORMAT").
+		WillReturnRows(sqlmock.NewRows([]string{"time", "fee", "unlockEdge"}).
+			AddRow("2026-06-15", "1.479688", "0.986758"))
+	mock.ExpectQuery("FROM information_schema\\.COLUMNS").
+		WithArgs("analytics", "act_earn_unlock_edge").
+		WillReturnRows(sqlmock.NewRows([]string{"COLUMN_NAME"}).
+			AddRow("addtime").
+			AddRow("fee").
+			AddRow("unlock_edge"))
+
+	result, err := executeSQLQuery(
+		context.Background(),
+		&model.DBConnection{DBType: "mysql"},
+		db,
+		`SELECT DATE_FORMAT(FROM_UNIXTIME(addtime), '%Y-%m-%d') AS time,
+  IFNULL(sum(fee), 0) AS fee,
+  IFNULL(sum(unlock_edge), 0) AS unlockEdge
+FROM act_earn_unlock_edge
+WHERE userid = 759477505764622593
+GROUP BY time
+ORDER BY time ASC`,
+		queryExecutionContext{DatabaseName: "analytics"},
+		defaultSQLEditorTimeoutSettings(),
+	)
+	if err != nil {
+		t.Fatalf("executeSQLQuery() error = %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("len(result.Rows) = %d, want 1", len(result.Rows))
+	}
+	if result.RawColumns[1] != "fee" || result.Columns[1] != "fee" {
+		t.Fatalf("unexpected result columns = raw:%#v display:%#v", result.RawColumns, result.Columns)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestBuildDisplayColumnsUsesOriginColumnName(t *testing.T) {
 	rawColumns := []string{"t_deposit.id", "t_deposit.user_id", "t_deposit.account_id"}
 	origins := []struct {
