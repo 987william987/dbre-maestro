@@ -7,8 +7,6 @@ import { keymap } from '@codemirror/view'
 import { format as formatSQL, type SqlLanguage } from 'sql-formatter'
 import {
   Check,
-  ChevronDown,
-  ChevronRight,
   Database,
   Download,
   Filter,
@@ -430,6 +428,17 @@ function formatConnectionBadge(connection: DBConnection) {
   return connection.db_type.toUpperCase()
 }
 
+function effectiveTimeoutSeconds(constraints: QueryConstraints, connection: DBConnection | null) {
+  const appTimeoutSeconds = constraints.app_timeout_seconds
+  if (connection?.db_type === 'mysql') {
+    return Math.min(appTimeoutSeconds, Math.floor(constraints.mysql_max_execution_time_ms / 1000))
+  }
+  if (connection?.db_type === 'postgres') {
+    return Math.min(appTimeoutSeconds, Math.floor(constraints.postgres_statement_timeout_ms / 1000))
+  }
+  return appTimeoutSeconds
+}
+
 function matchesAssetKeyword(node: {
   label: string
   meta?: string
@@ -570,6 +579,50 @@ async function buildSearchNodes(connection: DBConnection, keyword: string): Prom
   return rootNode.children.length > 0 || matchesAssetKeyword(rootNode, keyword) ? [rootNode] : []
 }
 
+async function buildConnectionRootNode(connection: DBConnection): Promise<AssetTreeNode> {
+  const rootNode = createConnectionNode(connection, connection.id)
+  rootNode.expanded = true
+  rootNode.loaded = true
+
+  if (connection.db_type === 'redis') {
+    const response = await listMetadata(connection.id)
+    rootNode.children = response.items.map((item) => ({
+      id: `redis-db-${connection.id}-${item.name}`,
+      kind: 'redis_db' as const,
+      connectionId: connection.id,
+      label: `DB ${item.name}`,
+      database: item.name,
+      schema: item.name,
+      active: false,
+      selectable: true,
+      expanded: false,
+      loaded: true,
+      loading: false,
+      item,
+      children: [],
+    }))
+    return rootNode
+  }
+
+  const response = await listMetadata(connection.id)
+  rootNode.children = response.items.map((item) => ({
+    id: `database-${connection.id}-${item.name}`,
+    kind: 'database' as const,
+    connectionId: connection.id,
+    label: item.name,
+    database: item.name,
+    schema: item.schema,
+    active: false,
+    selectable: true,
+    expanded: false,
+    loaded: false,
+    loading: false,
+    item,
+    children: [],
+  }))
+  return rootNode
+}
+
 function syncAssetTreeActiveStates(
   nodes: AssetTreeNode[],
   activeConnectionId: number | null,
@@ -666,43 +719,37 @@ function AssetTree({
     const hasChildren = node.children.length > 0
     const canExpand = node.kind !== 'table' && node.kind !== 'redis_db'
     const paddingLeft = 8 + depth * 14
+    const handleNodeClick = () => {
+      if (canExpand) {
+        onSelect(node)
+        onToggle(node)
+        return
+      }
+      onSelect(node)
+    }
 
     return (
       <div key={node.id}>
-        <div
-          className={`group flex items-center rounded-md border border-transparent pr-2 text-[12px] ${
+        <button
+          type="button"
+          onClick={handleNodeClick}
+          className={`group flex min-w-max items-center rounded-md border border-transparent pr-2 text-[12px] ${
             node.active ? 'bg-panel-soft text-ink' : 'text-muted hover:border-border/70 hover:bg-panel-soft'
           }`}
           style={{ paddingLeft }}
         >
-          <button
-            type="button"
-            onClick={() => onToggle(node)}
-            className="mr-1 inline-flex h-6 w-5 items-center justify-center rounded text-faint hover:text-ink"
-            aria-label={`Toggle ${node.label}`}
-          >
-            {canExpand ? (
-              node.expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />
-            ) : (
-              <span className="h-3.5 w-3.5" />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => onSelect(node)}
-            className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
-          >
+          <span className="flex items-center gap-2 py-1.5 text-left">
             <span className="flex h-4 w-4 items-center justify-center text-muted">{iconForNode(node)}</span>
-            <span className="truncate font-medium">{node.label}</span>
-            {node.loading ? <span className="text-[10px] font-semibold text-faint">Loading…</span> : null}
-          </button>
-        </div>
+            <span className="whitespace-nowrap font-medium">{node.label}</span>
+            {node.loading ? <span className="whitespace-nowrap text-[10px] font-semibold text-faint">Loading…</span> : null}
+          </span>
+        </button>
         {node.expanded && hasChildren ? <div className="mt-0.5 space-y-0.5">{node.children.map((child) => renderNode(child, depth + 1))}</div> : null}
       </div>
     )
   }
 
-  return <div className="space-y-0.5">{nodes.map((node) => renderNode(node))}</div>
+  return <div className="min-w-max space-y-0.5 pr-2">{nodes.map((node) => renderNode(node))}</div>
 }
 
 export function SQLEditorPage() {
@@ -879,6 +926,13 @@ export function SQLEditorPage() {
     () => (activeExplorerSearch.trim() ? activeSearchTreeNodes : filterAssetTree(activeExplorerNodes, activeExplorerSearch)),
     [activeExplorerNodes, activeExplorerSearch, activeSearchTreeNodes],
   )
+  const renderedExplorerNodes = useMemo(() => {
+    if (filteredExplorerNodes.length === 1 && filteredExplorerNodes[0].kind === 'connection') {
+      return filteredExplorerNodes[0].children
+    }
+    return filteredExplorerNodes
+  }, [filteredExplorerNodes])
+  const activeExplorerRootLoading = activeExplorerNodes.length === 1 && activeExplorerNodes[0].kind === 'connection' && activeExplorerNodes[0].loading
   const filteredConnections = useMemo(() => {
     const keyword = activeAssetPickerSearch.trim().toLowerCase()
     if (!keyword) {
@@ -896,16 +950,11 @@ export function SQLEditorPage() {
   const activeQueryAccessAttentionKey = activeTab ? queryAccessAttentionKeys[activeTab.id] : undefined
   const activeEditorHeight = activeTab ? (editorHeights[activeTab.id] ?? `${EDITOR_MIN_HEIGHT}px`) : `${EDITOR_MIN_HEIGHT}px`
   const queryConstraintBadges = useMemo(() => {
-    const effectiveTimeoutSeconds = Math.min(
-      queryConstraints.app_timeout_seconds,
-      Math.floor(queryConstraints.mysql_max_execution_time_ms / 1000),
-      Math.floor(queryConstraints.postgres_statement_timeout_ms / 1000),
-    )
     return {
       limit: queryConstraints.default_limit,
-      timeoutSeconds: effectiveTimeoutSeconds,
+      timeoutSeconds: effectiveTimeoutSeconds(queryConstraints, activeConnection),
     }
-  }, [queryConstraints])
+  }, [activeConnection, queryConstraints])
   const requestConfirmLoading = requestConfirmState
     ? requestConfirmState.kind === 'export'
       ? exportingTabIDs.includes(requestConfirmState.tabID)
@@ -1750,6 +1799,13 @@ export function SQLEditorPage() {
   }
 
   function handleSelectConnection(connection: DBConnection) {
+    const tabID = activeTab?.id
+    const loadingRootNode = {
+      ...createConnectionNode(connection, connection.id),
+      expanded: true,
+      loading: true,
+    }
+
     updateActiveTab({
       connectionId: connection.id,
       database: '',
@@ -1763,12 +1819,30 @@ export function SQLEditorPage() {
       explorerSearch: '',
       assetPickerOpen: false,
       assetPickerSearch: '',
-    })
-    updateActiveTab({ metadataError: '' })
-    updateActiveTab({
-      explorerNodes: [createConnectionNode(connection, connection.id)],
+      metadataError: '',
+      explorerNodes: [loadingRootNode],
       searchTreeNodes: [],
     })
+
+    void buildConnectionRootNode(connection)
+      .then((rootNode) => {
+        if (!tabID) {
+          return
+        }
+        updateTabByID(tabID, {
+          explorerNodes: syncAssetTreeActiveStates([rootNode], connection.id, '', '', null),
+          metadataError: '',
+        })
+      })
+      .catch((error) => {
+        if (!tabID) {
+          return
+        }
+        updateTabByID(tabID, {
+          explorerNodes: [{ ...loadingRootNode, loading: false, loaded: true }],
+          metadataError: formatMetadataError(error),
+        })
+      })
   }
 
   async function handleToggleNode(node: AssetTreeNode) {
@@ -1964,7 +2038,7 @@ export function SQLEditorPage() {
 
         <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
           <section className="flex min-h-0 flex-col border-r border-border/80 bg-panel">
-            <div className="px-4 py-3">
+            <div className="px-4 pt-2 pb-2">
               <div className="relative">
                 <button
                   type="button"
@@ -1972,20 +2046,19 @@ export function SQLEditorPage() {
                   onClick={() => updateActiveTab({ assetPickerOpen: !activeAssetPickerOpen })}
                   className="flex w-full items-center gap-2 text-left text-[12px] text-ink transition"
                 >
-                <FolderTree className="h-4 w-4 shrink-0 text-muted" />
-                <div className="min-w-0 flex-1">
-                  {activeConnection ? (
-                    <>
-                      <p className="break-all text-[13px] font-semibold leading-5 text-ink">{activeConnection.name}</p>
-                      <p className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-faint">
-                        {formatConnectionBadge(activeConnection)}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="text-[13px] font-semibold text-ink">Select assets</p>
-                  )}
-                </div>
-                <ChevronDown className="h-4 w-4 shrink-0 text-faint" />
+                  <FolderTree className="h-4 w-4 shrink-0 text-muted" />
+                  <div className="min-w-0 flex-1 overflow-x-auto">
+                    {activeConnection ? (
+                      <>
+                        <p className="whitespace-nowrap text-[12px] font-semibold leading-5 text-ink" title={activeConnection.name}>{activeConnection.name}</p>
+                        <p className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-faint">
+                          {formatConnectionBadge(activeConnection)}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-[13px] font-semibold text-ink">Select assets</p>
+                    )}
+                  </div>
                 </button>
 
               {activeAssetPickerOpen ? (
@@ -2000,7 +2073,7 @@ export function SQLEditorPage() {
                       className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
                     />
                   </label>
-                  <div className="mt-2 max-h-[220px] overflow-y-auto">
+                  <div className="mt-2 max-h-[220px] overflow-auto">
                     {filteredConnections.length === 0 ? (
                       <p className="px-2 py-2 text-[12px] text-muted">No matching assets.</p>
                     ) : (
@@ -2009,7 +2082,7 @@ export function SQLEditorPage() {
                           key={connection.id}
                           type="button"
                           onClick={() => handleSelectConnection(connection)}
-                          className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[12px] ${
+                          className={`flex min-w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[12px] ${
                             activeConnection?.id === connection.id
                               ? 'bg-panel-soft text-ink ring-1 ring-border-strong'
                               : 'text-muted hover:bg-panel-soft hover:text-ink'
@@ -2022,17 +2095,12 @@ export function SQLEditorPage() {
                               <Workflow className="h-3.5 w-3.5" />
                             )}
                           </span>
-                          <div className="min-w-0 flex-1 pr-2">
-                            <p className="break-all font-medium leading-5">{connection.name}</p>
-                            <p className="break-all text-[10px] uppercase tracking-[0.12em] text-faint">
+                          <div className="pr-2">
+                            <p className="whitespace-nowrap font-medium leading-5" title={connection.name}>{connection.name}</p>
+                            <p className="whitespace-nowrap text-[10px] uppercase tracking-[0.12em] text-faint">
                               {formatConnectionBadge(connection)}
                             </p>
                           </div>
-                          {activeConnection?.id === connection.id ? (
-                            <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink">
-                              Selected
-                            </span>
-                          ) : null}
                         </button>
                       ))
                     )}
@@ -2042,7 +2110,7 @@ export function SQLEditorPage() {
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
+            <div className="flex min-h-0 flex-1 flex-col px-4 pt-1 pb-3">
               {activeTab?.metadataError ? <InlineAlert className="mb-2" tone="info">{activeTab.metadataError}</InlineAlert> : null}
               <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-panel-soft px-2.5">
                 <Search className="h-3.5 w-3.5 text-faint" />
@@ -2054,18 +2122,18 @@ export function SQLEditorPage() {
                   className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
                 />
               </label>
-              <div className="mt-3 min-h-0 flex-1 overflow-y-auto pt-1">
+              <div className="mt-3 min-h-0 flex-1 overflow-auto pt-1">
                 {connectionsLoading ? (
                   <p className="px-1 py-2 text-[12px] text-muted">Loading connections...</p>
-                ) : activeSearchingAssets ? (
+                ) : activeSearchingAssets || activeExplorerRootLoading ? (
                   <p className="px-1 py-2 text-[12px] text-muted">Searching assets...</p>
                 ) : !activeConnection || activeExplorerNodes.length === 0 ? (
                   <p className="px-1 py-2 text-[12px] text-muted">No DB connections available.</p>
-                ) : filteredExplorerNodes.length === 0 ? (
+                ) : renderedExplorerNodes.length === 0 ? (
                   <p className="px-1 py-2 text-[12px] text-muted">No matching assets.</p>
                 ) : (
                   <AssetTree
-                    nodes={filteredExplorerNodes}
+                    nodes={renderedExplorerNodes}
                     onSelect={handleSelectNode}
                     onToggle={(node) => void handleToggleNode(node)}
                   />

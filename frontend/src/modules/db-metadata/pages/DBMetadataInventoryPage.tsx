@@ -15,7 +15,8 @@ import { Pagination } from '@/shared/ui/Pagination'
 const PAGE_SIZE = 10
 
 const INVENTORY_COLUMNS = [
-  { key: 'identifier', label: 'Identifier' },
+  { key: 'identifier', label: 'Cluster' },
+  { key: 'instance', label: 'Instance' },
   { key: 'engine', label: 'Engine' },
   { key: 'version', label: 'Version' },
   { key: 'regionAz', label: 'Region / AZ' },
@@ -177,7 +178,7 @@ export function DBMetadataInventoryPage() {
                   setEndpointKeyword(event.target.value)
                   setOffset(0)
                 }}
-                placeholder="Search identifier / writer / reader / instance endpoint"
+                placeholder="Search cluster / instance / writer / reader / endpoint"
                 className="h-full w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-muted"
               />
             </div>
@@ -342,74 +343,80 @@ export function DBMetadataInventoryPage() {
         ) : (
           <div className="grid gap-3 p-3">
             <div className="overflow-x-auto">
-            <table className="min-w-[1780px] border-collapse">
-              <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                <tr>
-                  {visibleColumns.includes('identifier') ? <th className="w-[240px] px-3 py-3">Identifier</th> : null}
-                  {visibleColumns.includes('engine') ? <th className="w-[150px] px-3 py-3">Engine</th> : null}
-                  {visibleColumns.includes('version') ? <th className="w-[130px] px-3 py-3">Version</th> : null}
-                  {visibleColumns.includes('regionAz') ? <th className="w-[150px] px-3 py-3">Region / AZ</th> : null}
-                  {visibleColumns.includes('role') ? <th className="w-[90px] px-3 py-3">Role</th> : null}
-                  {visibleColumns.includes('size') ? <th className="w-[130px] px-3 py-3">Size</th> : null}
-                  {visibleColumns.includes('clusterEndpoint') ? <th className="w-[260px] px-3 py-3">Cluster Writer</th> : null}
-                  {visibleColumns.includes('clusterReaderEndpoint') ? <th className="w-[260px] px-3 py-3">Cluster Reader</th> : null}
-                  {visibleColumns.includes('instanceEndpoint') ? <th className="w-[300px] px-3 py-3">Instance Endpoint</th> : null}
-                  {visibleColumns.includes('tags') ? <th className="w-[240px] px-3 py-3">Tags</th> : null}
-                  {visibleColumns.includes('mapping') ? <th className="w-[120px] px-3 py-3">Mapping</th> : null}
-                  {visibleColumns.includes('lastSynced') ? <th className="w-[120px] px-3 py-3">Last Synced</th> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {pagedItems.map((item) => (
-                  <tr key={item.id} className="border-t border-border text-sm text-ink hover:bg-slate-50/70">
-                    {visibleColumns.includes('identifier') ? (
-                      <td className="w-[240px] px-3 py-2 align-middle">
-                        <SingleLineValue value={item.db_identifier} className="font-semibold text-ink" />
-                      </td>
-                    ) : null}
-                    {visibleColumns.includes('engine') ? <td className="w-[150px] px-3 py-2 align-middle whitespace-nowrap text-[12px]">{item.engine}</td> : null}
-                    {visibleColumns.includes('version') ? <td className="w-[130px] px-3 py-2 align-middle text-[12px]">{item.engine_version ?? '-'}</td> : null}
-                    {visibleColumns.includes('regionAz') ? (
-                      <td className="w-[150px] max-w-[150px] px-3 py-2 align-middle text-[12px]">
-                        <ExpandableValue value={formatRegionAz(item.region, item.az)} />
-                      </td>
-                    ) : null}
-                    {visibleColumns.includes('role') ? <td className="w-[90px] px-3 py-2 align-middle text-[12px]">{item.role ?? '-'}</td> : null}
-                    {visibleColumns.includes('size') ? <td className="w-[130px] px-3 py-2 align-middle text-[12px]">{item.instance_class ?? '-'}</td> : null}
-                    {visibleColumns.includes('clusterEndpoint') ? (
-                      <td className="w-[260px] max-w-[260px] px-3 py-2 align-middle">
-                        <ExpandableValue value={item.cluster_endpoint} className="font-mono text-[11px] text-muted" />
-                      </td>
-                    ) : null}
-                    {visibleColumns.includes('clusterReaderEndpoint') ? (
-                      <td className="w-[260px] max-w-[260px] px-3 py-2 align-middle">
-                        <ExpandableValue value={item.cluster_reader_endpoint} className="font-mono text-[11px] text-muted" />
-                      </td>
-                    ) : null}
-                    {visibleColumns.includes('instanceEndpoint') ? (
-                      <td className="w-[300px] max-w-[300px] px-3 py-2 align-middle">
-                        <ExpandableValue value={item.instance_endpoint} className="font-mono text-[11px] text-muted" />
-                      </td>
-                    ) : null}
-                    {visibleColumns.includes('tags') ? (
-                      <td className="w-[240px] max-w-[240px] px-3 py-2 align-middle">
-                        <InventoryTags tags={item.tags} />
-                      </td>
-                    ) : null}
-                    {visibleColumns.includes('mapping') ? (
-                      <td className="w-[120px] px-3 py-2 align-middle text-[12px]">
-                        <p className="font-semibold">{item.mapping_status}</p>
-                        {item.mapping_status === 'ambiguous' ? <p className="mt-1 text-muted">{item.mapping_connections?.join(', ') || '-'}</p> : null}
-                      </td>
-                    ) : null}
-                    {visibleColumns.includes('lastSynced') ? (
-                      <td className="w-[120px] px-3 py-2 align-middle whitespace-nowrap text-[12px] text-muted">{formatDateTime(item.snapshot_at)}</td>
-                    ) : null}
+              <table className="min-w-[1920px] border-collapse">
+                <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+                  <tr>
+                    {visibleColumns.includes('identifier') ? <th className="w-[240px] px-3 py-3">Cluster</th> : null}
+                    {visibleColumns.includes('instance') ? <th className="w-[240px] px-3 py-3">Instance</th> : null}
+                    {visibleColumns.includes('engine') ? <th className="w-[150px] px-3 py-3">Engine</th> : null}
+                    {visibleColumns.includes('version') ? <th className="w-[130px] px-3 py-3">Version</th> : null}
+                    {visibleColumns.includes('regionAz') ? <th className="w-[150px] px-3 py-3">Region / AZ</th> : null}
+                    {visibleColumns.includes('role') ? <th className="w-[90px] px-3 py-3">Role</th> : null}
+                    {visibleColumns.includes('size') ? <th className="w-[130px] px-3 py-3">Size</th> : null}
+                    {visibleColumns.includes('clusterEndpoint') ? <th className="w-[260px] px-3 py-3">Cluster Writer</th> : null}
+                    {visibleColumns.includes('clusterReaderEndpoint') ? <th className="w-[260px] px-3 py-3">Cluster Reader</th> : null}
+                    {visibleColumns.includes('instanceEndpoint') ? <th className="w-[300px] px-3 py-3">Instance Endpoint</th> : null}
+                    {visibleColumns.includes('tags') ? <th className="w-[240px] px-3 py-3">Tags</th> : null}
+                    {visibleColumns.includes('mapping') ? <th className="w-[120px] px-3 py-3">Mapping</th> : null}
+                    {visibleColumns.includes('lastSynced') ? <th className="w-[120px] px-3 py-3">Last Synced</th> : null}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {pagedItems.map((item) => (
+                    <tr key={item.id} className="border-t border-border text-sm text-ink hover:bg-slate-50/70">
+                      {visibleColumns.includes('identifier') ? (
+                        <td className="w-[240px] px-3 py-2 align-middle">
+                          <SingleLineValue value={inventoryClusterName(item)} className="font-semibold text-ink" />
+                        </td>
+                      ) : null}
+                      {visibleColumns.includes('instance') ? (
+                        <td className="w-[240px] px-3 py-2 align-middle">
+                          <SingleLineValue value={inventoryInstanceName(item)} className="font-mono text-[11px] text-muted" />
+                        </td>
+                      ) : null}
+                      {visibleColumns.includes('engine') ? <td className="w-[150px] px-3 py-2 align-middle whitespace-nowrap text-[12px]">{item.engine}</td> : null}
+                      {visibleColumns.includes('version') ? <td className="w-[130px] px-3 py-2 align-middle text-[12px]">{item.engine_version ?? '-'}</td> : null}
+                      {visibleColumns.includes('regionAz') ? (
+                        <td className="w-[150px] max-w-[150px] px-3 py-2 align-middle text-[12px]">
+                          <ExpandableValue value={formatRegionAz(item.region, item.az)} />
+                        </td>
+                      ) : null}
+                      {visibleColumns.includes('role') ? <td className="w-[90px] px-3 py-2 align-middle text-[12px]">{item.role ?? '-'}</td> : null}
+                      {visibleColumns.includes('size') ? <td className="w-[130px] px-3 py-2 align-middle text-[12px]">{item.instance_class ?? '-'}</td> : null}
+                      {visibleColumns.includes('clusterEndpoint') ? (
+                        <td className="w-[260px] max-w-[260px] px-3 py-2 align-middle">
+                          <ExpandableValue value={item.cluster_endpoint} className="font-mono text-[11px] text-muted" />
+                        </td>
+                      ) : null}
+                      {visibleColumns.includes('clusterReaderEndpoint') ? (
+                        <td className="w-[260px] max-w-[260px] px-3 py-2 align-middle">
+                          <ExpandableValue value={item.cluster_reader_endpoint} className="font-mono text-[11px] text-muted" />
+                        </td>
+                      ) : null}
+                      {visibleColumns.includes('instanceEndpoint') ? (
+                        <td className="w-[300px] max-w-[300px] px-3 py-2 align-middle">
+                          <ExpandableValue value={item.instance_endpoint} className="font-mono text-[11px] text-muted" />
+                        </td>
+                      ) : null}
+                      {visibleColumns.includes('tags') ? (
+                        <td className="w-[240px] max-w-[240px] px-3 py-2 align-middle">
+                          <InventoryTags tags={item.tags} />
+                        </td>
+                      ) : null}
+                      {visibleColumns.includes('mapping') ? (
+                        <td className="w-[120px] px-3 py-2 align-middle text-[12px]">
+                          <p className="font-semibold">{item.mapping_status}</p>
+                          {item.mapping_status === 'ambiguous' ? <p className="mt-1 text-muted">{item.mapping_connections?.join(', ') || '-'}</p> : null}
+                        </td>
+                      ) : null}
+                      {visibleColumns.includes('lastSynced') ? (
+                        <td className="w-[120px] px-3 py-2 align-middle whitespace-nowrap text-[12px] text-muted">{formatDateTime(item.snapshot_at)}</td>
+                      ) : null}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <Pagination
               offset={offset}
               pageSize={PAGE_SIZE}
@@ -426,11 +433,20 @@ export function DBMetadataInventoryPage() {
 
 function inventoryEndpointSearchValues(item: InventorySnapshot) {
   return [
-    item.db_identifier,
+    inventoryClusterName(item),
+    inventoryInstanceName(item),
     item.cluster_endpoint ?? '',
     item.cluster_reader_endpoint ?? '',
     item.instance_endpoint ?? '',
   ]
+}
+
+function inventoryClusterName(item: InventorySnapshot) {
+  return item.cluster_identifier || item.db_identifier
+}
+
+function inventoryInstanceName(item: InventorySnapshot) {
+  return item.instance_identifier || item.db_identifier
 }
 
 function inventoryTagSearchValues(item: InventorySnapshot) {
