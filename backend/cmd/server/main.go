@@ -503,16 +503,36 @@ func registerStaticFiles(r chi.Router, staticDir string) {
 		}
 
 		requested := filepath.Clean(strings.TrimPrefix(req.URL.Path, "/"))
+		isAssetRequest := strings.HasPrefix(req.URL.Path, "/assets/")
 		if requested != "." && !strings.HasPrefix(requested, "..") {
 			fullPath := filepath.Join(staticDir, requested)
 			if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+				setStaticCacheHeaders(w, req.URL.Path)
+				if requested == "index.html" {
+					http.ServeFile(w, req, indexPath)
+					return
+				}
 				fileServer.ServeHTTP(w, req)
 				return
 			}
 		}
 
+		if isAssetRequest {
+			http.NotFound(w, req)
+			return
+		}
+
+		setStaticCacheHeaders(w, "index.html")
 		http.ServeFile(w, req, indexPath)
 	})
+}
+
+func setStaticCacheHeaders(w http.ResponseWriter, urlPath string) {
+	if strings.HasPrefix(urlPath, "/assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
 }
 
 // runScheduler polls every 30 seconds for scheduled tickets whose scheduled_at has passed,

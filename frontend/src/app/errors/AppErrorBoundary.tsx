@@ -5,12 +5,38 @@ type AppErrorBoundaryState = {
   componentStack: string
 }
 
+const CHUNK_RELOAD_STORAGE_KEY = 'dbre-maestro:chunk-reload-attempted'
+let chunkReloadRequested = false
+
 function formatUnknownError(error: unknown) {
   if (error instanceof Error) {
     return error
   }
 
   return new Error(typeof error === 'string' ? error : 'An unexpected frontend error occurred')
+}
+
+function isDynamicImportLoadError(error: Error) {
+  return /failed to fetch dynamically imported module|loading chunk|importing a module script failed/i.test(error.message)
+}
+
+function maybeReloadForDynamicImportError(error: Error) {
+  if (!isDynamicImportLoadError(error)) {
+    return false
+  }
+
+  try {
+    if (window.sessionStorage.getItem(CHUNK_RELOAD_STORAGE_KEY) === '1') {
+      return false
+    }
+    window.sessionStorage.setItem(CHUNK_RELOAD_STORAGE_KEY, '1')
+  } catch {
+    return false
+  }
+
+  window.location.reload()
+  chunkReloadRequested = true
+  return true
 }
 
 function RuntimeErrorPanel({
@@ -49,6 +75,13 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, AppErro
   }
 
   static getDerivedStateFromError(error: Error): AppErrorBoundaryState {
+    if (typeof window !== 'undefined' && maybeReloadForDynamicImportError(error)) {
+      return {
+        error: null,
+        componentStack: '',
+      }
+    }
+
     return {
       error,
       componentStack: '',
@@ -56,6 +89,9 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, AppErro
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    if (chunkReloadRequested && isDynamicImportLoadError(error)) {
+      return
+    }
     this.setState({
       error,
       componentStack: info.componentStack ?? '',
@@ -91,11 +127,19 @@ export class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, Glo
   }
 
   private handleErrorEvent = (event: ErrorEvent) => {
-    this.setState({ error: formatUnknownError(event.error ?? event.message) })
+    const error = formatUnknownError(event.error ?? event.message)
+    if (maybeReloadForDynamicImportError(error)) {
+      return
+    }
+    this.setState({ error })
   }
 
   private handleRejectionEvent = (event: PromiseRejectionEvent) => {
-    this.setState({ error: formatUnknownError(event.reason) })
+    const error = formatUnknownError(event.reason)
+    if (maybeReloadForDynamicImportError(error)) {
+      return
+    }
+    this.setState({ error })
   }
 
   componentDidMount() {
