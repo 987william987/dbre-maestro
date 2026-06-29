@@ -87,6 +87,9 @@ func TestRegisterStaticFilesServesAsset(t *testing.T) {
 	if got := rec.Body.String(); got != "console.log('ok')" {
 		t.Fatalf("body = %q, want asset body", got)
 	}
+	if got := rec.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("Cache-Control = %q, want immutable asset cache", got)
+	}
 }
 
 func TestRegisterStaticFilesFallsBackToIndexForSPARoutes(t *testing.T) {
@@ -107,6 +110,54 @@ func TestRegisterStaticFilesFallsBackToIndexForSPARoutes(t *testing.T) {
 	}
 	if got := rec.Body.String(); got != "index" {
 		t.Fatalf("body = %q, want index fallback", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("Cache-Control = %q, want no-cache for SPA fallback", got)
+	}
+}
+
+func TestRegisterStaticFilesServesRootIndexWithNoCache(t *testing.T) {
+	staticDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("index"), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+
+	r := chi.NewRouter()
+	registerStaticFiles(r, staticDir)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("Cache-Control = %q, want no-cache for index", got)
+	}
+}
+
+func TestRegisterStaticFilesDoesNotFallbackForMissingAssets(t *testing.T) {
+	staticDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(staticDir, "assets"), 0o755); err != nil {
+		t.Fatalf("mkdir assets: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staticDir, "index.html"), []byte("index"), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+
+	r := chi.NewRouter()
+	registerStaticFiles(r, staticDir)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/assets/missing.js", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if got := rec.Body.String(); got == "index" {
+		t.Fatal("missing asset should not receive SPA fallback")
 	}
 }
 
