@@ -822,29 +822,30 @@ func executeSinglePostgresStatement(
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
+	return collectPostgresQueryResult(ctx, rows, connModel, queryCtx, func(ctx context.Context, fields []pgconn.FieldDescription) ([]masking.ColumnOrigin, error) {
+		return resolvePostgresOrigins(ctx, pgxConn, fields)
+	})
+}
+
+func collectPostgresQueryResult(
+	ctx context.Context,
+	rows pgx.Rows,
+	connModel *model.DBConnection,
+	queryCtx queryExecutionContext,
+	resolveOrigins func(context.Context, []pgconn.FieldDescription) ([]masking.ColumnOrigin, error),
+) (*masking.QueryResult, error) {
 	fieldDescriptions := rows.FieldDescriptions()
 	columns := make([]string, len(fieldDescriptions))
 	for i, field := range fieldDescriptions {
 		columns[i] = field.Name
 	}
 
-	origins, err := resolvePostgresOrigins(ctx, pgxConn, fieldDescriptions)
-	if err != nil {
-		return nil, err
-	}
-
-	queryResult := &masking.QueryResult{
-		Columns:      buildDisplayColumns(columns, origins),
-		RawColumns:   columns,
-		Origins:      origins,
-		Dependencies: dependenciesFromOrigins(origins),
-		Rows:         make([][]any, 0),
-	}
+	resultRows := make([][]any, 0)
 	for rows.Next() {
 		values, err := rows.Values()
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		for i, value := range values {
@@ -852,12 +853,25 @@ func executeSinglePostgresStatement(
 				values[i] = string(b)
 			}
 		}
-		queryResult.Rows = append(queryResult.Rows, values)
+		resultRows = append(resultRows, values)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return nil, err
 	}
-	return queryResult, nil
+	rows.Close()
+
+	origins, err := resolveOrigins(ctx, fieldDescriptions)
+	if err != nil {
+		return nil, err
+	}
+	return &masking.QueryResult{
+		Columns:      buildDisplayColumns(columns, origins),
+		RawColumns:   columns,
+		Origins:      origins,
+		Dependencies: dependenciesFromOrigins(origins),
+		Rows:         resultRows,
+	}, nil
 }
 
 func resolvePostgresOrigins(ctx context.Context, conn *pgx.Conn, fields []pgconn.FieldDescription) ([]masking.ColumnOrigin, error) {
