@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,8 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/dbre-maestro/maestro/internal/masking"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestWriteQueryExecutionErrorTimeout(t *testing.T) {
@@ -235,6 +238,53 @@ ORDER BY time ASC`,
 	}
 }
 
+func TestCollectPostgresQueryResultResolvesOriginsAfterRowsClosed(t *testing.T) {
+	rows := &fakePGXRows{
+		fields: []pgconn.FieldDescription{{
+			Name:                 "id",
+			TableOID:             10,
+			TableAttributeNumber: 1,
+		}},
+		values: [][]any{{int32(1)}},
+	}
+
+	result, err := collectPostgresQueryResult(
+		context.Background(),
+		rows,
+		&model.DBConnection{DBType: "postgres"},
+		queryExecutionContext{DatabaseName: "postgres"},
+		func(_ context.Context, fields []pgconn.FieldDescription) ([]masking.ColumnOrigin, error) {
+			if !rows.closed {
+				return nil, fmt.Errorf("origin resolver called before result rows were closed")
+			}
+			if len(fields) != 1 || fields[0].Name != "id" {
+				return nil, fmt.Errorf("unexpected fields: %#v", fields)
+			}
+			return []masking.ColumnOrigin{{
+				Database: "postgres",
+				Schema:   "public",
+				Table:    "watches",
+				Column:   "id",
+			}}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("collectPostgresQueryResult() error = %v", err)
+	}
+	if !rows.closed {
+		t.Fatal("rows were not closed")
+	}
+	if len(result.Rows) != 1 || result.Rows[0][0] != int32(1) {
+		t.Fatalf("unexpected rows = %#v", result.Rows)
+	}
+	if len(result.Columns) != 1 || result.Columns[0] != "id" {
+		t.Fatalf("unexpected columns = %#v", result.Columns)
+	}
+	if len(result.Origins) != 1 || result.Origins[0].Table != "watches" {
+		t.Fatalf("unexpected origins = %#v", result.Origins)
+	}
+}
+
 func TestBuildDisplayColumnsUsesOriginColumnName(t *testing.T) {
 	rawColumns := []string{"t_deposit.id", "t_deposit.user_id", "t_deposit.account_id"}
 	origins := []struct {
@@ -259,6 +309,58 @@ func TestBuildDisplayColumnsUsesOriginColumnName(t *testing.T) {
 			t.Fatalf("display[%d] = %q, want %q", i, display[i], want[i])
 		}
 	}
+}
+
+type fakePGXRows struct {
+	fields []pgconn.FieldDescription
+	values [][]any
+	index  int
+	closed bool
+	err    error
+}
+
+func (r *fakePGXRows) Close() {
+	r.closed = true
+}
+
+func (r *fakePGXRows) Err() error {
+	return r.err
+}
+
+func (r *fakePGXRows) CommandTag() pgconn.CommandTag {
+	return pgconn.CommandTag{}
+}
+
+func (r *fakePGXRows) FieldDescriptions() []pgconn.FieldDescription {
+	return r.fields
+}
+
+func (r *fakePGXRows) Next() bool {
+	if r.index >= len(r.values) {
+		r.Close()
+		return false
+	}
+	r.index++
+	return true
+}
+
+func (r *fakePGXRows) Scan(...any) error {
+	return fmt.Errorf("Scan is not implemented")
+}
+
+func (r *fakePGXRows) Values() ([]any, error) {
+	if r.index == 0 || r.index > len(r.values) {
+		return nil, fmt.Errorf("Values called before Next")
+	}
+	return r.values[r.index-1], nil
+}
+
+func (r *fakePGXRows) RawValues() [][]byte {
+	return nil
+}
+
+func (r *fakePGXRows) Conn() *pgx.Conn {
+	return nil
 }
 
 func TestQueryHandlerTicketLinkUsesAppBaseURL(t *testing.T) {
