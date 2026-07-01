@@ -33,7 +33,7 @@ const RULE_METADATA: Record<string, { description: string; thresholdEditable: bo
     thresholdEditable: true,
   },
   require_utf8mb4: {
-    description: 'Require CREATE and ALTER TABLE statements to use utf8mb4.',
+    description: 'Require CREATE TABLE statements to use utf8mb4.',
     thresholdEditable: false,
   },
 }

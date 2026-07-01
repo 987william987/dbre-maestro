@@ -47,19 +47,18 @@ func CheckDDLTableComment(sqlStr string) error {
 	return fmt.Errorf("CREATE TABLE 缺少表備注 (COMMENT)")
 }
 
-// CheckRequireUTF8MB4 returns an error if a CREATE/ALTER TABLE statement
-// does not specify utf8mb4 as the character set.
+// CheckRequireUTF8MB4 returns an error if a CREATE TABLE statement does not
+// specify utf8mb4 as the character set.
 func CheckRequireUTF8MB4(sqlStr string) error {
 	upper := strings.ToUpper(strings.TrimSpace(sqlStr))
-	isTable := (strings.Contains(upper, "CREATE") || strings.Contains(upper, "ALTER")) &&
-		strings.Contains(upper, "TABLE")
+	isTable := strings.Contains(upper, "CREATE") && strings.Contains(upper, "TABLE")
 	if !isTable {
 		return nil
 	}
 	if strings.Contains(upper, "UTF8MB4") {
 		return nil
 	}
-	return fmt.Errorf("CREATE/ALTER TABLE 必須使用 utf8mb4 字符集")
+	return fmt.Errorf("CREATE TABLE 必須使用 utf8mb4 字符集")
 }
 
 // CheckLikelyMissingStatementDelimiter detects multiple top-level statement roots
@@ -209,14 +208,7 @@ func checkRequireUTF8MB4AST(stmt tidbast.StmtNode) error {
 		if hasUTF8MB4Option(s.Options) {
 			return nil
 		}
-		return fmt.Errorf("CREATE/ALTER TABLE 必須使用 utf8mb4 字符集")
-	case *tidbast.AlterTableStmt:
-		for _, spec := range s.Specs {
-			if spec != nil && hasUTF8MB4Option(spec.Options) {
-				return nil
-			}
-		}
-		return fmt.Errorf("CREATE/ALTER TABLE 必須使用 utf8mb4 字符集")
+		return fmt.Errorf("CREATE TABLE 必須使用 utf8mb4 字符集")
 	default:
 		return nil
 	}
