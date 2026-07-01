@@ -81,6 +81,24 @@ func TestRunStaticChecksParsed(t *testing.T) {
 		}
 	})
 
+	t.Run("mysql ast skips alter table for utf8mb4 rule", func(t *testing.T) {
+		parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "ALTER TABLE t_notify_template MODIFY COLUMN jump_config JSON")
+		if err != nil {
+			t.Fatalf("ParseSQL() error = %v", err)
+		}
+		issues := RunStaticChecksParsed(parsed.Statements[0], ruleMap)
+		if len(issues) != 0 {
+			t.Fatalf("expected no issues, got %#v", issues)
+		}
+	})
+
+	t.Run("mysql heuristic skips alter table for utf8mb4 rule", func(t *testing.T) {
+		issues := RunStaticChecks("ALTER TABLE t_notify_template MODIFY COLUMN jump_config JSON", ruleMap)
+		if len(issues) != 0 {
+			t.Fatalf("expected no issues, got %#v", issues)
+		}
+	})
+
 	t.Run("postgres ast catches update without where", func(t *testing.T) {
 		parsed, err := sqlparse.ParseSQL(sqlparse.DialectPostgres, "UPDATE users SET name = 'a'")
 		if err != nil {
