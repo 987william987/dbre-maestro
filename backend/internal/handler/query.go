@@ -67,6 +67,7 @@ type QueryHandler struct {
 	audit         *repository.AuditRepo
 	artifacts     *repository.QueryArtifactRepo
 	tickets       *repository.TicketRepo
+	redisPrefixes *repository.RedisSensitiveKeyPrefixRepo
 	settings      *repository.SettingsRepo
 	queryAccess   *queryaccess.Service
 	masking       *maskingRuntime
@@ -98,6 +99,7 @@ func NewQueryHandler(
 	audit *repository.AuditRepo,
 	artifacts *repository.QueryArtifactRepo,
 	tickets *repository.TicketRepo,
+	redisPrefixes *repository.RedisSensitiveKeyPrefixRepo,
 	settings *repository.SettingsRepo,
 	queryAccessRepo *repository.QueryAccessRepo,
 	engine *masking.Engine,
@@ -114,6 +116,7 @@ func NewQueryHandler(
 		audit:         audit,
 		artifacts:     artifacts,
 		tickets:       tickets,
+		redisPrefixes: redisPrefixes,
 		settings:      settings,
 		queryAccess:   queryaccess.NewService(queryAccessRepo, users),
 		masking:       newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
@@ -250,6 +253,11 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		SchemaName:   queryCtx.SchemaName,
 	}); err != nil {
 		if missingErr, ok := err.(*queryaccess.MissingAccessError); ok {
+			h.auditBlockedQuery(r, userID, conn.ID, req.SQL, "query_access_policy", map[string]any{
+				"database": strings.TrimSpace(req.Database),
+				"schema":   strings.TrimSpace(req.Schema),
+				"missing":  missingErr.Missing,
+			})
 			jsonErr(w, http.StatusForbidden, missingErr.Error())
 			return
 		}
@@ -1118,6 +1126,21 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 	if queryCtx.RedisDBIndex != nil {
 		dbIndex = *queryCtx.RedisDBIndex
 	}
+	if h.redisPrefixes != nil {
+		prefixRules, err := h.redisPrefixes.ListActiveForConnection(r.Context(), conn.ID, dbIndex)
+		if err != nil {
+			slog.Error("redis sensitive key policy load failed", "connection_id", conn.ID, "redis_db_index", dbIndex, "err", err)
+			jsonErr(w, http.StatusInternalServerError, "redis sensitive key policy unavailable")
+			return
+		}
+		if err := sqlreview.CheckRedisSensitiveKeyPrefixes(cmd, args, repository.RedisSensitiveKeyPrefixValues(prefixRules)); err != nil {
+			h.auditBlockedQuery(r, middleware.UserIDFromCtx(r.Context()), conn.ID, cmdLine, "redis_sensitive_key_policy", map[string]any{
+				"redis_db_index": dbIndex,
+			})
+			jsonErr(w, http.StatusForbidden, err.Error())
+			return
+		}
+	}
 
 	start := time.Now()
 	val, err := pool.RedisGlobal().DoInDB(ctx, pool.RedisConnOptions{
@@ -1169,6 +1192,28 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 		"rows":        result.Rows,
 		"row_count":   len(result.Rows),
 		"duration_ms": durationMs,
+	})
+}
+
+func (h *QueryHandler) auditBlockedQuery(r *http.Request, userID uint64, connID uint64, sqlText string, reason string, extra map[string]any) {
+	if h.audit == nil {
+		return
+	}
+	details := map[string]any{
+		"sql":    truncate(sqlText, 500),
+		"reason": reason,
+	}
+	for key, value := range extra {
+		details[key] = value
+	}
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "query_blocked",
+		ResourceType: "db_connection",
+		ResourceID:   &connID,
+		Details:      details,
+		IPAddress:    clientIP(r),
 	})
 }
 

@@ -10,16 +10,18 @@ import (
 
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/netguard"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/go-chi/chi/v5"
 )
 
 type DBConnectionHandler struct {
-	repo  *repository.DBConnectionRepo
-	users *repository.UserRepo
-	auths *repository.AuthGroupRepo
-	audit *repository.AuditRepo
+	repo       *repository.DBConnectionRepo
+	users      *repository.UserRepo
+	auths      *repository.AuthGroupRepo
+	audit      *repository.AuditRepo
+	hostPolicy *netguard.Policy
 }
 
 type dbConnectionTestResponse struct {
@@ -43,8 +45,20 @@ type connectionCredentialPayload struct {
 	Password       string `json:"password"`
 }
 
-func NewDBConnectionHandler(repo *repository.DBConnectionRepo, users *repository.UserRepo, auths *repository.AuthGroupRepo, audit *repository.AuditRepo) *DBConnectionHandler {
-	return &DBConnectionHandler{repo: repo, users: users, auths: auths, audit: audit}
+func NewDBConnectionHandler(repo *repository.DBConnectionRepo, users *repository.UserRepo, auths *repository.AuthGroupRepo, audit *repository.AuditRepo, options ...DBConnectionHandlerOption) *DBConnectionHandler {
+	h := &DBConnectionHandler{repo: repo, users: users, auths: auths, audit: audit}
+	for _, option := range options {
+		option(h)
+	}
+	return h
+}
+
+type DBConnectionHandlerOption func(*DBConnectionHandler)
+
+func WithDBConnectionHandlerHostPolicy(policy *netguard.Policy) DBConnectionHandlerOption {
+	return func(h *DBConnectionHandler) {
+		h.hostPolicy = policy
+	}
 }
 
 // GET /db-connections
@@ -135,6 +149,12 @@ func (h *DBConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := middleware.UserIDFromCtx(r.Context())
+	if ok := h.checkEndpointPolicy(w, r, nil, "readonly", readonlyHost, readonlyPort); !ok {
+		return
+	}
+	if ok := h.checkEndpointPolicy(w, r, nil, "readwrite", readwriteHost, readwritePort); !ok {
+		return
+	}
 	c := &model.DBConnection{
 		Name:          req.Name,
 		DBType:        req.DBType,
@@ -325,6 +345,12 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	if ok := h.checkEndpointPolicy(w, r, &id, "readonly", readonlyHost, readonlyPort); !ok {
+		return
+	}
+	if ok := h.checkEndpointPolicy(w, r, &id, "readwrite", readwriteHost, readwritePort); !ok {
+		return
+	}
 
 	if err := h.repo.Update(r.Context(), id, name, dbType, host, port, readonlyHost, readonlyPort, readwriteHost, readwritePort, databaseName, username, sslMode); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "update failed")
@@ -489,6 +515,44 @@ func (h *DBConnectionHandler) testConnectionByRole(ctx context.Context, conn *mo
 	}
 
 	return true, ""
+}
+
+func (h *DBConnectionHandler) checkEndpointPolicy(w http.ResponseWriter, r *http.Request, resourceID *uint64, endpoint string, host string, port uint16) bool {
+	if h == nil || h.hostPolicy == nil || !h.hostPolicy.Enabled() {
+		return true
+	}
+	report, err := h.hostPolicy.Check(r.Context(), endpoint, host, port)
+	if len(report.Violations) == 0 {
+		return true
+	}
+	userID := middleware.UserIDFromCtx(r.Context())
+	if h.audit != nil {
+		actionType := "db_connection_host_policy_warning"
+		if err != nil {
+			actionType = "db_connection_host_policy_blocked"
+		}
+		_ = h.audit.Log(r.Context(), repository.AuditEntry{
+			ActorID:      &userID,
+			ActorName:    middleware.UsernameFromCtx(r.Context()),
+			ActionType:   actionType,
+			ResourceType: "db_connection",
+			ResourceID:   resourceID,
+			Details: map[string]any{
+				"endpoint":    report.Endpoint,
+				"host":        report.Host,
+				"port":        report.Port,
+				"ips":         report.IPs,
+				"violations":  report.Violations,
+				"enforcement": report.Enforcement,
+			},
+			IPAddress: clientIP(r),
+		})
+	}
+	if err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return false
+	}
+	return true
 }
 
 func sanitizeConnectionTestError(err error) string {

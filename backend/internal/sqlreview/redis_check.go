@@ -161,6 +161,49 @@ func CheckRedisTicketCommand(cmdLine string) error {
 	return nil
 }
 
+// CheckRedisSensitiveKeyPrefixes rejects Redis read commands that return values or
+// collection content for keys under sensitive prefixes. Key discovery/metadata
+// commands such as SCAN, TYPE, TTL, PTTL, EXISTS, and length/count commands are
+// intentionally allowed.
+func CheckRedisSensitiveKeyPrefixes(cmd string, args []string, prefixes []string) error {
+	if len(prefixes) == 0 {
+		return nil
+	}
+	for _, key := range redisValueContentKeys(cmd, args) {
+		if redisKeyHasSensitivePrefix(key, prefixes) {
+			return fmt.Errorf("redis key value is blocked by sensitive key policy")
+		}
+	}
+	return nil
+}
+
+func redisValueContentKeys(cmd string, args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	switch strings.ToUpper(strings.TrimSpace(cmd)) {
+	case "GET", "GETRANGE", "HGET", "HMGET", "HSCAN", "LINDEX", "SISMEMBER", "SMISMEMBER", "SSCAN", "SRANDMEMBER", "ZSCORE", "ZMSCORE", "ZRANK", "ZCOUNT", "ZSCAN":
+		return []string{args[0]}
+	case "MGET":
+		return args
+	default:
+		return nil
+	}
+}
+
+func redisKeyHasSensitivePrefix(key string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		trimmed := strings.TrimSpace(prefix)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(key, trimmed) {
+			return true
+		}
+	}
+	return false
+}
+
 func validateRedisReadOnlyArgs(cmd string, args []string) error {
 	switch cmd {
 	case "SCAN", "HSCAN", "SSCAN", "ZSCAN":

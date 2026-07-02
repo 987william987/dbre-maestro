@@ -31,15 +31,21 @@ vi.mock('@/modules/masking-rules/api', () => ({
   createMaskingWhitelist: vi.fn(),
   patchMaskingWhitelist: vi.fn(),
   deleteMaskingWhitelist: vi.fn(),
+  listRedisSensitiveKeyPrefixes: vi.fn(),
+  createRedisSensitiveKeyPrefix: vi.fn(),
+  patchRedisSensitiveKeyPrefix: vi.fn(),
+  deleteRedisSensitiveKeyPrefix: vi.fn(),
 }))
 
 import {
   createMaskingRule,
+  createRedisSensitiveKeyPrefix,
   listMaskingConnections,
   listMaskingMetadata,
   listMaskingMetadataColumns,
   createMaskingWhitelist,
   deleteMaskingRule,
+  listRedisSensitiveKeyPrefixes,
   listMaskingRules,
   listMaskingWhitelists,
 } from '@/modules/masking-rules/api'
@@ -47,6 +53,8 @@ import {
 const mockedListMaskingRules = vi.mocked(listMaskingRules)
 const mockedCreateMaskingRule = vi.mocked(createMaskingRule)
 const mockedDeleteMaskingRule = vi.mocked(deleteMaskingRule)
+const mockedListRedisSensitiveKeyPrefixes = vi.mocked(listRedisSensitiveKeyPrefixes)
+const mockedCreateRedisSensitiveKeyPrefix = vi.mocked(createRedisSensitiveKeyPrefix)
 const mockedListMaskingWhitelists = vi.mocked(listMaskingWhitelists)
 const mockedListMaskingConnections = vi.mocked(listMaskingConnections)
 const mockedListMaskingMetadata = vi.mocked(listMaskingMetadata)
@@ -78,6 +86,18 @@ const whitelist = {
   created_at: '2026-01-01T00:00:00Z',
 }
 
+const redisPrefix = {
+  id: 9,
+  db_connection_id: 6,
+  redis_db_index: null,
+  key_prefix: 'session:',
+  reason: 'login session',
+  is_active: true,
+  created_by: 1,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+}
+
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -93,6 +113,7 @@ describe('MaskingRulesPage', () => {
     vi.restoreAllMocks()
     mockedListMaskingRules.mockResolvedValue({ rules: [rule] })
     mockedListMaskingWhitelists.mockResolvedValue({ whitelist: [whitelist] })
+    mockedListRedisSensitiveKeyPrefixes.mockResolvedValue({ prefixes: [redisPrefix] })
     mockedListMaskingConnections.mockResolvedValue({
       connections: [
         {
@@ -103,6 +124,21 @@ describe('MaskingRulesPage', () => {
           port: 3306,
           database_name: null,
           username: 'readonly',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          extra_params: null,
+          created_by: 1,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 6,
+          name: 'cache-redis',
+          db_type: 'redis',
+          host: 'redis.internal',
+          port: 6379,
+          database_name: null,
+          username: '',
           encryption_key_version: 1,
           ssl_mode: 'prefer',
           extra_params: null,
@@ -122,6 +158,31 @@ describe('MaskingRulesPage', () => {
       schema: 'analytics',
       table: 'tickets',
       columns: [{ name: 'email', data_type: 'varchar', column_type: 'varchar(255)', is_nullable: 'YES', comment: '' }],
+    })
+  })
+
+  it('creates a Redis sensitive key prefix', async () => {
+    mockedListRedisSensitiveKeyPrefixes
+      .mockResolvedValueOnce({ prefixes: [] })
+      .mockResolvedValueOnce({ prefixes: [redisPrefix] })
+    mockedCreateRedisSensitiveKeyPrefix.mockResolvedValue(redisPrefix)
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Redis Sensitive Key Prefixes')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'New Prefix' }))
+    selectOption('Redis Connection', 'cache-redis')
+    fireEvent.change(screen.getByLabelText('Key Prefix'), { target: { value: 'session:' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Prefix' }))
+
+    await waitFor(() => {
+      expect(mockedCreateRedisSensitiveKeyPrefix).toHaveBeenCalledWith({
+        db_connection_id: 6,
+        redis_db_index: null,
+        key_prefix: 'session:',
+        reason: null,
+        is_active: true,
+      })
     })
   })
 
@@ -183,7 +244,91 @@ describe('MaskingRulesPage', () => {
       expect(mockedCreateMaskingWhitelist).toHaveBeenCalledWith({
         db_connection_id: 1,
         database_name: 'analytics',
+        schema_name: '',
         table_name: 'tickets',
+        column_name: 'email',
+      })
+    })
+  })
+
+  it('creates a PostgreSQL whitelist entry with schema scope', async () => {
+    const pgWhitelist = {
+      ...whitelist,
+      db_connection_id: 7,
+      database_name: 'app',
+      schema_name: 'public',
+      table_name: 'users',
+    }
+    mockedListMaskingConnections.mockResolvedValueOnce({
+      connections: [
+        {
+          id: 7,
+          name: 'analytics-pg',
+          db_type: 'postgres',
+          host: 'pg.internal',
+          port: 5432,
+          database_name: null,
+          username: 'readonly',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          extra_params: null,
+          created_by: 1,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+    mockedListMaskingWhitelists
+      .mockResolvedValueOnce({ whitelist: [] })
+      .mockResolvedValueOnce({ whitelist: [pgWhitelist] })
+    mockedListMaskingMetadata
+      .mockResolvedValueOnce({
+        db_type: 'postgres',
+        level: 'database',
+        items: [{ kind: 'database', name: 'app' }],
+      })
+      .mockResolvedValueOnce({
+        db_type: 'postgres',
+        level: 'schema',
+        database: 'app',
+        items: [{ kind: 'schema', name: 'public', database: 'app', schema: 'public' }],
+      })
+      .mockResolvedValueOnce({
+        db_type: 'postgres',
+        level: 'table',
+        database: 'app',
+        schema: 'public',
+        items: [{ kind: 'table', name: 'users', database: 'app', schema: 'public' }],
+      })
+    mockedListMaskingMetadataColumns.mockResolvedValueOnce({
+      database: 'app',
+      schema: 'public',
+      table: 'users',
+      columns: [{ name: 'email', data_type: 'text', column_type: 'text', is_nullable: 'YES', comment: '' }],
+    })
+    mockedCreateMaskingWhitelist.mockResolvedValue(pgWhitelist)
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Unmask Whitelist')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'New Whitelist' }))
+    selectOption('Connection', 'analytics-pg')
+    await waitFor(() => expect(mockedListMaskingMetadata).toHaveBeenCalledWith(7))
+    selectOption('Database', 'app')
+    await waitFor(() => expect(mockedListMaskingMetadata).toHaveBeenCalledWith(7, { database: 'app' }))
+    selectOption('Schema', 'public')
+    await waitFor(() => expect(mockedListMaskingMetadata).toHaveBeenCalledWith(7, { database: 'app', schema: 'public' }))
+    selectOption('Table', 'users')
+    await waitFor(() => expect(mockedListMaskingMetadataColumns).toHaveBeenCalledWith(7, 'public', 'users', 'app'))
+    selectOption('Column', 'email')
+    fireEvent.click(screen.getByRole('button', { name: 'Create Whitelist' }))
+
+    await waitFor(() => {
+      expect(mockedCreateMaskingWhitelist).toHaveBeenCalledWith({
+        db_connection_id: 7,
+        database_name: 'app',
+        schema_name: 'public',
+        table_name: 'users',
         column_name: 'email',
       })
     })

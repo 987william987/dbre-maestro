@@ -226,7 +226,7 @@ export function MaskingDSLGuidePage() {
 }`}
             </pre>
             <p className="mt-2 text-[12px] leading-6 text-muted">
-              這條規則會先命中所有欄位名為 `email`、`contact_email`、`backup_email` 的 MySQL 查詢結果。
+              這條規則會先命中所有欄位名為 `email`、`contact_email`、`backup_email` 的 MySQL / PostgreSQL 查詢結果。
             </p>
           </div>
 

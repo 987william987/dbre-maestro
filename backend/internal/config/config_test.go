@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dbre-maestro/maestro/internal/netguard"
 	"github.com/dbre-maestro/maestro/internal/pool"
 )
 
@@ -133,6 +134,39 @@ func TestLoadReadsStaticDir(t *testing.T) {
 	}
 	if cfg.StaticDir != "/app/public" {
 		t.Fatalf("StaticDir = %q, want /app/public", cfg.StaticDir)
+	}
+}
+
+func TestLoadReadsDBConnectionHostPolicy(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("DB_CONNECTION_HOST_POLICY_ENFORCEMENT", "warn")
+	t.Setenv("DB_CONNECTION_HOST_ALLOWLIST", "*.rds.amazonaws.com,*.cache.amazonaws.com")
+	t.Setenv("DB_CONNECTION_CIDR_ALLOWLIST", "10.183.0.0/16,10.222.38.0/24")
+	t.Setenv("DB_CONNECTION_CIDR_DENYLIST", "127.0.0.0/8,169.254.0.0/16,::1/128")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.DBConnectionHostPolicy.Enforcement != "warn" {
+		t.Fatalf("Enforcement = %q, want warn", cfg.DBConnectionHostPolicy.Enforcement)
+	}
+	if got := len(cfg.DBConnectionHostPolicy.HostAllowlist); got != 2 {
+		t.Fatalf("HostAllowlist length = %d, want 2", got)
+	}
+	if _, err := netguard.NewPolicy(cfg.DBConnectionHostPolicy); err != nil {
+		t.Fatalf("NewPolicy() error = %v", err)
+	}
+}
+
+func TestLoadRejectsInvalidDBConnectionHostPolicy(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("DB_CONNECTION_HOST_POLICY_ENFORCEMENT", "enforce")
+	t.Setenv("DB_CONNECTION_CIDR_DENYLIST", "not-a-cidr")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want invalid CIDR error")
 	}
 }
 

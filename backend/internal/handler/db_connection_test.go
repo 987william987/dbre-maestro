@@ -11,6 +11,7 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/dbre-maestro/maestro/internal/middleware"
+	"github.com/dbre-maestro/maestro/internal/netguard"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/jmoiron/sqlx"
 )
@@ -375,6 +376,135 @@ func TestDBConnectionHandlerCreateRedisAllowsEmptyUsername(t *testing.T) {
 	}
 	if got["username"] != "" {
 		t.Fatalf("username = %#v, want empty string", got["username"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestDBConnectionHandlerCreateBlocksDeniedHostInEnforceMode(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	policy, err := netguard.NewPolicy(netguard.Config{
+		Enforcement:  netguard.EnforcementEnforce,
+		CIDRDenylist: []string{"169.254.0.0/16"},
+	})
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	handler := NewDBConnectionHandler(
+		repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")),
+		repository.NewUserRepo(sqlxDB),
+		repository.NewAuthGroupRepo(sqlxDB),
+		repository.NewAuditRepo(sqlxDB),
+		WithDBConnectionHandlerHostPolicy(policy),
+	)
+
+	mock.ExpectExec(`INSERT INTO audit_logs`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	req := httptest.NewRequest(http.MethodPost, "/db-connections", strings.NewReader(`{"name":"metadata","db_type":"mysql","host":"169.254.169.254","port":3306,"username":"readonly","password":"secret"}`))
+	req.RemoteAddr = "10.0.0.9:12345"
+	ctx := context.WithValue(req.Context(), middleware.CtxUserID, uint64(99))
+	ctx = context.WithValue(ctx, middleware.CtxUsername, "operator")
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.Create(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "host policy blocked") {
+		t.Fatalf("body = %s, want host policy error", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestDBConnectionHandlerCreateWarnsDeniedHostWithoutBlocking(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	policy, err := netguard.NewPolicy(netguard.Config{
+		Enforcement:  netguard.EnforcementWarn,
+		CIDRDenylist: []string{"169.254.0.0/16"},
+	})
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	handler := NewDBConnectionHandler(
+		repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")),
+		repository.NewUserRepo(sqlxDB),
+		repository.NewAuthGroupRepo(sqlxDB),
+		repository.NewAuditRepo(sqlxDB),
+		WithDBConnectionHandlerHostPolicy(policy),
+	)
+
+	mock.ExpectExec(`INSERT INTO audit_logs`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO db_connections`).
+		WithArgs("metadata", "mysql", "169.254.169.254", uint16(3306), "169.254.169.254", uint16(3306), "10.183.1.10", uint16(3306), nil, "readonly", sqlmock.AnyArg(), "prefer", uint64(99), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(7, 1))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
+	mock.ExpectExec(`DELETE FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+	mock.ExpectQuery(`SELECT \* FROM db_connections WHERE id = \?`).
+		WithArgs(uint64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id",
+			"name",
+			"db_type",
+			"host",
+			"port",
+			"readonly_host",
+			"readonly_port",
+			"readwrite_host",
+			"readwrite_port",
+			"database_name",
+			"username",
+			"password_encrypted",
+			"encryption_key_version",
+			"ssl_mode",
+			"extra_params",
+			"last_test_status",
+			"last_test_error",
+			"last_tested_at",
+			"created_by",
+			"created_at",
+			"updated_at",
+		}).AddRow(7, "metadata", "mysql", "169.254.169.254", 3306, "169.254.169.254", 3306, "10.183.1.10", 3306, nil, "readonly", []byte("cipher"), 1, "prefer", nil, nil, nil, nil, 99, time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
+	mock.ExpectExec(`INSERT INTO audit_logs`).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	req := httptest.NewRequest(http.MethodPost, "/db-connections", strings.NewReader(`{"name":"metadata","db_type":"mysql","host":"169.254.169.254","port":3306,"readwrite_host":"10.183.1.10","readwrite_port":3306,"username":"readonly","password":"secret"}`))
+	ctx := context.WithValue(req.Context(), middleware.CtxUserID, uint64(99))
+	ctx = context.WithValue(ctx, middleware.CtxUsername, "operator")
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.Create(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)

@@ -43,6 +43,10 @@
 | `AWS_SM_SECRET_ID` | AWS Secrets Manager secret id | 無 |
 | `LARK_WEBHOOK_URL` | Lark webhook fallback | 僅在未配置 Settings 內的 Lark App 時使用 |
 | `REFRESH_COOKIE_SECURE` | 非 production 環境強制 refresh cookie Secure | production 永遠強制 Secure |
+| `DB_CONNECTION_HOST_POLICY_ENFORCEMENT` | DB Connection host policy 模式 | `off`；可設 `warn` 或 `enforce` |
+| `DB_CONNECTION_HOST_ALLOWLIST` | 允許的 DB/Redis host pattern，逗號分隔 | 無；例如 `*.rds.amazonaws.com,*.cache.amazonaws.com` |
+| `DB_CONNECTION_CIDR_ALLOWLIST` | 允許的解析 IP CIDR，逗號分隔 | 無；例如 `10.183.0.0/16` |
+| `DB_CONNECTION_CIDR_DENYLIST` | 禁止的解析 IP CIDR，逗號分隔 | 無；建議至少包含 metadata / loopback 網段 |
 | `AWS_PROFILE` | DB metadata inventory 使用的 AWS profile | `default` |
 | `AWS_SDK_LOAD_CONFIG` | 啟用 shared config | Compose 預設 `1` |
 
@@ -229,6 +233,33 @@ DB Connections 已支援雙 endpoint：
 
 若只配置單一 host / port，系統會把 readwrite 預設回退到 readonly。
 
+## DB Connection Host Policy
+
+DB Connection host policy 用來限制平台可連線的 DB / Redis endpoint，避免有 DB connection 管理權限的使用者把後端 Pod 當成內網探測或 SSRF 工具。
+
+範例：
+
+```dotenv
+DB_CONNECTION_HOST_POLICY_ENFORCEMENT=warn
+DB_CONNECTION_HOST_ALLOWLIST=*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal
+DB_CONNECTION_CIDR_ALLOWLIST=10.183.0.0/16,10.222.38.0/24
+DB_CONNECTION_CIDR_DENYLIST=127.0.0.0/8,169.254.0.0/16,::1/128
+```
+
+`DB_CONNECTION_HOST_POLICY_ENFORCEMENT` 支援：
+
+- `off`：不檢查；未設定時的預設值
+- `warn`：記錄 policy violation，但允許建立、更新與連線
+- `enforce`：命中 violation 時拒絕建立、更新或連線
+
+檢查範圍包含：
+
+- 新增 / 修改 DB Connection 時的 readonly / readwrite endpoint
+- SQL Editor、metadata、export、scheduled report、ticket execute、metadata sync 等 runtime 連線前的 resolved endpoint
+- MySQL、PostgreSQL、Redis connection
+
+這是第一階段保護：程式會在連線前檢查 host 與 DNS 解析結果。它尚未接管 MySQL / PostgreSQL / Redis driver 的 custom dialer，因此不是最終 socket 層保證。若安全要求提高，後續可再加第二階段 custom dialer。
+
 ## 範例
 
 ```dotenv
@@ -245,6 +276,11 @@ DB_POOL_EXEC_MAX_OPEN=3
 DB_POOL_METADATA_MAX_OPEN=1
 DB_POOL_SCOPED_PG_QUERY_MAX_OPEN=2
 DB_POOL_SHADOW_VALIDATION_MAX_OPEN=1
+
+DB_CONNECTION_HOST_POLICY_ENFORCEMENT=warn
+DB_CONNECTION_HOST_ALLOWLIST=*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal
+DB_CONNECTION_CIDR_ALLOWLIST=10.183.0.0/16,10.222.38.0/24
+DB_CONNECTION_CIDR_DENYLIST=127.0.0.0/8,169.254.0.0/16,::1/128
 ```
 
 ## 相關文件

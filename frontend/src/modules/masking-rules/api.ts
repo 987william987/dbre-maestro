@@ -1,6 +1,6 @@
 import { apiClient } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { MaskingRule, MaskingWhitelist } from '@/shared/types/maskingRule'
+import type { MaskingRule, MaskingWhitelist, RedisSensitiveKeyPrefix } from '@/shared/types/maskingRule'
 import type { MetadataColumn, MetadataResponse } from '@/shared/types/sqlEditor'
 
 type MaskingRulesResponse = {
@@ -9,6 +9,10 @@ type MaskingRulesResponse = {
 
 type MaskingWhitelistResponse = {
   whitelist: MaskingWhitelist[]
+}
+
+type RedisSensitiveKeyPrefixesResponse = {
+  prefixes: RedisSensitiveKeyPrefix[]
 }
 
 type CreateMaskingRulePayload = {
@@ -21,8 +25,17 @@ type CreateMaskingRulePayload = {
 type CreateMaskingWhitelistPayload = {
   db_connection_id: number
   database_name: string
+  schema_name?: string
   table_name: string
   column_name: string
+}
+
+type RedisSensitiveKeyPrefixPayload = {
+  db_connection_id: number
+  redis_db_index?: number | null
+  key_prefix: string
+  reason?: string | null
+  is_active: boolean
 }
 
 type MaskingConnectionsResponse = {
@@ -62,6 +75,26 @@ export function deleteMaskingRule(id: number) {
   return apiClient.delete<void>(`/masking-rules/${id}`)
 }
 
+export async function listRedisSensitiveKeyPrefixes() {
+  const response = await apiClient.get<RedisSensitiveKeyPrefixesResponse>('/masking-rules/redis-prefixes')
+  return {
+    ...response,
+    prefixes: Array.isArray(response.prefixes) ? response.prefixes : [],
+  }
+}
+
+export function createRedisSensitiveKeyPrefix(payload: RedisSensitiveKeyPrefixPayload) {
+  return apiClient.post<RedisSensitiveKeyPrefix>('/masking-rules/redis-prefixes', payload)
+}
+
+export function patchRedisSensitiveKeyPrefix(id: number, payload: RedisSensitiveKeyPrefixPayload) {
+  return apiClient.patch<RedisSensitiveKeyPrefix>(`/masking-rules/redis-prefixes/${id}`, payload)
+}
+
+export function deleteRedisSensitiveKeyPrefix(id: number) {
+  return apiClient.delete<void>(`/masking-rules/redis-prefixes/${id}`)
+}
+
 export async function listMaskingWhitelists() {
   const response = await apiClient.get<MaskingWhitelistResponse>('/masking-whitelist')
   return {
@@ -79,12 +112,16 @@ export function listMaskingConnections() {
 
 type MaskingMetadataParams = {
   database?: string
+  schema?: string
 }
 
 export async function listMaskingMetadata(connectionId: number, params?: MaskingMetadataParams) {
   const searchParams = new URLSearchParams()
   if (params?.database) {
     searchParams.set('database', params.database)
+  }
+  if (params?.schema) {
+    searchParams.set('schema', params.schema)
   }
   const query = searchParams.toString()
   const response = await apiClient.get<MetadataResponse>(

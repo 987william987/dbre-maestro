@@ -20,6 +20,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/job"
 	"github.com/dbre-maestro/maestro/internal/masking"
 	"github.com/dbre-maestro/maestro/internal/middleware"
+	"github.com/dbre-maestro/maestro/internal/netguard"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/realtime"
@@ -131,6 +132,14 @@ func main() {
 		}
 		slog.Info("aws secrets manager secret loaded", "secret_id", cfg.AWSSecretsManagerSecretID)
 	}
+	dbConnectionHostPolicy, err := netguard.NewPolicy(cfg.DBConnectionHostPolicy)
+	if err != nil {
+		slog.Error("config error", "err", err)
+		os.Exit(1)
+	}
+	if dbConnectionHostPolicy.Enabled() {
+		slog.Info("db connection host policy enabled", "enforcement", dbConnectionHostPolicy.Enforcement())
+	}
 
 	migrationsPath := filepath.Join("migrations")
 	if _, err := os.Stat(migrationsPath); os.IsNotExist(err) {
@@ -197,11 +206,12 @@ func main() {
 		slog.Info("break-glass mfa reset complete", "username", strings.TrimSpace(*resetMFAUsername))
 		return
 	}
-	dbConnRepo := repository.NewDBConnectionRepo(metaDB, cfg.EncryptionKey)
+	dbConnRepo := repository.NewDBConnectionRepo(metaDB, cfg.EncryptionKey, repository.WithDBConnectionHostPolicy(dbConnectionHostPolicy))
 	exportRepo := repository.NewExportRepo(metaDB)
 	queryArtifactRepo := repository.NewQueryArtifactRepo(metaDB)
 	notifRepo := repository.NewNotificationRepo(metaDB)
 	whitelistRepo := repository.NewMaskingWhitelistRepo(metaDB)
+	redisSensitivePrefixRepo := repository.NewRedisSensitiveKeyPrefixRepo(metaDB)
 	authGroupRepo := repository.NewAuthGroupRepo(metaDB)
 	settingsRepo := repository.NewSettingsRepo(metaDB, cfg.EncryptionKey)
 	dbMetadataRepo := repository.NewDBMetadataRepo(metaDB)
@@ -225,12 +235,13 @@ func main() {
 	healthH := handler.NewHealthHandler(metaDB)
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret, cfg.RefreshCookieSecure, cfg.MFAEnforcement, mfaChallengeRepo)
 	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL)
-	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo)
+	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo, handler.WithDBConnectionHandlerHostPolicy(dbConnectionHostPolicy))
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
 	auditH := handler.NewAuditHandler(auditRepo)
 	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
+	redisSensitivePrefixH := handler.NewRedisSensitiveKeyPrefixHandler(redisSensitivePrefixRepo, dbConnRepo, auditRepo)
 	sqlReviewRuleH := handler.NewSQLReviewRuleHandler(sqlReviewRuleRepo, auditRepo)
-	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, settingsRepo, queryAccessRepo, maskingEngine, whitelistRepo, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
+	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, redisSensitivePrefixRepo, settingsRepo, queryAccessRepo, maskingEngine, whitelistRepo, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
 	userH := handler.NewUserHandler(userRepo, authGroupRepo, sessionRepo, auditRepo, dbConnRepo)
 	queryAccessAdminH := handler.NewQueryAccessAdminHandler(queryAccessRepo, userRepo, authGroupRepo, auditRepo)
 	metadataH := handler.NewMetadataHandler(dbConnRepo, userRepo)
@@ -393,6 +404,10 @@ func main() {
 			r.Use(middleware.RequireAuth(cfg.JWTSecret))
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(requireMaskingRulesRead).Get("/redis-prefixes", redisSensitivePrefixH.List)
+			r.With(requireMaskingRulesWrite).Post("/redis-prefixes", redisSensitivePrefixH.Create)
+			r.With(requireMaskingRulesWrite).Patch("/redis-prefixes/{id}", redisSensitivePrefixH.Patch)
+			r.With(requireMaskingRulesWrite).Delete("/redis-prefixes/{id}", redisSensitivePrefixH.Delete)
 			r.With(requireMaskingRulesRead).Get("/", maskingRuleH.List)
 			r.With(requireMaskingRulesWrite).Post("/", maskingRuleH.Create)
 			r.With(requireMaskingRulesWrite).Patch("/{id}", maskingRuleH.Patch)

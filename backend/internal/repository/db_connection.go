@@ -5,22 +5,37 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/crypto"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/netguard"
 	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/jmoiron/sqlx"
 )
 
 type DBConnectionRepo struct {
-	db     *sqlx.DB
-	encKey []byte
+	db         *sqlx.DB
+	encKey     []byte
+	hostPolicy *netguard.Policy
 }
 
-func NewDBConnectionRepo(db *sqlx.DB, encKey []byte) *DBConnectionRepo {
-	return &DBConnectionRepo{db: db, encKey: encKey}
+func NewDBConnectionRepo(db *sqlx.DB, encKey []byte, options ...DBConnectionRepoOption) *DBConnectionRepo {
+	r := &DBConnectionRepo{db: db, encKey: encKey}
+	for _, option := range options {
+		option(r)
+	}
+	return r
+}
+
+type DBConnectionRepoOption func(*DBConnectionRepo)
+
+func WithDBConnectionHostPolicy(policy *netguard.Policy) DBConnectionRepoOption {
+	return func(r *DBConnectionRepo) {
+		r.hostPolicy = policy
+	}
 }
 
 func (r *DBConnectionRepo) Create(ctx context.Context, c *model.DBConnection, plainPassword string, credentials []model.DBConnectionCredentialInput) (*model.DBConnection, error) {
@@ -119,6 +134,9 @@ func (r *DBConnectionRepo) ResolveCredential(conn *model.DBConnection, role stri
 		cloned := *conn
 		cloned.Username = credential.Username
 		applyConnectionEndpoint(&cloned, targetRole)
+		if err := r.checkResolvedEndpoint(context.Background(), &cloned, targetRole); err != nil {
+			return nil, "", err
+		}
 		return &cloned, string(plain), nil
 	}
 
@@ -132,7 +150,30 @@ func (r *DBConnectionRepo) ResolveCredential(conn *model.DBConnection, role stri
 	}
 	cloned := *conn
 	applyConnectionEndpoint(&cloned, targetRole)
+	if err := r.checkResolvedEndpoint(context.Background(), &cloned, targetRole); err != nil {
+		return nil, "", err
+	}
 	return &cloned, string(plain), nil
+}
+
+func (r *DBConnectionRepo) checkResolvedEndpoint(ctx context.Context, conn *model.DBConnection, role string) error {
+	if r == nil || r.hostPolicy == nil || !r.hostPolicy.Enabled() || conn == nil {
+		return nil
+	}
+	report, err := r.hostPolicy.Check(ctx, role, conn.Host, conn.Port)
+	if len(report.Violations) > 0 {
+		slog.Warn("db connection host policy violation",
+			"connection_id", conn.ID,
+			"connection_name", conn.Name,
+			"role", role,
+			"host", report.Host,
+			"port", report.Port,
+			"ips", report.IPs,
+			"violations", report.Violations,
+			"enforcement", report.Enforcement,
+		)
+	}
+	return err
 }
 
 func (r *DBConnectionRepo) UpdatePassword(ctx context.Context, id uint64, plainPassword string) error {

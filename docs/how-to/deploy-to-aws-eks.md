@@ -67,6 +67,10 @@ Backend Pod 至少需要：
 | `RUN_MIGRATIONS_ON_STARTUP` | 是否在 Deployment Pod 啟動時執行 migration；預設 `true` |
 | `MFA_ENFORCEMENT` | production 建議 `required_for_admins` |
 | `REFRESH_COOKIE_SECURE` | production 必須等同 `true`；程式會強制 |
+| `DB_CONNECTION_HOST_POLICY_ENFORCEMENT` | DB/Redis endpoint host policy；建議先用 `warn`，確認後改 `enforce` |
+| `DB_CONNECTION_HOST_ALLOWLIST` | 允許的 host pattern，例如 `*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal` |
+| `DB_CONNECTION_CIDR_ALLOWLIST` | 允許的 DB / Redis subnet CIDR，需由 SRE 依環境提供 |
+| `DB_CONNECTION_CIDR_DENYLIST` | 禁止連線 CIDR，至少擋 metadata / loopback，例如 `127.0.0.0/8,169.254.0.0/16,::1/128` |
 
 Lark App ID / Secret 建議透過平台 Settings 管理，不建議寫死在 image。
 
@@ -153,6 +157,10 @@ deploy:
     APP_BASE_URL: "https://dbre-maestro-test.tskyrocket.xyz"
     MFA_ENFORCEMENT: "disabled"
     RUN_MIGRATIONS_ON_STARTUP: "true"
+    DB_CONNECTION_HOST_POLICY_ENFORCEMENT: "warn"
+    DB_CONNECTION_HOST_ALLOWLIST: "*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal"
+    DB_CONNECTION_CIDR_ALLOWLIST: "10.183.0.0/16,10.222.38.0/24"
+    DB_CONNECTION_CIDR_DENYLIST: "127.0.0.0/8,169.254.0.0/16,::1/128"
 ```
 
 上述設定假設 test 仍使用單副本，並由 Deployment Pod 啟動時執行 migration。若 test 已建立 migration Job，建議改成：
@@ -174,7 +182,13 @@ deploy:
     MFA_ENFORCEMENT: "required_for_admins"
     REFRESH_COOKIE_SECURE: "true"
     RUN_MIGRATIONS_ON_STARTUP: "false"
+    DB_CONNECTION_HOST_POLICY_ENFORCEMENT: "enforce"
+    DB_CONNECTION_HOST_ALLOWLIST: "*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal"
+    DB_CONNECTION_CIDR_ALLOWLIST: "<prod-db-and-redis-subnet-cidrs>"
+    DB_CONNECTION_CIDR_DENYLIST: "127.0.0.0/8,169.254.0.0/16,::1/128"
 ```
+
+Host policy 建議先在 test 使用 `warn` 模式觀察 backend log 與 audit log，確認既有 DB / Redis endpoint 沒有誤傷後再於 production 使用 `enforce`。這是第一階段連線前檢查，會檢查 DB Connection 新增 / 修改，以及 SQL Editor、metadata、export、scheduled report、ticket execute、metadata sync 等 runtime 連線前的 resolved endpoint；目前尚未接管 driver custom dialer。
 
 production 必須先由 migration Job 執行：
 
