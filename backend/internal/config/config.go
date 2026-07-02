@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dbre-maestro/maestro/internal/netguard"
 	"github.com/dbre-maestro/maestro/internal/pool"
 )
 
@@ -29,6 +30,7 @@ type Config struct {
 	RefreshCookieSecure       bool
 	LarkWebhookURL            string // optional; empty = Lark notifications disabled
 	PoolProfiles              map[pool.Profile]pool.ProfileConfig
+	DBConnectionHostPolicy    netguard.Config
 }
 
 func Load() (*Config, error) {
@@ -42,6 +44,12 @@ func Load() (*Config, error) {
 		RunMigrationsOnStartup:    true,
 		AWSSecretsManagerRegion:   strings.TrimSpace(os.Getenv("AWS_SM_REGION")),
 		AWSSecretsManagerSecretID: strings.TrimSpace(os.Getenv("AWS_SM_SECRET_ID")),
+		DBConnectionHostPolicy: netguard.Config{
+			Enforcement:   os.Getenv("DB_CONNECTION_HOST_POLICY_ENFORCEMENT"),
+			HostAllowlist: netguard.SplitCSV(os.Getenv("DB_CONNECTION_HOST_ALLOWLIST")),
+			CIDRAllowlist: netguard.SplitCSV(os.Getenv("DB_CONNECTION_CIDR_ALLOWLIST")),
+			CIDRDenylist:  netguard.SplitCSV(os.Getenv("DB_CONNECTION_CIDR_DENYLIST")),
+		},
 		PoolProfiles: map[pool.Profile]pool.ProfileConfig{
 			pool.ProfileQuery:            pool.DefaultConfigForProfile(pool.ProfileQuery),
 			pool.ProfileExec:             pool.DefaultConfigForProfile(pool.ProfileExec),
@@ -100,6 +108,9 @@ func Load() (*Config, error) {
 	}
 
 	if err := loadPoolProfileConfig(c); err != nil {
+		return nil, err
+	}
+	if _, err := netguard.NewPolicy(c.DBConnectionHostPolicy); err != nil {
 		return nil, err
 	}
 	if !c.AWSSecretsManagerEnabled {
