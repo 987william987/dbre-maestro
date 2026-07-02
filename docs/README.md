@@ -15,6 +15,8 @@
 
 - [How to RD 使用 DBRE Maestro](how-to/rd-user-guide.md)
 - [How to DBA/Admin 管理 DBRE Maestro](how-to/dba-admin-user-guide.md)
+- [How to 排查線上與部署問題](how-to/troubleshoot-operations.md)
+- [How to 驗證安全審計修復](how-to/verify-security-audit-remediation.md)
 - [How to 使用 SQL Editor](how-to/use-sql-editor.md)
 - [How to 建立與執行 Tickets](how-to/create-and-execute-tickets.md)
 - [How to 設定 Workflow Rules](how-to/configure-workflow-rules.md)
@@ -26,6 +28,8 @@
 ## Reference
 
 - [設定與環境變數](reference/configuration.md)
+- [後端維護參考](reference/backend-maintenance.md)
+- [前端維護參考](reference/frontend-maintenance.md)
 - [後端 API 與權限對照](reference/backend-api-and-permissions.md)
 - [登入安全與 Session](reference/auth-and-sessions.md)
 - [DB Connections](reference/db-connections.md)
@@ -42,7 +46,9 @@
 
 ## Explanation
 
+- [專案導覽](explanation/project-map.md)
 - [架構總覽](explanation/architecture-overview.md)
+- [安全邊界說明](explanation/security-boundaries.md)
 - [權限模型](explanation/permission-model.md)
 - [通知與工單更新架構：REST 初始化 + SSE 即時更新](explanation/notification-architecture-rest-vs-sse.md)
 
