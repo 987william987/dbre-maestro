@@ -98,11 +98,15 @@ func (r *ExportRepo) UpdateStatus(ctx context.Context, id uint64, status model.E
 	return err
 }
 
-// MarkDownloaded sets downloaded_at to now (first download timestamp).
-func (r *ExportRepo) MarkDownloaded(ctx context.Context, token string) error {
-	_, err := r.db.ExecContext(ctx,
+// MarkDownloaded consumes the download token by setting downloaded_at once.
+func (r *ExportRepo) MarkDownloaded(ctx context.Context, token string) (bool, error) {
+	res, err := r.db.ExecContext(ctx,
 		`UPDATE export_requests SET downloaded_at = ? WHERE download_token = ? AND downloaded_at IS NULL`,
 		timeutil.NowUTC(), token,
 	)
-	return err
+	if err != nil {
+		return false, err
+	}
+	rowsAffected, _ := res.RowsAffected()
+	return rowsAffected > 0, nil
 }
