@@ -13,11 +13,13 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/dbre-maestro/maestro/internal/auth"
+	"github.com/dbre-maestro/maestro/internal/crypto"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
+	"github.com/pquerna/otp/totp"
 )
 
 type auditDetailsReason string
@@ -45,6 +47,29 @@ func authUserRows(isActive bool) *sqlmock.Rows {
 	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
 	return sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
 		AddRow(7, "alice", "alice@example.com", "$2a$10$0nQylfz.2fD0vExsU1Jd0OHj3W8tLi8fL4v9MXM71j8x9prVf1viy", 0, 0, isActive, now, now)
+}
+
+func mfaUserRows(t *testing.T, encKey []byte, secret string, enabled bool) *sqlmock.Rows {
+	t.Helper()
+	encrypted, err := crypto.Encrypt(encKey, []byte(secret))
+	if err != nil {
+		t.Fatalf("encrypt mfa secret: %v", err)
+	}
+	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	return sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "mfa_enabled", "mfa_secret_encrypted", "mfa_enabled_at", "created_at", "updated_at"}).
+		AddRow(7, "alice", "alice@example.com", "hash", 0, 1, 1, enabled, encrypted, now, now, now)
+}
+
+func mfaChallengeRows(tokenID string, setup bool, usedAt any, revokedAt any, attempts int) *sqlmock.Rows {
+	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	return sqlmock.NewRows([]string{"id", "token_id", "user_id", "setup", "expires_at", "attempt_count", "used_at", "revoked_at", "created_ip", "created_at"}).
+		AddRow(3, tokenID, 7, setup, time.Now().Add(time.Minute), attempts, usedAt, revokedAt, "10.0.0.1", now)
+}
+
+func sessionRows(id uint64, userID uint64) *sqlmock.Rows {
+	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	return sqlmock.NewRows([]string{"id", "user_id", "token_hash", "user_agent", "ip_address", "expires_at", "revoked_at", "created_at"}).
+		AddRow(id, userID, "hash", nil, nil, now.Add(time.Hour), nil, now)
 }
 
 func TestAuthHandlerMe(t *testing.T) {
@@ -446,6 +471,206 @@ func TestAuthHandlerRefreshRateLimit(t *testing.T) {
 	handler.Refresh(secondRec, secondReq)
 	if secondRec.Code != http.StatusTooManyRequests {
 		t.Fatalf("second status = %d, want %d", secondRec.Code, http.StatusTooManyRequests)
+	}
+}
+
+func TestAuthHandlerVerifyMFAMarksChallengeUsed(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	encKey := []byte("01234567890123456789012345678901")
+	jwtSecret := []byte("secret")
+	tokenID := "challenge-success"
+	secret := "JBSWY3DPEHPK3PXP"
+	code, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatalf("GenerateCode: %v", err)
+	}
+	mfaToken, err := auth.NewMFAChallengeTokenWithID(7, "alice", false, tokenID, jwtSecret)
+	if err != nil {
+		t.Fatalf("NewMFAChallengeTokenWithID: %v", err)
+	}
+	handler := NewAuthHandler(
+		repository.NewUserRepo(sqlxDB, encKey),
+		repository.NewSessionRepo(sqlxDB),
+		nil,
+		jwtSecret,
+		MFAEnforcementRequiredForAdmins,
+		repository.NewMFAChallengeRepo(sqlxDB),
+	)
+
+	mock.ExpectQuery(`SELECT \* FROM mfa_challenges WHERE token_id = \?`).
+		WithArgs(tokenID).
+		WillReturnRows(mfaChallengeRows(tokenID, false, nil, nil, 0))
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(uint64(7)).
+		WillReturnRows(mfaUserRows(t, encKey, secret, true))
+	mock.ExpectExec(`UPDATE mfa_challenges\s+SET used_at = \?`).
+		WithArgs(sqlmock.AnyArg(), uint64(3), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO sessions`).
+		WithArgs(uint64(7), sqlmock.AnyArg(), nil, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(33, 1))
+	mock.ExpectQuery(`SELECT \* FROM sessions WHERE id = \?`).
+		WithArgs(int64(33)).
+		WillReturnRows(sessionRows(33, 7))
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/mfa/verify", strings.NewReader(`{"mfa_token":"`+mfaToken+`","code":"`+code+`"}`))
+	rec := httptest.NewRecorder()
+	handler.VerifyMFA(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "access_token") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerVerifyMFARejectsUsedChallenge(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	jwtSecret := []byte("secret")
+	tokenID := "challenge-used"
+	mfaToken, err := auth.NewMFAChallengeTokenWithID(7, "alice", false, tokenID, jwtSecret)
+	if err != nil {
+		t.Fatalf("NewMFAChallengeTokenWithID: %v", err)
+	}
+	handler := NewAuthHandler(
+		repository.NewUserRepo(sqlxDB, []byte("01234567890123456789012345678901")),
+		repository.NewSessionRepo(sqlxDB),
+		nil,
+		jwtSecret,
+		MFAEnforcementRequiredForAdmins,
+		repository.NewMFAChallengeRepo(sqlxDB),
+	)
+
+	usedAt := time.Now()
+	mock.ExpectQuery(`SELECT \* FROM mfa_challenges WHERE token_id = \?`).
+		WithArgs(tokenID).
+		WillReturnRows(mfaChallengeRows(tokenID, false, usedAt, nil, 0))
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/mfa/verify", strings.NewReader(`{"mfa_token":"`+mfaToken+`","code":"123456"}`))
+	rec := httptest.NewRecorder()
+	handler.VerifyMFA(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid mfa challenge") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerVerifyMFARecordsFailedAttempt(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	encKey := []byte("01234567890123456789012345678901")
+	jwtSecret := []byte("secret")
+	tokenID := "challenge-failed"
+	mfaToken, err := auth.NewMFAChallengeTokenWithID(7, "alice", false, tokenID, jwtSecret)
+	if err != nil {
+		t.Fatalf("NewMFAChallengeTokenWithID: %v", err)
+	}
+	handler := NewAuthHandler(
+		repository.NewUserRepo(sqlxDB, encKey),
+		repository.NewSessionRepo(sqlxDB),
+		nil,
+		jwtSecret,
+		MFAEnforcementRequiredForAdmins,
+		repository.NewMFAChallengeRepo(sqlxDB),
+	)
+
+	mock.ExpectQuery(`SELECT \* FROM mfa_challenges WHERE token_id = \?`).
+		WithArgs(tokenID).
+		WillReturnRows(mfaChallengeRows(tokenID, false, nil, nil, 4))
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(uint64(7)).
+		WillReturnRows(mfaUserRows(t, encKey, "JBSWY3DPEHPK3PXP", true))
+	mock.ExpectExec(`UPDATE mfa_challenges\s+SET attempt_count = attempt_count \+ 1`).
+		WithArgs(mfaMaxAttempts, sqlmock.AnyArg(), uint64(3)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/mfa/verify", strings.NewReader(`{"mfa_token":"`+mfaToken+`","code":"000000"}`))
+	rec := httptest.NewRecorder()
+	handler.VerifyMFA(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid mfa code") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerVerifyMFARateLimit(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	jwtSecret := []byte("secret")
+	tokenID := "challenge-rate-limit"
+	mfaToken, err := auth.NewMFAChallengeTokenWithID(7, "alice", false, tokenID, jwtSecret)
+	if err != nil {
+		t.Fatalf("NewMFAChallengeTokenWithID: %v", err)
+	}
+	handler := NewAuthHandler(
+		repository.NewUserRepo(sqlxDB, []byte("01234567890123456789012345678901")),
+		repository.NewSessionRepo(sqlxDB),
+		nil,
+		jwtSecret,
+		MFAEnforcementRequiredForAdmins,
+		repository.NewMFAChallengeRepo(sqlxDB),
+	)
+	handler.mfaVerifyRateLimiter = newRequestRateLimiter(1, time.Minute)
+
+	mock.ExpectQuery(`SELECT \* FROM mfa_challenges WHERE token_id = \?`).
+		WithArgs(tokenID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "token_id", "user_id", "setup", "expires_at", "attempt_count", "used_at", "revoked_at", "created_ip", "created_at"}))
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/auth/mfa/verify", strings.NewReader(`{"mfa_token":"`+mfaToken+`","code":"000000"}`))
+	firstReq.RemoteAddr = "10.0.0.3:12345"
+	firstRec := httptest.NewRecorder()
+	handler.VerifyMFA(firstRec, firstReq)
+	if firstRec.Code != http.StatusUnauthorized {
+		t.Fatalf("first status = %d, want %d", firstRec.Code, http.StatusUnauthorized)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/auth/mfa/verify", strings.NewReader(`{"mfa_token":"`+mfaToken+`","code":"000000"}`))
+	secondReq.RemoteAddr = "10.0.0.3:12345"
+	secondRec := httptest.NewRecorder()
+	handler.VerifyMFA(secondRec, secondReq)
+	if secondRec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d, want %d, body=%s", secondRec.Code, http.StatusTooManyRequests, secondRec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
 	}
 }
 

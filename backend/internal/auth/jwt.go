@@ -63,6 +63,14 @@ func ParseAccessToken(tokenStr string, secret []byte) (*Claims, error) {
 }
 
 func NewMFAChallengeToken(userID uint64, username string, setup bool, secret []byte) (string, error) {
+	tokenID, err := NewTokenID()
+	if err != nil {
+		return "", err
+	}
+	return NewMFAChallengeTokenWithID(userID, username, setup, tokenID, secret)
+}
+
+func NewMFAChallengeTokenWithID(userID uint64, username string, setup bool, tokenID string, secret []byte) (string, error) {
 	claims := MFAChallengeClaims{
 		UserID:   userID,
 		Username: username,
@@ -72,6 +80,7 @@ func NewMFAChallengeToken(userID uint64, username string, setup bool, secret []b
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			Subject:   username,
 			Audience:  []string{"mfa"},
+			ID:        tokenID,
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -96,13 +105,20 @@ func ParseMFAChallengeToken(tokenStr string, secret []byte) (*MFAChallengeClaims
 }
 
 func NewRefreshToken() (raw string, hash string, err error) {
-	b := make([]byte, 32)
-	if _, err = rand.Read(b); err != nil {
-		return "", "", fmt.Errorf("generate refresh token: %w", err)
+	raw, err = NewTokenID()
+	if err != nil {
+		return "", "", err
 	}
-	raw = hex.EncodeToString(b)
 	hash = HashRefreshToken(raw)
 	return raw, hash, nil
+}
+
+func NewTokenID() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate token id: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func HashRefreshToken(raw string) string {
