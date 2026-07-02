@@ -9,17 +9,21 @@ import {
   listMaskingMetadata,
   listMaskingMetadataColumns,
   createMaskingWhitelist,
+  createRedisSensitiveKeyPrefix,
   deleteMaskingRule,
   deleteMaskingWhitelist,
+  deleteRedisSensitiveKeyPrefix,
   listMaskingRules,
   listMaskingWhitelists,
+  listRedisSensitiveKeyPrefixes,
   patchMaskingRule,
   patchMaskingWhitelist,
+  patchRedisSensitiveKeyPrefix,
 } from '@/modules/masking-rules/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
-import type { MaskingRule, MaskingWhitelist } from '@/shared/types/maskingRule'
+import type { MaskingRule, MaskingWhitelist, RedisSensitiveKeyPrefix } from '@/shared/types/maskingRule'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
@@ -31,6 +35,7 @@ import { useToast } from '@/shared/ui/ToastContext'
 type ConnectionOption = {
   id: number
   name: string
+  dbType: string
 }
 
 type RuleForm = {
@@ -47,6 +52,14 @@ type WhitelistForm = {
   columnName: string
 }
 
+type RedisPrefixForm = {
+  dbConnectionId: string
+  redisDBIndex: string
+  keyPrefix: string
+  reason: string
+  isActive: boolean
+}
+
 type RuleDrawerState =
   | { mode: 'create' }
   | { mode: 'edit'; rule: MaskingRule }
@@ -55,6 +68,11 @@ type RuleDrawerState =
 type WhitelistDrawerState =
   | { mode: 'create' }
   | { mode: 'edit'; entry: MaskingWhitelist }
+  | null
+
+type RedisPrefixDrawerState =
+  | { mode: 'create' }
+  | { mode: 'edit'; prefix: RedisSensitiveKeyPrefix }
   | null
 
 const EMPTY_RULE_FORM: RuleForm = {
@@ -69,6 +87,14 @@ const EMPTY_WHITELIST_FORM: WhitelistForm = {
   databaseName: '',
   tableName: '',
   columnName: '',
+}
+
+const EMPTY_REDIS_PREFIX_FORM: RedisPrefixForm = {
+  dbConnectionId: '',
+  redisDBIndex: '',
+  keyPrefix: '',
+  reason: '',
+  isActive: true,
 }
 
 const MASK_MODE_OPTIONS: Array<{ value: RuleForm['maskMode']; label: string }> = [
@@ -107,11 +133,13 @@ export function MaskingRulesPage() {
 
   const [rules, setRules] = useState<MaskingRule[]>([])
   const [whitelist, setWhitelist] = useState<MaskingWhitelist[]>([])
+  const [redisPrefixes, setRedisPrefixes] = useState<RedisSensitiveKeyPrefix[]>([])
   const [connections, setConnections] = useState<ConnectionOption[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [rulesOffset, setRulesOffset] = useState(0)
   const [whitelistOffset, setWhitelistOffset] = useState(0)
+  const [redisPrefixOffset, setRedisPrefixOffset] = useState(0)
 
   const [ruleDrawer, setRuleDrawer] = useState<RuleDrawerState>(null)
   const [ruleForm, setRuleForm] = useState<RuleForm>(EMPTY_RULE_FORM)
@@ -127,9 +155,16 @@ export function MaskingRulesPage() {
   const [columnOptions, setColumnOptions] = useState<string[]>([])
   const [targetLoading, setTargetLoading] = useState(false)
 
-  const [pendingDelete, setPendingDelete] = useState<{ kind: 'rule' | 'whitelist'; id: number } | null>(null)
+  const [redisPrefixDrawer, setRedisPrefixDrawer] = useState<RedisPrefixDrawerState>(null)
+  const [redisPrefixForm, setRedisPrefixForm] = useState<RedisPrefixForm>(EMPTY_REDIS_PREFIX_FORM)
+  const [redisPrefixSubmitting, setRedisPrefixSubmitting] = useState(false)
+  const [redisPrefixDrawerError, setRedisPrefixDrawerError] = useState('')
+
+  const [pendingDelete, setPendingDelete] = useState<{ kind: 'rule' | 'whitelist' | 'redisPrefix'; id: number } | null>(null)
   const [deletingKey, setDeletingKey] = useState<string | null>(null)
 
+  const mysqlConnections = useMemo(() => connections.filter((connection) => connection.dbType === 'mysql'), [connections])
+  const redisConnections = useMemo(() => connections.filter((connection) => connection.dbType === 'redis'), [connections])
   const sortedRules = useMemo(() => [...rules].sort((left, right) => left.column_name.localeCompare(right.column_name)), [rules])
   const sortedWhitelist = useMemo(
     () =>
@@ -140,10 +175,23 @@ export function MaskingRulesPage() {
       }),
     [whitelist],
   )
+  const sortedRedisPrefixes = useMemo(
+    () =>
+      [...redisPrefixes].sort((left, right) => {
+        const leftKey = `${left.db_connection_id}:${left.redis_db_index ?? '*'}:${left.key_prefix}`
+        const rightKey = `${right.db_connection_id}:${right.redis_db_index ?? '*'}:${right.key_prefix}`
+        return leftKey.localeCompare(rightKey)
+      }),
+    [redisPrefixes],
+  )
   const pagedRules = useMemo(() => sortedRules.slice(rulesOffset, rulesOffset + PAGE_SIZE), [rulesOffset, sortedRules])
   const pagedWhitelist = useMemo(
     () => sortedWhitelist.slice(whitelistOffset, whitelistOffset + PAGE_SIZE),
     [sortedWhitelist, whitelistOffset],
+  )
+  const pagedRedisPrefixes = useMemo(
+    () => sortedRedisPrefixes.slice(redisPrefixOffset, redisPrefixOffset + PAGE_SIZE),
+    [redisPrefixOffset, sortedRedisPrefixes],
   )
 
   useEffect(() => {
@@ -189,21 +237,27 @@ export function MaskingRulesPage() {
     }
   }, [sortedWhitelist.length, whitelistOffset])
 
+  useEffect(() => {
+    if (redisPrefixOffset > 0 && redisPrefixOffset >= sortedRedisPrefixes.length) {
+      setRedisPrefixOffset(Math.max(0, Math.floor((Math.max(sortedRedisPrefixes.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
+    }
+  }, [redisPrefixOffset, sortedRedisPrefixes.length])
+
   async function loadPage() {
     setLoading(true)
     setError('')
     try {
-      const [rulesResponse, whitelistResponse, connectionsResponse] = await Promise.all([
+      const [rulesResponse, whitelistResponse, redisPrefixResponse, connectionsResponse] = await Promise.all([
         listMaskingRules(),
         listMaskingWhitelists(),
+        listRedisSensitiveKeyPrefixes(),
         listMaskingConnections(),
       ])
       setRules(rulesResponse.rules)
       setWhitelist(whitelistResponse.whitelist)
+      setRedisPrefixes(redisPrefixResponse.prefixes)
       setConnections(
-        connectionsResponse.connections
-          .filter((connection) => connection.db_type === 'mysql')
-          .map((connection) => ({ id: connection.id, name: connection.name })),
+        connectionsResponse.connections.map((connection) => ({ id: connection.id, name: connection.name, dbType: connection.db_type })),
       )
     } catch (loadError) {
       setError(loadError instanceof ApiError ? loadError.message : 'Failed to load masking settings.')
@@ -295,6 +349,29 @@ export function MaskingRulesPage() {
     setColumnOptions([])
   }
 
+  function openRedisPrefixDrawer(state: RedisPrefixDrawerState) {
+    setRedisPrefixDrawer(state)
+    setRedisPrefixDrawerError('')
+    setRedisPrefixForm(
+      state?.mode === 'edit'
+        ? {
+            dbConnectionId: String(state.prefix.db_connection_id),
+            redisDBIndex: state.prefix.redis_db_index === null || state.prefix.redis_db_index === undefined ? '' : String(state.prefix.redis_db_index),
+            keyPrefix: state.prefix.key_prefix,
+            reason: state.prefix.reason ?? '',
+            isActive: state.prefix.is_active,
+          }
+        : EMPTY_REDIS_PREFIX_FORM,
+    )
+  }
+
+  function closeRedisPrefixDrawer() {
+    setRedisPrefixDrawer(null)
+    setRedisPrefixDrawerError('')
+    setRedisPrefixSubmitting(false)
+    setRedisPrefixForm(EMPTY_REDIS_PREFIX_FORM)
+  }
+
   async function handleRuleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!ruleDrawer) {
@@ -358,6 +435,38 @@ export function MaskingRulesPage() {
     }
   }
 
+  async function handleRedisPrefixSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!redisPrefixDrawer) {
+      return
+    }
+
+    setRedisPrefixSubmitting(true)
+    setRedisPrefixDrawerError('')
+    try {
+      const payload = {
+        db_connection_id: Number(redisPrefixForm.dbConnectionId),
+        redis_db_index: redisPrefixForm.redisDBIndex.trim() === '' ? null : Number(redisPrefixForm.redisDBIndex),
+        key_prefix: redisPrefixForm.keyPrefix.trim(),
+        reason: redisPrefixForm.reason.trim() || null,
+        is_active: redisPrefixForm.isActive,
+      }
+      if (redisPrefixDrawer.mode === 'create') {
+        await createRedisSensitiveKeyPrefix(payload)
+        pushToast(`Redis sensitive prefix created: ${payload.key_prefix}`, 'success')
+      } else {
+        await patchRedisSensitiveKeyPrefix(redisPrefixDrawer.prefix.id, payload)
+        pushToast(`Redis sensitive prefix updated: ${payload.key_prefix}`, 'success')
+      }
+      await loadPage()
+      closeRedisPrefixDrawer()
+    } catch (submitError) {
+      setRedisPrefixDrawerError(submitError instanceof ApiError ? submitError.message : 'Failed to save the Redis sensitive key prefix.')
+    } finally {
+      setRedisPrefixSubmitting(false)
+    }
+  }
+
   async function handleDelete() {
     if (!pendingDelete) {
       return
@@ -370,9 +479,12 @@ export function MaskingRulesPage() {
       if (pendingDelete.kind === 'rule') {
         await deleteMaskingRule(pendingDelete.id)
         pushToast('Global masking rule deleted', 'success')
-      } else {
+      } else if (pendingDelete.kind === 'whitelist') {
         await deleteMaskingWhitelist(pendingDelete.id)
         pushToast('Whitelist deleted', 'success')
+      } else {
+        await deleteRedisSensitiveKeyPrefix(pendingDelete.id)
+        pushToast('Redis sensitive prefix deleted', 'success')
       }
       await loadPage()
       setPendingDelete(null)
@@ -387,7 +499,7 @@ export function MaskingRulesPage() {
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
       <PageIntro
         title="Masking Rules"
-        description="Currently only MySQL is supported. Global rules now use a DSL: `column pattern + match type + mask mode + mask config`, while the whitelist is used to precisely exempt specific instance / database / table / column targets from false positives."
+        description="SQL masking supports MySQL and PostgreSQL column results. Redis is managed separately with sensitive key prefixes: key names and metadata may be visible, but value/content reads are blocked for matching prefixes."
         actions={
           <>
             <Link
@@ -409,7 +521,7 @@ export function MaskingRulesPage() {
 
           <SectionCard
             title="Global Masking Rules"
-            description="These are truly global rules. Each rule stores `column pattern`, `match_type`, `mask_mode`, and JSON `mask_config`, so DBA can flexibly map field patterns to masking behavior without code changes."
+            description="SQL column masking for MySQL and PostgreSQL. Each rule stores `column pattern`, `match_type`, `mask_mode`, and JSON `mask_config`, so DBA can map field patterns to masking behavior without code changes."
             icon={<ShieldAlert className="h-4 w-4 text-accent" />}
             action={
               canWrite ? (
@@ -503,6 +615,55 @@ export function MaskingRulesPage() {
             />
           </SectionCard>
 
+          <SectionCard
+            title="Redis Sensitive Key Prefixes"
+            description="Redis policy is managed by key prefix. Matching key names and metadata remain visible, while value/content commands are blocked before execution."
+            icon={<ShieldAlert className="h-4 w-4 text-accent" />}
+            action={
+              canWrite ? (
+                <ActionButton onClick={() => openRedisPrefixDrawer({ mode: 'create' })}>
+                  <Plus className="h-4 w-4" />
+                  New Prefix
+                </ActionButton>
+              ) : null
+            }
+          >
+            {loading ? (
+              <LoadingBlock message="Loading Redis sensitive prefixes..." className="m-4 min-h-[180px] rounded-xl border-border bg-panel" />
+            ) : sortedRedisPrefixes.length === 0 ? (
+              <EmptyState message="No Redis sensitive key prefixes yet." />
+            ) : (
+              <CompactTable
+                headers={['Connection', 'DB', 'Prefix', 'Status', 'Reason', 'Created', 'Actions']}
+                rows={pagedRedisPrefixes.map((prefix) => ({
+                  key: `redis-prefix-${prefix.id}`,
+                  cells: [
+                    <span key="connection" className="text-ink">{formatConnectionName(prefix.db_connection_id, connections)}</span>,
+                    <Badge key="db">{prefix.redis_db_index === null || prefix.redis_db_index === undefined ? 'All' : prefix.redis_db_index}</Badge>,
+                    <span key="prefix" className="font-mono text-[12px] font-semibold text-ink">{prefix.key_prefix}</span>,
+                    <Badge key="status">{prefix.is_active ? 'active' : 'inactive'}</Badge>,
+                    <span key="reason" className="max-w-[320px] truncate text-muted">{prefix.reason || '-'}</span>,
+                    <span key="created" className="whitespace-nowrap text-muted">{formatDateTime(prefix.created_at)}</span>,
+                    <ActionCell
+                      key="actions"
+                      canWrite={canWrite}
+                      onEdit={() => openRedisPrefixDrawer({ mode: 'edit', prefix })}
+                      onDelete={() => setPendingDelete({ kind: 'redisPrefix', id: prefix.id })}
+                      deleting={deletingKey === `redisPrefix:${prefix.id}`}
+                    />,
+                  ],
+                }))}
+              />
+            )}
+            <Pagination
+              offset={redisPrefixOffset}
+              pageSize={PAGE_SIZE}
+              count={pagedRedisPrefixes.length}
+              total={sortedRedisPrefixes.length}
+              onChange={setRedisPrefixOffset}
+            />
+          </SectionCard>
+
       {ruleDrawer ? createPortal(
         <DrawerLayout
           eyebrow="Global Masking Rule"
@@ -592,7 +753,7 @@ export function MaskingRulesPage() {
                 disabled={whitelistSubmitting}
                 options={[
                   { value: '', label: 'Select MySQL connection' },
-                  ...connections.map((connection) => ({ value: String(connection.id), label: connection.name })),
+                  ...mysqlConnections.map((connection) => ({ value: String(connection.id), label: connection.name })),
                 ]}
               />
             </Field>
@@ -700,10 +861,80 @@ export function MaskingRulesPage() {
         document.body,
       ) : null}
 
+      {redisPrefixDrawer ? createPortal(
+        <DrawerLayout
+          eyebrow="Redis Sensitive Prefix"
+          title={redisPrefixDrawer.mode === 'create' ? 'New Redis Prefix' : `Edit ${redisPrefixDrawer.prefix.key_prefix}`}
+          onClose={closeRedisPrefixDrawer}
+        >
+          <form className="grid gap-4" onSubmit={handleRedisPrefixSubmit}>
+            <Field label="Redis Connection">
+              <DropdownSelect
+                ariaLabel="Redis Connection"
+                value={redisPrefixForm.dbConnectionId}
+                onChange={(value) => setRedisPrefixForm((current) => ({ ...current, dbConnectionId: value }))}
+                disabled={redisPrefixSubmitting}
+                options={[
+                  { value: '', label: 'Select Redis connection' },
+                  ...redisConnections.map((connection) => ({ value: String(connection.id), label: connection.name })),
+                ]}
+              />
+            </Field>
+            <Field label="Redis DB Index">
+              <input
+                value={redisPrefixForm.redisDBIndex}
+                onChange={(event) => setRedisPrefixForm((current) => ({ ...current, redisDBIndex: event.target.value }))}
+                className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                disabled={redisPrefixSubmitting}
+                inputMode="numeric"
+                placeholder="Blank = all DB indexes"
+              />
+            </Field>
+            <Field label="Key Prefix">
+              <input
+                value={redisPrefixForm.keyPrefix}
+                onChange={(event) => setRedisPrefixForm((current) => ({ ...current, keyPrefix: event.target.value }))}
+                className="h-10 rounded-lg border border-border bg-panel-soft px-3 font-mono text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                disabled={redisPrefixSubmitting}
+                placeholder="session:"
+              />
+            </Field>
+            <Field label="Reason">
+              <input
+                value={redisPrefixForm.reason}
+                onChange={(event) => setRedisPrefixForm((current) => ({ ...current, reason: event.target.value }))}
+                className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                disabled={redisPrefixSubmitting}
+              />
+            </Field>
+            <label className="flex items-center gap-2 text-[12px] font-medium text-ink">
+              <input
+                type="checkbox"
+                checked={redisPrefixForm.isActive}
+                onChange={(event) => setRedisPrefixForm((current) => ({ ...current, isActive: event.target.checked }))}
+                disabled={redisPrefixSubmitting}
+                className="h-4 w-4 rounded border-border text-brand focus:ring-accent"
+              />
+              Active
+            </label>
+            {redisPrefixDrawerError ? <InlineAlert>{redisPrefixDrawerError}</InlineAlert> : null}
+            <button
+              type="submit"
+              disabled={redisPrefixSubmitting || !isRedisPrefixFormSubmittable(redisPrefixForm)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {redisPrefixSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : redisPrefixDrawer.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+              {redisPrefixDrawer.mode === 'create' ? 'Create Prefix' : 'Save Changes'}
+            </button>
+          </form>
+        </DrawerLayout>,
+        document.body,
+      ) : null}
+
       <ConfirmDialog
         open={pendingDelete !== null}
-        title={pendingDelete?.kind === 'rule' ? 'Delete Global Masking Rule' : 'Delete Unmask Whitelist'}
-        description={pendingDelete?.kind === 'rule' ? 'Delete this global masking rule?' : 'Delete this whitelist entry?'}
+        title={deleteDialogTitle(pendingDelete?.kind)}
+        description={deleteDialogDescription(pendingDelete?.kind)}
         confirmLabel="Confirm Delete"
         tone="danger"
         loading={pendingDelete !== null && deletingKey === `${pendingDelete.kind}:${pendingDelete.id}`}
@@ -742,8 +973,45 @@ function isWhitelistFormSubmittable(form: WhitelistForm) {
   return Boolean(form.dbConnectionId && form.databaseName.trim() && form.tableName.trim() && form.columnName.trim())
 }
 
+function isRedisPrefixFormSubmittable(form: RedisPrefixForm) {
+  if (!form.dbConnectionId || !form.keyPrefix.trim()) {
+    return false
+  }
+  if (form.redisDBIndex.trim() === '') {
+    return true
+  }
+  const dbIndex = Number(form.redisDBIndex)
+  return Number.isInteger(dbIndex) && dbIndex >= 0 && dbIndex <= 15
+}
+
 function formatConnectionName(connectionID: number, connections: ConnectionOption[]) {
   return connections.find((connection) => connection.id === connectionID)?.name ?? `Connection #${connectionID}`
+}
+
+function deleteDialogTitle(kind?: 'rule' | 'whitelist' | 'redisPrefix') {
+  switch (kind) {
+    case 'rule':
+      return 'Delete Global Masking Rule'
+    case 'whitelist':
+      return 'Delete Unmask Whitelist'
+    case 'redisPrefix':
+      return 'Delete Redis Sensitive Prefix'
+    default:
+      return 'Delete'
+  }
+}
+
+function deleteDialogDescription(kind?: 'rule' | 'whitelist' | 'redisPrefix') {
+  switch (kind) {
+    case 'rule':
+      return 'Delete this global masking rule?'
+    case 'whitelist':
+      return 'Delete this whitelist entry?'
+    case 'redisPrefix':
+      return 'Delete this Redis sensitive key prefix?'
+    default:
+      return 'Delete this item?'
+  }
 }
 
 function SectionCard({

@@ -49,13 +49,7 @@ func (h *MaskingWhitelistHandler) ListConnections(w http.ResponseWriter, r *http
 		jsonErr(w, http.StatusInternalServerError, "list masking connections failed")
 		return
 	}
-	filtered := make([]model.DBConnection, 0, len(connections))
-	for _, connection := range connections {
-		if connection.DBType == "mysql" {
-			filtered = append(filtered, connection)
-		}
-	}
-	jsonOK(w, map[string]any{"connections": filtered})
+	jsonOK(w, map[string]any{"connections": connections})
 }
 
 // GET /masking-whitelist/connections/{id}/metadata

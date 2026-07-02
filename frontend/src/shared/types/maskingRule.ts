@@ -17,3 +17,15 @@ export type MaskingWhitelist = {
   created_by: number
   created_at: string
 }
+
+export type RedisSensitiveKeyPrefix = {
+  id: number
+  db_connection_id: number
+  redis_db_index?: number | null
+  key_prefix: string
+  reason?: string | null
+  is_active: boolean
+  created_by?: number | null
+  created_at: string
+  updated_at: string
+}

@@ -67,6 +67,7 @@ type QueryHandler struct {
 	audit         *repository.AuditRepo
 	artifacts     *repository.QueryArtifactRepo
 	tickets       *repository.TicketRepo
+	redisPrefixes *repository.RedisSensitiveKeyPrefixRepo
 	settings      *repository.SettingsRepo
 	queryAccess   *queryaccess.Service
 	masking       *maskingRuntime
@@ -98,6 +99,7 @@ func NewQueryHandler(
 	audit *repository.AuditRepo,
 	artifacts *repository.QueryArtifactRepo,
 	tickets *repository.TicketRepo,
+	redisPrefixes *repository.RedisSensitiveKeyPrefixRepo,
 	settings *repository.SettingsRepo,
 	queryAccessRepo *repository.QueryAccessRepo,
 	engine *masking.Engine,
@@ -114,6 +116,7 @@ func NewQueryHandler(
 		audit:         audit,
 		artifacts:     artifacts,
 		tickets:       tickets,
+		redisPrefixes: redisPrefixes,
 		settings:      settings,
 		queryAccess:   queryaccess.NewService(queryAccessRepo, users),
 		masking:       newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
@@ -1117,6 +1120,35 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 	dbIndex := 0
 	if queryCtx.RedisDBIndex != nil {
 		dbIndex = *queryCtx.RedisDBIndex
+	}
+	if h.redisPrefixes != nil {
+		prefixRules, err := h.redisPrefixes.ListActiveForConnection(r.Context(), conn.ID, dbIndex)
+		if err != nil {
+			slog.Error("redis sensitive key policy load failed", "connection_id", conn.ID, "redis_db_index", dbIndex, "err", err)
+			jsonErr(w, http.StatusInternalServerError, "redis sensitive key policy unavailable")
+			return
+		}
+		if err := sqlreview.CheckRedisSensitiveKeyPrefixes(cmd, args, repository.RedisSensitiveKeyPrefixValues(prefixRules)); err != nil {
+			if h.audit != nil {
+				userID := middleware.UserIDFromCtx(r.Context())
+				connID := conn.ID
+				h.audit.Log(r.Context(), repository.AuditEntry{
+					ActorID:      &userID,
+					ActorName:    middleware.UsernameFromCtx(r.Context()),
+					ActionType:   "query_blocked",
+					ResourceType: "db_connection",
+					ResourceID:   &connID,
+					Details: map[string]any{
+						"sql":            truncate(cmdLine, 500),
+						"reason":         "redis_sensitive_key_policy",
+						"redis_db_index": dbIndex,
+					},
+					IPAddress: clientIP(r),
+				})
+			}
+			jsonErr(w, http.StatusForbidden, err.Error())
+			return
+		}
 	}
 
 	start := time.Now()
