@@ -4,6 +4,25 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { UsersPage } from '@/modules/users/pages/UsersPage'
 import { ToastProvider } from '@/shared/ui/ToastContext'
 
+const authMock = vi.hoisted(() => ({
+  currentUser: {
+    id: 99,
+    username: 'testdba',
+    authGroups: ['dba'],
+    authGroupDetails: [{ id: 3, group_key: 'dba', name: 'DBA', is_system: true, is_protected: false }],
+    permissions: ['users.read', 'users.write'],
+    dbConnectionIds: [],
+    protected: false,
+    isActive: true,
+  },
+}))
+
+vi.mock('@/shared/auth/AuthContext', () => ({
+  useAuth: () => ({
+    user: authMock.currentUser,
+  }),
+}))
+
 vi.mock('@/modules/users/api', () => ({
   listUsers: vi.fn(),
   getUser: vi.fn(),
@@ -97,6 +116,16 @@ function seedAuthGroups() {
 describe('UsersPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    authMock.currentUser = {
+      id: 99,
+      username: 'testdba',
+      authGroups: ['dba'],
+      authGroupDetails: [{ id: 3, group_key: 'dba', name: 'DBA', is_system: true, is_protected: false }],
+      permissions: ['users.read', 'users.write'],
+      dbConnectionIds: [],
+      protected: false,
+      isActive: true,
+    }
     mockedListUsers.mockResolvedValue({ users: [] })
     mockedListUserDBConnections.mockResolvedValue({ connections: [] })
     mockedListUserSessions.mockResolvedValue({ sessions: [] })
@@ -309,7 +338,7 @@ describe('UsersPage', () => {
     })
   })
 
-  it('protected admin 只能修改密碼', async () => {
+  it('非 all-permissions 使用者不能修改 protected admin', async () => {
     mockedListUsers.mockResolvedValue({
       users: [
         {
@@ -351,15 +380,53 @@ describe('UsersPage', () => {
 
     expect(username).toBeDisabled()
     expect(email).toBeDisabled()
+    expect(password).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Mark Delete' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
+    expect(screen.getByText(/Your account cannot change password/)).toBeInTheDocument()
+  })
 
-    fireEvent.change(password, { target: { value: 'NewSecret123!' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Save Changes' }))[1])
-
-    await waitFor(() => {
-      expect(mockedPatchUser).toHaveBeenCalledWith(1, { password: 'NewSecret123!' })
+  it('非 all-permissions 使用者不能移除一般使用者身上的 admin group', async () => {
+    mockedListUsers.mockResolvedValue({
+      users: [
+        {
+          id: 7,
+          username: 'william',
+          email: 'william@example.com',
+          lark_recipient: '',
+          auth_groups: ['admin', 'dba'],
+          db_connection_ids: [],
+          protected: false,
+          is_active: true,
+          created_at: '2026-06-10T00:00:00Z',
+          updated_at: '2026-06-10T00:00:00Z',
+        },
+      ],
     })
+    mockedGetUser.mockResolvedValue({
+      id: 7,
+      username: 'william',
+      email: 'william@example.com',
+      lark_recipient: '',
+      protected: false,
+      is_active: true,
+      created_at: '2026-06-10T00:00:00Z',
+      updated_at: '2026-06-10T00:00:00Z',
+      memberships: [
+        { id: 1, user_id: 7, auth_group: 'admin', granted_by: 1, expires_at: null, created_at: '2026-06-10T00:00:00Z' },
+        { id: 2, user_id: 7, auth_group: 'dba', granted_by: 1, expires_at: null, created_at: '2026-06-10T00:00:00Z' },
+      ],
+      permissions: [],
+      db_connection_ids: [],
+      direct_permissions: [],
+      direct_db_connection_ids: [],
+    })
+
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage' }))
+
+    expect(await screen.findByRole('button', { name: 'Remove Admin' })).toBeDisabled()
   })
 
   it('建立 auth group 不需要 group key 且可帶 users / permissions / db scope', async () => {

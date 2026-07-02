@@ -254,6 +254,55 @@ func TestUserHandlerRemoveMembershipProtectedUserRequiresAllPermissionsAdmin(t *
 	}
 }
 
+func TestUserHandlerPatchCannotRemoveAdminMembershipWithoutAllPermissionsAdmin(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewUserHandler(repository.NewUserRepo(sqlxDB), repository.NewAuthGroupRepo(sqlxDB), nil, nil, repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")))
+	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(uint64(7)).
+		WillReturnRows(userRows())
+	mock.ExpectExec(`UPDATE users SET username=\?, email=\?, lark_recipient=\?, updated_at=\? WHERE id=\?`).
+		WithArgs("alice", "alice@example.com", "", sqlmock.AnyArg(), uint64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT membership_id AS id, user_id, auth_group, granted_by, expires_at, created_at`).
+		WithArgs(uint64(7), sqlmock.AnyArg(), uint64(7), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "auth_group", "granted_by", "expires_at", "created_at"}).
+			AddRow(10, 7, "admin", nil, nil, now))
+	mock.ExpectQuery(`SELECT id, group_key, name, description, is_system, is_protected`).
+		WithArgs("admin").
+		WillReturnRows(authGroupRow(4, "admin", "Admin", "", 1, 1))
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(uint64(99)).
+		WillReturnRows(userRowsWithID(99, "operator"))
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs(uint64(99), sqlmock.AnyArg(), uint64(99), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+	req := withURLParam(httptest.NewRequest(http.MethodPatch, "/users/7", strings.NewReader(`{"auth_groups":[]}`)), "id", "7")
+	ctx := context.WithValue(req.Context(), middleware.CtxUserID, uint64(99))
+	ctx = context.WithValue(ctx, middleware.CtxUsername, "operator")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	handler.Patch(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "protected auth group can only be changed by all-permissions admin") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestAuthGroupHandlerAddPermissionProtectedGroupRequiresAllPermissionsAdmin(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

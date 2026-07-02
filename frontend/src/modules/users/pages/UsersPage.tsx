@@ -9,8 +9,9 @@ import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccess
 import type { QueryAccessRule } from '@/modules/users/api'
 import type { AccountSession } from '@/modules/account/api'
 import { ApiError } from '@/shared/api/client'
+import { useAuth } from '@/shared/auth/AuthContext'
 import { formatDateTime } from '@/shared/lib/format'
-import type { AuthGroup } from '@/shared/types/auth'
+import type { AuthGroup, CurrentUser } from '@/shared/types/auth'
 import type { AuthGroupDetail } from '@/shared/types/authGroup'
 import type { DBConnection, DBConnectionBindings } from '@/shared/types/dbConnection'
 import type { UserDetail, UserSummary } from '@/shared/types/user'
@@ -172,6 +173,7 @@ function minutesUntil(value?: string | null) {
 }
 
 export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode }) {
+  const { user: currentUser } = useAuth()
   const { pushToast } = useToast()
   const navigate = useNavigate()
   const [viewMode, setViewMode] = useState<ViewMode>(initialView)
@@ -338,6 +340,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
 
   const selectedUserIsProtected = selectedUser?.protected === true
   const selectedAuthGroupIsProtected = selectedAuthGroup?.protected === true
+  const currentUserCanManageProtectedAccess = canManageProtectedAccess(currentUser)
+  const selectedUserSecurityLocked = selectedUserIsProtected && !currentUserCanManageProtectedAccess
+  const selectedAuthGroupSecurityLocked = selectedAuthGroupIsProtected && !currentUserCanManageProtectedAccess
+  const protectedAuthGroupNames = useMemo(() => new Set(authGroups.filter((group) => group.protected === true).map((group) => group.name)), [authGroups])
   const authGroupOptions = authGroups.map((group) => group.name)
 
   const availableUserPermissions = useMemo(
@@ -1401,7 +1407,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           aria-label="Username"
                           value={userDraft.username}
                           onChange={(event) => setUserDraft((current) => ({ ...current, username: event.target.value }))}
-                          disabled={saving || selectedUserIsProtected}
+                          disabled={saving || selectedUserSecurityLocked}
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
@@ -1411,7 +1417,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           aria-label="Email"
                           value={userDraft.email}
                           onChange={(event) => setUserDraft((current) => ({ ...current, email: event.target.value }))}
-                          disabled={saving || selectedUserIsProtected}
+                          disabled={saving || selectedUserSecurityLocked}
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
@@ -1435,7 +1441,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           aria-label="Lark Open ID"
                           value={userDraft.larkRecipient}
                           onChange={(event) => setUserDraft((current) => ({ ...current, larkRecipient: event.target.value }))}
-                          disabled={saving || selectedUserIsProtected}
+                          disabled={saving || selectedUserSecurityLocked}
                           placeholder="Enter an open_id, for example ou_xxxxxxxxxxxxx"
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
@@ -1447,7 +1453,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           type="password"
                           value={userDraft.password}
                           onChange={(event) => setUserDraft((current) => ({ ...current, password: event.target.value }))}
-                          disabled={saving}
+                          disabled={saving || selectedUserSecurityLocked}
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                         />
                       </label>
@@ -1461,7 +1467,9 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
 
                       {selectedUserIsProtected ? (
                         <div className="rounded-lg border border-danger/20 bg-red-50 px-3 py-3 text-[12px] text-danger">
-                          The initial admin can only change the password here. Other fields cannot be edited, disabled, or deleted.
+                          {currentUserCanManageProtectedAccess
+                            ? 'The initial admin is protected. Only all-permissions admins can change high-risk fields.'
+                            : 'The initial admin is protected. Your account cannot change password, MFA, status, groups, permissions, DB scope, or delete this user.'}
                         </div>
                       ) : null}
 
@@ -1476,7 +1484,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                               <ActionTag
                                 key={group}
                                 label={authGroupLabelMap.get(group) ?? group}
-                                disabled={saving || selectedUserIsProtected}
+                                disabled={saving || selectedUserSecurityLocked || (!currentUserCanManageProtectedAccess && protectedAuthGroupNames.has(group))}
                                 onRemove={() => setUserDraft((current) => ({
                                   ...current,
                                   authGroups: current.authGroups.filter((item) => item !== group),
@@ -1491,11 +1499,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           ariaLabel="User auth group membership selection"
                           value={pendingUserAuthGroup}
                           onChange={setPendingUserAuthGroup}
-                          disabled={saving || selectedUserIsProtected}
+                          disabled={saving || selectedUserSecurityLocked}
                           options={[
                             { value: '', label: 'Select auth group' },
                             ...authGroupOptions
                               .filter((group) => !userDraft.authGroups.includes(group))
+                              .filter((group) => currentUserCanManageProtectedAccess || !protectedAuthGroupNames.has(group))
                               .map((group) => ({
                                 value: group,
                                 label: authGroupLabelMap.get(group) ?? group,
@@ -1515,7 +1524,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                             }))
                             setPendingUserAuthGroup('')
                           }}
-                          disabled={saving || selectedUserIsProtected || !pendingUserAuthGroup}
+                          disabled={saving || selectedUserSecurityLocked || !pendingUserAuthGroup}
                           className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-panel-soft px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                         >
                           Add to Group
@@ -1532,7 +1541,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         groupedPermissions={groupPermissions(userDraft.directPermissions)}
                         emptyMessage="No direct permissions assigned yet."
                         removable
-                        disabled={saving || selectedUserIsProtected}
+                        disabled={saving || selectedUserSecurityLocked}
                         onRemove={(permissionKey) => setUserDraft((current) => ({
                           ...current,
                           directPermissions: current.directPermissions.filter((item) => item !== permissionKey),
@@ -1545,7 +1554,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         search={userPermissionSearch}
                         onSearchChange={setUserPermissionSearch}
                         permissions={availableUserPermissions}
-                        disabled={saving || selectedUserIsProtected}
+                        disabled={saving || selectedUserSecurityLocked}
                         emptyMessage="No matches found, or all direct permissions are already assigned."
                         onAdd={(permissionKey) => setUserDraft((current) => ({
                           ...current,
@@ -1565,7 +1574,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         resolveConnection={(connectionId) => connections.find((item) => item.id === connectionId)}
                         emptyMessage="No direct DB scope assigned yet."
                         removable
-                        disabled={saving || selectedUserIsProtected}
+                        disabled={saving || selectedUserSecurityLocked}
                         onRemove={(connectionId) => setUserDraft((current) => ({
                           ...current,
                           directDBConnectionIDs: current.directDBConnectionIDs.filter((item) => item !== connectionId),
@@ -1579,7 +1588,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         onSearchChange={setUserDBScopeSearch}
                         connections={availableUserConnections}
                         emptyMessage="No matches found, or all direct DB scope entries are already assigned."
-                        disabled={saving || selectedUserIsProtected}
+                        disabled={saving || selectedUserSecurityLocked}
                         onAdd={(connectionId) => setUserDraft((current) => ({
                           ...current,
                           directDBConnectionIDs: [...current.directDBConnectionIDs, connectionId],
@@ -1697,7 +1706,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     </CardSection>
                   ) : null}
 
-                  {drawerState.mode === 'edit-user' && !selectedUserIsProtected ? (
+                  {drawerState.mode === 'edit-user' && !selectedUserSecurityLocked ? (
                     <CardSection title="Account Controls" icon={<Shield className="h-4 w-4 text-accent" />}>
                       <div className="grid gap-3">
                         <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-panel-soft px-3 py-3">
@@ -1760,6 +1769,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       type="submit"
                       disabled={
                         saving ||
+                        selectedUserSecurityLocked ||
                         !userDraft.username.trim() ||
                         !userDraft.email.trim() ||
                         (drawerState.mode === 'create-user' && !userDraft.password.trim())
@@ -1783,7 +1793,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           aria-label="Name"
                           value={authGroupDraft.name}
                           onChange={(event) => setAuthGroupDraft((current) => ({ ...current, name: event.target.value }))}
-                          disabled={saving || selectedAuthGroupIsProtected}
+                          disabled={saving || selectedAuthGroupSecurityLocked}
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
@@ -1793,7 +1803,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           aria-label="Description"
                           value={authGroupDraft.description}
                           onChange={(event) => setAuthGroupDraft((current) => ({ ...current, description: event.target.value }))}
-                          disabled={saving || selectedAuthGroupIsProtected}
+                          disabled={saving || selectedAuthGroupSecurityLocked}
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
@@ -1815,7 +1825,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                               <ActionTag
                                 key={userID}
                                 label={user?.username ?? `User #${userID}`}
-                                disabled={saving || user?.protected === true || selectedAuthGroupIsProtected}
+                                disabled={saving || (user?.protected === true && !currentUserCanManageProtectedAccess) || selectedAuthGroupSecurityLocked}
                                 onRemove={() => setAuthGroupDraft((current) => ({
                                   ...current,
                                   userIDs: current.userIDs.filter((id) => id !== userID),
@@ -1831,11 +1841,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         ariaLabel="Auth Group user selection"
                         value={pendingAuthGroupUserID}
                         onChange={setPendingAuthGroupUserID}
-                        disabled={saving || selectedAuthGroupIsProtected}
+                        disabled={saving || selectedAuthGroupSecurityLocked}
                         options={[
                           { value: '', label: 'Select user' },
                           ...users
                             .filter((user) => !authGroupDraft.userIDs.includes(user.id))
+                            .filter((user) => currentUserCanManageProtectedAccess || user.protected !== true)
                             .map((user) => ({
                               value: String(user.id),
                               label: user.username,
@@ -1856,7 +1867,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           }))
                           setPendingAuthGroupUserID('')
                         }}
-                        disabled={saving || selectedAuthGroupIsProtected || !pendingAuthGroupUserID}
+                        disabled={saving || selectedAuthGroupSecurityLocked || !pendingAuthGroupUserID}
                         className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-panel-soft px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                       >
                         Add User
@@ -1871,7 +1882,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       groupedPermissions={groupPermissions(authGroupDraft.permissions)}
                       emptyMessage="No auth group permissions yet."
                       removable
-                      disabled={saving || selectedAuthGroupIsProtected}
+                      disabled={saving || selectedAuthGroupSecurityLocked}
                       onRemove={(permissionKey) => setAuthGroupDraft((current) => ({
                         ...current,
                         permissions: current.permissions.filter((item) => item !== permissionKey),
@@ -1884,7 +1895,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       search={authGroupPermissionSearch}
                       onSearchChange={setAuthGroupPermissionSearch}
                       permissions={availableAuthGroupPermissions}
-                      disabled={saving || selectedAuthGroupIsProtected}
+                      disabled={saving || selectedAuthGroupSecurityLocked}
                       emptyMessage="No matches found, or all permissions are already assigned."
                       onAdd={(permissionKey) => setAuthGroupDraft((current) => ({
                         ...current,
@@ -1902,7 +1913,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       resolveConnection={(connectionId) => connections.find((item) => item.id === connectionId)}
                       emptyMessage="No auth group DB scope yet."
                       removable
-                      disabled={saving || selectedAuthGroupIsProtected}
+                      disabled={saving || selectedAuthGroupSecurityLocked}
                       onRemove={(connectionId) => setAuthGroupDraft((current) => ({
                         ...current,
                         dbConnectionIDs: current.dbConnectionIDs.filter((item) => item !== connectionId),
@@ -1916,7 +1927,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       onSearchChange={setAuthGroupDBScopeSearch}
                       connections={availableAuthGroupConnections}
                       emptyMessage="No matches found, or all DB scope entries are already assigned."
-                      disabled={saving || selectedAuthGroupIsProtected}
+                      disabled={saving || selectedAuthGroupSecurityLocked}
                       onAdd={(connectionId) => setAuthGroupDraft((current) => ({
                         ...current,
                         dbConnectionIDs: [...current.dbConnectionIDs, connectionId],
@@ -1953,7 +1964,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                   <div className="flex justify-end">
                     <button
                       type="submit"
-                      disabled={saving || !authGroupDraft.name.trim()}
+                      disabled={saving || selectedAuthGroupSecurityLocked || !authGroupDraft.name.trim()}
                       className="inline-flex h-10 min-w-[180px] items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
                     >
                       {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -2032,6 +2043,17 @@ function summarizeUserChanges(
   }
 
   return lines
+}
+
+function canManageProtectedAccess(user: CurrentUser | null) {
+  if (!user) {
+    return false
+  }
+  if (user.protected || user.authGroupDetails.some((group) => group.is_protected)) {
+    return true
+  }
+  const permissions = new Set(user.permissions)
+  return PERMISSION_METADATA.every((permission) => permissions.has(permission.key))
 }
 
 function summarizeAuthGroupChanges(

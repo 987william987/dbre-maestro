@@ -593,6 +593,16 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "auth group repo unavailable")
 			return
 		}
+		currentMemberships, err := h.users.ListMemberships(r.Context(), id)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "list memberships failed")
+			return
+		}
+		currentGroups := make(map[string]bool, len(currentMemberships))
+		for _, membership := range currentMemberships {
+			currentGroups[string(membership.AuthGroup)] = true
+		}
+		nextGroupKeys := map[string]bool{}
 		nextGroups := make([]model.AuthGroup, 0, len(*req.AuthGroups))
 		seen := map[string]bool{}
 		for _, groupKey := range *req.AuthGroups {
@@ -615,7 +625,23 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			seen[normalized] = true
+			nextGroupKeys[normalized] = true
 			nextGroups = append(nextGroups, model.AuthGroup(normalized))
+		}
+		for currentGroup := range currentGroups {
+			if nextGroupKeys[currentGroup] {
+				continue
+			}
+			group, err := h.auths.GetByKey(r.Context(), currentGroup)
+			if err != nil {
+				jsonErr(w, http.StatusInternalServerError, "load auth group failed")
+				return
+			}
+			if err := requireAuthGroupMutationAllowed(r.Context(), h.users, actorID, group); err != nil {
+				h.logForbiddenUserMutation(r, actorID, id, "replace_memberships", err.Error())
+				jsonErr(w, http.StatusForbidden, err.Error())
+				return
+			}
 		}
 		if err := h.users.ReplaceMemberships(r.Context(), id, nextGroups, &actorID); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "replace memberships failed")

@@ -299,6 +299,45 @@ func (h *AuthGroupHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusForbidden, err.Error())
 			return
 		}
+		currentUsers, err := h.users.ListUsersByAuthGroup(r.Context(), model.AuthGroup(group.GroupKey))
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "list auth group users failed")
+			return
+		}
+		currentUserIDs := map[uint64]model.User{}
+		for _, user := range currentUsers {
+			currentUserIDs[user.ID] = user
+		}
+		nextUserIDs := map[uint64]bool{}
+		for _, userID := range *req.UserIDs {
+			if userID == 0 {
+				continue
+			}
+			nextUserIDs[userID] = true
+			if _, ok := currentUserIDs[userID]; ok {
+				continue
+			}
+			user, err := h.users.GetByID(r.Context(), userID)
+			if err != nil || user == nil {
+				jsonErr(w, http.StatusNotFound, "user not found")
+				return
+			}
+			if err := requireProtectedUserAdmin(r.Context(), h.users, actorID, user); err != nil {
+				h.logForbiddenAuthGroupMutation(r, actorID, group.ID, "replace_auth_group_users", err.Error())
+				jsonErr(w, http.StatusForbidden, err.Error())
+				return
+			}
+		}
+		for userID, user := range currentUserIDs {
+			if nextUserIDs[userID] {
+				continue
+			}
+			if err := requireProtectedUserAdmin(r.Context(), h.users, actorID, &user); err != nil {
+				h.logForbiddenAuthGroupMutation(r, actorID, group.ID, "replace_auth_group_users", err.Error())
+				jsonErr(w, http.StatusForbidden, err.Error())
+				return
+			}
+		}
 	}
 	if req.Permissions != nil {
 		for _, permissionKey := range *req.Permissions {
