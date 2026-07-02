@@ -124,6 +124,66 @@ func TestCanExecuteTicketRejectsSubmitterEvenWithExecutePermission(t *testing.T)
 	}
 }
 
+func TestCanExecuteTicketRejectsReviewerEvenWhenListedAsExecutor(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	submitterID := uint64(5)
+	reviewerID := uint64(7)
+	executorID := uint64(8)
+	connID := uint64(3)
+	now := time.Date(2026, 6, 22, 8, 0, 0, 0, time.UTC)
+	ticket := &model.Ticket{
+		ID:             1,
+		TicketType:     model.TicketTypeDDL,
+		Status:         model.TicketStatusPendingExecution,
+		SubmitterID:    submitterID,
+		ReviewerID:     &reviewerID,
+		DBConnectionID: &connID,
+	}
+	ctx := context.WithValue(context.Background(), middleware.CtxPermissions, []string{permissionTicketExecute})
+	handler := &TicketHandler{tickets: repository.NewTicketRepo(sqlx.NewDb(db, "sqlmock"))}
+
+	allowed, err := handler.canExecuteTicket(ctx, ticket, reviewerID)
+	if err != nil {
+		t.Fatalf("canExecuteTicket() reviewer error = %v", err)
+	}
+	if allowed {
+		t.Fatal("reviewer must not be allowed to execute the same ticket")
+	}
+
+	mock.ExpectQuery(`SELECT ticket_id, workflow_rule_id, workflow_rule_name, approval_enabled,`).
+		WithArgs(ticket.ID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"ticket_id",
+			"workflow_rule_id",
+			"workflow_rule_name",
+			"approval_enabled",
+			"approval_user_ids",
+			"executor_user_ids",
+			"admin_user_ids",
+			"error_code",
+			"error_message",
+			"resolution_trace",
+			"resolved_at",
+			"created_at",
+			"updated_at",
+		}).AddRow(ticket.ID, nil, "test", true, "[7]", "[7,8]", "[]", "", "", "{}", now, now, now))
+	allowed, err = handler.canExecuteTicket(ctx, ticket, executorID)
+	if err != nil {
+		t.Fatalf("canExecuteTicket() executor error = %v", err)
+	}
+	if !allowed {
+		t.Fatal("non-reviewer executor candidate should be allowed to execute")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
 func TestWorkflowResolutionExcludesSubmitter(t *testing.T) {
 	connID := uint64(3)
 	ticket := &model.Ticket{

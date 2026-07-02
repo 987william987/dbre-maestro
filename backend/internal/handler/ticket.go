@@ -2303,6 +2303,9 @@ func (h *TicketHandler) canExecuteTicket(ctx context.Context, ticket *model.Tick
 	if ticket.SubmitterID == userID {
 		return false, nil
 	}
+	if ticket.ReviewerID != nil && *ticket.ReviewerID == userID {
+		return false, nil
+	}
 	if !middleware.HasPermission(ctx, permissionTicketExecute) {
 		return false, nil
 	}
