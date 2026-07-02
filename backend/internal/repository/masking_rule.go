@@ -98,7 +98,7 @@ func (r *MaskingRuleRepo) Patch(ctx context.Context, rule *model.MaskingRule) (*
 	return r.GetByID(ctx, rule.ID)
 }
 
-// ListForConnection returns global rules that apply to MySQL query/export masking.
+// ListForConnection returns global rules that apply to SQL query/export masking.
 func (r *MaskingRuleRepo) ListForConnection(ctx context.Context, connID uint64) ([]model.MaskingRule, error) {
 	var rules []model.MaskingRule
 	err := r.db.SelectContext(ctx, &rules,

@@ -46,7 +46,7 @@ func newMaskingRuntime(
 }
 
 func (m *maskingRuntime) isSensitiveConnection(ctx context.Context, conn *model.DBConnection) (bool, error) {
-	if !supportsMySQLMasking(conn) {
+	if !supportsSQLMasking(conn) {
 		return false, nil
 	}
 	rules, err := m.rules.ListForConnection(ctx, conn.ID)
@@ -77,8 +77,11 @@ func (m *maskingRuntime) applyResult(ctx context.Context, conn *model.DBConnecti
 	if err != nil {
 		return false, nil, err
 	}
-	if len(decisions) == 0 || m.engine == nil {
+	if len(decisions) == 0 {
 		return false, nil, nil
+	}
+	if m.engine == nil {
+		return false, nil, fmt.Errorf("masking engine is not configured")
 	}
 
 	override, err := m.hasSensitiveOverride(ctx, userID)
@@ -110,7 +113,7 @@ func (m *maskingRuntime) applyResult(ctx context.Context, conn *model.DBConnecti
 }
 
 func (m *maskingRuntime) analyzeSensitiveColumns(ctx context.Context, conn *model.DBConnection, result *masking.QueryResult) ([]sensitiveColumnDecision, []int, error) {
-	if !supportsMySQLMasking(conn) || result == nil {
+	if !supportsSQLMasking(conn) || result == nil {
 		return nil, nil, nil
 	}
 
@@ -235,8 +238,16 @@ func (m *maskingRuntime) activeSensitiveAccessIndexes(
 	return grantedIndexes, nil
 }
 
-func supportsMySQLMasking(conn *model.DBConnection) bool {
-	return conn != nil && conn.DBType == "mysql"
+func supportsSQLMasking(conn *model.DBConnection) bool {
+	if conn == nil {
+		return false
+	}
+	switch conn.DBType {
+	case "mysql", "postgres", "postgresql":
+		return true
+	default:
+		return false
+	}
 }
 
 func decideMaskRuleForResultColumn(columnLabel string, matches []matchedMaskRule) (masking.Rule, bool) {
