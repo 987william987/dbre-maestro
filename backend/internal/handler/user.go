@@ -26,6 +26,24 @@ func NewUserHandler(users *repository.UserRepo, auths *repository.AuthGroupRepo,
 	return &UserHandler{users: users, auths: auths, sessions: sessions, audit: audit, dbConns: dbConns}
 }
 
+func (h *UserHandler) logForbiddenUserMutation(r *http.Request, actorID, targetID uint64, action, reason string) {
+	if h.audit == nil {
+		return
+	}
+	_ = h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "user_security_denied",
+		ResourceType: "user",
+		ResourceID:   &targetID,
+		Details: map[string]string{
+			"action": action,
+			"reason": reason,
+		},
+		IPAddress: clientIP(r),
+	})
+}
+
 // GET /users/db-connections
 func (h *UserHandler) ListDBConnections(w http.ResponseWriter, r *http.Request) {
 	if h.dbConns == nil {
@@ -294,6 +312,12 @@ func (h *UserHandler) RevokeSession(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "user not found")
 		return
 	}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireProtectedUserAdmin(r.Context(), h.users, actorID, user); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "revoke_session", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
+		return
+	}
 	revoked, err := h.sessions.RevokeByIDForUser(r.Context(), sessionID, id)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "revoke session failed")
@@ -303,7 +327,6 @@ func (h *UserHandler) RevokeSession(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "session not found")
 		return
 	}
-	actorID := middleware.UserIDFromCtx(r.Context())
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &actorID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
@@ -335,11 +358,16 @@ func (h *UserHandler) RevokeSessions(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "user not found")
 		return
 	}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireProtectedUserAdmin(r.Context(), h.users, actorID, user); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "revoke_sessions", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
+		return
+	}
 	if err := h.sessions.RevokeAllForUser(r.Context(), id); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "revoke sessions failed")
 		return
 	}
-	actorID := middleware.UserIDFromCtx(r.Context())
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &actorID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
@@ -370,6 +398,12 @@ func (h *UserHandler) ResetMFA(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "user not found")
 		return
 	}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireProtectedUserAdmin(r.Context(), h.users, actorID, user); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "reset_mfa", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
+		return
+	}
 	if err := h.users.ResetMFA(r.Context(), id); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "reset mfa failed")
 		return
@@ -378,7 +412,6 @@ func (h *UserHandler) ResetMFA(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "revoke sessions failed")
 		return
 	}
-	actorID := middleware.UserIDFromCtx(r.Context())
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &actorID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
@@ -430,8 +463,15 @@ func (h *UserHandler) AddMembership(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "user not found")
 		return
 	}
-	if user.IsProtected && group != model.AuthGroupAdmin {
-		jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireProtectedUserAdmin(r.Context(), h.users, actorID, user); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "add_membership", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
+		return
+	}
+	if err := requireAuthGroupContentsGrantAllowed(r.Context(), h.users, h.auths, actorID, authGroup); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "add_membership", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -445,7 +485,6 @@ func (h *UserHandler) AddMembership(w http.ResponseWriter, r *http.Request) {
 		expiresAt = &t
 	}
 
-	actorID := middleware.UserIDFromCtx(r.Context())
 	if err := h.users.AddMembership(r.Context(), id, group, &actorID, expiresAt); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "add membership failed")
 		return
@@ -493,14 +532,11 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if user.IsProtected {
-		onlyPasswordChange := req.Password != nil && strings.TrimSpace(*req.Password) != "" &&
-			req.Username == nil && req.Email == nil && req.LarkRecipient == nil && req.IsActive == nil &&
-			req.AuthGroups == nil && req.DirectPermissions == nil && req.DirectDBConnectionIDs == nil
-		if !onlyPasswordChange {
-			jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
-			return
-		}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireProtectedUserAdmin(r.Context(), h.users, actorID, user); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "patch_user", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
+		return
 	}
 
 	username := user.Username
@@ -552,7 +588,6 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	actorID := middleware.UserIDFromCtx(r.Context())
 	if req.AuthGroups != nil {
 		if h.auths == nil {
 			jsonErr(w, http.StatusInternalServerError, "auth group repo unavailable")
@@ -574,6 +609,11 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, http.StatusUnprocessableEntity, "invalid auth_group")
 				return
 			}
+			if err := requireAuthGroupContentsGrantAllowed(r.Context(), h.users, h.auths, actorID, group); err != nil {
+				h.logForbiddenUserMutation(r, actorID, id, "replace_memberships", err.Error())
+				jsonErr(w, http.StatusForbidden, err.Error())
+				return
+			}
 			seen[normalized] = true
 			nextGroups = append(nextGroups, model.AuthGroup(normalized))
 		}
@@ -589,6 +629,11 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			trimmed := strings.TrimSpace(permissionKey)
 			if trimmed == "" || seen[trimmed] {
 				continue
+			}
+			if err := requirePermissionGrantAllowed(r.Context(), h.users, actorID, trimmed); err != nil {
+				h.logForbiddenUserMutation(r, actorID, id, "replace_direct_permissions", err.Error())
+				jsonErr(w, http.StatusForbidden, err.Error())
+				return
 			}
 			seen[trimmed] = true
 			nextPermissions = append(nextPermissions, trimmed)
@@ -608,6 +653,11 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		for _, connectionID := range *req.DirectDBConnectionIDs {
 			if connectionID == 0 || seen[connectionID] {
 				continue
+			}
+			if err := requireDBConnectionGrantAllowed(r.Context(), h.users, actorID, connectionID); err != nil {
+				h.logForbiddenUserMutation(r, actorID, id, "replace_direct_db_connections", err.Error())
+				jsonErr(w, http.StatusForbidden, err.Error())
+				return
 			}
 			seen[connectionID] = true
 			nextConnectionIDs = append(nextConnectionIDs, connectionID)
@@ -694,8 +744,15 @@ func (h *UserHandler) RemoveMembership(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusNotFound, "user not found")
 		return
 	}
-	if user.IsProtected {
-		jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireProtectedUserAdmin(r.Context(), h.users, actorID, user); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "remove_membership", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
+		return
+	}
+	if err := requireAuthGroupMutationAllowed(r.Context(), h.users, actorID, authGroup); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "remove_membership", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -704,7 +761,6 @@ func (h *UserHandler) RemoveMembership(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	actorID := middleware.UserIDFromCtx(r.Context())
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &actorID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
@@ -731,8 +787,10 @@ func (h *UserHandler) AddDirectPermission(w http.ResponseWriter, r *http.Request
 		jsonErr(w, http.StatusNotFound, "user not found")
 		return
 	}
-	if user.IsProtected {
-		jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireProtectedUserAdmin(r.Context(), h.users, actorID, user); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "add_direct_permission", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -744,8 +802,14 @@ func (h *UserHandler) AddDirectPermission(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	actorID := middleware.UserIDFromCtx(r.Context())
-	if err := h.users.AddDirectPermission(r.Context(), id, strings.TrimSpace(req.PermissionKey), &actorID); err != nil {
+	permissionKey := strings.TrimSpace(req.PermissionKey)
+	if err := requirePermissionGrantAllowed(r.Context(), h.users, actorID, permissionKey); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "add_direct_permission", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
+		return
+	}
+
+	if err := h.users.AddDirectPermission(r.Context(), id, permissionKey, &actorID); err != nil {
 		if err == sql.ErrNoRows {
 			jsonErr(w, http.StatusUnprocessableEntity, "invalid permission_key")
 			return
@@ -760,7 +824,7 @@ func (h *UserHandler) AddDirectPermission(w http.ResponseWriter, r *http.Request
 		ActionType:   "user_permission_add",
 		ResourceType: "user",
 		ResourceID:   &id,
-		Details:      map[string]string{"permission_key": strings.TrimSpace(req.PermissionKey)},
+		Details:      map[string]string{"permission_key": permissionKey},
 		IPAddress:    clientIP(r),
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -778,8 +842,10 @@ func (h *UserHandler) RemoveDirectPermission(w http.ResponseWriter, r *http.Requ
 		jsonErr(w, http.StatusNotFound, "user not found")
 		return
 	}
-	if user.IsProtected {
-		jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireProtectedUserAdmin(r.Context(), h.users, actorID, user); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "remove_direct_permission", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
 		return
 	}
 	permissionKey := strings.TrimSpace(chi.URLParam(r, "permissionKey"))
@@ -806,8 +872,10 @@ func (h *UserHandler) AddDirectDBConnection(w http.ResponseWriter, r *http.Reque
 		jsonErr(w, http.StatusNotFound, "user not found")
 		return
 	}
-	if user.IsProtected {
-		jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireProtectedUserAdmin(r.Context(), h.users, actorID, user); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "add_direct_db_connection", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
 		return
 	}
 	var req struct {
@@ -817,7 +885,11 @@ func (h *UserHandler) AddDirectDBConnection(w http.ResponseWriter, r *http.Reque
 		jsonErr(w, http.StatusBadRequest, "db_connection_id is required")
 		return
 	}
-	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireDBConnectionGrantAllowed(r.Context(), h.users, actorID, req.DBConnectionID); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "add_direct_db_connection", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
+		return
+	}
 	if err := h.users.AddDirectDBConnection(r.Context(), id, req.DBConnectionID, &actorID); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "add direct db connection failed")
 		return
@@ -837,8 +909,10 @@ func (h *UserHandler) RemoveDirectDBConnection(w http.ResponseWriter, r *http.Re
 		jsonErr(w, http.StatusNotFound, "user not found")
 		return
 	}
-	if user.IsProtected {
-		jsonErr(w, http.StatusConflict, protectedUserErrorMessage())
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireProtectedUserAdmin(r.Context(), h.users, actorID, user); err != nil {
+		h.logForbiddenUserMutation(r, actorID, id, "remove_direct_db_connection", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
 		return
 	}
 	connID, err := strconv.ParseUint(chi.URLParam(r, "connID"), 10, 64)

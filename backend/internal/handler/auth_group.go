@@ -22,6 +22,24 @@ func NewAuthGroupHandler(authGroups *repository.AuthGroupRepo, users *repository
 	return &AuthGroupHandler{authGroups: authGroups, users: users, audit: audit}
 }
 
+func (h *AuthGroupHandler) logForbiddenAuthGroupMutation(r *http.Request, actorID, groupID uint64, action, reason string) {
+	if h.audit == nil {
+		return
+	}
+	_ = h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "auth_group_security_denied",
+		ResourceType: "auth_group",
+		ResourceID:   &groupID,
+		Details: map[string]string{
+			"action": action,
+			"reason": reason,
+		},
+		IPAddress: clientIP(r),
+	})
+}
+
 func (h *AuthGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 	type authGroupView struct {
 		ID                uint64   `json:"id"`
@@ -186,13 +204,35 @@ func (h *AuthGroupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actorID := middleware.UserIDFromCtx(r.Context())
+	for _, permissionKey := range req.Permissions {
+		trimmed := strings.TrimSpace(permissionKey)
+		if trimmed == "" {
+			continue
+		}
+		if err := requirePermissionGrantAllowed(r.Context(), h.users, actorID, trimmed); err != nil {
+			h.logForbiddenAuthGroupMutation(r, actorID, 0, "create_auth_group", err.Error())
+			jsonErr(w, http.StatusForbidden, err.Error())
+			return
+		}
+	}
+	for _, dbConnectionID := range req.DBConnectionIDs {
+		if dbConnectionID == 0 {
+			continue
+		}
+		if err := requireDBConnectionGrantAllowed(r.Context(), h.users, actorID, dbConnectionID); err != nil {
+			h.logForbiddenAuthGroupMutation(r, actorID, 0, "create_auth_group", err.Error())
+			jsonErr(w, http.StatusForbidden, err.Error())
+			return
+		}
+	}
+
 	group, err := h.authGroups.Create(r.Context(), groupKey, strings.TrimSpace(req.Name), strings.TrimSpace(req.Description), false, false)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "create auth group failed")
 		return
 	}
 
-	actorID := middleware.UserIDFromCtx(r.Context())
 	for _, userID := range req.UserIDs {
 		if err := h.users.AddMembership(r.Context(), userID, model.AuthGroup(group.GroupKey), &actorID, nil); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "bind auth group users failed")
@@ -247,6 +287,44 @@ func (h *AuthGroupHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "at least one mutable field is required")
 		return
 	}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireAuthGroupMutationAllowed(r.Context(), h.users, actorID, group); err != nil {
+		h.logForbiddenAuthGroupMutation(r, actorID, group.ID, "patch_auth_group", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
+		return
+	}
+	if req.UserIDs != nil {
+		if err := requireAuthGroupContentsGrantAllowed(r.Context(), h.users, h.authGroups, actorID, group); err != nil {
+			h.logForbiddenAuthGroupMutation(r, actorID, group.ID, "replace_auth_group_users", err.Error())
+			jsonErr(w, http.StatusForbidden, err.Error())
+			return
+		}
+	}
+	if req.Permissions != nil {
+		for _, permissionKey := range *req.Permissions {
+			trimmed := strings.TrimSpace(permissionKey)
+			if trimmed == "" {
+				continue
+			}
+			if err := requirePermissionGrantAllowed(r.Context(), h.users, actorID, trimmed); err != nil {
+				h.logForbiddenAuthGroupMutation(r, actorID, group.ID, "replace_auth_group_permissions", err.Error())
+				jsonErr(w, http.StatusForbidden, err.Error())
+				return
+			}
+		}
+	}
+	if req.DBConnectionIDs != nil {
+		for _, dbConnectionID := range *req.DBConnectionIDs {
+			if dbConnectionID == 0 {
+				continue
+			}
+			if err := requireDBConnectionGrantAllowed(r.Context(), h.users, actorID, dbConnectionID); err != nil {
+				h.logForbiddenAuthGroupMutation(r, actorID, group.ID, "replace_auth_group_db_connections", err.Error())
+				jsonErr(w, http.StatusForbidden, err.Error())
+				return
+			}
+		}
+	}
 
 	nextGroupKey := group.GroupKey
 	nextName := group.Name
@@ -266,7 +344,6 @@ func (h *AuthGroupHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "update auth group failed")
 		return
 	}
-	actorID := middleware.UserIDFromCtx(r.Context())
 	if req.UserIDs != nil {
 		currentUsers, err := h.users.ListUsersByAuthGroup(r.Context(), model.AuthGroup(group.GroupKey))
 		if err != nil {
@@ -363,7 +440,14 @@ func (h *AuthGroupHandler) AddPermission(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusBadRequest, "permission_key is required")
 		return
 	}
-	if err := h.authGroups.AddPermission(r.Context(), group.ID, strings.TrimSpace(req.PermissionKey)); err != nil {
+	actorID := middleware.UserIDFromCtx(r.Context())
+	permissionKey := strings.TrimSpace(req.PermissionKey)
+	if err := requirePermissionGrantAllowed(r.Context(), h.users, actorID, permissionKey); err != nil {
+		h.logForbiddenAuthGroupMutation(r, actorID, group.ID, "add_auth_group_permission", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
+		return
+	}
+	if err := h.authGroups.AddPermission(r.Context(), group.ID, permissionKey); err != nil {
 		if err == sql.ErrNoRows {
 			jsonErr(w, http.StatusUnprocessableEntity, "invalid permission_key")
 			return
@@ -403,6 +487,12 @@ func (h *AuthGroupHandler) AddDBConnection(w http.ResponseWriter, r *http.Reques
 		jsonErr(w, http.StatusBadRequest, "db_connection_id is required")
 		return
 	}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireDBConnectionGrantAllowed(r.Context(), h.users, actorID, req.DBConnectionID); err != nil {
+		h.logForbiddenAuthGroupMutation(r, actorID, group.ID, "add_auth_group_db_connection", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
+		return
+	}
 	if err := h.authGroups.AddDBConnection(r.Context(), group.ID, req.DBConnectionID); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "add auth group db connection failed")
 		return
@@ -435,6 +525,12 @@ func (h *AuthGroupHandler) loadMutableAuthGroup(w http.ResponseWriter, r *http.R
 	}
 	if group == nil {
 		jsonErr(w, http.StatusNotFound, "auth group not found")
+		return nil, false
+	}
+	actorID := middleware.UserIDFromCtx(r.Context())
+	if err := requireAuthGroupMutationAllowed(r.Context(), h.users, actorID, group); err != nil {
+		h.logForbiddenAuthGroupMutation(r, actorID, group.ID, "mutate_auth_group", err.Error())
+		jsonErr(w, http.StatusForbidden, err.Error())
 		return nil, false
 	}
 	return group, true
