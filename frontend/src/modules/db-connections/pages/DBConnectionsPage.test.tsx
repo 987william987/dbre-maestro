@@ -255,6 +255,8 @@ describe('DBConnectionsPage', () => {
     selectOption('DB Type', 'PostgreSQL')
     selectOption('SSL Mode', 'require')
     expect(screen.queryByLabelText('Database Name')).not.toBeInTheDocument()
+    expect(screen.getByText('Readonly endpoint changed. Re-enter the readonly password before saving.')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
 
     await waitFor(() => expect(mockedPatchDBConnection).toHaveBeenCalledWith(5, {
@@ -268,10 +270,32 @@ describe('DBConnectionsPage', () => {
       readwrite_port: 5432,
       database_name: 'postgres',
       username: 'readonly',
-      password: '',
+      password: 'secret',
       ssl_mode: 'require',
-      credentials: [{ credential_role: 'readonly', username: 'readonly', password: '' }],
+      credentials: [{ credential_role: 'readonly', username: 'readonly', password: 'secret' }],
     }))
+  })
+
+  it('requires the affected role password when editing an endpoint', async () => {
+    mockedPatchDBConnection.mockResolvedValue(connection)
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getAllByText('analytics').length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    fireEvent.change(screen.getByLabelText('Readonly Host'), { target: { value: 'new-db.internal' } })
+
+    expect(screen.getByText('Readonly endpoint changed. Re-enter the readonly password before saving.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+
+    await waitFor(() => expect(mockedPatchDBConnection).toHaveBeenCalledWith(5, expect.objectContaining({
+      readonly_host: 'new-db.internal',
+      password: 'secret',
+      credentials: [{ credential_role: 'readonly', username: 'readonly', password: 'secret' }],
+    })))
   })
 
   it('keeps the database field hidden for mysql and always submits null', async () => {

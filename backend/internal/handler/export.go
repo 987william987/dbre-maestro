@@ -553,13 +553,17 @@ func (h *ExportHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GET /exports/download/{token} — validate token, execute SQL, stream CSV
-// Token is the only auth; expired → 403; token-not-found → 403 (no enumeration).
-// Status must be "ready" to allow download.
+// GET /exports/download/{token} — authenticated one-time download.
+// Token-not-found, expired, reused, or unauthorized all avoid token enumeration.
 func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
 	if len(token) != 64 {
 		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	userID := middleware.UserIDFromCtx(r.Context())
+	if userID == 0 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -568,8 +572,12 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	// 403 for not-found, expired, or not-yet-approved — no token enumeration
-	if req == nil || time.Now().After(req.ExpiresAt) || req.Status != model.ExportStatusReady {
+	// 403 for not-found, expired, reused, or not-yet-approved — no token enumeration.
+	if req == nil || time.Now().After(req.ExpiresAt) || req.Status != model.ExportStatusReady || req.DownloadedAt != nil {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if req.RequesterID != userID && !middleware.HasPermission(r.Context(), permissionSQLEditorExportReview) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -630,6 +638,16 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	downloaded, err := h.exports.MarkDownloaded(r.Context(), token)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if !downloaded {
+		http.Error(w, "download link has already been used", http.StatusGone)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="export-%s.csv"`, token[:8]))
 
@@ -648,17 +666,9 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 	}
 	cw.Flush()
 
-	h.exports.MarkDownloaded(r.Context(), token)
-
-	userID := middleware.UserIDFromCtx(r.Context())
 	reqID := req.ID
 	h.audit.Log(r.Context(), repository.AuditEntry{
-		ActorID: func() *uint64 {
-			if userID != 0 {
-				return &userID
-			}
-			return nil
-		}(),
+		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
 		ActionType:   "export_download",
 		ResourceType: "export",

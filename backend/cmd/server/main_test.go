@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dbre-maestro/maestro/internal/middleware"
@@ -59,6 +60,18 @@ func TestRequireTicketsWorkspaceReadRejectsUnrelatedPermission(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestRedactedRequestURIRedactsExportDownloadToken(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/exports/download/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?foo=bar", nil)
+
+	got := redactedRequestURI(req)
+	if got != "/api/exports/download/[redacted]?foo=bar" {
+		t.Fatalf("redactedRequestURI() = %q", got)
+	}
+	if strings.Contains(got, "0123456789abcdef") {
+		t.Fatalf("redacted URI leaked token: %q", got)
 	}
 }
 

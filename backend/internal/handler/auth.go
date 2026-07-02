@@ -23,14 +23,16 @@ import (
 )
 
 type AuthHandler struct {
-	users               *repository.UserRepo
-	sessions            *repository.SessionRepo
-	audit               *repository.AuditRepo
-	jwtSecret           []byte
-	refreshCookieSecure bool
-	loginRateLimiter    requestRateLimiter
-	refreshRateLimiter  requestRateLimiter
-	mfaEnforcement      MFAEnforcement
+	users                *repository.UserRepo
+	sessions             *repository.SessionRepo
+	audit                *repository.AuditRepo
+	mfaChallenges        *repository.MFAChallengeRepo
+	jwtSecret            []byte
+	refreshCookieSecure  bool
+	loginRateLimiter     requestRateLimiter
+	refreshRateLimiter   requestRateLimiter
+	mfaVerifyRateLimiter requestRateLimiter
+	mfaEnforcement       MFAEnforcement
 }
 
 type MFAEnforcement string
@@ -44,11 +46,13 @@ const (
 	refreshCookiePath       = "/api/auth/refresh"
 	refreshReuseGraceWindow = 30 * time.Second
 	sessionListLimit        = 20
+	mfaMaxAttempts          = 5
 )
 
 func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, jwtSecret []byte, options ...any) *AuthHandler {
 	secure := false
 	enforcement := MFAEnforcementDisabled
+	var mfaChallenges *repository.MFAChallengeRepo
 	for _, option := range options {
 		switch value := option.(type) {
 		case bool:
@@ -57,17 +61,21 @@ func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo
 			enforcement = normalizeMFAEnforcement(value)
 		case MFAEnforcement:
 			enforcement = value
+		case *repository.MFAChallengeRepo:
+			mfaChallenges = value
 		}
 	}
 	return &AuthHandler{
-		users:               users,
-		sessions:            sessions,
-		audit:               audit,
-		jwtSecret:           jwtSecret,
-		refreshCookieSecure: secure,
-		loginRateLimiter:    newRequestRateLimiter(5, time.Minute),
-		refreshRateLimiter:  newRequestRateLimiter(30, time.Minute),
-		mfaEnforcement:      enforcement,
+		users:                users,
+		sessions:             sessions,
+		audit:                audit,
+		mfaChallenges:        mfaChallenges,
+		jwtSecret:            jwtSecret,
+		refreshCookieSecure:  secure,
+		loginRateLimiter:     newRequestRateLimiter(5, time.Minute),
+		refreshRateLimiter:   newRequestRateLimiter(30, time.Minute),
+		mfaVerifyRateLimiter: newRequestRateLimiter(10, time.Minute),
+		mfaEnforcement:       enforcement,
 	}
 }
 
@@ -179,7 +187,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			h.startMFASetup(w, r, user)
 			return
 		}
-		mfaToken, err := auth.NewMFAChallengeToken(user.ID, user.Username, false, h.jwtSecret)
+		mfaToken, err := h.newMFAChallenge(r.Context(), r, user, false)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "token error")
 			return
@@ -239,7 +247,7 @@ func (h *AuthHandler) startMFASetup(w http.ResponseWriter, r *http.Request, user
 		jsonErr(w, http.StatusInternalServerError, "mfa setup failed")
 		return
 	}
-	mfaToken, err := auth.NewMFAChallengeToken(user.ID, user.Username, true, h.jwtSecret)
+	mfaToken, err := h.newMFAChallenge(r.Context(), r, user, true)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "token error")
 		return
@@ -258,6 +266,28 @@ func (h *AuthHandler) startMFASetup(w http.ResponseWriter, r *http.Request, user
 	})
 }
 
+func (h *AuthHandler) newMFAChallenge(ctx context.Context, r *http.Request, user *model.User, setup bool) (string, error) {
+	if h.mfaChallenges == nil {
+		return "", fmt.Errorf("mfa challenge repository is not configured")
+	}
+	tokenID, err := auth.NewTokenID()
+	if err != nil {
+		return "", err
+	}
+	createdIP := clientIP(r)
+	expiresAt := time.Now().Add(auth.MFAChallengeTTL)
+	if err := h.mfaChallenges.Create(ctx, model.MFAChallenge{
+		TokenID:   tokenID,
+		UserID:    user.ID,
+		Setup:     setup,
+		ExpiresAt: expiresAt,
+		CreatedIP: &createdIP,
+	}); err != nil {
+		return "", err
+	}
+	return auth.NewMFAChallengeTokenWithID(user.ID, user.Username, setup, tokenID, h.jwtSecret)
+}
+
 // POST /auth/mfa/verify
 func (h *AuthHandler) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -271,6 +301,22 @@ func (h *AuthHandler) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 	claims, err := auth.ParseMFAChallengeToken(strings.TrimSpace(req.MFAToken), h.jwtSecret)
 	if err != nil {
 		jsonErr(w, http.StatusUnauthorized, "invalid mfa token")
+		return
+	}
+	if claims.ID == "" || h.mfaChallenges == nil {
+		jsonErr(w, http.StatusUnauthorized, "invalid mfa challenge")
+		return
+	}
+	if !h.allowMFAVerifyAttempt(w, r, claims) {
+		return
+	}
+	challenge, err := h.mfaChallenges.GetByTokenID(r.Context(), claims.ID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "mfa challenge check failed")
+		return
+	}
+	if !validMFAChallenge(challenge, claims) {
+		jsonErr(w, http.StatusUnauthorized, "invalid mfa challenge")
 		return
 	}
 	user, err := h.users.GetByID(r.Context(), claims.UserID)
@@ -297,6 +343,10 @@ func (h *AuthHandler) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !totp.Validate(strings.TrimSpace(req.Code), secret) {
+		if err := h.mfaChallenges.RecordFailedAttempt(r.Context(), challenge.ID, mfaMaxAttempts); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "mfa challenge update failed")
+			return
+		}
 		h.logAudit(r, repository.AuditEntry{
 			ActorID:      &user.ID,
 			ActorName:    user.Username,
@@ -304,6 +354,15 @@ func (h *AuthHandler) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 			ResourceType: "auth",
 		})
 		jsonErr(w, http.StatusUnauthorized, "invalid mfa code")
+		return
+	}
+	used, err := h.mfaChallenges.MarkUsed(r.Context(), challenge.ID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "mfa challenge update failed")
+		return
+	}
+	if !used {
+		jsonErr(w, http.StatusUnauthorized, "invalid mfa challenge")
 		return
 	}
 	if claims.Setup || !user.MFAEnabled {
@@ -319,6 +378,19 @@ func (h *AuthHandler) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	h.completeLogin(w, r, user)
+}
+
+func validMFAChallenge(challenge *model.MFAChallenge, claims *auth.MFAChallengeClaims) bool {
+	if challenge == nil || claims == nil {
+		return false
+	}
+	if challenge.UserID != claims.UserID || challenge.Setup != claims.Setup {
+		return false
+	}
+	if challenge.UsedAt != nil || challenge.RevokedAt != nil {
+		return false
+	}
+	return time.Now().Before(challenge.ExpiresAt)
 }
 
 // POST /auth/refresh
@@ -600,6 +672,35 @@ func (h *AuthHandler) allowAuthAttempt(w http.ResponseWriter, r *http.Request, l
 	})
 	jsonErr(w, http.StatusTooManyRequests, fmt.Sprintf("%s rate limit exceeded", action))
 	return false
+}
+
+func (h *AuthHandler) allowMFAVerifyAttempt(w http.ResponseWriter, r *http.Request, claims *auth.MFAChallengeClaims) bool {
+	if h.mfaVerifyRateLimiter == nil || claims == nil {
+		return true
+	}
+	now := time.Now()
+	keys := []string{
+		"ip:" + clientIP(r),
+		fmt.Sprintf("user:%d", claims.UserID),
+		"token:" + claims.ID,
+	}
+	for _, key := range keys {
+		if h.mfaVerifyRateLimiter.Allow(key, now) {
+			continue
+		}
+		h.logAudit(r, repository.AuditEntry{
+			ActorID:      &claims.UserID,
+			ActorName:    claims.Username,
+			ActionType:   "auth_rate_limited",
+			ResourceType: "auth",
+			Details: map[string]any{
+				"action": "mfa_verify",
+			},
+		})
+		jsonErr(w, http.StatusTooManyRequests, "mfa verify rate limit exceeded")
+		return false
+	}
+	return true
 }
 
 func (h *AuthHandler) requiresMFA(ctx context.Context, user *model.User) (bool, error) {

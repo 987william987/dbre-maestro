@@ -425,12 +425,8 @@ func (h *ScheduledSQLReportHandler) executeReport(ctx context.Context, report *m
 	if err != nil {
 		return nil, "", 0, err
 	}
-	decisions, _, err := h.masking.analyzeSensitiveColumns(ctx, resolvedConn, result)
-	if err != nil {
-		return nil, "", 0, err
-	}
-	if len(decisions) > 0 {
-		return nil, "", 0, fmt.Errorf("scheduled report result contains sensitive columns")
+	if _, _, err := h.masking.applyResult(ctx, resolvedConn, 0, result); err != nil {
+		return nil, "", 0, fmt.Errorf("masking scheduled report result: %w", err)
 	}
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)

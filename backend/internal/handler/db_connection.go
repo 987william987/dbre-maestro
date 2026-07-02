@@ -23,11 +23,11 @@ type DBConnectionHandler struct {
 }
 
 type dbConnectionTestResponse struct {
-	OK             bool       `json:"ok"`
-	Error          string     `json:"error,omitempty"`
-	LastTestStatus string     `json:"last_test_status"`
-	LastTestError  string     `json:"last_test_error,omitempty"`
-	LastTestedAt   *time.Time `json:"last_tested_at,omitempty"`
+	OK             bool                             `json:"ok"`
+	Error          string                           `json:"error,omitempty"`
+	LastTestStatus string                           `json:"last_test_status"`
+	LastTestError  string                           `json:"last_test_error,omitempty"`
+	LastTestedAt   *time.Time                       `json:"last_tested_at,omitempty"`
 	Results        []dbConnectionEndpointTestResult `json:"results,omitempty"`
 }
 
@@ -320,6 +320,12 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		sslMode = *req.SSLMode
 	}
 
+	credentials := normalizeCredentialPayloads(existingCredentials(existing, req.Credentials))
+	if err := validateEndpointCredentialRefresh(existing, readonlyHost, readonlyPort, readwriteHost, readwritePort, req.Password, credentials); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
 	if err := h.repo.Update(r.Context(), id, name, dbType, host, port, readonlyHost, readonlyPort, readwriteHost, readwritePort, databaseName, username, sslMode); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "update failed")
 		return
@@ -330,7 +336,6 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	credentials := normalizeCredentialPayloads(existingCredentials(existing, req.Credentials))
 	if req.Credentials != nil {
 		if err := h.repo.ReplaceCredentials(r.Context(), id, credentials); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "update credentials failed")
@@ -451,7 +456,7 @@ func normalizeConnectionEndpoints(host string, port uint16, readonlyHost string,
 func (h *DBConnectionHandler) testConnectionByRole(ctx context.Context, conn *model.DBConnection, role string) (bool, string) {
 	resolvedConn, password, err := h.repo.ResolveCredential(conn, role)
 	if err != nil {
-		return false, err.Error()
+		return false, sanitizeConnectionTestError(err)
 	}
 
 	if conn.DBType == "redis" {
@@ -466,7 +471,7 @@ func (h *DBConnectionHandler) testConnectionByRole(ctx context.Context, conn *mo
 			DB:       0,
 			SSLMode:  resolvedConn.SSLMode,
 		}); err != nil {
-			return false, err.Error()
+			return false, sanitizeConnectionTestError(err)
 		}
 		return true, ""
 	}
@@ -474,16 +479,61 @@ func (h *DBConnectionHandler) testConnectionByRole(ctx context.Context, conn *mo
 	driver, dsn := pool.BuildDSN(resolvedConn, password)
 	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
 	if err != nil {
-		return false, err.Error()
+		return false, sanitizeConnectionTestError(err)
 	}
 
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := pools.QueryPool.PingContext(pingCtx); err != nil {
-		return false, err.Error()
+		return false, sanitizeConnectionTestError(err)
 	}
 
 	return true, ""
+}
+
+func sanitizeConnectionTestError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if strings.Contains(err.Error(), "not configured") {
+		return "credential is not configured"
+	}
+	return "connection test failed"
+}
+
+func validateEndpointCredentialRefresh(existing *model.DBConnection, readonlyHost string, readonlyPort uint16, readwriteHost string, readwritePort uint16, legacyPassword *string, credentials []model.DBConnectionCredentialInput) error {
+	legacyPasswordProvided := legacyPassword != nil && *legacyPassword != ""
+	if endpointChanged(existing.EffectiveReadonlyHost(), existing.EffectiveReadonlyPort(), readonlyHost, readonlyPort) && !credentialPasswordProvided(credentials, model.DBCredentialRoleReadonly, legacyPasswordProvided) {
+		return errStr("readonly endpoint changed; readonly password is required")
+	}
+	if endpointChanged(existing.EffectiveReadwriteHost(), existing.EffectiveReadwritePort(), readwriteHost, readwritePort) && !credentialPasswordProvided(credentials, model.DBCredentialRoleReadwrite, legacyPasswordProvided) {
+		return errStr("readwrite endpoint changed; readwrite password is required")
+	}
+	return nil
+}
+
+func endpointChanged(currentHost string, currentPort uint16, nextHost string, nextPort uint16) bool {
+	return strings.TrimSpace(currentHost) != strings.TrimSpace(nextHost) || currentPort != nextPort
+}
+
+func credentialPasswordProvided(credentials []model.DBConnectionCredentialInput, role string, legacyPasswordProvided bool) bool {
+	roleConfigured := false
+	for _, credential := range credentials {
+		if credential.CredentialRole != role {
+			continue
+		}
+		if strings.TrimSpace(credential.Username) == "" {
+			continue
+		}
+		roleConfigured = true
+		if credential.Password != "" {
+			return true
+		}
+	}
+	if roleConfigured {
+		return false
+	}
+	return legacyPasswordProvided
 }
 
 func (h *DBConnectionHandler) writeTestResult(w http.ResponseWriter, r *http.Request, connectionID uint64, ok bool, message string, results []dbConnectionEndpointTestResult) {

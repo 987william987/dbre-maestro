@@ -47,6 +47,41 @@ func timeoutExceptEventStream(timeout time.Duration) func(http.Handler) http.Han
 	}
 }
 
+func redactingRequestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+		defer func() {
+			status := ww.Status()
+			if status == 0 {
+				status = http.StatusOK
+			}
+			slog.Info("request complete",
+				"method", r.Method,
+				"path", redactedRequestURI(r),
+				"status", status,
+				"bytes", ww.BytesWritten(),
+				"duration", time.Since(start),
+				"remote_addr", r.RemoteAddr,
+			)
+		}()
+		next.ServeHTTP(ww, r)
+	})
+}
+
+func redactedRequestURI(r *http.Request) string {
+	if r == nil || r.URL == nil {
+		return ""
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/exports/download/") {
+		if r.URL.RawQuery == "" {
+			return "/api/exports/download/[redacted]"
+		}
+		return "/api/exports/download/[redacted]?" + r.URL.RawQuery
+	}
+	return r.URL.RequestURI()
+}
+
 func resetMFABreakGlass(ctx context.Context, users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, username string) error {
 	user, err := users.GetByUsername(ctx, username)
 	if err != nil {
@@ -153,6 +188,7 @@ func main() {
 	userRepo := repository.NewUserRepo(metaDB, cfg.EncryptionKey)
 	sessionRepo := repository.NewSessionRepo(metaDB)
 	auditRepo := repository.NewAuditRepo(metaDB)
+	mfaChallengeRepo := repository.NewMFAChallengeRepo(metaDB)
 	if strings.TrimSpace(*resetMFAUsername) != "" {
 		if err := resetMFABreakGlass(context.Background(), userRepo, sessionRepo, auditRepo, strings.TrimSpace(*resetMFAUsername)); err != nil {
 			slog.Error("break-glass mfa reset failed", "err", err)
@@ -187,7 +223,7 @@ func main() {
 	}
 
 	healthH := handler.NewHealthHandler(metaDB)
-	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret, cfg.RefreshCookieSecure, cfg.MFAEnforcement)
+	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret, cfg.RefreshCookieSecure, cfg.MFAEnforcement, mfaChallengeRepo)
 	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL)
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo)
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
@@ -218,7 +254,7 @@ func main() {
 	r.Use(middleware.SecurityHeaders(cfg.AppEnv == "production"))
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
-	r.Use(chimw.Logger)
+	r.Use(redactingRequestLogger)
 	r.Use(chimw.Recoverer)
 	r.Use(timeoutExceptEventStream(requestTimeout))
 
@@ -261,7 +297,11 @@ func main() {
 				middleware.InjectPermissions(userRepo),
 				middleware.RequirePermission("sql_editor.export"),
 			).Post("/", exportH.Create)
-			r.Get("/download/{token}", exportH.Download)
+			r.With(
+				middleware.RequireAuth(cfg.JWTSecret),
+				middleware.RequireActiveUser(userRepo),
+				middleware.InjectPermissions(userRepo),
+			).Get("/download/{token}", exportH.Download)
 		})
 
 		r.Route("/db-connections", func(r chi.Router) {

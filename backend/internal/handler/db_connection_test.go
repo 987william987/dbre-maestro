@@ -121,6 +121,186 @@ func TestDBConnectionHandlerPatchAllowsClearingDatabaseName(t *testing.T) {
 	}
 }
 
+func TestDBConnectionHandlerPatchRejectsReadonlyEndpointChangeWithoutPassword(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewDBConnectionHandler(
+		repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")),
+		repository.NewUserRepo(sqlxDB),
+		repository.NewAuthGroupRepo(sqlxDB),
+		repository.NewAuditRepo(sqlxDB),
+	)
+
+	mock.ExpectQuery(`SELECT \* FROM db_connections WHERE id = \?`).
+		WithArgs(uint64(5)).
+		WillReturnRows(dbConnectionRows("analytics"))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
+
+	req := withURLParam(httptest.NewRequest(http.MethodPatch, "/db-connections/5", strings.NewReader(`{"readonly_host":"new-db.internal"}`)), "id", "5")
+	rec := httptest.NewRecorder()
+	handler.Patch(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "readonly password is required") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestDBConnectionHandlerPatchRejectsReadonlyEndpointChangeWhenRoleCredentialWouldBeReused(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewDBConnectionHandler(
+		repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")),
+		repository.NewUserRepo(sqlxDB),
+		repository.NewAuthGroupRepo(sqlxDB),
+		repository.NewAuditRepo(sqlxDB),
+	)
+
+	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`SELECT \* FROM db_connections WHERE id = \?`).
+		WithArgs(uint64(5)).
+		WillReturnRows(dbConnectionRows("analytics"))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}).
+			AddRow(11, 5, "readonly", "readonly", []byte("readonly-cipher"), 1, now, now))
+
+	req := withURLParam(httptest.NewRequest(http.MethodPatch, "/db-connections/5", strings.NewReader(`{"readonly_host":"new-db.internal","password":"legacy-secret"}`)), "id", "5")
+	rec := httptest.NewRecorder()
+	handler.Patch(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "readonly password is required") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestDBConnectionHandlerPatchRejectsReadwriteEndpointChangeWithoutPassword(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewDBConnectionHandler(
+		repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")),
+		repository.NewUserRepo(sqlxDB),
+		repository.NewAuthGroupRepo(sqlxDB),
+		repository.NewAuditRepo(sqlxDB),
+	)
+
+	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`SELECT \* FROM db_connections WHERE id = \?`).
+		WithArgs(uint64(5)).
+		WillReturnRows(dbConnectionRows("analytics"))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}).
+			AddRow(12, 5, "readwrite", "writer", []byte("readwrite-cipher"), 1, now, now))
+
+	req := withURLParam(httptest.NewRequest(http.MethodPatch, "/db-connections/5", strings.NewReader(`{"readwrite_host":"new-writer.internal"}`)), "id", "5")
+	rec := httptest.NewRecorder()
+	handler.Patch(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "readwrite password is required") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestDBConnectionHandlerTestRedactsConnectionFailureDetails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewDBConnectionHandler(
+		repository.NewDBConnectionRepo(sqlxDB, []byte("01234567890123456789012345678901")),
+		repository.NewUserRepo(sqlxDB),
+		repository.NewAuthGroupRepo(sqlxDB),
+		repository.NewAuditRepo(sqlxDB),
+	)
+
+	mock.ExpectQuery(`SELECT \* FROM db_connections WHERE id = \?`).
+		WithArgs(uint64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id",
+			"name",
+			"db_type",
+			"host",
+			"port",
+			"readonly_host",
+			"readonly_port",
+			"readwrite_host",
+			"readwrite_port",
+			"database_name",
+			"username",
+			"password_encrypted",
+			"encryption_key_version",
+			"ssl_mode",
+			"extra_params",
+			"last_test_status",
+			"last_test_error",
+			"last_tested_at",
+			"created_by",
+			"created_at",
+			"updated_at",
+		}).AddRow(5, "analytics", "mysql", "secret-db.internal", 3306, "secret-db.internal", 3306, "secret-db.internal", 3306, "analytics", "readonly", []byte(nil), 1, "prefer", nil, nil, nil, nil, 1, time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \?`).
+		WithArgs(uint64(5)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
+	mock.ExpectExec(`UPDATE db_connections`).
+		WithArgs("failed", "credential is not configured", sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(5)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	req := withURLParam(httptest.NewRequest(http.MethodPost, "/db-connections/5/test?credential_role=readonly", nil), "id", "5")
+	rec := httptest.NewRecorder()
+	handler.Test(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "credential is not configured") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "secret-db.internal") {
+		t.Fatalf("body leaked connection detail: %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestDBConnectionHandlerCreateRedisAllowsEmptyUsername(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
