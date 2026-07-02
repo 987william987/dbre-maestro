@@ -172,6 +172,11 @@ export function DBConnectionsPage() {
         await createDBConnection(toPayload(form))
         pushToast('Database connection created', 'success')
       } else if (selectedConnection) {
+        const endpointError = getEndpointPasswordError(selectedConnection, form)
+        if (endpointError) {
+          setDrawerError(endpointError)
+          return
+        }
         await patchDBConnection(selectedConnection.id, toPayload(form))
         pushToast('Database connection updated', 'success')
       }
@@ -243,6 +248,9 @@ export function DBConnectionsPage() {
     })
   }, [connections])
   const pagedConnections = useMemo(() => sortedConnections.slice(offset, offset + PAGE_SIZE), [offset, sortedConnections])
+  const endpointPasswordError = drawerState?.mode === 'edit' && selectedConnection
+    ? getEndpointPasswordError(selectedConnection, form)
+    : ''
 
   useEffect(() => {
     if (offset > 0 && offset >= sortedConnections.length) {
@@ -507,7 +515,7 @@ export function DBConnectionsPage() {
                             value={form.readonlyPassword}
                             type="password"
                             onChange={(event) => setForm((current) => ({ ...current, readonlyPassword: event.target.value }))}
-                            placeholder={drawerState.mode === 'edit' ? 'Leave blank to keep the current password' : ''}
+                            placeholder={drawerState.mode === 'edit' ? 'Required when readonly endpoint changes' : ''}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           />
@@ -530,7 +538,7 @@ export function DBConnectionsPage() {
                             value={form.readwritePassword}
                             type="password"
                             onChange={(event) => setForm((current) => ({ ...current, readwritePassword: event.target.value }))}
-                            placeholder={drawerState.mode === 'edit' ? 'Leave blank to keep the current password' : ''}
+                            placeholder={drawerState.mode === 'edit' ? 'Required when readwrite endpoint changes' : ''}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             disabled={submitting}
                           />
@@ -539,7 +547,7 @@ export function DBConnectionsPage() {
 
                       <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
                         <p className="font-semibold text-ink">Credential Policy</p>
-                        <p className="mt-1">SQL Editor and DB Metadata use `readonly`; ticket execution uses `readwrite`. In edit mode, leaving a password blank keeps the current password.</p>
+                        <p className="mt-1">SQL Editor and DB Metadata use `readonly`; ticket execution uses `readwrite`. In edit mode, leaving a password blank keeps the current password only when the corresponding endpoint is unchanged.</p>
                       </div>
 
                       <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
@@ -547,9 +555,11 @@ export function DBConnectionsPage() {
                         <p className="mt-1">{activeSSLMode?.description}</p>
                       </div>
 
+                      {endpointPasswordError ? <InlineAlert>{endpointPasswordError}</InlineAlert> : null}
+
                       <button
                         type="submit"
-                        disabled={submitting || !isFormSubmittable(form, drawerState.mode === 'edit')}
+                        disabled={submitting || !isFormSubmittable(form, drawerState.mode === 'edit') || Boolean(endpointPasswordError)}
                         className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : drawerState.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
@@ -666,6 +676,41 @@ function isFormSubmittable(form: ConnectionForm, isEdit = false) {
     return false
   }
   return Number(form.readonlyPort) > 0 && Number(form.readwritePort || form.readonlyPort) > 0
+}
+
+function getEndpointPasswordError(connection: DBConnection, form: ConnectionForm) {
+  if (readonlyEndpointChanged(connection, form) && !form.readonlyPassword) {
+    return 'Readonly endpoint changed. Re-enter the readonly password before saving.'
+  }
+  if (readwriteEndpointChanged(connection, form) && form.readwriteUsername.trim() && !form.readwritePassword) {
+    return 'Readwrite endpoint changed. Re-enter the readwrite password before saving.'
+  }
+  if (readwriteEndpointChanged(connection, form) && !form.readwriteUsername.trim() && !form.readonlyPassword) {
+    return 'Readwrite endpoint changed. Re-enter the connection password before saving.'
+  }
+  return ''
+}
+
+function readonlyEndpointChanged(connection: DBConnection, form: ConnectionForm) {
+  return endpointChanged(
+    connection.readonly_host || connection.host,
+    connection.readonly_port || connection.port,
+    form.readonlyHost,
+    form.readonlyPort,
+  )
+}
+
+function readwriteEndpointChanged(connection: DBConnection, form: ConnectionForm) {
+  return endpointChanged(
+    connection.readwrite_host || connection.readonly_host || connection.host,
+    connection.readwrite_port || connection.readonly_port || connection.port,
+    form.readwriteHost || form.readonlyHost,
+    form.readwritePort || form.readonlyPort,
+  )
+}
+
+function endpointChanged(currentHost: string, currentPort: number, nextHost: string, nextPort: string) {
+  return currentHost.trim() !== nextHost.trim() || currentPort !== Number(nextPort)
 }
 
 function formatDBType(dbType: string) {
