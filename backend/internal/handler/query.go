@@ -253,6 +253,11 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		SchemaName:   queryCtx.SchemaName,
 	}); err != nil {
 		if missingErr, ok := err.(*queryaccess.MissingAccessError); ok {
+			h.auditBlockedQuery(r, userID, conn.ID, req.SQL, "query_access_policy", map[string]any{
+				"database": strings.TrimSpace(req.Database),
+				"schema":   strings.TrimSpace(req.Schema),
+				"missing":  missingErr.Missing,
+			})
 			jsonErr(w, http.StatusForbidden, missingErr.Error())
 			return
 		}
@@ -1129,23 +1134,9 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 			return
 		}
 		if err := sqlreview.CheckRedisSensitiveKeyPrefixes(cmd, args, repository.RedisSensitiveKeyPrefixValues(prefixRules)); err != nil {
-			if h.audit != nil {
-				userID := middleware.UserIDFromCtx(r.Context())
-				connID := conn.ID
-				h.audit.Log(r.Context(), repository.AuditEntry{
-					ActorID:      &userID,
-					ActorName:    middleware.UsernameFromCtx(r.Context()),
-					ActionType:   "query_blocked",
-					ResourceType: "db_connection",
-					ResourceID:   &connID,
-					Details: map[string]any{
-						"sql":            truncate(cmdLine, 500),
-						"reason":         "redis_sensitive_key_policy",
-						"redis_db_index": dbIndex,
-					},
-					IPAddress: clientIP(r),
-				})
-			}
+			h.auditBlockedQuery(r, middleware.UserIDFromCtx(r.Context()), conn.ID, cmdLine, "redis_sensitive_key_policy", map[string]any{
+				"redis_db_index": dbIndex,
+			})
 			jsonErr(w, http.StatusForbidden, err.Error())
 			return
 		}
@@ -1201,6 +1192,28 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 		"rows":        result.Rows,
 		"row_count":   len(result.Rows),
 		"duration_ms": durationMs,
+	})
+}
+
+func (h *QueryHandler) auditBlockedQuery(r *http.Request, userID uint64, connID uint64, sqlText string, reason string, extra map[string]any) {
+	if h.audit == nil {
+		return
+	}
+	details := map[string]any{
+		"sql":    truncate(sqlText, 500),
+		"reason": reason,
+	}
+	for key, value := range extra {
+		details[key] = value
+	}
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "query_blocked",
+		ResourceType: "db_connection",
+		ResourceID:   &connID,
+		Details:      details,
+		IPAddress:    clientIP(r),
 	})
 }
 

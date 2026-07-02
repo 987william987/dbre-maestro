@@ -48,6 +48,7 @@ type RuleForm = {
 type WhitelistForm = {
   dbConnectionId: string
   databaseName: string
+  schemaName: string
   tableName: string
   columnName: string
 }
@@ -85,6 +86,7 @@ const EMPTY_RULE_FORM: RuleForm = {
 const EMPTY_WHITELIST_FORM: WhitelistForm = {
   dbConnectionId: '',
   databaseName: '',
+  schemaName: '',
   tableName: '',
   columnName: '',
 }
@@ -151,6 +153,7 @@ export function MaskingRulesPage() {
   const [whitelistSubmitting, setWhitelistSubmitting] = useState(false)
   const [whitelistDrawerError, setWhitelistDrawerError] = useState('')
   const [databaseOptions, setDatabaseOptions] = useState<string[]>([])
+  const [schemaOptions, setSchemaOptions] = useState<string[]>([])
   const [tableOptions, setTableOptions] = useState<string[]>([])
   const [columnOptions, setColumnOptions] = useState<string[]>([])
   const [targetLoading, setTargetLoading] = useState(false)
@@ -163,8 +166,15 @@ export function MaskingRulesPage() {
   const [pendingDelete, setPendingDelete] = useState<{ kind: 'rule' | 'whitelist' | 'redisPrefix'; id: number } | null>(null)
   const [deletingKey, setDeletingKey] = useState<string | null>(null)
 
-  const mysqlConnections = useMemo(() => connections.filter((connection) => connection.dbType === 'mysql'), [connections])
+  const sqlConnections = useMemo(
+    () => connections.filter((connection) => connection.dbType === 'mysql' || connection.dbType === 'postgres' || connection.dbType === 'postgresql'),
+    [connections],
+  )
   const redisConnections = useMemo(() => connections.filter((connection) => connection.dbType === 'redis'), [connections])
+  const selectedWhitelistConnection = useMemo(
+    () => connections.find((connection) => String(connection.id) === whitelistForm.dbConnectionId) ?? null,
+    [connections, whitelistForm.dbConnectionId],
+  )
   const sortedRules = useMemo(() => [...rules].sort((left, right) => left.column_name.localeCompare(right.column_name)), [rules])
   const sortedWhitelist = useMemo(
     () =>
@@ -201,6 +211,7 @@ export function MaskingRulesPage() {
   useEffect(() => {
     if (!whitelistDrawer || !whitelistForm.dbConnectionId) {
       setDatabaseOptions([])
+      setSchemaOptions([])
       setTableOptions([])
       setColumnOptions([])
       return
@@ -210,20 +221,49 @@ export function MaskingRulesPage() {
 
   useEffect(() => {
     if (!whitelistDrawer || !whitelistForm.dbConnectionId || !whitelistForm.databaseName) {
+      setSchemaOptions([])
       setTableOptions([])
       setColumnOptions([])
       return
     }
-    void loadTables(Number(whitelistForm.dbConnectionId), whitelistForm.databaseName)
+    if (selectedWhitelistConnection?.dbType === 'postgres' || selectedWhitelistConnection?.dbType === 'postgresql') {
+      void loadSchemas(Number(whitelistForm.dbConnectionId), whitelistForm.databaseName)
+      return
+    }
+    void loadTables(Number(whitelistForm.dbConnectionId), whitelistForm.databaseName, '')
   }, [whitelistDrawer, whitelistForm.dbConnectionId, whitelistForm.databaseName])
+
+  useEffect(() => {
+    if (
+      !whitelistDrawer ||
+      !whitelistForm.dbConnectionId ||
+      !whitelistForm.databaseName ||
+      !(selectedWhitelistConnection?.dbType === 'postgres' || selectedWhitelistConnection?.dbType === 'postgresql') ||
+      !whitelistForm.schemaName
+    ) {
+      if (selectedWhitelistConnection?.dbType === 'postgres' || selectedWhitelistConnection?.dbType === 'postgresql') {
+        setTableOptions([])
+        setColumnOptions([])
+      }
+      return
+    }
+    void loadTables(Number(whitelistForm.dbConnectionId), whitelistForm.databaseName, whitelistForm.schemaName)
+  }, [whitelistDrawer, whitelistForm.dbConnectionId, whitelistForm.databaseName, whitelistForm.schemaName])
 
   useEffect(() => {
     if (!whitelistDrawer || !whitelistForm.dbConnectionId || !whitelistForm.databaseName || !whitelistForm.tableName) {
       setColumnOptions([])
       return
     }
-    void loadColumns(Number(whitelistForm.dbConnectionId), whitelistForm.databaseName, whitelistForm.tableName)
-  }, [whitelistDrawer, whitelistForm.dbConnectionId, whitelistForm.databaseName, whitelistForm.tableName])
+    const schemaName = selectedWhitelistConnection?.dbType === 'postgres' || selectedWhitelistConnection?.dbType === 'postgresql'
+      ? whitelistForm.schemaName
+      : whitelistForm.databaseName
+    if (!schemaName) {
+      setColumnOptions([])
+      return
+    }
+    void loadColumns(Number(whitelistForm.dbConnectionId), whitelistForm.databaseName, schemaName, whitelistForm.tableName)
+  }, [whitelistDrawer, whitelistForm.dbConnectionId, whitelistForm.databaseName, whitelistForm.schemaName, whitelistForm.tableName])
 
   useEffect(() => {
     if (rulesOffset > 0 && rulesOffset >= sortedRules.length) {
@@ -278,10 +318,22 @@ export function MaskingRulesPage() {
     }
   }
 
-  async function loadTables(connectionId: number, databaseName: string) {
+  async function loadSchemas(connectionId: number, databaseName: string) {
     setTargetLoading(true)
     try {
       const response = await listMaskingMetadata(connectionId, { database: databaseName })
+      setSchemaOptions(response.items.map((item) => item.name))
+    } catch {
+      setSchemaOptions([])
+    } finally {
+      setTargetLoading(false)
+    }
+  }
+
+  async function loadTables(connectionId: number, databaseName: string, schemaName: string) {
+    setTargetLoading(true)
+    try {
+      const response = await listMaskingMetadata(connectionId, schemaName ? { database: databaseName, schema: schemaName } : { database: databaseName })
       setTableOptions(response.items.map((item) => item.name))
     } catch {
       setTableOptions([])
@@ -290,10 +342,10 @@ export function MaskingRulesPage() {
     }
   }
 
-  async function loadColumns(connectionId: number, databaseName: string, tableName: string) {
+  async function loadColumns(connectionId: number, databaseName: string, schemaName: string, tableName: string) {
     setTargetLoading(true)
     try {
-      const response = await listMaskingMetadataColumns(connectionId, databaseName, tableName, databaseName)
+      const response = await listMaskingMetadataColumns(connectionId, schemaName, tableName, databaseName)
       setColumnOptions(response.columns.map((column) => column.name))
     } catch {
       setColumnOptions([])
@@ -332,6 +384,7 @@ export function MaskingRulesPage() {
         ? {
             dbConnectionId: String(state.entry.db_connection_id),
             databaseName: state.entry.database_name,
+            schemaName: state.entry.schema_name ?? '',
             tableName: state.entry.table_name,
             columnName: state.entry.column_name,
           }
@@ -345,6 +398,7 @@ export function MaskingRulesPage() {
     setWhitelistSubmitting(false)
     setWhitelistForm(EMPTY_WHITELIST_FORM)
     setDatabaseOptions([])
+    setSchemaOptions([])
     setTableOptions([])
     setColumnOptions([])
   }
@@ -416,15 +470,16 @@ export function MaskingRulesPage() {
       const payload = {
         db_connection_id: Number(whitelistForm.dbConnectionId),
         database_name: whitelistForm.databaseName.trim(),
+        schema_name: whitelistForm.schemaName.trim(),
         table_name: whitelistForm.tableName.trim(),
         column_name: whitelistForm.columnName.trim(),
       }
       if (whitelistDrawer.mode === 'create') {
         await createMaskingWhitelist(payload)
-        pushToast(`Whitelist created: ${payload.database_name}.${payload.table_name}.${payload.column_name}`, 'success')
+        pushToast(`Whitelist created: ${formatWhitelistTarget(payload)}`, 'success')
       } else {
         await patchMaskingWhitelist(whitelistDrawer.entry.id, payload)
-        pushToast(`Whitelist updated: ${payload.database_name}.${payload.table_name}.${payload.column_name}`, 'success')
+        pushToast(`Whitelist updated: ${formatWhitelistTarget(payload)}`, 'success')
       }
       await loadPage()
       closeWhitelistDrawer()
@@ -571,7 +626,7 @@ export function MaskingRulesPage() {
 
           <SectionCard
             title="Unmask Whitelist"
-            description="MySQL only. Each whitelist entry is bound to `connection -> database -> table -> column` so you can precisely exempt a target from an over-matched global rule."
+            description="MySQL and PostgreSQL. Each whitelist entry is bound to a concrete database / schema / table / column target so you can precisely exempt false positives from global SQL masking."
             icon={<ShieldCheck className="h-4 w-4 text-accent" />}
             action={
               canWrite ? (
@@ -593,7 +648,7 @@ export function MaskingRulesPage() {
                   key: `whitelist-${entry.id}`,
                   cells: [
                     <span key="connection" className="text-ink">{formatConnectionName(entry.db_connection_id, connections)}</span>,
-                    <span key="target" className="font-semibold text-ink">{entry.database_name}.{entry.table_name}.{entry.column_name}</span>,
+                    <span key="target" className="font-semibold text-ink">{formatWhitelistTarget(entry)}</span>,
                     <span key="created" className="whitespace-nowrap text-muted">{formatDateTime(entry.created_at)}</span>,
                     <ActionCell
                       key="actions"
@@ -733,7 +788,7 @@ export function MaskingRulesPage() {
           title={
             whitelistDrawer.mode === 'create'
               ? 'New Whitelist'
-              : `Edit ${whitelistDrawer.entry.database_name}.${whitelistDrawer.entry.table_name}.${whitelistDrawer.entry.column_name}`
+              : `Edit ${formatWhitelistTarget(whitelistDrawer.entry)}`
           }
           onClose={closeWhitelistDrawer}
         >
@@ -746,14 +801,15 @@ export function MaskingRulesPage() {
                   setWhitelistForm({
                     dbConnectionId: value,
                     databaseName: '',
+                    schemaName: '',
                     tableName: '',
                     columnName: '',
                   })
                 }
                 disabled={whitelistSubmitting}
                 options={[
-                  { value: '', label: 'Select MySQL connection' },
-                  ...mysqlConnections.map((connection) => ({ value: String(connection.id), label: connection.name })),
+                  { value: '', label: 'Select SQL connection' },
+                  ...sqlConnections.map((connection) => ({ value: String(connection.id), label: connection.name })),
                 ]}
               />
             </Field>
@@ -773,6 +829,7 @@ export function MaskingRulesPage() {
                       setWhitelistForm((current) => ({
                         ...current,
                         databaseName: value,
+                        schemaName: '',
                         tableName: '',
                         columnName: '',
                       }))
@@ -785,7 +842,29 @@ export function MaskingRulesPage() {
                   />
                 </Field>
 
-                {whitelistForm.databaseName ? (
+                {whitelistForm.databaseName && (selectedWhitelistConnection?.dbType === 'postgres' || selectedWhitelistConnection?.dbType === 'postgresql') ? (
+                  <Field label="Schema">
+                    <DropdownSelect
+                      ariaLabel="Schema"
+                      value={whitelistForm.schemaName}
+                      onChange={(value) =>
+                        setWhitelistForm((current) => ({
+                          ...current,
+                          schemaName: value,
+                          tableName: '',
+                          columnName: '',
+                        }))
+                      }
+                      disabled={whitelistSubmitting}
+                      options={[
+                        { value: '', label: 'Select schema' },
+                        ...schemaOptions.map((option) => ({ value: option, label: option })),
+                      ]}
+                    />
+                  </Field>
+                ) : null}
+
+                {whitelistForm.databaseName && (!(selectedWhitelistConnection?.dbType === 'postgres' || selectedWhitelistConnection?.dbType === 'postgresql') || whitelistForm.schemaName) ? (
                   <Field label="Table">
                     <DropdownSelect
                       ariaLabel="Table"
@@ -831,6 +910,16 @@ export function MaskingRulesPage() {
                 disabled={whitelistSubmitting}
               />
             </Field>
+            {(selectedWhitelistConnection?.dbType === 'postgres' || selectedWhitelistConnection?.dbType === 'postgresql') ? (
+              <Field label="Schema Name">
+                <input
+                  value={whitelistForm.schemaName}
+                  onChange={(event) => setWhitelistForm((current) => ({ ...current, schemaName: event.target.value }))}
+                  className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                  disabled={whitelistSubmitting}
+                />
+              </Field>
+            ) : null}
             <Field label="Table Name">
               <input
                 value={whitelistForm.tableName}
@@ -850,7 +939,7 @@ export function MaskingRulesPage() {
             {whitelistDrawerError ? <InlineAlert>{whitelistDrawerError}</InlineAlert> : null}
             <button
               type="submit"
-              disabled={whitelistSubmitting || !isWhitelistFormSubmittable(whitelistForm)}
+              disabled={whitelistSubmitting || !isWhitelistFormSubmittable(whitelistForm, selectedWhitelistConnection)}
               className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {whitelistSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : whitelistDrawer.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
@@ -969,8 +1058,15 @@ function parseMaskConfig(value: string) {
   return parsed as Record<string, unknown>
 }
 
-function isWhitelistFormSubmittable(form: WhitelistForm) {
-  return Boolean(form.dbConnectionId && form.databaseName.trim() && form.tableName.trim() && form.columnName.trim())
+function isWhitelistFormSubmittable(form: WhitelistForm, connection?: ConnectionOption | null) {
+  const isPostgres = connection?.dbType === 'postgres' || connection?.dbType === 'postgresql'
+  return Boolean(
+    form.dbConnectionId &&
+    form.databaseName.trim() &&
+    (!isPostgres || form.schemaName.trim()) &&
+    form.tableName.trim() &&
+    form.columnName.trim(),
+  )
 }
 
 function isRedisPrefixFormSubmittable(form: RedisPrefixForm) {
@@ -986,6 +1082,11 @@ function isRedisPrefixFormSubmittable(form: RedisPrefixForm) {
 
 function formatConnectionName(connectionID: number, connections: ConnectionOption[]) {
   return connections.find((connection) => connection.id === connectionID)?.name ?? `Connection #${connectionID}`
+}
+
+function formatWhitelistTarget(entry: { database_name: string; schema_name?: string; table_name: string; column_name: string }) {
+  const schemaName = entry.schema_name?.trim()
+  return [entry.database_name, schemaName, entry.table_name, entry.column_name].filter(Boolean).join('.')
 }
 
 function deleteDialogTitle(kind?: 'rule' | 'whitelist' | 'redisPrefix') {

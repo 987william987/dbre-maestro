@@ -244,7 +244,91 @@ describe('MaskingRulesPage', () => {
       expect(mockedCreateMaskingWhitelist).toHaveBeenCalledWith({
         db_connection_id: 1,
         database_name: 'analytics',
+        schema_name: '',
         table_name: 'tickets',
+        column_name: 'email',
+      })
+    })
+  })
+
+  it('creates a PostgreSQL whitelist entry with schema scope', async () => {
+    const pgWhitelist = {
+      ...whitelist,
+      db_connection_id: 7,
+      database_name: 'app',
+      schema_name: 'public',
+      table_name: 'users',
+    }
+    mockedListMaskingConnections.mockResolvedValueOnce({
+      connections: [
+        {
+          id: 7,
+          name: 'analytics-pg',
+          db_type: 'postgres',
+          host: 'pg.internal',
+          port: 5432,
+          database_name: null,
+          username: 'readonly',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          extra_params: null,
+          created_by: 1,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+    mockedListMaskingWhitelists
+      .mockResolvedValueOnce({ whitelist: [] })
+      .mockResolvedValueOnce({ whitelist: [pgWhitelist] })
+    mockedListMaskingMetadata
+      .mockResolvedValueOnce({
+        db_type: 'postgres',
+        level: 'database',
+        items: [{ kind: 'database', name: 'app' }],
+      })
+      .mockResolvedValueOnce({
+        db_type: 'postgres',
+        level: 'schema',
+        database: 'app',
+        items: [{ kind: 'schema', name: 'public', database: 'app', schema: 'public' }],
+      })
+      .mockResolvedValueOnce({
+        db_type: 'postgres',
+        level: 'table',
+        database: 'app',
+        schema: 'public',
+        items: [{ kind: 'table', name: 'users', database: 'app', schema: 'public' }],
+      })
+    mockedListMaskingMetadataColumns.mockResolvedValueOnce({
+      database: 'app',
+      schema: 'public',
+      table: 'users',
+      columns: [{ name: 'email', data_type: 'text', column_type: 'text', is_nullable: 'YES', comment: '' }],
+    })
+    mockedCreateMaskingWhitelist.mockResolvedValue(pgWhitelist)
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Unmask Whitelist')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'New Whitelist' }))
+    selectOption('Connection', 'analytics-pg')
+    await waitFor(() => expect(mockedListMaskingMetadata).toHaveBeenCalledWith(7))
+    selectOption('Database', 'app')
+    await waitFor(() => expect(mockedListMaskingMetadata).toHaveBeenCalledWith(7, { database: 'app' }))
+    selectOption('Schema', 'public')
+    await waitFor(() => expect(mockedListMaskingMetadata).toHaveBeenCalledWith(7, { database: 'app', schema: 'public' }))
+    selectOption('Table', 'users')
+    await waitFor(() => expect(mockedListMaskingMetadataColumns).toHaveBeenCalledWith(7, 'public', 'users', 'app'))
+    selectOption('Column', 'email')
+    fireEvent.click(screen.getByRole('button', { name: 'Create Whitelist' }))
+
+    await waitFor(() => {
+      expect(mockedCreateMaskingWhitelist).toHaveBeenCalledWith({
+        db_connection_id: 7,
+        database_name: 'app',
+        schema_name: 'public',
+        table_name: 'users',
         column_name: 'email',
       })
     })

@@ -1,18 +1,23 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/dbre-maestro/maestro/internal/masking"
+	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jmoiron/sqlx"
 )
 
 func TestWriteQueryExecutionErrorTimeout(t *testing.T) {
@@ -238,6 +243,90 @@ ORDER BY time ASC`,
 	}
 }
 
+func TestQueryHandlerExecuteAuditsQueryAccessPolicyBlock(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewQueryHandler(
+		repository.NewDBConnectionRepo(sqlxDB, []byte("0123456789abcdef0123456789abcdef")),
+		repository.NewUserRepo(sqlxDB),
+		repository.NewMaskingRuleRepo(sqlxDB),
+		repository.NewAuditRepo(sqlxDB),
+		nil,
+		nil,
+		nil,
+		nil,
+		repository.NewQueryAccessRepo(sqlxDB),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		"",
+	)
+
+	now := time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC)
+	userID := uint64(42)
+	connID := uint64(2)
+
+	mock.ExpectQuery(`SELECT \* FROM db_connections WHERE id = \?`).
+		WithArgs(connID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "name", "db_type", "host", "port", "readonly_host", "readonly_port", "readwrite_host", "readwrite_port",
+			"database_name", "username", "password_encrypted", "encryption_key_version", "ssl_mode", "extra_params",
+			"created_by", "created_at", "updated_at",
+		}).AddRow(connID, "analytics-db", "mysql", "db.internal", uint16(3306), "db.internal", uint16(3306), "db.internal", uint16(3306),
+			nil, "readonly", []byte("encrypted"), uint(1), "prefer", nil, userID, now, now))
+	mock.ExpectQuery(`SELECT \* FROM db_connection_credentials WHERE db_connection_id = \? ORDER BY credential_role`).
+		WithArgs(connID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at",
+		}))
+
+	expectNonAllPermissionsUser(mock, userID, now)
+	mock.ExpectQuery(`SELECT DISTINCT db_connection_id FROM \(`).
+		WithArgs(userID, userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"db_connection_id"}).AddRow(connID))
+
+	expectNonAllPermissionsUser(mock, userID, now)
+	mock.ExpectQuery(`SELECT DISTINCT id FROM \(`).
+		WithArgs(userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(`SELECT id, subject_type, subject_id, effect, connection_id, database_pattern, table_pattern,`).
+		WithArgs(userID, connID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "subject_type", "subject_id", "effect", "connection_id", "database_pattern", "table_pattern",
+			"granted_via", "source_ticket_id", "expires_at", "revoked_at", "revoked_by", "created_by", "updated_by", "created_at", "updated_at",
+		}))
+	mock.ExpectExec(`INSERT INTO audit_logs \(actor_id, actor_name, action_type, resource_type, resource_id, details, ip_address, created_at\)`).
+		WithArgs(sqlmock.AnyArg(), "pedro", "query_blocked", "db_connection", sqlmock.AnyArg(), auditDetailsReason("query_access_policy"), "10.0.0.9:12345", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/query/execute", bytes.NewBufferString(`{
+		"db_connection_id": 2,
+		"database": "analytics",
+		"sql": "SELECT email FROM users"
+	}`))
+	req.RemoteAddr = "10.0.0.9:12345"
+	ctx := context.WithValue(req.Context(), middleware.CtxUserID, userID)
+	ctx = context.WithValue(ctx, middleware.CtxUsername, "pedro")
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.Execute(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestCollectPostgresQueryResultResolvesOriginsAfterRowsClosed(t *testing.T) {
 	rows := &fakePGXRows{
 		fields: []pgconn.FieldDescription{{
@@ -283,6 +372,17 @@ func TestCollectPostgresQueryResultResolvesOriginsAfterRowsClosed(t *testing.T) 
 	if len(result.Origins) != 1 || result.Origins[0].Table != "watches" {
 		t.Fatalf("unexpected origins = %#v", result.Origins)
 	}
+}
+
+func expectNonAllPermissionsUser(mock sqlmock.Sqlmock, userID uint64, now time.Time) {
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "username", "email", "lark_recipient", "password", "is_setup", "is_protected", "is_active", "mfa_enabled", "mfa_secret_encrypted", "mfa_enabled_at", "created_at", "updated_at",
+		}).AddRow(userID, "pedro", "pedro@example.com", "", "hash", true, false, true, false, []byte{}, nil, now, now))
+	mock.ExpectQuery(`SELECT EXISTS \(`).
+		WithArgs(userID, sqlmock.AnyArg(), userID, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"has_all_permissions"}).AddRow(false))
 }
 
 func TestBuildDisplayColumnsUsesOriginColumnName(t *testing.T) {

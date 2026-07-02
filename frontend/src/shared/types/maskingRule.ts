@@ -12,6 +12,7 @@ export type MaskingWhitelist = {
   id: number
   db_connection_id: number
   database_name: string
+  schema_name?: string
   table_name: string
   column_name: string
   created_by: number

@@ -63,7 +63,8 @@ func (h *MaskingWhitelistHandler) ListMetadata(w http.ResponseWriter, r *http.Re
 	defer cancel()
 
 	selectedDatabase := strings.TrimSpace(r.URL.Query().Get("database"))
-	response, err := h.metadata.loadMetadata(ctx, resolvedConn, password, selectedDatabase, "")
+	selectedSchema := strings.TrimSpace(r.URL.Query().Get("schema"))
+	response, err := h.metadata.loadMetadata(ctx, resolvedConn, password, selectedDatabase, selectedSchema)
 	if err != nil {
 		logMetadataQueryError("masking_whitelist_metadata", conn, selectedDatabase, "", "", err)
 		jsonErr(w, http.StatusInternalServerError, metadataTemporaryErrorMessage)
@@ -119,6 +120,7 @@ func (h *MaskingWhitelistHandler) Create(w http.ResponseWriter, r *http.Request)
 	entry := &model.MaskingWhitelist{
 		DBConnectionID: req.DBConnectionID,
 		DatabaseName:   req.DatabaseName,
+		SchemaName:     req.SchemaName,
 		TableName:      req.TableName,
 		ColumnName:     req.ColumnName,
 		CreatedBy:      userID,
@@ -166,6 +168,7 @@ func (h *MaskingWhitelistHandler) Patch(w http.ResponseWriter, r *http.Request) 
 
 	existing.DBConnectionID = req.DBConnectionID
 	existing.DatabaseName = req.DatabaseName
+	existing.SchemaName = req.SchemaName
 	existing.TableName = req.TableName
 	existing.ColumnName = req.ColumnName
 
@@ -223,12 +226,14 @@ func (h *MaskingWhitelistHandler) Delete(w http.ResponseWriter, r *http.Request)
 func parseMaskingWhitelistPayload(w http.ResponseWriter, r *http.Request) (*struct {
 	DBConnectionID uint64 `json:"db_connection_id"`
 	DatabaseName   string `json:"database_name"`
+	SchemaName     string `json:"schema_name"`
 	TableName      string `json:"table_name"`
 	ColumnName     string `json:"column_name"`
 }, bool) {
 	var req struct {
 		DBConnectionID uint64 `json:"db_connection_id"`
 		DatabaseName   string `json:"database_name"`
+		SchemaName     string `json:"schema_name"`
 		TableName      string `json:"table_name"`
 		ColumnName     string `json:"column_name"`
 	}
@@ -237,6 +242,7 @@ func parseMaskingWhitelistPayload(w http.ResponseWriter, r *http.Request) (*stru
 		return nil, false
 	}
 	req.DatabaseName = strings.TrimSpace(req.DatabaseName)
+	req.SchemaName = strings.TrimSpace(req.SchemaName)
 	req.TableName = strings.TrimSpace(req.TableName)
 	req.ColumnName = strings.TrimSpace(req.ColumnName)
 	if req.DBConnectionID == 0 || req.DatabaseName == "" || req.TableName == "" || req.ColumnName == "" {
@@ -252,8 +258,8 @@ func (h *MaskingWhitelistHandler) validateMySQLConnection(w http.ResponseWriter,
 		jsonErr(w, http.StatusNotFound, "db connection not found")
 		return false
 	}
-	if conn.DBType != "mysql" {
-		jsonErr(w, http.StatusUnprocessableEntity, "only mysql connections support masking whitelist")
+	if !supportsSQLMasking(conn) {
+		jsonErr(w, http.StatusUnprocessableEntity, "only mysql and postgresql connections support masking whitelist")
 		return false
 	}
 	return true
@@ -271,8 +277,8 @@ func (h *MaskingWhitelistHandler) resolveMySQLConnection(w http.ResponseWriter, 
 		jsonErr(w, http.StatusNotFound, "connection not found")
 		return 0, nil, nil, "", false
 	}
-	if conn.DBType != "mysql" {
-		jsonErr(w, http.StatusUnprocessableEntity, "only mysql connections support masking whitelist")
+	if !supportsSQLMasking(conn) {
+		jsonErr(w, http.StatusUnprocessableEntity, "only mysql and postgresql connections support masking whitelist")
 		return 0, nil, nil, "", false
 	}
 

@@ -25,6 +25,7 @@ type CreateMaskingRulePayload = {
 type CreateMaskingWhitelistPayload = {
   db_connection_id: number
   database_name: string
+  schema_name?: string
   table_name: string
   column_name: string
 }
@@ -111,12 +112,16 @@ export function listMaskingConnections() {
 
 type MaskingMetadataParams = {
   database?: string
+  schema?: string
 }
 
 export async function listMaskingMetadata(connectionId: number, params?: MaskingMetadataParams) {
   const searchParams = new URLSearchParams()
   if (params?.database) {
     searchParams.set('database', params.database)
+  }
+  if (params?.schema) {
+    searchParams.set('schema', params.schema)
   }
   const query = searchParams.toString()
   const response = await apiClient.get<MetadataResponse>(

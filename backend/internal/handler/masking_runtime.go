@@ -153,7 +153,7 @@ func (m *maskingRuntime) analyzeSensitiveColumns(ctx context.Context, conn *mode
 			databaseName := originDatabaseName(conn, dependency)
 			tableName := originTableName(dependency, columnLabel)
 			if tableName != "" && databaseName != "" && m.whitelist != nil {
-				exempt, err := m.whitelist.Match(ctx, conn.ID, databaseName, tableName, actualColumnName)
+				exempt, err := m.whitelist.Match(ctx, conn.ID, databaseName, dependency.Schema, tableName, actualColumnName)
 				if err != nil {
 					return nil, nil, err
 				}

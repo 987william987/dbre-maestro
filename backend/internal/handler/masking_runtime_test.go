@@ -38,7 +38,7 @@ func TestMaskingRuntimeApplyResultMasksMySQLColumns(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "column_name", "match_type", "mask_mode", "mask_config", "created_by", "created_at"}).
 			AddRow(1, "email", "exact", "full", []byte(`{}`), 1, time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(`SELECT COUNT\(\*\)\s+FROM masking_whitelist`).
-		WithArgs(uint64(7), "analytics", "users", "email").
+		WithArgs(uint64(7), "analytics", "", "users", "email").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 
 	override, sensitiveIndexes, err := runtime.applyResult(context.Background(), conn, 0, result)
@@ -84,7 +84,7 @@ func TestMaskingRuntimeApplyResultMasksPostgresColumns(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "column_name", "match_type", "mask_mode", "mask_config", "created_by", "created_at"}).
 			AddRow(1, "email", "exact", "full", []byte(`{}`), 1, time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(`SELECT COUNT\(\*\)\s+FROM masking_whitelist`).
-		WithArgs(uint64(7), "app", "users", "email").
+		WithArgs(uint64(7), "app", "public", "users", "email").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 
 	override, sensitiveIndexes, err := runtime.applyResult(context.Background(), conn, 0, result)
@@ -125,7 +125,7 @@ func TestMaskingRuntimeApplyResultFailsClosedWhenEngineMissing(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "column_name", "match_type", "mask_mode", "mask_config", "created_by", "created_at"}).
 			AddRow(1, "email", "exact", "full", []byte(`{}`), 1, time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(`SELECT COUNT\(\*\)\s+FROM masking_whitelist`).
-		WithArgs(uint64(7), "app", "users", "email").
+		WithArgs(uint64(7), "app", "public", "users", "email").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 
 	_, _, err = runtime.applyResult(context.Background(), conn, 0, result)
@@ -165,7 +165,7 @@ func TestMaskingRuntimeApplyResultSkipsWhitelistMatch(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "column_name", "match_type", "mask_mode", "mask_config", "created_by", "created_at"}).
 			AddRow(1, "email", "exact", "full", []byte(`{}`), 1, time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(`SELECT COUNT\(\*\)\s+FROM masking_whitelist`).
-		WithArgs(uint64(7), "analytics", "users", "email").
+		WithArgs(uint64(7), "analytics", "", "users", "email").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 
 	override, sensitiveIndexes, err := runtime.applyResult(context.Background(), conn, 0, result)
