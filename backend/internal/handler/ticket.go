@@ -2254,6 +2254,9 @@ func (h *TicketHandler) canViewTicket(ctx context.Context, ticket *model.Ticket,
 }
 
 func (h *TicketHandler) canReviewTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
+	if ticket == nil || ticket.SubmitterID == userID {
+		return false, nil
+	}
 	if !h.canReviewWorkflowByPermission(ctx, approvalWorkflowForTicket(ticket)) {
 		return false, nil
 	}
@@ -2295,6 +2298,9 @@ func (h *TicketHandler) canAdminOverrideTicketReview(ctx context.Context, userID
 
 func (h *TicketHandler) canExecuteTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
 	if ticket == nil || !isExecutableTicketType(ticket.TicketType) || ticket.Status != model.TicketStatusPendingExecution {
+		return false, nil
+	}
+	if ticket.SubmitterID == userID {
 		return false, nil
 	}
 	if !middleware.HasPermission(ctx, permissionTicketExecute) {

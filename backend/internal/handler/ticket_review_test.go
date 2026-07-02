@@ -6,6 +6,7 @@ import (
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/jmoiron/sqlx"
@@ -78,5 +79,85 @@ func TestCanViewFullTicketQueueAllowsDBAGroup(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
+func TestCanReviewTicketRejectsSubmitterEvenWithReviewPermission(t *testing.T) {
+	userID := uint64(7)
+	ctx := context.WithValue(context.Background(), middleware.CtxPermissions, []string{permissionTicketReview})
+	handler := &TicketHandler{}
+	ticket := &model.Ticket{
+		ID:          1,
+		TicketType:  model.TicketTypeDDL,
+		Status:      model.TicketStatusPendingReview,
+		SubmitterID: userID,
+	}
+
+	allowed, err := handler.canReviewTicket(ctx, ticket, userID)
+	if err != nil {
+		t.Fatalf("canReviewTicket() error = %v", err)
+	}
+	if allowed {
+		t.Fatal("submitter must not be allowed to review their own ticket")
+	}
+}
+
+func TestCanExecuteTicketRejectsSubmitterEvenWithExecutePermission(t *testing.T) {
+	userID := uint64(7)
+	ctx := context.WithValue(context.Background(), middleware.CtxPermissions, []string{permissionTicketExecute})
+	handler := &TicketHandler{}
+	connID := uint64(3)
+	ticket := &model.Ticket{
+		ID:             1,
+		TicketType:     model.TicketTypeDDL,
+		Status:         model.TicketStatusPendingExecution,
+		SubmitterID:    userID,
+		DBConnectionID: &connID,
+	}
+
+	allowed, err := handler.canExecuteTicket(ctx, ticket, userID)
+	if err != nil {
+		t.Fatalf("canExecuteTicket() error = %v", err)
+	}
+	if allowed {
+		t.Fatal("submitter must not be allowed to execute their own ticket")
+	}
+}
+
+func TestWorkflowResolutionExcludesSubmitter(t *testing.T) {
+	connID := uint64(3)
+	ticket := &model.Ticket{
+		ID:             1,
+		TicketType:     model.TicketTypeDDL,
+		Status:         model.TicketStatusPendingReview,
+		SubmitterID:    7,
+		DBConnectionID: &connID,
+	}
+	resolution := &model.WorkflowResolution{
+		TicketType:        model.TicketTypeDDL,
+		DBConnectionID:    &connID,
+		ApprovalEnabled:   true,
+		ApprovalUserIDs:   []uint64{7, 8},
+		ExecutorUserIDs:   []uint64{7, 9},
+		AdminUserIDs:      []uint64{},
+		ErrorCode:         "",
+		ErrorMessage:      "",
+		RuleName:          "test",
+		ExportSensitivity: nil,
+	}
+
+	excludeSubmitterFromWorkflowResolution(ticket, resolution)
+
+	if uint64InSlice(7, resolution.ApprovalUserIDs) {
+		t.Fatalf("submitter still appears in approval candidates: %#v", resolution.ApprovalUserIDs)
+	}
+	if uint64InSlice(7, resolution.ExecutorUserIDs) {
+		t.Fatalf("submitter still appears in executor candidates: %#v", resolution.ExecutorUserIDs)
+	}
+	if !uint64InSlice(8, resolution.ApprovalUserIDs) || !uint64InSlice(9, resolution.ExecutorUserIDs) {
+		t.Fatalf("non-submitter candidates were removed: approval=%#v executor=%#v", resolution.ApprovalUserIDs, resolution.ExecutorUserIDs)
+	}
+	if resolution.ErrorCode != "" {
+		t.Fatalf("resolution should remain valid when other candidates exist, got %s", resolution.ErrorCode)
 	}
 }

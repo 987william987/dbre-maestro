@@ -15,6 +15,7 @@ const (
 	workflowErrorInvalidRule          = "invalid_rule"
 	workflowExcludedInactive          = "inactive"
 	workflowExcludedMissingPermission = "missing_permission"
+	workflowExcludedSubmitter         = "submitter"
 )
 
 type workflowRuleMatcher interface {
@@ -27,7 +28,12 @@ func resolveTicketWorkflow(ctx context.Context, settings *repository.SettingsRep
 	}
 	dbConnectionID := ticket.DBConnectionID
 	exportSensitivity := workflowExportSensitivity(ticket)
-	return resolveWorkflow(ctx, settings, users, ticket.TicketType, dbConnectionID, exportSensitivity)
+	resolution, err := resolveWorkflow(ctx, settings, users, ticket.TicketType, dbConnectionID, exportSensitivity)
+	if err != nil || resolution == nil {
+		return resolution, err
+	}
+	excludeSubmitterFromWorkflowResolution(ticket, resolution)
+	return resolution, nil
 }
 
 func resolveWorkflow(ctx context.Context, settings *repository.SettingsRepo, users *repository.UserRepo, ticketType model.TicketType, dbConnectionID *uint64, exportSensitivity *string) (*model.WorkflowResolution, error) {
@@ -171,7 +177,7 @@ func workflowResolutionFromSnapshot(ticket *model.Ticket, snapshot *model.Ticket
 	if ticket == nil || snapshot == nil {
 		return nil
 	}
-	return &model.WorkflowResolution{
+	resolution := &model.WorkflowResolution{
 		RuleID:            snapshot.RuleID,
 		RuleName:          snapshot.RuleName,
 		TicketType:        ticket.TicketType,
@@ -184,6 +190,59 @@ func workflowResolutionFromSnapshot(ticket *model.Ticket, snapshot *model.Ticket
 		ErrorCode:         snapshot.ErrorCode,
 		ErrorMessage:      snapshot.ErrorMessage,
 	}
+	excludeSubmitterFromWorkflowResolution(ticket, resolution)
+	return resolution
+}
+
+func excludeSubmitterFromWorkflowResolution(ticket *model.Ticket, resolution *model.WorkflowResolution) {
+	if ticket == nil || resolution == nil || ticket.SubmitterID == 0 {
+		return
+	}
+	approvalUserIDs, approvalExcluded := excludeWorkflowUserID(resolution.ApprovalUserIDs, ticket.SubmitterID)
+	if approvalExcluded {
+		resolution.ApprovalUserIDs = approvalUserIDs
+		resolution.ExcludedApprovalUsers = append(resolution.ExcludedApprovalUsers, model.WorkflowExcludedUser{
+			UserID: ticket.SubmitterID,
+			Reason: workflowExcludedSubmitter,
+		})
+	}
+	executorUserIDs, executorExcluded := excludeWorkflowUserID(resolution.ExecutorUserIDs, ticket.SubmitterID)
+	if executorExcluded {
+		resolution.ExecutorUserIDs = executorUserIDs
+		resolution.ExcludedExecutorUsers = append(resolution.ExcludedExecutorUsers, model.WorkflowExcludedUser{
+			UserID: ticket.SubmitterID,
+			Reason: workflowExcludedSubmitter,
+		})
+	}
+	if resolution.ErrorCode != "" {
+		return
+	}
+	if resolution.ApprovalEnabled && len(resolution.ApprovalUserIDs) == 0 {
+		resolution.ErrorCode = workflowErrorNoEffectiveApprovers
+		resolution.ErrorMessage = "workflow has no effective approval users after excluding the submitter"
+		return
+	}
+	if isExecutableTicketType(ticket.TicketType) && len(resolution.ExecutorUserIDs) == 0 {
+		resolution.ErrorCode = workflowErrorNoEffectiveExecutors
+		resolution.ErrorMessage = "workflow has no effective executor users after excluding the submitter"
+		return
+	}
+}
+
+func excludeWorkflowUserID(userIDs []uint64, excludedID uint64) ([]uint64, bool) {
+	next := userIDs[:0]
+	excluded := false
+	for _, userID := range userIDs {
+		if userID == excludedID {
+			excluded = true
+			continue
+		}
+		next = append(next, userID)
+	}
+	if !excluded {
+		return userIDs, false
+	}
+	return next, true
 }
 
 func workflowExportSensitivity(ticket *model.Ticket) *string {
