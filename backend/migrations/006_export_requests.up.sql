@@ -18,4 +18,4 @@ CREATE TABLE IF NOT EXISTS export_requests (
     UNIQUE KEY uq_download_token (download_token),
     KEY idx_export_requester (requester_id),
     KEY idx_export_expiry (expires_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

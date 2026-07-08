@@ -12,4 +12,4 @@ CREATE TABLE IF NOT EXISTS sessions (
     UNIQUE KEY uq_token_hash (token_hash),
     KEY idx_sessions_user (user_id),
     KEY idx_sessions_expiry (expires_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

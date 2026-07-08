@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS workflow_rules (
     updated_at DATETIME(6) NOT NULL,
     PRIMARY KEY (id),
     KEY idx_workflow_rules_match (ticket_type, db_connection_id, export_sensitivity, enabled, priority)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT INTO workflow_rules
     (rule_name, ticket_type, db_connection_id, export_sensitivity, approval_enabled, approval_auth_groups, executor_auth_groups, priority, enabled, created_at, updated_at)

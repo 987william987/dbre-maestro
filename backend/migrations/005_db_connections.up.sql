@@ -17,4 +17,4 @@ CREATE TABLE IF NOT EXISTS db_connections (
     PRIMARY KEY (id),
     UNIQUE KEY uq_conn_name (name),
     KEY idx_conn_type (db_type)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

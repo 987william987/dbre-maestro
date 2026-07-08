@@ -14,4 +14,4 @@ CREATE TABLE IF NOT EXISTS mfa_challenges (
     KEY idx_mfa_challenges_user (user_id, created_at),
     KEY idx_mfa_challenges_expires (expires_at),
     KEY idx_mfa_challenges_active (user_id, used_at, revoked_at, expires_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
