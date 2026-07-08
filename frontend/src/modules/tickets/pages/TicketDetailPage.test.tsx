@@ -506,6 +506,58 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('pass')).toBeInTheDocument()
   })
 
+  it('可一次展開與收合所有長 SQL，且逐列 SQL 仍可獨立控制', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail(baseTicket, {
+      review_results: [
+        {
+          id: 1,
+          ticket_id: 12,
+          seq: 1,
+          sql_stmt: 'CREATE TABLE IF NOT EXISTS very_long_table_one (id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id BIGINT NOT NULL, encrypted_secret VARCHAR(4096) NOT NULL, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;',
+          phase: 'validation',
+          scan_rows: 0,
+          status: 'pass',
+          message: null,
+        },
+        {
+          id: 2,
+          ticket_id: 12,
+          seq: 2,
+          sql_stmt: 'CREATE TABLE IF NOT EXISTS very_long_table_two (id BIGINT AUTO_INCREMENT PRIMARY KEY, action VARCHAR(64) NOT NULL, operator_id BIGINT DEFAULT NULL, request_payload VARCHAR(4096) NOT NULL, created_at BIGINT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;',
+          phase: 'validation',
+          scan_rows: 0,
+          status: 'pass',
+          message: null,
+        },
+      ],
+    }))
+
+    renderPage()
+
+    const showAll = await screen.findByRole('button', { name: /Show all SQL/i })
+    expect(screen.getAllByRole('button', { name: /Show full SQL/i })).toHaveLength(2)
+
+    fireEvent.click(showAll)
+
+    expect(screen.getByRole('button', { name: /Collapse all SQL/i })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /Collapse SQL/i })).toHaveLength(2)
+
+    fireEvent.click(screen.getAllByRole('button', { name: /Collapse SQL/i })[0])
+
+    expect(screen.getByRole('button', { name: /Show all SQL/i })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /Show full SQL/i })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /Collapse SQL/i })).toHaveLength(1)
+  })
+
   it('顯示關鍵工單資訊與逐句 SQL 執行結果', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',

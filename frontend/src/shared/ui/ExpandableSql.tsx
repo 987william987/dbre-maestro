@@ -4,6 +4,9 @@ import { ChevronDown } from 'lucide-react'
 type ExpandableSqlProps = {
   value: string
   label?: string
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
+  showToggle?: boolean
 }
 
 type ExpandableTextProps = {
@@ -11,23 +14,36 @@ type ExpandableTextProps = {
   empty?: string
 }
 
-export function ExpandableSql({ value, label = 'SQL' }: ExpandableSqlProps) {
-  const [expanded, setExpanded] = useState(false)
+export function isExpandableSql(value: string) {
+  return value.length > 120 || value.includes('\n')
+}
+
+export function ExpandableSql({ value, label = 'SQL', expanded: controlledExpanded, onExpandedChange, showToggle = true }: ExpandableSqlProps) {
+  const [uncontrolledExpanded, setUncontrolledExpanded] = useState(false)
+  const expanded = controlledExpanded ?? uncontrolledExpanded
   const shouldCollapse = value.length > 120 || value.includes('\n')
+  const toggleExpanded = () => {
+    const next = !expanded
+    if (onExpandedChange) {
+      onExpandedChange(next)
+      return
+    }
+    setUncontrolledExpanded(next)
+  }
 
   return (
     <div className="w-full min-w-0 max-w-full">
-      <pre className={`w-full max-w-full font-mono text-[12px] leading-6 text-ink ${
+      <pre className={`m-0 block w-full min-w-0 max-w-full font-mono text-[12px] leading-6 text-ink ${
         shouldCollapse && !expanded
           ? 'truncate whitespace-nowrap'
-          : 'max-h-80 overflow-auto whitespace-pre-wrap break-words'
+          : 'max-h-80 overflow-auto whitespace-pre-wrap break-all'
       }`}>
         {value}
       </pre>
-      {shouldCollapse ? (
+      {shouldCollapse && showToggle ? (
         <button
           type="button"
-          onClick={() => setExpanded((current) => !current)}
+          onClick={toggleExpanded}
           className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-primary"
           aria-expanded={expanded}
           aria-label={`${expanded ? 'Collapse' : 'Show full'} ${label}`}

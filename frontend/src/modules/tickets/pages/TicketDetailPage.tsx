@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Check, ChevronDown, Download, Loader2, Play, Send, ShieldCheck, ShieldX, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, Download, Loader2, Minus, Play, Plus, Send, ShieldCheck, ShieldX, X } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/shared/auth/AuthContext'
@@ -10,7 +10,7 @@ import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWo
 import type { CurrentUser } from '@/shared/types/auth'
 import type { AuditLog } from '@/shared/types/audit'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
-import { ExpandableSql } from '@/shared/ui/ExpandableSql'
+import { ExpandableSql, isExpandableSql } from '@/shared/ui/ExpandableSql'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
@@ -408,6 +408,10 @@ type StatementResultRow = {
   errorMessage: string | null
 }
 
+function statementResultKey(row: StatementResultRow) {
+  return `${row.seq}:${row.sql}`
+}
+
 function buildStatementResults(detail: TicketDetail) {
   const rows = new Map<number, StatementResultRow>()
 
@@ -663,6 +667,7 @@ export function TicketDetailPage() {
   const [debugTraceOpen, setDebugTraceOpen] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [statusTransitioning, setStatusTransitioning] = useState(false)
+  const [expandedStatementSQLs, setExpandedStatementSQLs] = useState<Set<string>>(() => new Set())
   const previousStatusRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -747,6 +752,10 @@ export function TicketDetailPage() {
     }
   }, [detail?.ticket.status])
 
+  useEffect(() => {
+    setExpandedStatementSQLs(new Set())
+  }, [detail?.ticket.id])
+
   if (!user) {
     return null
   }
@@ -760,6 +769,11 @@ export function TicketDetailPage() {
   const canRetryWorkflow = detail?.capabilities?.can_retry_workflow_resolution ?? false
   const exportDownloadURL = detail?.export_request?.download_url ?? null
   const statementResults = detail ? buildStatementResults(detail) : []
+  const expandableStatementKeys = statementResults
+    .filter((row) => isExpandableSql(row.sql))
+    .map(statementResultKey)
+  const allStatementSQLsExpanded = expandableStatementKeys.length > 0 &&
+    expandableStatementKeys.every((key) => expandedStatementSQLs.has(key))
   const queryAccessItems = detail?.query_access_items ?? []
   const queryAccessConnections = summarizeQueryAccessConnections(queryAccessItems)
   const queryAccessScopeSummary = summarizeQueryAccessScope(queryAccessItems)
@@ -788,6 +802,29 @@ export function TicketDetailPage() {
         setIsRefreshing(false)
       }
     }
+  }
+
+  function setStatementSQLExpanded(key: string, expanded: boolean) {
+    setExpandedStatementSQLs((current) => {
+      const next = new Set(current)
+      if (expanded) {
+        next.add(key)
+      } else {
+        next.delete(key)
+      }
+      return next
+    })
+  }
+
+  function toggleAllStatementSQLs() {
+    setExpandedStatementSQLs((current) => {
+      if (allStatementSQLsExpanded) {
+        return new Set()
+      }
+      const next = new Set(current)
+      expandableStatementKeys.forEach((key) => next.add(key))
+      return next
+    })
   }
 
   async function runAction(
@@ -961,38 +998,91 @@ export function TicketDetailPage() {
               </div>
             ) : (
               <div className="px-4 pb-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Statement Results</p>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Statement Results</p>
+                  {expandableStatementKeys.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={toggleAllStatementSQLs}
+                      className="mt-1 inline-flex h-6 items-center gap-1 text-[11px] font-semibold text-muted transition hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      {allStatementSQLsExpanded ? 'Collapse all SQL' : 'Show all SQL'}
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${allStatementSQLsExpanded ? 'rotate-180' : ''}`} />
+                    </button>
+                  ) : null}
+                </div>
                 <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-                  <table className="min-w-full border-collapse">
+                  <table className="w-full table-fixed border-collapse">
+                    <colgroup>
+                      <col className="w-[28px]" />
+                      <col className="w-[36px]" />
+                      <col className="w-[38%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[9%]" />
+                      <col className="w-[7%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[5%]" />
+                      <col className="w-[5%]" />
+                    </colgroup>
                     <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
                       <tr>
-                        <th className="px-4 py-3">ID</th>
-                        <th className="px-4 py-3">SQL</th>
-                        <th className="px-4 py-3">Scan / Impact Rows</th>
-                        <th className="px-4 py-3">Review Status</th>
-                        <th className="px-4 py-3">Review Message</th>
-                        <th className="px-4 py-3">Rows Affected</th>
-                        <th className="px-4 py-3">Execution Status</th>
-                        <th className="px-4 py-3">Current Stage</th>
-                        <th className="px-4 py-3">Duration</th>
-                        <th className="px-4 py-3">Error Message</th>
+                        <th className="py-3 pl-2 pr-1" aria-label="Expand SQL" />
+                        <th className="py-3 pl-1 pr-2">ID</th>
+                        <th className="py-3 pl-1 pr-2">SQL</th>
+                        <th className="px-3 py-3">Scan / Impact Rows</th>
+                        <th className="px-3 py-3">Review Status</th>
+                        <th className="px-3 py-3">Review Message</th>
+                        <th className="px-3 py-3">Rows Affected</th>
+                        <th className="px-3 py-3">Execution Status</th>
+                        <th className="px-3 py-3">Current Stage</th>
+                        <th className="px-3 py-3">Duration</th>
+                        <th className="px-3 py-3">Error Message</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border bg-white text-[13px] text-ink">
-                      {statementResults.map((row) => (
-                        <tr key={`${row.seq}-${row.sql}`}>
-                          <td className="px-4 py-3 align-top">{row.seq}</td>
-                          <td className="px-4 py-3 align-top"><ExpandableSql value={row.sql} /></td>
-                          <td className="px-4 py-3 align-top">{row.scanRows ?? '—'}</td>
-                          <td className="px-4 py-3 align-top">{row.reviewStatus ?? '—'}</td>
-                          <td className="px-4 py-3 align-top text-muted">{row.reviewMessage || '—'}</td>
-                          <td className="px-4 py-3 align-top">{row.rowsAffected ?? '—'}</td>
-                          <td className="px-4 py-3 align-top">{row.executionStatus ?? '—'}</td>
-                          <td className="px-4 py-3 align-top">{row.currentStage ?? '—'}</td>
-                          <td className="px-4 py-3 align-top">{row.duration ?? '—'}</td>
-                          <td className="px-4 py-3 align-top text-muted">{row.errorMessage || '—'}</td>
-                        </tr>
-                      ))}
+                      {statementResults.map((row) => {
+                        const rowKey = statementResultKey(row)
+                        const rowExpanded = expandedStatementSQLs.has(rowKey)
+                        const rowExpandable = isExpandableSql(row.sql)
+                        return (
+                          <tr key={rowKey}>
+                            <td className="py-3 pl-2 pr-1 align-top">
+                              {rowExpandable ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setStatementSQLExpanded(rowKey, !rowExpanded)}
+                                  className="inline-flex h-6 w-5 shrink-0 items-center justify-center rounded-md text-primary transition hover:bg-panel-soft focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                  aria-expanded={rowExpanded}
+                                  aria-label={`${rowExpanded ? 'Collapse' : 'Show full'} SQL statement ${row.seq}`}
+                                >
+                                  {rowExpanded ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                                </button>
+                              ) : null}
+                            </td>
+                            <td className="py-3 pl-1 pr-2 align-top leading-6">
+                              {row.seq}
+                            </td>
+                            <td className="min-w-0 py-3 pl-1 pr-2 align-top">
+                              <ExpandableSql
+                                value={row.sql}
+                                expanded={rowExpanded}
+                                onExpandedChange={(expanded) => setStatementSQLExpanded(rowKey, expanded)}
+                                showToggle={false}
+                              />
+                            </td>
+                            <td className="break-words px-3 py-3 align-top leading-6">{row.scanRows ?? '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6">{row.reviewStatus ?? '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6 text-muted">{row.reviewMessage || '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6">{row.rowsAffected ?? '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6">{row.executionStatus ?? '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6">{row.currentStage ?? '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6">{row.duration ?? '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6 text-muted">{row.errorMessage || '—'}</td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
