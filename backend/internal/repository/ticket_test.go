@@ -142,6 +142,32 @@ func TestTicketGetByTicketNo(t *testing.T) {
 	}
 }
 
+func TestTicketUpdateStatusStoresWithdrawReason(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+	reason := "需求改變，先撤回"
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = ?, updated_at = ?, rejection_reason = ? WHERE id = ? AND status = ?`)).
+		WithArgs(model.TicketStatusWithdrawn, sqlmock.AnyArg(), reason, uint64(12), model.TicketStatusPendingReview).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	ok, err := repo.UpdateStatus(context.Background(), 12, model.TicketStatusPendingReview, model.TicketStatusWithdrawn, nil, nil, &reason)
+	if err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("UpdateStatus() ok = false, want true")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
 func ticketRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id",

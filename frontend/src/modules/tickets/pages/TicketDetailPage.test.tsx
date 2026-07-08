@@ -25,11 +25,12 @@ vi.mock('@/shared/ui/ToastContext', () => ({
 }))
 
 import { useAuth } from '@/shared/auth/AuthContext'
-import { downloadTicketExport, getTicket } from '@/modules/tickets/api'
+import { downloadTicketExport, getTicket, withdrawTicket } from '@/modules/tickets/api'
 
 const mockedUseAuth = vi.mocked(useAuth)
 const mockedGetTicket = vi.mocked(getTicket)
 const mockedDownloadTicketExport = vi.mocked(downloadTicketExport)
+const mockedWithdrawTicket = vi.mocked(withdrawTicket)
 
 const baseTicket: Ticket = {
   id: 12,
@@ -99,6 +100,7 @@ describe('TicketDetailPage role visibility', () => {
   beforeEach(() => {
     mockedGetTicket.mockReset()
     mockedDownloadTicketExport.mockReset()
+    mockedWithdrawTicket.mockReset()
   })
 
   it('reviewer 在 pending_review 狀態可見 approve / reject', async () => {
@@ -200,7 +202,7 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('Reject at Execution Stage')).toBeInTheDocument()
   })
 
-  it('submitter 在 pending_review 狀態可見 withdraw', async () => {
+  it('submitter 在 pending_review 狀態可填寫原因並 withdraw', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
       isAuthenticated: true,
@@ -220,10 +222,16 @@ describe('TicketDetailPage role visibility', () => {
         can_download_export: false,
       },
     }))
+    mockedWithdrawTicket.mockResolvedValue({ ...baseTicket, status: 'withdrawn', rejection_reason: '需求改變，先撤回' })
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByText('Withdraw Ticket')).toBeInTheDocument())
+    const reasonInput = await screen.findByPlaceholderText('Withdraw reason (optional)')
+    fireEvent.change(reasonInput, { target: { value: '需求改變，先撤回' } })
+    fireEvent.click(screen.getByText('Withdraw Ticket'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Withdraw' }))
+
+    await waitFor(() => expect(mockedWithdrawTicket).toHaveBeenCalledWith('T-012', '需求改變，先撤回'))
   })
 
   it('developer 不會看到審核或 DBA 操作面板', async () => {

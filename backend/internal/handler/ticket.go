@@ -1863,6 +1863,23 @@ func (h *TicketHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 	}
 	id := ticket.ID
 
+	var req struct {
+		Reason *string `json:"reason"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := bindJSON(r, &req); err != nil {
+			jsonErr(w, http.StatusBadRequest, "invalid withdraw request")
+			return
+		}
+	}
+	var reason *string
+	if req.Reason != nil {
+		trimmed := strings.TrimSpace(*req.Reason)
+		if trimmed != "" {
+			reason = &trimmed
+		}
+	}
+
 	userID := middleware.UserIDFromCtx(r.Context())
 	allowed, err := h.canWithdrawTicket(r.Context(), ticket, userID)
 	if err != nil {
@@ -1879,7 +1896,7 @@ func (h *TicketHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok, err := h.tickets.UpdateStatus(r.Context(), id, ticket.Status, model.TicketStatusWithdrawn, nil, nil, nil)
+	ok, err := h.tickets.UpdateStatus(r.Context(), id, ticket.Status, model.TicketStatusWithdrawn, nil, nil, reason)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "withdraw failed")
 		return
@@ -1889,17 +1906,23 @@ func (h *TicketHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auditDetails := map[string]string{"status": string(model.TicketStatusWithdrawn)}
+	notificationDetail := "工單撤銷。"
+	if reason != nil {
+		auditDetails["reason"] = *reason
+		notificationDetail = *reason
+	}
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
 		ActionType:   "ticket_withdraw",
 		ResourceType: "ticket",
 		ResourceID:   &id,
-		Details:      map[string]string{"status": string(model.TicketStatusWithdrawn)},
+		Details:      auditDetails,
 		IPAddress:    clientIP(r),
 	})
 
-	h.dispatchTicketNotification(r.Context(), ticket, ticketEventWithdrawn, &userID, "submitter 已收回此工單。")
+	h.dispatchTicketNotification(r.Context(), ticket, ticketEventWithdrawn, &userID, notificationDetail)
 
 	h.publishTicketUpdateByID(r.Context(), id, ticket, &userID)
 	updated, _ := h.tickets.GetByID(r.Context(), id)

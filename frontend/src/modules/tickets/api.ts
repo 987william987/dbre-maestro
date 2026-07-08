@@ -146,8 +146,10 @@ export async function rejectTicket(ticketRef: string | number, reason: string) {
   })
 }
 
-export async function withdrawTicket(ticketRef: string | number) {
-  return apiClient.post<Ticket>(`/tickets/${ticketRef}/withdraw`)
+export async function withdrawTicket(ticketRef: string | number, reason?: string) {
+  return apiClient.post<Ticket>(`/tickets/${ticketRef}/withdraw`, {
+    reason: reason?.trim() ? reason.trim() : null,
+  })
 }
 
 export async function executeTicket(ticketRef: string | number) {

@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Check, ChevronDown, Download, Loader2, Minus, Play, Plus, Send, ShieldCheck, ShieldX, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, Download, Loader2, Minus, Play, Plus, ShieldCheck, ShieldX, X } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/shared/auth/AuthContext'
@@ -344,7 +344,9 @@ function formatActivityDetail(log: AuditLog) {
         ? `Reject reason: ${details.reason.trim()}`
         : 'Ticket rejected.'
     case 'ticket_withdraw':
-      return 'Ticket withdrawn by submitter.'
+      return typeof details?.reason === 'string' && details.reason.trim()
+        ? `Withdraw reason: ${details.reason.trim()}`
+        : 'Ticket withdrawn by submitter.'
     case 'ticket_execute_start':
       return 'Ticket execution started.'
     case 'ticket_execute_complete':
@@ -1093,73 +1095,54 @@ export function TicketDetailPage() {
               <div className="px-4 pb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Actions</p>
                 <div className="mt-3">
-                  {canReview && ticket.status === 'pending_review' ? (
+                  {(canReview || canWithdraw) && ticket.status === 'pending_review' ? (
                     <div className="p-0">
-                      <div className="flex items-center gap-2">
-                        <ShieldCheck className="h-4 w-4 text-accent" />
-                        <p className="text-[13px] font-semibold text-ink">Review</p>
-                      </div>
-                      <p className="mt-1 text-[12px] text-muted">Your role can review this ticket. The backend will re-validate the state transition.</p>
-
-                      <div className="mt-3 grid gap-3 xl:grid-cols-2">
-                        <label className="flex flex-col gap-1.5">
-                          <span className="text-[12px] font-semibold text-ink">Review comment (optional)</span>
+                      <div className="flex flex-col gap-2">
+                        {canReview || canWithdraw ? (
                           <textarea
                             value={comment}
                             onChange={(event) => setComment(event.target.value)}
-                            className="min-h-24 rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            className="min-h-[96px] rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            placeholder={canReview ? 'Review comment or rejection reason' : 'Withdraw reason (optional)'}
                             disabled={acting !== null}
                           />
-                          <button
-                            type="button"
-                            disabled={acting !== null}
-                            onClick={() => void runAction('approve', () => approveTicket(ticket.ticket_no, comment))}
-                            className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {acting === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                            Approve
-                          </button>
-                        </label>
-
-                        <label className="flex flex-col gap-1.5">
-                          <span className="text-[12px] font-semibold text-ink">Rejection reason (required)</span>
-                          <textarea
-                            value={reason}
-                            onChange={(event) => setReason(event.target.value)}
-                            className="min-h-24 rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                            disabled={acting !== null}
-                          />
-                          <button
-                            type="button"
-                            disabled={acting !== null || reason.trim() === ''}
-                            onClick={() => void runAction('reject', () => rejectTicket(ticket.ticket_no, reason.trim()))}
-                            className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
-                            Reject
-                          </button>
-                        </label>
+                        ) : null}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {canReview ? (
+                            <>
+                              <button
+                                type="button"
+                                disabled={acting !== null}
+                                onClick={() => void runAction('approve', () => approveTicket(ticket.ticket_no, comment))}
+                                className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {acting === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                disabled={acting !== null || comment.trim() === ''}
+                                onClick={() => void runAction('reject', () => rejectTicket(ticket.ticket_no, comment.trim()))}
+                                className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
+                                Reject
+                              </button>
+                            </>
+                          ) : null}
+                          {canWithdraw ? (
+                            <button
+                              type="button"
+                              disabled={acting !== null}
+                              onClick={() => setConfirmAction('withdraw')}
+                              className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {acting === 'withdraw' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
+                              Withdraw Ticket
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
-
-                  {canWithdraw && ticket.status === 'pending_review' ? (
-                    <div className="p-0">
-                      <div className="flex items-center gap-2">
-                        <Send className="h-4 w-4 text-accent" />
-                        <p className="text-[13px] font-semibold text-ink">Submission</p>
-                      </div>
-                      <p className="mt-1 text-[12px] text-muted">Withdraw this ticket before review starts.</p>
-
-                      <button
-                        type="button"
-                        disabled={acting !== null}
-                        onClick={() => setConfirmAction('withdraw')}
-                        className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {acting === 'withdraw' ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                        Withdraw Ticket
-                      </button>
                     </div>
                   ) : null}
 
@@ -1169,7 +1152,7 @@ export function TicketDetailPage() {
                         type="button"
                         disabled={acting !== null}
                         onClick={() => void runAction('retry_workflow', () => retryWorkflowResolution(ticket.ticket_no).then((response) => response.ticket))}
-                        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 text-[13px] font-bold text-orange-700 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-orange-200 bg-orange-50 px-3 text-[12px] font-semibold text-orange-700 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {acting === 'retry_workflow' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                         Retry Workflow Resolution
@@ -1222,7 +1205,7 @@ export function TicketDetailPage() {
                             type="button"
                             disabled={acting !== null || ticket.status !== 'approved' || (ticket.ticket_type !== 'sensitive_query_access' && ticket.ticket_type !== 'query_access')}
                             onClick={() => setConfirmAction('revoke')}
-                            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {acting === 'revoke' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
                             {ticket.ticket_type === 'query_access' ? 'Revoke Query Access' : 'Revoke Access'}
@@ -1347,7 +1330,7 @@ export function TicketDetailPage() {
         onConfirm={() => {
           if (!ticket) return
           if (confirmAction === 'withdraw') {
-            void runAction('withdraw', () => withdrawTicket(ticket.ticket_no)).finally(() => setConfirmAction(null))
+            void runAction('withdraw', () => withdrawTicket(ticket.ticket_no, comment.trim())).finally(() => setConfirmAction(null))
           }
           if (confirmAction === 'execute') {
             void runAction('execute', () => executeTicket(ticket.ticket_no)).finally(() => setConfirmAction(null))
