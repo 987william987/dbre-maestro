@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Check, ChevronDown, Download, Loader2, Play, Send, ShieldCheck, ShieldX, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, Download, Loader2, Minus, Play, Plus, ShieldCheck, ShieldX, X } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/shared/auth/AuthContext'
@@ -10,7 +10,7 @@ import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWo
 import type { CurrentUser } from '@/shared/types/auth'
 import type { AuditLog } from '@/shared/types/audit'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
-import { ExpandableSql } from '@/shared/ui/ExpandableSql'
+import { ExpandableSql, isExpandableSql } from '@/shared/ui/ExpandableSql'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { PageIntro } from '@/shared/ui/PageIntro'
@@ -344,7 +344,9 @@ function formatActivityDetail(log: AuditLog) {
         ? `Reject reason: ${details.reason.trim()}`
         : 'Ticket rejected.'
     case 'ticket_withdraw':
-      return 'Ticket withdrawn by submitter.'
+      return typeof details?.reason === 'string' && details.reason.trim()
+        ? `Withdraw reason: ${details.reason.trim()}`
+        : 'Ticket withdrawn by submitter.'
     case 'ticket_execute_start':
       return 'Ticket execution started.'
     case 'ticket_execute_complete':
@@ -406,6 +408,10 @@ type StatementResultRow = {
   currentStage: string | null
   duration: string | null
   errorMessage: string | null
+}
+
+function statementResultKey(row: StatementResultRow) {
+  return `${row.seq}:${row.sql}`
 }
 
 function buildStatementResults(detail: TicketDetail) {
@@ -663,6 +669,7 @@ export function TicketDetailPage() {
   const [debugTraceOpen, setDebugTraceOpen] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [statusTransitioning, setStatusTransitioning] = useState(false)
+  const [expandedStatementSQLs, setExpandedStatementSQLs] = useState<Set<string>>(() => new Set())
   const previousStatusRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -747,6 +754,10 @@ export function TicketDetailPage() {
     }
   }, [detail?.ticket.status])
 
+  useEffect(() => {
+    setExpandedStatementSQLs(new Set())
+  }, [detail?.ticket.id])
+
   if (!user) {
     return null
   }
@@ -760,6 +771,11 @@ export function TicketDetailPage() {
   const canRetryWorkflow = detail?.capabilities?.can_retry_workflow_resolution ?? false
   const exportDownloadURL = detail?.export_request?.download_url ?? null
   const statementResults = detail ? buildStatementResults(detail) : []
+  const expandableStatementKeys = statementResults
+    .filter((row) => isExpandableSql(row.sql))
+    .map(statementResultKey)
+  const allStatementSQLsExpanded = expandableStatementKeys.length > 0 &&
+    expandableStatementKeys.every((key) => expandedStatementSQLs.has(key))
   const queryAccessItems = detail?.query_access_items ?? []
   const queryAccessConnections = summarizeQueryAccessConnections(queryAccessItems)
   const queryAccessScopeSummary = summarizeQueryAccessScope(queryAccessItems)
@@ -788,6 +804,29 @@ export function TicketDetailPage() {
         setIsRefreshing(false)
       }
     }
+  }
+
+  function setStatementSQLExpanded(key: string, expanded: boolean) {
+    setExpandedStatementSQLs((current) => {
+      const next = new Set(current)
+      if (expanded) {
+        next.add(key)
+      } else {
+        next.delete(key)
+      }
+      return next
+    })
+  }
+
+  function toggleAllStatementSQLs() {
+    setExpandedStatementSQLs((current) => {
+      if (allStatementSQLsExpanded) {
+        return new Set()
+      }
+      const next = new Set(current)
+      expandableStatementKeys.forEach((key) => next.add(key))
+      return next
+    })
   }
 
   async function runAction(
@@ -961,38 +1000,91 @@ export function TicketDetailPage() {
               </div>
             ) : (
               <div className="px-4 pb-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Statement Results</p>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Statement Results</p>
+                  {expandableStatementKeys.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={toggleAllStatementSQLs}
+                      className="mt-1 inline-flex h-6 items-center gap-1 text-[11px] font-semibold text-muted transition hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      {allStatementSQLsExpanded ? 'Collapse all SQL' : 'Show all SQL'}
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${allStatementSQLsExpanded ? 'rotate-180' : ''}`} />
+                    </button>
+                  ) : null}
+                </div>
                 <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-                  <table className="min-w-full border-collapse">
+                  <table className="w-full table-fixed border-collapse">
+                    <colgroup>
+                      <col className="w-[28px]" />
+                      <col className="w-[36px]" />
+                      <col className="w-[38%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[9%]" />
+                      <col className="w-[7%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[5%]" />
+                      <col className="w-[5%]" />
+                    </colgroup>
                     <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
                       <tr>
-                        <th className="px-4 py-3">ID</th>
-                        <th className="px-4 py-3">SQL</th>
-                        <th className="px-4 py-3">Scan / Impact Rows</th>
-                        <th className="px-4 py-3">Review Status</th>
-                        <th className="px-4 py-3">Review Message</th>
-                        <th className="px-4 py-3">Rows Affected</th>
-                        <th className="px-4 py-3">Execution Status</th>
-                        <th className="px-4 py-3">Current Stage</th>
-                        <th className="px-4 py-3">Duration</th>
-                        <th className="px-4 py-3">Error Message</th>
+                        <th className="py-3 pl-2 pr-1" aria-label="Expand SQL" />
+                        <th className="py-3 pl-1 pr-2">ID</th>
+                        <th className="py-3 pl-1 pr-2">SQL</th>
+                        <th className="px-3 py-3">Scan / Impact Rows</th>
+                        <th className="px-3 py-3">Review Status</th>
+                        <th className="px-3 py-3">Review Message</th>
+                        <th className="px-3 py-3">Rows Affected</th>
+                        <th className="px-3 py-3">Execution Status</th>
+                        <th className="px-3 py-3">Current Stage</th>
+                        <th className="px-3 py-3">Duration</th>
+                        <th className="px-3 py-3">Error Message</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border bg-white text-[13px] text-ink">
-                      {statementResults.map((row) => (
-                        <tr key={`${row.seq}-${row.sql}`}>
-                          <td className="px-4 py-3 align-top">{row.seq}</td>
-                          <td className="px-4 py-3 align-top"><ExpandableSql value={row.sql} /></td>
-                          <td className="px-4 py-3 align-top">{row.scanRows ?? '—'}</td>
-                          <td className="px-4 py-3 align-top">{row.reviewStatus ?? '—'}</td>
-                          <td className="px-4 py-3 align-top text-muted">{row.reviewMessage || '—'}</td>
-                          <td className="px-4 py-3 align-top">{row.rowsAffected ?? '—'}</td>
-                          <td className="px-4 py-3 align-top">{row.executionStatus ?? '—'}</td>
-                          <td className="px-4 py-3 align-top">{row.currentStage ?? '—'}</td>
-                          <td className="px-4 py-3 align-top">{row.duration ?? '—'}</td>
-                          <td className="px-4 py-3 align-top text-muted">{row.errorMessage || '—'}</td>
-                        </tr>
-                      ))}
+                      {statementResults.map((row) => {
+                        const rowKey = statementResultKey(row)
+                        const rowExpanded = expandedStatementSQLs.has(rowKey)
+                        const rowExpandable = isExpandableSql(row.sql)
+                        return (
+                          <tr key={rowKey}>
+                            <td className="py-3 pl-2 pr-1 align-top">
+                              {rowExpandable ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setStatementSQLExpanded(rowKey, !rowExpanded)}
+                                  className="inline-flex h-6 w-5 shrink-0 items-center justify-center rounded-md text-primary transition hover:bg-panel-soft focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                  aria-expanded={rowExpanded}
+                                  aria-label={`${rowExpanded ? 'Collapse' : 'Show full'} SQL statement ${row.seq}`}
+                                >
+                                  {rowExpanded ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                                </button>
+                              ) : null}
+                            </td>
+                            <td className="py-3 pl-1 pr-2 align-top leading-6">
+                              {row.seq}
+                            </td>
+                            <td className="min-w-0 py-3 pl-1 pr-2 align-top">
+                              <ExpandableSql
+                                value={row.sql}
+                                expanded={rowExpanded}
+                                onExpandedChange={(expanded) => setStatementSQLExpanded(rowKey, expanded)}
+                                showToggle={false}
+                              />
+                            </td>
+                            <td className="break-words px-3 py-3 align-top leading-6">{row.scanRows ?? '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6">{row.reviewStatus ?? '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6 text-muted">{row.reviewMessage || '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6">{row.rowsAffected ?? '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6">{row.executionStatus ?? '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6">{row.currentStage ?? '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6">{row.duration ?? '—'}</td>
+                            <td className="break-words px-3 py-3 align-top leading-6 text-muted">{row.errorMessage || '—'}</td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1003,73 +1095,54 @@ export function TicketDetailPage() {
               <div className="px-4 pb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Actions</p>
                 <div className="mt-3">
-                  {canReview && ticket.status === 'pending_review' ? (
+                  {(canReview || canWithdraw) && ticket.status === 'pending_review' ? (
                     <div className="p-0">
-                      <div className="flex items-center gap-2">
-                        <ShieldCheck className="h-4 w-4 text-accent" />
-                        <p className="text-[13px] font-semibold text-ink">Review</p>
-                      </div>
-                      <p className="mt-1 text-[12px] text-muted">Your role can review this ticket. The backend will re-validate the state transition.</p>
-
-                      <div className="mt-3 grid gap-3 xl:grid-cols-2">
-                        <label className="flex flex-col gap-1.5">
-                          <span className="text-[12px] font-semibold text-ink">Review comment (optional)</span>
+                      <div className="flex flex-col gap-2">
+                        {canReview || canWithdraw ? (
                           <textarea
                             value={comment}
                             onChange={(event) => setComment(event.target.value)}
-                            className="min-h-24 rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            className="min-h-[96px] rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            placeholder={canReview ? 'Review comment or rejection reason' : 'Withdraw reason (optional)'}
                             disabled={acting !== null}
                           />
-                          <button
-                            type="button"
-                            disabled={acting !== null}
-                            onClick={() => void runAction('approve', () => approveTicket(ticket.ticket_no, comment))}
-                            className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {acting === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                            Approve
-                          </button>
-                        </label>
-
-                        <label className="flex flex-col gap-1.5">
-                          <span className="text-[12px] font-semibold text-ink">Rejection reason (required)</span>
-                          <textarea
-                            value={reason}
-                            onChange={(event) => setReason(event.target.value)}
-                            className="min-h-24 rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                            disabled={acting !== null}
-                          />
-                          <button
-                            type="button"
-                            disabled={acting !== null || reason.trim() === ''}
-                            onClick={() => void runAction('reject', () => rejectTicket(ticket.ticket_no, reason.trim()))}
-                            className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
-                            Reject
-                          </button>
-                        </label>
+                        ) : null}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {canReview ? (
+                            <>
+                              <button
+                                type="button"
+                                disabled={acting !== null}
+                                onClick={() => void runAction('approve', () => approveTicket(ticket.ticket_no, comment))}
+                                className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {acting === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                disabled={acting !== null || comment.trim() === ''}
+                                onClick={() => void runAction('reject', () => rejectTicket(ticket.ticket_no, comment.trim()))}
+                                className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
+                                Reject
+                              </button>
+                            </>
+                          ) : null}
+                          {canWithdraw ? (
+                            <button
+                              type="button"
+                              disabled={acting !== null}
+                              onClick={() => setConfirmAction('withdraw')}
+                              className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {acting === 'withdraw' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
+                              Withdraw Ticket
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
-
-                  {canWithdraw && ticket.status === 'pending_review' ? (
-                    <div className="p-0">
-                      <div className="flex items-center gap-2">
-                        <Send className="h-4 w-4 text-accent" />
-                        <p className="text-[13px] font-semibold text-ink">Submission</p>
-                      </div>
-                      <p className="mt-1 text-[12px] text-muted">Withdraw this ticket before review starts.</p>
-
-                      <button
-                        type="button"
-                        disabled={acting !== null}
-                        onClick={() => setConfirmAction('withdraw')}
-                        className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {acting === 'withdraw' ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                        Withdraw Ticket
-                      </button>
                     </div>
                   ) : null}
 
@@ -1079,7 +1152,7 @@ export function TicketDetailPage() {
                         type="button"
                         disabled={acting !== null}
                         onClick={() => void runAction('retry_workflow', () => retryWorkflowResolution(ticket.ticket_no).then((response) => response.ticket))}
-                        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-4 text-[13px] font-bold text-orange-700 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-orange-200 bg-orange-50 px-3 text-[12px] font-semibold text-orange-700 transition hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {acting === 'retry_workflow' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                         Retry Workflow Resolution
@@ -1132,7 +1205,7 @@ export function TicketDetailPage() {
                             type="button"
                             disabled={acting !== null || ticket.status !== 'approved' || (ticket.ticket_type !== 'sensitive_query_access' && ticket.ticket_type !== 'query_access')}
                             onClick={() => setConfirmAction('revoke')}
-                            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-danger/20 bg-red-50 px-4 text-[13px] font-bold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {acting === 'revoke' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
                             {ticket.ticket_type === 'query_access' ? 'Revoke Query Access' : 'Revoke Access'}
@@ -1257,7 +1330,7 @@ export function TicketDetailPage() {
         onConfirm={() => {
           if (!ticket) return
           if (confirmAction === 'withdraw') {
-            void runAction('withdraw', () => withdrawTicket(ticket.ticket_no)).finally(() => setConfirmAction(null))
+            void runAction('withdraw', () => withdrawTicket(ticket.ticket_no, comment.trim())).finally(() => setConfirmAction(null))
           }
           if (confirmAction === 'execute') {
             void runAction('execute', () => executeTicket(ticket.ticket_no)).finally(() => setConfirmAction(null))

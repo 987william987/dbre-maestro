@@ -25,11 +25,12 @@ vi.mock('@/shared/ui/ToastContext', () => ({
 }))
 
 import { useAuth } from '@/shared/auth/AuthContext'
-import { downloadTicketExport, getTicket } from '@/modules/tickets/api'
+import { downloadTicketExport, getTicket, withdrawTicket } from '@/modules/tickets/api'
 
 const mockedUseAuth = vi.mocked(useAuth)
 const mockedGetTicket = vi.mocked(getTicket)
 const mockedDownloadTicketExport = vi.mocked(downloadTicketExport)
+const mockedWithdrawTicket = vi.mocked(withdrawTicket)
 
 const baseTicket: Ticket = {
   id: 12,
@@ -99,6 +100,7 @@ describe('TicketDetailPage role visibility', () => {
   beforeEach(() => {
     mockedGetTicket.mockReset()
     mockedDownloadTicketExport.mockReset()
+    mockedWithdrawTicket.mockReset()
   })
 
   it('reviewer 在 pending_review 狀態可見 approve / reject', async () => {
@@ -200,7 +202,7 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('Reject at Execution Stage')).toBeInTheDocument()
   })
 
-  it('submitter 在 pending_review 狀態可見 withdraw', async () => {
+  it('submitter 在 pending_review 狀態可填寫原因並 withdraw', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
       isAuthenticated: true,
@@ -220,10 +222,16 @@ describe('TicketDetailPage role visibility', () => {
         can_download_export: false,
       },
     }))
+    mockedWithdrawTicket.mockResolvedValue({ ...baseTicket, status: 'withdrawn', rejection_reason: '需求改變，先撤回' })
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByText('Withdraw Ticket')).toBeInTheDocument())
+    const reasonInput = await screen.findByPlaceholderText('Withdraw reason (optional)')
+    fireEvent.change(reasonInput, { target: { value: '需求改變，先撤回' } })
+    fireEvent.click(screen.getByText('Withdraw Ticket'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Withdraw' }))
+
+    await waitFor(() => expect(mockedWithdrawTicket).toHaveBeenCalledWith('T-012', '需求改變，先撤回'))
   })
 
   it('developer 不會看到審核或 DBA 操作面板', async () => {
@@ -504,6 +512,58 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('UPDATE users SET flagged = 1 WHERE id < 10')).toBeInTheDocument()
     expect(screen.getByText('10')).toBeInTheDocument()
     expect(screen.getByText('pass')).toBeInTheDocument()
+  })
+
+  it('可一次展開與收合所有長 SQL，且逐列 SQL 仍可獨立控制', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail(baseTicket, {
+      review_results: [
+        {
+          id: 1,
+          ticket_id: 12,
+          seq: 1,
+          sql_stmt: 'CREATE TABLE IF NOT EXISTS very_long_table_one (id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id BIGINT NOT NULL, encrypted_secret VARCHAR(4096) NOT NULL, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;',
+          phase: 'validation',
+          scan_rows: 0,
+          status: 'pass',
+          message: null,
+        },
+        {
+          id: 2,
+          ticket_id: 12,
+          seq: 2,
+          sql_stmt: 'CREATE TABLE IF NOT EXISTS very_long_table_two (id BIGINT AUTO_INCREMENT PRIMARY KEY, action VARCHAR(64) NOT NULL, operator_id BIGINT DEFAULT NULL, request_payload VARCHAR(4096) NOT NULL, created_at BIGINT NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;',
+          phase: 'validation',
+          scan_rows: 0,
+          status: 'pass',
+          message: null,
+        },
+      ],
+    }))
+
+    renderPage()
+
+    const showAll = await screen.findByRole('button', { name: /Show all SQL/i })
+    expect(screen.getAllByRole('button', { name: /Show full SQL/i })).toHaveLength(2)
+
+    fireEvent.click(showAll)
+
+    expect(screen.getByRole('button', { name: /Collapse all SQL/i })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /Collapse SQL/i })).toHaveLength(2)
+
+    fireEvent.click(screen.getAllByRole('button', { name: /Collapse SQL/i })[0])
+
+    expect(screen.getByRole('button', { name: /Show all SQL/i })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /Show full SQL/i })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /Collapse SQL/i })).toHaveLength(1)
   })
 
   it('顯示關鍵工單資訊與逐句 SQL 執行結果', async () => {
