@@ -11,4 +11,4 @@ CREATE TABLE IF NOT EXISTS masking_whitelist (
     created_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_whitelist_conn (db_connection_id, table_name, column_name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

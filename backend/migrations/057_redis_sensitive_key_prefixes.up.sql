@@ -14,4 +14,4 @@ CREATE TABLE IF NOT EXISTS redis_sensitive_key_prefixes (
     CONSTRAINT fk_redis_sensitive_prefix_connection
         FOREIGN KEY (db_connection_id) REFERENCES db_connections(id)
         ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

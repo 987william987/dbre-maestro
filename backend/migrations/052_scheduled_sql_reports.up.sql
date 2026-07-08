@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS scheduled_sql_reports (
     KEY idx_scheduled_sql_reports_due (is_active, next_run_at),
     KEY idx_scheduled_sql_reports_connection (db_connection_id),
     KEY idx_scheduled_sql_reports_created_by (created_by)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS scheduled_sql_report_runs (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS scheduled_sql_report_runs (
     PRIMARY KEY (id),
     KEY idx_scheduled_sql_report_runs_report (report_id, started_at),
     KEY idx_scheduled_sql_report_runs_status (status, created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT IGNORE INTO permissions (permission_key, name, description, category)
 VALUES

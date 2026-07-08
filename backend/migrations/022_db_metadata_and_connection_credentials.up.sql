@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS db_connection_credentials (
     PRIMARY KEY (id),
     UNIQUE KEY uq_db_conn_credential_role (db_connection_id, credential_role),
     KEY idx_db_conn_credentials_conn (db_connection_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS cloud_db_inventory_snapshots (
     id                      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS cloud_db_inventory_snapshots (
     KEY idx_inventory_snapshot_time (snapshot_at),
     KEY idx_inventory_engine_region (engine, region),
     KEY idx_inventory_identifier (db_identifier)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS db_object_snapshots (
     id                       BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS db_object_snapshots (
     KEY idx_object_snapshot_time (snapshot_at),
     KEY idx_object_snapshot_conn (db_connection_id),
     KEY idx_object_snapshot_table (database_name, schema_name, table_name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT IGNORE INTO permissions (permission_key, name, description, category)
 VALUES

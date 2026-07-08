@@ -17,4 +17,4 @@ CREATE TABLE IF NOT EXISTS ticket_workflow_snapshots (
     CONSTRAINT fk_ticket_workflow_snapshots_ticket
         FOREIGN KEY (ticket_id) REFERENCES tickets(id)
         ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

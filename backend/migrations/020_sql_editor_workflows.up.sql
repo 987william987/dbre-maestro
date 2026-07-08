@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS ticket_scopes (
     PRIMARY KEY (id),
     KEY idx_ticket_scopes_ticket (ticket_id),
     KEY idx_ticket_scopes_ticket_column (ticket_id, column_name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT IGNORE INTO permissions (permission_key, name, description, category)
 VALUES

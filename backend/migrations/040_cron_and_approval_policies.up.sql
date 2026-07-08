@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS db_metadata_job_runs (
     error_message TEXT NULL,
     updated_at DATETIME(6) NOT NULL,
     PRIMARY KEY (job_name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS approval_policies (
     workflow_type VARCHAR(32) NOT NULL,
@@ -18,4 +18,4 @@ CREATE TABLE IF NOT EXISTS approval_policies (
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
     PRIMARY KEY (workflow_type)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

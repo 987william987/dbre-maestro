@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS query_access_ticket_items (
     PRIMARY KEY (id),
     KEY idx_query_access_ticket_items_ticket (ticket_id),
     KEY idx_query_access_ticket_items_connection (connection_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS query_access_grants (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -35,4 +35,4 @@ CREATE TABLE IF NOT EXISTS query_access_grants (
     KEY idx_query_access_grants_ticket (source_ticket_id),
     KEY idx_query_access_grants_expiry (expires_at),
     KEY idx_query_access_grants_active (revoked_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

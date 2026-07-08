@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     KEY idx_tickets_submitter (submitter_id),
     KEY idx_tickets_status (status),
     KEY idx_tickets_created (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS ticket_executions (
     id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -38,4 +38,4 @@ CREATE TABLE IF NOT EXISTS ticket_executions (
     PRIMARY KEY (id),
     KEY idx_exec_ticket (ticket_id),
     KEY idx_exec_ticket_seq (ticket_id, seq)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

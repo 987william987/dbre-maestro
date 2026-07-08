@@ -13,4 +13,4 @@ CREATE TABLE IF NOT EXISTS ticket_review_results (
     PRIMARY KEY (id),
     KEY idx_ticket_review_results_ticket (ticket_id),
     KEY idx_ticket_review_results_ticket_seq (ticket_id, seq)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

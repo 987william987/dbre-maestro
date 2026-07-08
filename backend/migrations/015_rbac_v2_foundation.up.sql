@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS auth_groups (
     updated_at   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_auth_groups_key (group_key)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS permissions (
     id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -21,13 +21,13 @@ CREATE TABLE IF NOT EXISTS permissions (
     updated_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_permissions_key (permission_key)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS auth_group_permissions (
     auth_group_id BIGINT UNSIGNED NOT NULL,
     permission_id BIGINT UNSIGNED NOT NULL,
     PRIMARY KEY (auth_group_id, permission_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS user_permissions (
     user_id       BIGINT UNSIGNED NOT NULL,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS user_permissions (
     granted_by    BIGINT UNSIGNED NULL,
     created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, permission_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS user_auth_groups (
     id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS user_auth_groups (
     created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_user_auth_group (user_id, auth_group_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS user_db_connections (
     user_id          BIGINT UNSIGNED NOT NULL,
@@ -54,13 +54,13 @@ CREATE TABLE IF NOT EXISTS user_db_connections (
     granted_by       BIGINT UNSIGNED NULL,
     created_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, db_connection_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS auth_group_db_connections (
     auth_group_id    BIGINT UNSIGNED NOT NULL,
     db_connection_id BIGINT UNSIGNED NOT NULL,
     PRIMARY KEY (auth_group_id, db_connection_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT IGNORE INTO auth_groups (group_key, name, description, is_system, is_protected)
 VALUES

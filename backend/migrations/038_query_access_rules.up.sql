@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS query_access_ticket_rules (
     KEY idx_query_access_ticket_rules_ticket (ticket_id),
     KEY idx_query_access_ticket_rules_connection (connection_id),
     KEY idx_query_access_ticket_rules_effect (effect)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS query_access_rules (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS query_access_rules (
     KEY idx_query_access_rules_expiry (expires_at),
     KEY idx_query_access_rules_active (revoked_at),
     KEY idx_query_access_rules_effect (effect)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT INTO query_access_ticket_rules
     (ticket_id, effect, connection_id, database_pattern, table_pattern, created_at)
