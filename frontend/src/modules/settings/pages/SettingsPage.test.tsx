@@ -55,6 +55,7 @@ describe('SettingsPage', () => {
           db_connection_id: null,
           export_sensitivity: null,
           approval_enabled: true,
+          execution_mode: 'manual',
           approval_auth_groups: ['data_owner'],
           executor_auth_groups: ['dba'],
           priority: 100,

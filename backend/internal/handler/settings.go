@@ -21,16 +21,29 @@ type SettingsHandler struct {
 	auths    *repository.AuthGroupRepo
 	dbConns  *repository.DBConnectionRepo
 	audit    *repository.AuditRepo
+	appEnv   string
 }
 
-func NewSettingsHandler(settings *repository.SettingsRepo, users *repository.UserRepo, auths *repository.AuthGroupRepo, dbConns *repository.DBConnectionRepo, audit *repository.AuditRepo) *SettingsHandler {
-	return &SettingsHandler{
+type SettingsHandlerOption func(*SettingsHandler)
+
+func WithSettingsHandlerAppEnv(appEnv string) SettingsHandlerOption {
+	return func(h *SettingsHandler) {
+		h.appEnv = strings.TrimSpace(appEnv)
+	}
+}
+
+func NewSettingsHandler(settings *repository.SettingsRepo, users *repository.UserRepo, auths *repository.AuthGroupRepo, dbConns *repository.DBConnectionRepo, audit *repository.AuditRepo, opts ...SettingsHandlerOption) *SettingsHandler {
+	h := &SettingsHandler{
 		settings: settings,
 		users:    users,
 		auths:    auths,
 		dbConns:  dbConns,
 		audit:    audit,
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +52,7 @@ func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "load settings failed")
 		return
 	}
+	settings.AppEnv = h.appEnv
 	jsonOK(w, settings)
 }
 
@@ -341,6 +355,7 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "update settings failed")
 		return
 	}
+	req.AppEnv = h.appEnv
 
 	actorID := middleware.UserIDFromCtx(r.Context())
 	h.audit.Log(r.Context(), repository.AuditEntry{
@@ -723,8 +738,20 @@ func (h *SettingsHandler) validateWorkflowRuleShape(ctx context.Context, rule mo
 	if strings.TrimSpace(rule.RuleName) == "" {
 		return fmt.Errorf("rule_name is required")
 	}
+	rule.ExecutionMode = normalizeWorkflowExecutionMode(rule.ExecutionMode)
 	if rule.TicketType == "" {
 		return fmt.Errorf("ticket_type is required")
+	}
+	if rule.ExecutionMode == workflowExecutionModeAutoApproval {
+		if h.appEnv == "production" {
+			return fmt.Errorf("auto_after_approval execution mode is not allowed in production")
+		}
+		if !rule.ApprovalEnabled {
+			return fmt.Errorf("auto_after_approval execution mode requires approval_enabled")
+		}
+		if rule.TicketType != model.TicketTypeDDL && rule.TicketType != model.TicketTypeDML {
+			return fmt.Errorf("auto_after_approval execution mode is only allowed for ddl and dml workflow rules")
+		}
 	}
 	if rule.DBConnectionID != nil {
 		conn, err := h.dbConns.GetByID(ctx, *rule.DBConnectionID)

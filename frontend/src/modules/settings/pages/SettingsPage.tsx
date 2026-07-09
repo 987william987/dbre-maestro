@@ -73,6 +73,7 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [workflowPreviews, setWorkflowPreviews] = useState<WorkflowRulePreview[]>([])
+  const isProduction = settings?.app_env === 'production'
   const workflowIssues = form ? findWorkflowRuleIssues(form.workflowRules, authGroups) : []
 
   useEffect(() => {
@@ -185,6 +186,7 @@ export function SettingsPage() {
           db_connection_id: null,
           export_sensitivity: null,
           approval_enabled: true,
+          execution_mode: 'manual',
           approval_auth_groups: ['data_owner'],
           executor_auth_groups: ['dba'],
           priority: 100,
@@ -431,6 +433,7 @@ export function SettingsPage() {
                   connections={connections}
                   authGroups={authGroups}
                   preview={workflowPreviews[index]}
+                  isProduction={isProduction}
                   onChange={(patch) => updateWorkflowRule(index, patch)}
                   onRemove={() => removeWorkflowRule(index)}
                 />
@@ -470,6 +473,7 @@ function WorkflowRuleEditor({
   connections,
   authGroups,
   preview,
+  isProduction,
   onChange,
   onRemove,
 }: {
@@ -478,6 +482,7 @@ function WorkflowRuleEditor({
   connections: Array<Pick<DBConnection, 'id' | 'name' | 'db_type' | 'host' | 'port'>>
   authGroups: AuthGroupSummary[]
   preview?: WorkflowRulePreview
+  isProduction: boolean
   onChange: (patch: Partial<WorkflowRule>) => void
   onRemove: () => void
 }) {
@@ -486,10 +491,11 @@ function WorkflowRuleEditor({
   const executorGroupItems = workflowAuthGroupItems(authGroups, rule.executor_auth_groups)
   const requiredReviewPermissions = WORKFLOW_REVIEW_PERMISSIONS[rule.ticket_type] ?? []
   const hasDeprecatedReviewer = [...rule.approval_auth_groups, ...rule.executor_auth_groups].includes('reviewer')
+  const supportsAutoExecution = rule.ticket_type === 'ddl' || rule.ticket_type === 'dml'
 
   return (
     <div className="grid gap-4 px-4 py-4">
-      <div className="grid gap-3 lg:grid-cols-[minmax(180px,1.2fr)_170px_190px_140px_auto]">
+      <div className="grid gap-3 lg:grid-cols-[220px_minmax(260px,1fr)_minmax(260px,1fr)_100px_40px]">
         <Field
           label="Rule name"
           value={rule.rule_name}
@@ -507,19 +513,35 @@ function WorkflowRuleEditor({
             }))}
           />
         </label>
-        <label className="grid gap-2 text-[12px] font-semibold text-muted">
-          <span>DB connection</span>
-          <DropdownSelect
-            ariaLabel={`Workflow rule ${index + 1} DB connection`}
-            value={rule.db_connection_id == null ? '' : String(rule.db_connection_id)}
-            onChange={(value) => onChange({ db_connection_id: value === '' ? null : Number(value) })}
-            options={[
-              { value: '', label: 'All connections' },
-              ...connections.map((connection) => ({ value: String(connection.id), label: connection.name })),
-            ]}
-            menuClassName="max-h-[360px] overflow-y-auto"
-          />
-        </label>
+        <div className={`grid gap-3 ${rule.ticket_type === 'sql_export' ? 'sm:grid-cols-[150px_minmax(0,1fr)]' : ''}`}>
+          {rule.ticket_type === 'sql_export' ? (
+            <label className="grid gap-2 text-[12px] font-semibold text-muted">
+              <span>Export sensitivity</span>
+              <DropdownSelect
+                ariaLabel={`Workflow rule ${index + 1} export sensitivity`}
+                value={rule.export_sensitivity ?? 'normal'}
+                onChange={(value) => onChange({ export_sensitivity: value as 'normal' | 'sensitive' })}
+                options={[
+                  { value: 'normal', label: 'Normal' },
+                  { value: 'sensitive', label: 'Sensitive' },
+                ]}
+              />
+            </label>
+          ) : null}
+          <label className="grid gap-2 text-[12px] font-semibold text-muted">
+            <span>DB connection</span>
+            <DropdownSelect
+              ariaLabel={`Workflow rule ${index + 1} DB connection`}
+              value={rule.db_connection_id == null ? '' : String(rule.db_connection_id)}
+              onChange={(value) => onChange({ db_connection_id: value === '' ? null : Number(value) })}
+              options={[
+                { value: '', label: 'All connections' },
+                ...connections.map((connection) => ({ value: String(connection.id), label: connection.name })),
+              ]}
+              menuClassName="max-h-[360px] overflow-y-auto"
+            />
+          </label>
+        </div>
         <Field
           label="Priority"
           value={String(rule.priority)}
@@ -537,7 +559,7 @@ function WorkflowRuleEditor({
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[220px_1fr_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[220px_minmax(260px,1fr)_minmax(260px,1fr)_100px_40px]">
         <div className="grid content-start gap-3">
           <label className="flex items-center gap-2 text-[13px] font-semibold text-ink">
             <Switch
@@ -551,27 +573,27 @@ function WorkflowRuleEditor({
             <Switch
               ariaLabel={`${rule.rule_name} approval enabled`}
               checked={rule.approval_enabled}
-              onChange={(checked) => onChange({ approval_enabled: checked })}
+              onChange={(checked) => onChange({ approval_enabled: checked, execution_mode: checked ? rule.execution_mode : 'manual' })}
             />
             Approval required
           </label>
-          {rule.ticket_type === 'sql_export' ? (
-            <label className="grid gap-2 text-[12px] font-semibold text-muted">
-              <span>Export sensitivity</span>
-              <DropdownSelect
-                ariaLabel={`Workflow rule ${index + 1} export sensitivity`}
-                value={rule.export_sensitivity ?? 'normal'}
-                onChange={(value) => onChange({ export_sensitivity: value as 'normal' | 'sensitive' })}
-                options={[
-                  { value: 'normal', label: 'Normal' },
-                  { value: 'sensitive', label: 'Sensitive' },
-                ]}
+          {supportsAutoExecution ? (
+            <label className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+              <Switch
+                ariaLabel={`${rule.rule_name} auto execute after approval`}
+                checked={rule.execution_mode === 'auto_after_approval'}
+                disabled={!rule.approval_enabled || isProduction}
+                onChange={(checked) => onChange({ execution_mode: checked ? 'auto_after_approval' : 'manual' })}
               />
+              Auto execute after approval
             </label>
+          ) : null}
+          {supportsAutoExecution && isProduction ? (
+            <span className="text-[11px] font-medium leading-4 text-muted">Auto execution is disabled in production.</span>
           ) : null}
           <div className="rounded-lg border border-border bg-panel-soft px-3 py-2 text-[11px] leading-5 text-muted">
             Review permission: {requiredReviewPermissions.join(' or ') || 'None'}
-            {isExecutable ? <><br />Execution permission: tickets.execute</> : null}
+            {isExecutable && rule.execution_mode !== 'auto_after_approval' ? <><br />Execution permission: tickets.execute</> : null}
           </div>
         </div>
         <Checklist
@@ -581,13 +603,26 @@ function WorkflowRuleEditor({
           selectedIDs={rule.approval_auth_groups}
           onChange={(selectedIDs) => onChange({ approval_auth_groups: selectedIDs })}
         />
-        <Checklist
-          title="Executor auth groups"
-          emptyMessage="No auth groups available."
-          items={executorGroupItems}
-          selectedIDs={rule.executor_auth_groups}
-          onChange={(selectedIDs) => onChange({ executor_auth_groups: selectedIDs })}
-        />
+        <div className="grid gap-3">
+          {isExecutable && rule.execution_mode !== 'auto_after_approval' ? (
+            <Checklist
+              title="Executor auth groups"
+              emptyMessage="No auth groups available."
+              items={executorGroupItems}
+              selectedIDs={rule.executor_auth_groups}
+              onChange={(selectedIDs) => onChange({ executor_auth_groups: selectedIDs })}
+            />
+          ) : (
+            <div className="grid content-start gap-2">
+              <p className="text-[12px] font-semibold text-muted">Executor auth groups</p>
+              <div className="min-h-[56px] rounded-lg border border-dashed border-border bg-panel-soft px-3 py-3 text-[12px] leading-5 text-muted">
+                Executor auth groups are not required for this execution mode.
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="hidden lg:block" aria-hidden="true" />
+        <div className="hidden lg:block" aria-hidden="true" />
       </div>
       {hasDeprecatedReviewer ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-5 text-amber-800">
@@ -685,6 +720,15 @@ function normalizeWorkflowRulePatch(rule: WorkflowRule): WorkflowRule {
   }
   if (!isExecutableTicketType(nextRule.ticket_type)) {
     nextRule.executor_auth_groups = []
+  }
+  if (nextRule.execution_mode !== 'auto_after_approval') {
+    nextRule.execution_mode = 'manual'
+  }
+  if (nextRule.execution_mode === 'auto_after_approval' && nextRule.ticket_type !== 'ddl' && nextRule.ticket_type !== 'dml') {
+    nextRule.execution_mode = 'manual'
+  }
+  if (!nextRule.approval_enabled) {
+    nextRule.execution_mode = 'manual'
   }
   return nextRule
 }
@@ -788,6 +832,7 @@ function toForm(settings: PlatformSettings): SettingsForm {
 function toPayload(current: PlatformSettings | null, form: SettingsForm): PlatformSettings {
   return {
     sensitive_export_reviewer_user_ids: current?.sensitive_export_reviewer_user_ids ?? [],
+    app_env: current?.app_env,
     sensitive_query_access_reviewer_user_ids: current?.sensitive_query_access_reviewer_user_ids ?? [],
     require_non_sensitive_export_review: current?.require_non_sensitive_export_review ?? true,
     lark_app_id: form.larkAppID.trim(),

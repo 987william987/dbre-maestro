@@ -1,4 +1,5 @@
 export type PlatformSettings = {
+  app_env?: string
   sensitive_export_reviewer_user_ids: number[]
   sensitive_query_access_reviewer_user_ids: number[]
   require_non_sensitive_export_review: boolean
@@ -48,6 +49,7 @@ export type WorkflowRule = {
   db_connection_id?: number | null
   export_sensitivity?: 'normal' | 'sensitive' | null
   approval_enabled: boolean
+  execution_mode: 'manual' | 'auto_after_approval'
   approval_auth_groups: string[]
   executor_auth_groups: string[]
   priority: number

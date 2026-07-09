@@ -398,6 +398,13 @@ func normalizeLarkOAuthSite(site string) string {
 	}
 }
 
+func normalizeWorkflowExecutionMode(mode string) string {
+	if strings.TrimSpace(mode) == "auto_after_approval" {
+		return "auto_after_approval"
+	}
+	return "manual"
+}
+
 func (r *SettingsRepo) ListWorkflowRules(ctx context.Context) ([]model.WorkflowRule, error) {
 	var rows []struct {
 		ID                 uint64           `db:"id"`
@@ -409,11 +416,12 @@ func (r *SettingsRepo) ListWorkflowRules(ctx context.Context) ([]model.WorkflowR
 		ApprovalAuthGroups string           `db:"approval_auth_groups"`
 		ExecutorAuthGroups string           `db:"executor_auth_groups"`
 		Priority           int              `db:"priority"`
+		ExecutionMode      string           `db:"execution_mode"`
 		Enabled            bool             `db:"enabled"`
 	}
 	if err := r.db.SelectContext(ctx, &rows, `
 		SELECT id, rule_name, ticket_type, db_connection_id, export_sensitivity,
-		       approval_enabled, approval_auth_groups, executor_auth_groups, priority, enabled
+		       approval_enabled, approval_auth_groups, executor_auth_groups, priority, execution_mode, enabled
 		FROM workflow_rules
 		ORDER BY priority ASC, id ASC
 	`); err != nil {
@@ -439,6 +447,7 @@ func (r *SettingsRepo) ListWorkflowRules(ctx context.Context) ([]model.WorkflowR
 			ApprovalAuthGroups: approvalGroups,
 			ExecutorAuthGroups: executorGroups,
 			Priority:           row.Priority,
+			ExecutionMode:      normalizeWorkflowExecutionMode(row.ExecutionMode),
 			Enabled:            row.Enabled,
 		})
 	}
@@ -565,10 +574,10 @@ func replaceWorkflowRules(ctx context.Context, tx *sqlx.Tx, rules []model.Workfl
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO workflow_rules
-			 (rule_name, ticket_type, db_connection_id, export_sensitivity, approval_enabled, approval_auth_groups, executor_auth_groups, priority, enabled, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 (rule_name, ticket_type, db_connection_id, export_sensitivity, approval_enabled, approval_auth_groups, executor_auth_groups, priority, execution_mode, enabled, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			rule.RuleName, rule.TicketType, rule.DBConnectionID, rule.ExportSensitivity, rule.ApprovalEnabled,
-			string(approvalRaw), string(executorRaw), rule.Priority, rule.Enabled, now, now,
+			string(approvalRaw), string(executorRaw), rule.Priority, normalizeWorkflowExecutionMode(rule.ExecutionMode), rule.Enabled, now, now,
 		); err != nil {
 			return fmt.Errorf("insert workflow rule %s: %w", rule.RuleName, err)
 		}

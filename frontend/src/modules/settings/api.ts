@@ -4,6 +4,7 @@ import type { ApprovalResolutionWorkflow, PlatformSettings, WorkflowResolution, 
 
 function normalizeSettings(settings: PlatformSettings): PlatformSettings {
   return {
+    app_env: typeof settings.app_env === 'string' ? settings.app_env : '',
     sensitive_export_reviewer_user_ids: Array.isArray(settings.sensitive_export_reviewer_user_ids)
       ? settings.sensitive_export_reviewer_user_ids
       : [],
@@ -61,6 +62,7 @@ function normalizeWorkflowRule(rule: WorkflowRule): WorkflowRule {
     db_connection_id: typeof rule.db_connection_id === 'number' ? rule.db_connection_id : null,
     export_sensitivity: rule.export_sensitivity === 'normal' || rule.export_sensitivity === 'sensitive' ? rule.export_sensitivity : null,
     approval_enabled: typeof rule.approval_enabled === 'boolean' ? rule.approval_enabled : true,
+    execution_mode: rule.execution_mode === 'auto_after_approval' ? 'auto_after_approval' : 'manual',
     approval_auth_groups: Array.isArray(rule.approval_auth_groups) ? rule.approval_auth_groups : [],
     executor_auth_groups: Array.isArray(rule.executor_auth_groups) ? rule.executor_auth_groups : [],
     priority: typeof rule.priority === 'number' ? rule.priority : 100,

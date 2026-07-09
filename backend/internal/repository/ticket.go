@@ -168,12 +168,13 @@ func (r *TicketRepo) SaveWorkflowSnapshot(ctx context.Context, ticketID uint64, 
 	now := timeutil.NowUTC()
 	if _, err := r.db.ExecContext(ctx,
 		`INSERT INTO ticket_workflow_snapshots
-		 (ticket_id, workflow_rule_id, workflow_rule_name, approval_enabled, approval_user_ids, executor_user_ids, admin_user_ids, error_code, error_message, resolution_trace, resolved_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 (ticket_id, workflow_rule_id, workflow_rule_name, approval_enabled, execution_mode, approval_user_ids, executor_user_ids, admin_user_ids, error_code, error_message, resolution_trace, resolved_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE
 		   workflow_rule_id = VALUES(workflow_rule_id),
 		   workflow_rule_name = VALUES(workflow_rule_name),
 		   approval_enabled = VALUES(approval_enabled),
+		   execution_mode = VALUES(execution_mode),
 		   approval_user_ids = VALUES(approval_user_ids),
 		   executor_user_ids = VALUES(executor_user_ids),
 		   admin_user_ids = VALUES(admin_user_ids),
@@ -182,7 +183,7 @@ func (r *TicketRepo) SaveWorkflowSnapshot(ctx context.Context, ticketID uint64, 
 		   resolution_trace = VALUES(resolution_trace),
 		   resolved_at = VALUES(resolved_at),
 		   updated_at = VALUES(updated_at)`,
-		ticketID, resolution.RuleID, resolution.RuleName, resolution.ApprovalEnabled, string(approvalUserIDs), string(executorUserIDs),
+		ticketID, resolution.RuleID, resolution.RuleName, resolution.ApprovalEnabled, normalizeWorkflowExecutionMode(resolution.ExecutionMode), string(approvalUserIDs), string(executorUserIDs),
 		string(adminUserIDs), resolution.ErrorCode, resolution.ErrorMessage, string(resolutionTrace), now, now, now,
 	); err != nil {
 		return fmt.Errorf("save ticket workflow snapshot: %w", err)
@@ -196,6 +197,7 @@ func (r *TicketRepo) GetWorkflowSnapshot(ctx context.Context, ticketID uint64) (
 		RuleID          *uint64   `db:"workflow_rule_id"`
 		RuleName        string    `db:"workflow_rule_name"`
 		ApprovalEnabled bool      `db:"approval_enabled"`
+		ExecutionMode   string    `db:"execution_mode"`
 		ApprovalUserIDs string    `db:"approval_user_ids"`
 		ExecutorUserIDs string    `db:"executor_user_ids"`
 		AdminUserIDs    string    `db:"admin_user_ids"`
@@ -207,7 +209,7 @@ func (r *TicketRepo) GetWorkflowSnapshot(ctx context.Context, ticketID uint64) (
 		UpdatedAt       time.Time `db:"updated_at"`
 	}
 	err := r.db.GetContext(ctx, &row,
-		`SELECT ticket_id, workflow_rule_id, workflow_rule_name, approval_enabled,
+		`SELECT ticket_id, workflow_rule_id, workflow_rule_name, approval_enabled, execution_mode,
 		        approval_user_ids, executor_user_ids, admin_user_ids, error_code, error_message, resolution_trace,
 		        resolved_at, created_at, updated_at
 		 FROM ticket_workflow_snapshots
@@ -225,6 +227,7 @@ func (r *TicketRepo) GetWorkflowSnapshot(ctx context.Context, ticketID uint64) (
 		RuleID:          row.RuleID,
 		RuleName:        row.RuleName,
 		ApprovalEnabled: row.ApprovalEnabled,
+		ExecutionMode:   normalizeWorkflowExecutionMode(row.ExecutionMode),
 		ErrorCode:       row.ErrorCode,
 		ErrorMessage:    row.ErrorMessage,
 		ResolutionTrace: row.ResolutionTrace,

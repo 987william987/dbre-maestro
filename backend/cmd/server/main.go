@@ -235,7 +235,7 @@ func main() {
 
 	healthH := handler.NewHealthHandler(metaDB)
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret, cfg.RefreshCookieSecure, cfg.MFAEnforcement, mfaChallengeRepo, larkLoginRepo, cfg.LarkOAuth, settingsRepo)
-	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL)
+	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL, handler.WithTicketHandlerAppEnv(cfg.AppEnv))
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo, handler.WithDBConnectionHandlerHostPolicy(dbConnectionHostPolicy))
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
 	auditH := handler.NewAuditHandler(auditRepo)
@@ -250,7 +250,7 @@ func main() {
 	notifH := handler.NewNotificationHandler(notifRepo)
 	eventStreamH := handler.NewEventStreamHandler(eventBroker)
 	whitelistH := handler.NewMaskingWhitelistHandler(dbConnRepo, whitelistRepo, auditRepo)
-	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, authGroupRepo, dbConnRepo, auditRepo)
+	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, authGroupRepo, dbConnRepo, auditRepo, handler.WithSettingsHandlerAppEnv(cfg.AppEnv))
 	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo, settingsRepo)
 	scheduledReportH := handler.NewScheduledSQLReportHandler(scheduledReportRepo, dbConnRepo, userRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, ticketRepo, maskingEngine, auditRepo, larkDispatcher)
 	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
