@@ -133,7 +133,7 @@ func (h *TicketHandler) runMySQLDMLExplainValidation(
 		return nil
 	}
 
-	queryDB, cleanup, err := h.openTicketSQLDB(ctx, dbConnID, model.DBCredentialRoleReadonly, databaseName)
+	queryDB, cleanup, err := h.openTicketSQLDB(ctx, dbConnID, model.DBCredentialRoleReadwrite, databaseName)
 	if err != nil {
 		return buildBatchValidationErrorItems(statements, validationMethodMySQLExplain, nil, "dml", "table", "open explain connection failed: "+err.Error())
 	}
