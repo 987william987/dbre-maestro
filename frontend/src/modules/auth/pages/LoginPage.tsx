@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { apiClient } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { defaultRouteForPermissions } from '@/shared/auth/permissions'
 import { getSetupStatus } from '@/shared/setup/api'
@@ -9,7 +10,7 @@ import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 
 export function LoginPage() {
-  const { isAuthenticated, login, status, user, verifyMFA } = useAuth()
+  const { isAuthenticated, login, consumeLarkLogin, status, user, verifyMFA } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
@@ -24,6 +25,7 @@ export function LoginPage() {
   } | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [larkLoading, setLarkLoading] = useState(false)
   const [error, setError] = useState('')
   const [setupCompleted, setSetupCompleted] = useState<boolean | null>(null)
 
@@ -46,6 +48,64 @@ export function LoginPage() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const ticket = params.get('lark_ticket')?.trim() ?? ''
+    const larkError = params.get('lark_error')?.trim() ?? ''
+    if (larkError) {
+      setError(larkLoginErrorMessage(larkError))
+      navigate('/login', { replace: true })
+      return
+    }
+    if (!ticket) {
+      return
+    }
+
+    let active = true
+    setLoading(true)
+    setError('')
+    if (!consumeLarkLogin) {
+      setError('Lark login is unavailable.')
+      setLoading(false)
+      navigate('/login', { replace: true })
+      return
+    }
+    void consumeLarkLogin(ticket)
+      .then((result) => {
+        if (!active) {
+          return
+        }
+        navigate('/login', { replace: true })
+        if (result.status === 'mfa_required') {
+          setMFAChallenge({
+            token: result.mfaToken,
+            setupRequired: result.setupRequired,
+            otpAuthURL: result.otpAuthURL,
+            mfaSecret: result.mfaSecret,
+            qrDataURL: result.qrDataURL,
+          })
+          setMFACode('')
+          return
+        }
+        navigate(result.returnTo ?? '/', { replace: true })
+      })
+      .catch((consumeError: unknown) => {
+        if (active) {
+          setError(consumeError instanceof Error ? consumeError.message : 'Lark login failed. Please try again later.')
+          navigate('/login', { replace: true })
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [consumeLarkLogin, location.search, location.state, navigate])
 
   if (status === 'loading') {
     return (
@@ -93,6 +153,20 @@ export function LoginPage() {
       setError(submitError instanceof Error ? submitError.message : 'Login failed. Please try again later.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleLarkLogin = async () => {
+    setError('')
+    setLarkLoading(true)
+    try {
+      const nextPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
+      const returnTo = nextPath && nextPath.startsWith('/') ? nextPath : '/'
+      const result = await apiClient.get<{ url: string }>(`/auth/lark/login/start?returnTo=${encodeURIComponent(returnTo)}`)
+      window.location.assign(result.url)
+    } catch (startError) {
+      setError(startError instanceof Error ? startError.message : 'Failed to start Lark login.')
+      setLarkLoading(false)
     }
   }
 
@@ -209,6 +283,21 @@ export function LoginPage() {
           </button>
         </form>
 
+        {!mfaChallenge ? (
+          <button
+            type="button"
+            disabled={loading || larkLoading}
+            onClick={handleLarkLogin}
+            className={cn(
+              'mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-control border border-border px-4 text-sm font-bold transition-colors',
+              'bg-panel text-ink hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50',
+            )}
+          >
+            {larkLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#00D6B9] text-[11px] font-black text-white">L</span>}
+            {larkLoading ? 'Redirecting…' : 'Sign in with Lark'}
+          </button>
+        ) : null}
+
         {setupCompleted === false ? (
           <div className="mt-6 rounded-card border border-border bg-panel-soft px-4 py-4">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-faint">First time?</p>
@@ -228,4 +317,14 @@ export function LoginPage() {
       </div>
     </div>
   )
+}
+
+function larkLoginErrorMessage(code: string) {
+  if (code === 'access_denied') {
+    return 'Lark authorization was cancelled.'
+  }
+  if (code === 'user_disabled') {
+    return 'The Lark account is linked to a disabled user.'
+  }
+  return 'Lark login failed. Please try again later.'
 }

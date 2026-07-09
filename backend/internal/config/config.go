@@ -29,8 +29,21 @@ type Config struct {
 	AWSSecretsManagerSecretID string
 	RefreshCookieSecure       bool
 	LarkWebhookURL            string // optional; empty = Lark notifications disabled
+	LarkOAuth                 LarkOAuthConfig
 	PoolProfiles              map[pool.Profile]pool.ProfileConfig
 	DBConnectionHostPolicy    netguard.Config
+}
+
+type LarkOAuthConfig struct {
+	Enabled     bool
+	Site        string
+	AppID       string
+	AppSecret   string
+	RedirectURL string
+}
+
+func (c LarkOAuthConfig) Configured() bool {
+	return c.Enabled && c.AppID != "" && c.AppSecret != "" && c.RedirectURL != ""
 }
 
 func Load() (*Config, error) {
@@ -85,6 +98,13 @@ func Load() (*Config, error) {
 	}
 
 	c.LarkWebhookURL = os.Getenv("LARK_WEBHOOK_URL")
+	c.LarkOAuth = LarkOAuthConfig{
+		Enabled:     truthyEnv(os.Getenv("LARK_OAUTH_ENABLE")),
+		Site:        normalizeLarkSite(getEnv("LARK_SITE", "lark")),
+		AppID:       strings.TrimSpace(os.Getenv("LARK_APP_ID")),
+		AppSecret:   strings.TrimSpace(os.Getenv("LARK_APP_SECRET")),
+		RedirectURL: strings.TrimSpace(os.Getenv("LARK_OAUTH_REDIRECT_URL")),
+	}
 	if raw := os.Getenv("RUN_MIGRATIONS_ON_STARTUP"); raw != "" {
 		runMigrations, err := strconv.ParseBool(raw)
 		if err != nil {
@@ -167,6 +187,24 @@ func normalizeMFAEnforcement(value string) string {
 		return normalized
 	default:
 		return ""
+	}
+}
+
+func truthyEnv(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "yes", "y":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeLarkSite(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "feishu", "cn", "china":
+		return "feishu"
+	default:
+		return "lark"
 	}
 }
 

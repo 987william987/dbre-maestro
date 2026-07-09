@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"image/png"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/dbre-maestro/maestro/internal/auth"
+	"github.com/dbre-maestro/maestro/internal/config"
+	"github.com/dbre-maestro/maestro/internal/larkoauth"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/repository"
@@ -27,11 +30,15 @@ type AuthHandler struct {
 	sessions             *repository.SessionRepo
 	audit                *repository.AuditRepo
 	mfaChallenges        *repository.MFAChallengeRepo
+	larkLogins           *repository.LarkLoginRepo
 	jwtSecret            []byte
+	larkOAuth            config.LarkOAuthConfig
+	larkOAuthClient      larkoauth.Client
 	refreshCookieSecure  bool
 	loginRateLimiter     requestRateLimiter
 	refreshRateLimiter   requestRateLimiter
 	mfaVerifyRateLimiter requestRateLimiter
+	larkLoginRateLimiter requestRateLimiter
 	mfaEnforcement       MFAEnforcement
 }
 
@@ -47,12 +54,17 @@ const (
 	refreshReuseGraceWindow = 30 * time.Second
 	sessionListLimit        = 20
 	mfaMaxAttempts          = 5
+	larkLoginStateTTL       = 10 * time.Minute
+	larkLoginTicketTTL      = 2 * time.Minute
 )
 
 func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, jwtSecret []byte, options ...any) *AuthHandler {
 	secure := false
 	enforcement := MFAEnforcementDisabled
 	var mfaChallenges *repository.MFAChallengeRepo
+	var larkLogins *repository.LarkLoginRepo
+	var larkOAuth config.LarkOAuthConfig
+	var larkOAuthClient larkoauth.Client
 	for _, option := range options {
 		switch value := option.(type) {
 		case bool:
@@ -63,20 +75,31 @@ func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo
 			enforcement = value
 		case *repository.MFAChallengeRepo:
 			mfaChallenges = value
+		case *repository.LarkLoginRepo:
+			larkLogins = value
+		case config.LarkOAuthConfig:
+			larkOAuth = value
+		case larkoauth.Client:
+			larkOAuthClient = value
 		}
 	}
-	return &AuthHandler{
+	h := &AuthHandler{
 		users:                users,
 		sessions:             sessions,
 		audit:                audit,
 		mfaChallenges:        mfaChallenges,
+		larkLogins:           larkLogins,
 		jwtSecret:            jwtSecret,
+		larkOAuth:            larkOAuth,
+		larkOAuthClient:      larkOAuthClient,
 		refreshCookieSecure:  secure,
 		loginRateLimiter:     newRequestRateLimiter(5, time.Minute),
 		refreshRateLimiter:   newRequestRateLimiter(30, time.Minute),
 		mfaVerifyRateLimiter: newRequestRateLimiter(10, time.Minute),
+		larkLoginRateLimiter: newRequestRateLimiter(20, time.Minute),
 		mfaEnforcement:       enforcement,
 	}
+	return h
 }
 
 // GET /setup/status
@@ -170,6 +193,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusForbidden, "user is disabled")
 		return
 	}
+	if user.PasswordLoginDisabled {
+		h.logLoginFailed(r, &user.ID, user.Username, "password_login_disabled")
+		jsonErr(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		h.logLoginFailed(r, &user.ID, user.Username, "invalid_credentials")
@@ -202,7 +230,283 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	h.completeLogin(w, r, user)
 }
 
+// GET /auth/lark/login/start
+func (h *AuthHandler) StartLarkLogin(w http.ResponseWriter, r *http.Request) {
+	if !h.larkOAuth.Configured() || h.larkLogins == nil {
+		jsonErr(w, http.StatusServiceUnavailable, "lark login is not configured")
+		return
+	}
+	if !h.allowAuthAttempt(w, r, h.larkLoginRateLimiter, "lark_login_start", clientIP(r)) {
+		return
+	}
+	state, err := auth.NewTokenID()
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "token error")
+		return
+	}
+	returnTo := sanitizeReturnTo(r.URL.Query().Get("returnTo"))
+	if err := h.larkLogins.Create(r.Context(), state, returnTo, time.Now().Add(larkLoginStateTTL)); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "lark login state error")
+		return
+	}
+	jsonOK(w, map[string]string{"url": larkoauth.AuthorizeURL(h.larkOAuth, state)})
+}
+
+// GET /auth/lark/login/callback
+func (h *AuthHandler) CompleteLarkLogin(w http.ResponseWriter, r *http.Request) {
+	if !h.larkOAuth.Configured() || h.larkLogins == nil {
+		http.Redirect(w, r, larkLoginRedirect("", "login_failed"), http.StatusFound)
+		return
+	}
+	now := time.Now()
+	state, ok, err := h.larkLogins.ClaimState(r.Context(), strings.TrimSpace(r.URL.Query().Get("state")), now)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "lark login state error")
+		return
+	}
+	if !ok || state == nil {
+		http.Redirect(w, r, larkLoginRedirect("", "login_failed"), http.StatusFound)
+		return
+	}
+	if code := strings.TrimSpace(r.URL.Query().Get("error")); code != "" {
+		errCode := larkLoginOAuthErrorCode(code)
+		_ = h.larkLogins.MarkFailed(r.Context(), state.ID, errCode)
+		http.Redirect(w, r, larkLoginRedirect("", errCode), http.StatusFound)
+		return
+	}
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	if code == "" {
+		_ = h.larkLogins.MarkFailed(r.Context(), state.ID, "login_failed")
+		http.Redirect(w, r, larkLoginRedirect("", "login_failed"), http.StatusFound)
+		return
+	}
+	client := h.larkOAuthClient
+	if client == nil {
+		defaultClient := larkoauth.NewHTTPClient()
+		client = defaultClient
+	}
+	identity, err := client.ExchangeCode(r.Context(), h.larkOAuth, code)
+	if err != nil || strings.TrimSpace(identity.OpenID) == "" {
+		_ = h.larkLogins.MarkFailed(r.Context(), state.ID, "invalid_lark_identity")
+		h.logLoginFailed(r, nil, "", "lark_oauth_failed")
+		http.Redirect(w, r, larkLoginRedirect("", "login_failed"), http.StatusFound)
+		return
+	}
+	user, err := h.findOrCreateLarkUser(r.Context(), identity)
+	if err != nil {
+		_ = h.larkLogins.MarkFailed(r.Context(), state.ID, "resolve_user_failed")
+		h.logLoginFailed(r, nil, strings.TrimSpace(identity.Email), "lark_user_resolve_failed")
+		http.Redirect(w, r, larkLoginRedirect("", "login_failed"), http.StatusFound)
+		return
+	}
+	if !user.IsActive {
+		h.logLoginFailed(r, &user.ID, user.Username, "disabled_user")
+		http.Redirect(w, r, larkLoginRedirect("", "user_disabled"), http.StatusFound)
+		return
+	}
+	ticket, err := auth.NewTokenID()
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "token error")
+		return
+	}
+	if err := h.larkLogins.StoreTicket(r.Context(), state.ID, user.ID, ticket, time.Now().Add(larkLoginTicketTTL)); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "lark login ticket error")
+		return
+	}
+	http.Redirect(w, r, larkLoginRedirect(ticket, ""), http.StatusFound)
+}
+
+// POST /auth/lark/login/result/consume
+func (h *AuthHandler) ConsumeLarkLoginResult(w http.ResponseWriter, r *http.Request) {
+	if h.larkLogins == nil {
+		jsonErr(w, http.StatusServiceUnavailable, "lark login is not configured")
+		return
+	}
+	var req struct {
+		Ticket string `json:"ticket"`
+	}
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	state, ok, err := h.larkLogins.ConsumeTicket(r.Context(), strings.TrimSpace(req.Ticket), time.Now())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "lark login ticket error")
+		return
+	}
+	if !ok || state == nil {
+		jsonErr(w, http.StatusUnauthorized, "invalid lark login ticket")
+		return
+	}
+	userID, err := state.RequiredUserID()
+	if err != nil {
+		jsonErr(w, http.StatusUnauthorized, "invalid lark login ticket")
+		return
+	}
+	user, err := h.users.GetByID(r.Context(), userID)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusUnauthorized, "invalid lark login ticket")
+		return
+	}
+	if !user.IsActive {
+		jsonErr(w, http.StatusForbidden, "user is disabled")
+		return
+	}
+	requiresMFA, err := h.requiresMFA(r.Context(), user)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "mfa policy check failed")
+		return
+	}
+	if requiresMFA {
+		if !user.MFAEnabled || len(user.MFASecret) == 0 {
+			h.startMFASetup(w, r, user)
+			return
+		}
+		mfaToken, err := h.newMFAChallenge(r.Context(), r, user, false)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "token error")
+			return
+		}
+		jsonOK(w, map[string]any{"mfa_required": true, "mfa_token": mfaToken})
+		return
+	}
+	h.completeLoginWithPayload(w, r, user, map[string]string{"return_to": sanitizeReturnTo(state.ReturnTo)})
+}
+
+func (h *AuthHandler) findOrCreateLarkUser(ctx context.Context, identity larkoauth.Identity) (*model.User, error) {
+	input := repository.LarkIdentityInput{
+		OpenID:      strings.TrimSpace(identity.OpenID),
+		UnionID:     strings.TrimSpace(identity.UnionID),
+		Email:       strings.TrimSpace(identity.Email),
+		DisplayName: strings.TrimSpace(identity.DisplayName),
+		AvatarURL:   strings.TrimSpace(identity.AvatarURL),
+	}
+	if input.OpenID == "" {
+		return nil, fmt.Errorf("lark identity missing open_id")
+	}
+
+	user, err := h.users.GetByLarkLoginIdentity(ctx, input.OpenID, input.UnionID)
+	if err != nil {
+		return nil, err
+	}
+	if user != nil {
+		if err := h.users.BindLarkIdentity(ctx, user.ID, input); err != nil {
+			return nil, err
+		}
+		return h.users.GetByID(ctx, user.ID)
+	}
+
+	if input.Email != "" {
+		user, err = h.users.GetByEmail(ctx, input.Email)
+		if err != nil {
+			return nil, err
+		}
+		if user != nil {
+			if user.IsProtected {
+				return nil, fmt.Errorf("protected user cannot be auto-bound to lark")
+			}
+			if err := h.users.BindLarkIdentity(ctx, user.ID, input); err != nil {
+				return nil, err
+			}
+			return h.users.GetByID(ctx, user.ID)
+		}
+	}
+
+	passwordSeed, err := auth.NewTokenID()
+	if err != nil {
+		return nil, err
+	}
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(passwordSeed), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	input.PasswordHash = string(passwordHash)
+	return h.users.CreateLarkDeveloper(ctx, h.uniqueLarkUsername(ctx, identity), input)
+}
+
+func (h *AuthHandler) uniqueLarkUsername(ctx context.Context, identity larkoauth.Identity) string {
+	base := larkUsernameBase(identity)
+	for suffix := 1; ; suffix++ {
+		candidate := base
+		if suffix > 1 {
+			candidate = fmt.Sprintf("%s-%d", base, suffix)
+		}
+		existing, err := h.users.GetByUsername(ctx, candidate)
+		if err != nil || existing == nil {
+			return candidate
+		}
+	}
+}
+
+func larkUsernameBase(identity larkoauth.Identity) string {
+	source := strings.TrimSpace(identity.Email)
+	if at := strings.Index(source, "@"); at > 0 {
+		source = source[:at]
+	}
+	if source == "" {
+		source = strings.TrimSpace(identity.DisplayName)
+	}
+	if source == "" {
+		source = firstNonEmptyString(identity.UnionID, identity.OpenID, "lark-user")
+	}
+
+	var builder strings.Builder
+	for _, char := range source {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) || char == '-' || char == '_' || char == '.' {
+			builder.WriteRune(char)
+		} else if unicode.IsSpace(char) {
+			builder.WriteRune('-')
+		}
+	}
+	base := strings.Trim(builder.String(), "-_.")
+	if base == "" {
+		return "lark-user"
+	}
+	return strings.ToLower(base)
+}
+
+func sanitizeReturnTo(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") || strings.Contains(value, "://") {
+		return "/"
+	}
+	return value
+}
+
+func larkLoginRedirect(ticket string, errorCode string) string {
+	values := url.Values{}
+	if strings.TrimSpace(ticket) != "" {
+		values.Set("lark_ticket", strings.TrimSpace(ticket))
+	} else if strings.TrimSpace(errorCode) != "" {
+		values.Set("lark_error", strings.TrimSpace(errorCode))
+	}
+	if encoded := values.Encode(); encoded != "" {
+		return "/login?" + encoded
+	}
+	return "/login"
+}
+
+func larkLoginOAuthErrorCode(value string) string {
+	if strings.TrimSpace(value) == "access_denied" {
+		return "access_denied"
+	}
+	return "login_failed"
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
 func (h *AuthHandler) completeLogin(w http.ResponseWriter, r *http.Request, user *model.User) {
+	h.completeLoginWithPayload(w, r, user, nil)
+}
+
+func (h *AuthHandler) completeLoginWithPayload(w http.ResponseWriter, r *http.Request, user *model.User, extra map[string]string) {
 	rawRefresh, hashRefresh, err := auth.NewRefreshToken()
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "token error")
@@ -231,7 +535,11 @@ func (h *AuthHandler) completeLogin(w http.ResponseWriter, r *http.Request, user
 		ActionType: "login",
 	})
 
-	jsonOK(w, map[string]string{"access_token": accessToken})
+	payload := map[string]string{"access_token": accessToken}
+	for key, value := range extra {
+		payload[key] = value
+	}
+	jsonOK(w, payload)
 }
 
 func (h *AuthHandler) startMFASetup(w http.ResponseWriter, r *http.Request, user *model.User) {

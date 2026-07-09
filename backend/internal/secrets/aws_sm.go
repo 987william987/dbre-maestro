@@ -98,6 +98,8 @@ type applicationSecretPayload struct {
 	MigrationDSN      string `json:"MIGRATION_DSN"`
 	DBREEncryptionKey string `json:"DBRE_ENCRYPTION_KEY"`
 	JWTSecret         string `json:"JWT_SECRET"`
+	LarkAppID         string `json:"LARK_APP_ID"`
+	LarkAppSecret     string `json:"LARK_APP_SECRET"`
 }
 
 func applicationSecretsFromPayload(secret string) (applicationSecretPayload, error) {
@@ -140,6 +142,12 @@ func applyApplicationSecrets(cfg *config.Config, values applicationSecretPayload
 		if err := cfg.SetEncryptionKey(value); err != nil {
 			return err
 		}
+	}
+	if value := strings.TrimSpace(values.LarkAppID); value != "" {
+		cfg.LarkOAuth.AppID = value
+	}
+	if value := strings.TrimSpace(values.LarkAppSecret); value != "" {
+		cfg.LarkOAuth.AppSecret = value
 	}
 	return nil
 }

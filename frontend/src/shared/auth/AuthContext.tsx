@@ -13,7 +13,7 @@ type MFAVerifyParams = {
 }
 
 type LoginResult =
-  | { status: 'authenticated' }
+  | { status: 'authenticated'; returnTo?: string }
   | {
       status: 'mfa_required'
       mfaToken: string
@@ -28,6 +28,7 @@ type AuthContextValue = {
   user: CurrentUser | null
   accessToken: string | null
   login: (params: LoginParams) => Promise<LoginResult>
+  consumeLarkLogin?: (ticket: string) => Promise<LoginResult>
   verifyMFA?: (params: MFAVerifyParams) => Promise<void>
   logout: () => Promise<void>
   clearAuth: () => void
@@ -52,6 +53,7 @@ type LoginResponse = {
   otp_auth_url?: string
   mfa_secret?: string
   qr_data_url?: string
+  return_to?: string
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -230,7 +232,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (data?.access_token) {
       await completeLogin(data.access_token)
-      return { status: 'authenticated' }
+      return { status: 'authenticated', returnTo: data.return_to }
     }
 
     if ((data?.mfa_required || data?.mfa_setup_required) && data.mfa_token) {
@@ -245,6 +247,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     throw new Error('Sign-in failed')
+  }, [completeLogin])
+
+  const consumeLarkLogin = useCallback(async (ticket: string): Promise<LoginResult> => {
+    const { response, data } = await fetchJSON<LoginResponse>('/auth/lark/login/result/consume', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ticket }),
+    })
+
+    if (!response.ok) {
+      const message =
+        data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+          ? data.error
+          : 'Lark sign-in failed'
+      throw new Error(message)
+    }
+
+    if (data?.access_token) {
+      await completeLogin(data.access_token)
+      return { status: 'authenticated', returnTo: data.return_to }
+    }
+
+    if ((data?.mfa_required || data?.mfa_setup_required) && data.mfa_token) {
+      return {
+        status: 'mfa_required',
+        mfaToken: data.mfa_token,
+        setupRequired: data.mfa_setup_required === true,
+        otpAuthURL: data.otp_auth_url,
+        mfaSecret: data.mfa_secret,
+        qrDataURL: data.qr_data_url,
+      }
+    }
+
+    throw new Error('Lark sign-in failed')
   }, [completeLogin])
 
   const verifyMFA = useCallback(async ({ mfaToken, code }: MFAVerifyParams) => {
@@ -290,6 +328,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     accessToken,
     login,
+    consumeLarkLogin,
     verifyMFA,
     logout,
     clearAuth,
