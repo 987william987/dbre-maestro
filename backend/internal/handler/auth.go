@@ -29,6 +29,7 @@ type AuthHandler struct {
 	users                *repository.UserRepo
 	sessions             *repository.SessionRepo
 	audit                *repository.AuditRepo
+	settings             *repository.SettingsRepo
 	mfaChallenges        *repository.MFAChallengeRepo
 	larkLogins           *repository.LarkLoginRepo
 	jwtSecret            []byte
@@ -62,6 +63,7 @@ func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo
 	secure := false
 	enforcement := MFAEnforcementDisabled
 	var mfaChallenges *repository.MFAChallengeRepo
+	var settings *repository.SettingsRepo
 	var larkLogins *repository.LarkLoginRepo
 	var larkOAuth config.LarkOAuthConfig
 	var larkOAuthClient larkoauth.Client
@@ -75,6 +77,8 @@ func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo
 			enforcement = value
 		case *repository.MFAChallengeRepo:
 			mfaChallenges = value
+		case *repository.SettingsRepo:
+			settings = value
 		case *repository.LarkLoginRepo:
 			larkLogins = value
 		case config.LarkOAuthConfig:
@@ -87,6 +91,7 @@ func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo
 		users:                users,
 		sessions:             sessions,
 		audit:                audit,
+		settings:             settings,
 		mfaChallenges:        mfaChallenges,
 		larkLogins:           larkLogins,
 		jwtSecret:            jwtSecret,
@@ -232,7 +237,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 // GET /auth/lark/login/start
 func (h *AuthHandler) StartLarkLogin(w http.ResponseWriter, r *http.Request) {
-	if !h.larkOAuth.Configured() || h.larkLogins == nil {
+	cfg, err := h.resolveLarkOAuthConfig(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "lark login config error")
+		return
+	}
+	if !cfg.Configured() || h.larkLogins == nil {
 		jsonErr(w, http.StatusServiceUnavailable, "lark login is not configured")
 		return
 	}
@@ -249,12 +259,17 @@ func (h *AuthHandler) StartLarkLogin(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "lark login state error")
 		return
 	}
-	jsonOK(w, map[string]string{"url": larkoauth.AuthorizeURL(h.larkOAuth, state)})
+	jsonOK(w, map[string]string{"url": larkoauth.AuthorizeURL(cfg, state)})
 }
 
 // GET /auth/lark/login/callback
 func (h *AuthHandler) CompleteLarkLogin(w http.ResponseWriter, r *http.Request) {
-	if !h.larkOAuth.Configured() || h.larkLogins == nil {
+	cfg, err := h.resolveLarkOAuthConfig(r.Context())
+	if err != nil {
+		http.Redirect(w, r, larkLoginRedirect("", "login_failed"), http.StatusFound)
+		return
+	}
+	if !cfg.Configured() || h.larkLogins == nil {
 		http.Redirect(w, r, larkLoginRedirect("", "login_failed"), http.StatusFound)
 		return
 	}
@@ -285,7 +300,7 @@ func (h *AuthHandler) CompleteLarkLogin(w http.ResponseWriter, r *http.Request) 
 		defaultClient := larkoauth.NewHTTPClient()
 		client = defaultClient
 	}
-	identity, err := client.ExchangeCode(r.Context(), h.larkOAuth, code)
+	identity, err := client.ExchangeCode(r.Context(), cfg, code)
 	if err != nil || strings.TrimSpace(identity.OpenID) == "" {
 		_ = h.larkLogins.MarkFailed(r.Context(), state.ID, "invalid_lark_identity")
 		h.logLoginFailed(r, nil, "", "lark_oauth_failed")
@@ -422,6 +437,36 @@ func (h *AuthHandler) findOrCreateLarkUser(ctx context.Context, identity larkoau
 	}
 	input.PasswordHash = string(passwordHash)
 	return h.users.CreateLarkDeveloper(ctx, h.uniqueLarkUsername(ctx, identity), input)
+}
+
+func (h *AuthHandler) resolveLarkOAuthConfig(ctx context.Context) (config.LarkOAuthConfig, error) {
+	cfg := h.larkOAuth
+	if h.settings == nil {
+		return cfg, nil
+	}
+
+	settings, err := h.settings.Get(ctx)
+	if err != nil {
+		return config.LarkOAuthConfig{}, err
+	}
+	cfg.Enabled = settings.LarkOAuthEnabled
+	if strings.TrimSpace(settings.LarkOAuthSite) != "" {
+		cfg.Site = strings.TrimSpace(settings.LarkOAuthSite)
+	}
+	if strings.TrimSpace(settings.LarkOAuthRedirectURL) != "" {
+		cfg.RedirectURL = strings.TrimSpace(settings.LarkOAuthRedirectURL)
+	}
+	if strings.TrimSpace(cfg.AppID) == "" {
+		cfg.AppID = strings.TrimSpace(settings.LarkAppID)
+	}
+	if strings.TrimSpace(cfg.AppSecret) == "" {
+		secret, err := h.settings.GetLarkAppSecret(ctx)
+		if err != nil {
+			return config.LarkOAuthConfig{}, err
+		}
+		cfg.AppSecret = strings.TrimSpace(secret)
+	}
+	return cfg, nil
 }
 
 func (h *AuthHandler) uniqueLarkUsername(ctx context.Context, identity larkoauth.Identity) string {

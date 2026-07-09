@@ -7,6 +7,9 @@ export type PlatformSettings = {
   lark_app_id: string
   lark_app_secret?: string
   lark_app_secret_configured: boolean
+  lark_oauth_enabled: boolean
+  lark_oauth_site: 'lark' | 'feishu'
+  lark_oauth_redirect_url: string
   sql_editor_app_timeout_seconds: number
   sql_editor_mysql_max_execution_time_ms: number
   sql_editor_postgres_statement_timeout_ms: number

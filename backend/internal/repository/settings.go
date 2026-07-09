@@ -22,6 +22,9 @@ const (
 	settingRequireNonSensitiveExportRev  = "require_non_sensitive_export_review"
 	settingLarkAppID                     = "lark_app_id"
 	settingLarkAppSecret                 = "lark_app_secret"
+	settingLarkOAuthEnabled              = "lark_oauth_enabled"
+	settingLarkOAuthSite                 = "lark_oauth_site"
+	settingLarkOAuthRedirectURL          = "lark_oauth_redirect_url"
 	settingSQLEditorAppTimeoutSeconds    = "sql_editor_app_timeout_seconds"
 	settingSQLEditorMySQLMaxExecTimeMs   = "sql_editor_mysql_max_execution_time_ms"
 	settingSQLEditorPGStatementTimeoutMs = "sql_editor_postgres_statement_timeout_ms"
@@ -62,6 +65,7 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 		DBMetadataObjectCron:                 "0 10 * * *",
 		DBMetadataObjectSyncIntervalMins:     60,
 		DBMetadataCronTimezone:               "Asia/Taipei",
+		LarkOAuthSite:                        "lark",
 	}
 	exportReviewerIDs, err := r.getUint64List(ctx, settingSensitiveExportReviewers)
 	if err != nil {
@@ -98,6 +102,27 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 		return nil, err
 	}
 	settings.LarkAppSecretConfigured = larkAppSecretConfigured
+	larkOAuthEnabled, err := r.getBool(ctx, settingLarkOAuthEnabled)
+	if err != nil {
+		return nil, err
+	}
+	if larkOAuthEnabled != nil {
+		settings.LarkOAuthEnabled = *larkOAuthEnabled
+	}
+	larkOAuthSite, err := r.getString(ctx, settingLarkOAuthSite)
+	if err != nil {
+		return nil, err
+	}
+	if larkOAuthSite != nil && *larkOAuthSite != "" {
+		settings.LarkOAuthSite = normalizeLarkOAuthSite(*larkOAuthSite)
+	}
+	larkOAuthRedirectURL, err := r.getString(ctx, settingLarkOAuthRedirectURL)
+	if err != nil {
+		return nil, err
+	}
+	if larkOAuthRedirectURL != nil {
+		settings.LarkOAuthRedirectURL = strings.TrimSpace(*larkOAuthRedirectURL)
+	}
 	sqlEditorAppTimeoutSeconds, err := r.getInt(ctx, settingSQLEditorAppTimeoutSeconds)
 	if err != nil {
 		return nil, err
@@ -224,6 +249,15 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 		if err := r.upsertEncryptedString(ctx, tx, settingLarkAppSecret, settings.LarkAppSecret); err != nil {
 			return err
 		}
+	}
+	if err := upsertBool(ctx, tx, settingLarkOAuthEnabled, settings.LarkOAuthEnabled); err != nil {
+		return err
+	}
+	if err := upsertString(ctx, tx, settingLarkOAuthSite, normalizeLarkOAuthSite(settings.LarkOAuthSite)); err != nil {
+		return err
+	}
+	if err := upsertString(ctx, tx, settingLarkOAuthRedirectURL, strings.TrimSpace(settings.LarkOAuthRedirectURL)); err != nil {
+		return err
 	}
 	if err := upsertInt(ctx, tx, settingSQLEditorAppTimeoutSeconds, settings.SQLEditorAppTimeoutSeconds); err != nil {
 		return err
@@ -353,6 +387,15 @@ func (r *SettingsRepo) GetApprovalPolicy(ctx context.Context, workflowType model
 
 func (r *SettingsRepo) GetLarkAppSecret(ctx context.Context) (string, error) {
 	return r.getEncryptedString(ctx, settingLarkAppSecret)
+}
+
+func normalizeLarkOAuthSite(site string) string {
+	switch strings.ToLower(strings.TrimSpace(site)) {
+	case "feishu":
+		return "feishu"
+	default:
+		return "lark"
+	}
 }
 
 func (r *SettingsRepo) ListWorkflowRules(ctx context.Context) ([]model.WorkflowRule, error) {

@@ -18,6 +18,9 @@ type SettingsForm = {
   larkAppID: string
   larkAppSecret: string
   larkAppSecretConfigured: boolean
+  larkOAuthEnabled: boolean
+  larkOAuthSite: 'lark' | 'feishu'
+  larkOAuthRedirectURL: string
   sqlEditorAppTimeoutSeconds: string
   sqlEditorMySQLMaxExecutionTimeMs: string
   sqlEditorPostgresStatementTimeoutMs: string
@@ -214,7 +217,7 @@ export function SettingsPage() {
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Lark Notifications</p>
-              <p className="mt-1 text-[12px] leading-5 text-muted">Configure Lark app credentials for ticket notifications. Directed delivery uses each user&apos;s configured Lark Open ID. Leave App Secret blank to keep the existing secret.</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Configure Lark app credentials for ticket notifications and Lark OAuth login. Directed delivery uses each user&apos;s configured Lark Open ID. Leave App Secret blank to keep the existing secret.</p>
             </div>
             <div className="grid gap-4 px-4 py-4 md:grid-cols-2">
               <Field
@@ -230,6 +233,34 @@ export function SettingsPage() {
                 placeholder={form.larkAppSecretConfigured ? 'Leave blank to keep existing secret' : 'Enter app secret'}
                 type="password"
               />
+              <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
+                <Switch
+                  ariaLabel="Enable Lark OAuth login"
+                  checked={form.larkOAuthEnabled}
+                  onChange={(checked) => setForm((current) => current ? { ...current, larkOAuthEnabled: checked } : current)}
+                />
+                Enable Lark OAuth login
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-[12px] font-semibold text-muted">Lark Site</span>
+                <DropdownSelect
+                  ariaLabel="Lark site"
+                  value={form.larkOAuthSite}
+                  onChange={(value) => setForm((current) => current ? { ...current, larkOAuthSite: value === 'feishu' ? 'feishu' : 'lark' } : current)}
+                  options={[
+                    { value: 'lark', label: 'Lark' },
+                    { value: 'feishu', label: 'Feishu' },
+                  ]}
+                />
+              </label>
+              <div className="md:col-span-2">
+                <Field
+                  label="OAuth Redirect URL"
+                  value={form.larkOAuthRedirectURL}
+                  onChange={(value) => setForm((current) => current ? { ...current, larkOAuthRedirectURL: value } : current)}
+                  placeholder="https://dbre-maestro-test.tskyrocket.xyz/api/auth/lark/login/callback"
+                />
+              </div>
             </div>
           </section>
 
@@ -735,6 +766,9 @@ function toForm(settings: PlatformSettings): SettingsForm {
     larkAppID: settings.lark_app_id,
     larkAppSecret: '',
     larkAppSecretConfigured: settings.lark_app_secret_configured,
+    larkOAuthEnabled: settings.lark_oauth_enabled,
+    larkOAuthSite: settings.lark_oauth_site === 'feishu' ? 'feishu' : 'lark',
+    larkOAuthRedirectURL: settings.lark_oauth_redirect_url,
     sqlEditorAppTimeoutSeconds: String(settings.sql_editor_app_timeout_seconds),
     sqlEditorMySQLMaxExecutionTimeMs: String(settings.sql_editor_mysql_max_execution_time_ms),
     sqlEditorPostgresStatementTimeoutMs: String(settings.sql_editor_postgres_statement_timeout_ms),
@@ -759,6 +793,9 @@ function toPayload(current: PlatformSettings | null, form: SettingsForm): Platfo
     lark_app_id: form.larkAppID.trim(),
     lark_app_secret: form.larkAppSecret,
     lark_app_secret_configured: form.larkAppSecretConfigured,
+    lark_oauth_enabled: form.larkOAuthEnabled,
+    lark_oauth_site: form.larkOAuthSite,
+    lark_oauth_redirect_url: form.larkOAuthRedirectURL.trim(),
     sql_editor_app_timeout_seconds: parsePositiveInt(form.sqlEditorAppTimeoutSeconds, 30),
     sql_editor_mysql_max_execution_time_ms: parsePositiveInt(form.sqlEditorMySQLMaxExecutionTimeMs, 25000),
     sql_editor_postgres_statement_timeout_ms: parsePositiveInt(form.sqlEditorPostgresStatementTimeoutMs, 25000),

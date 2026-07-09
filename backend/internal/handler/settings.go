@@ -270,6 +270,20 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "lark_app_secret is required when configuring lark for the first time")
 		return
 	}
+	req.LarkOAuthSite = normalizeLarkOAuthSite(req.LarkOAuthSite)
+	req.LarkOAuthRedirectURL = strings.TrimSpace(req.LarkOAuthRedirectURL)
+	if req.LarkOAuthEnabled && strings.TrimSpace(req.LarkAppID) == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "lark_app_id is required when lark oauth login is enabled")
+		return
+	}
+	if req.LarkOAuthEnabled && !req.LarkAppSecretConfigured {
+		jsonErr(w, http.StatusUnprocessableEntity, "lark_app_secret is required when lark oauth login is enabled")
+		return
+	}
+	if req.LarkOAuthEnabled && req.LarkOAuthRedirectURL == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "lark_oauth_redirect_url is required when lark oauth login is enabled")
+		return
+	}
 	for _, connectionID := range append([]uint64{}, req.DBMetadataObjectEnabledConnectionIDs...) {
 		if err := h.validateConnectionExists(r, connectionID); err != nil {
 			jsonErr(w, http.StatusUnprocessableEntity, err.Error())
@@ -341,6 +355,9 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			"require_non_sensitive_export_review":         req.RequireNonSensitiveExportReview,
 			"lark_app_id":                                 req.LarkAppID,
 			"lark_app_secret_configured":                  req.LarkAppSecretConfigured || req.LarkAppSecret != "",
+			"lark_oauth_enabled":                          req.LarkOAuthEnabled,
+			"lark_oauth_site":                             req.LarkOAuthSite,
+			"lark_oauth_redirect_url_configured":          req.LarkOAuthRedirectURL != "",
 			"sql_editor_app_timeout_seconds":              req.SQLEditorAppTimeoutSeconds,
 			"sql_editor_mysql_max_execution_time_ms":      req.SQLEditorMySQLMaxExecutionTimeMs,
 			"sql_editor_postgres_statement_timeout_ms":    req.SQLEditorPostgresStatementTimeoutMs,
@@ -384,6 +401,15 @@ func resolveLarkSecretState(appID string, appSecret string, requestConfigured bo
 		return true, false
 	}
 	return false, true
+}
+
+func normalizeLarkOAuthSite(site string) string {
+	switch strings.ToLower(strings.TrimSpace(site)) {
+	case "feishu":
+		return "feishu"
+	default:
+		return "lark"
+	}
 }
 
 type approvalResolutionUser struct {
