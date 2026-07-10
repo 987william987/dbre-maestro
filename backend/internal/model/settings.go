@@ -1,6 +1,7 @@
 package model
 
 type PlatformSettings struct {
+	AppEnv string `json:"app_env,omitempty"`
 	// Deprecated: reviewer routing is now controlled by ApprovalPolicies.
 	SensitiveExportReviewerUserIDs []uint64 `json:"sensitive_export_reviewer_user_ids"`
 	// Deprecated: reviewer routing is now controlled by ApprovalPolicies.
@@ -11,6 +12,9 @@ type PlatformSettings struct {
 	LarkAppID                            string           `json:"lark_app_id"`
 	LarkAppSecret                        string           `json:"lark_app_secret,omitempty"`
 	LarkAppSecretConfigured              bool             `json:"lark_app_secret_configured"`
+	LarkOAuthEnabled                     bool             `json:"lark_oauth_enabled"`
+	LarkOAuthSite                        string           `json:"lark_oauth_site"`
+	LarkOAuthRedirectURL                 string           `json:"lark_oauth_redirect_url"`
 	SQLEditorAppTimeoutSeconds           int              `json:"sql_editor_app_timeout_seconds"`
 	SQLEditorMySQLMaxExecutionTimeMs     int              `json:"sql_editor_mysql_max_execution_time_ms"`
 	SQLEditorPostgresStatementTimeoutMs  int              `json:"sql_editor_postgres_statement_timeout_ms"`
@@ -52,6 +56,7 @@ type WorkflowRule struct {
 	DBConnectionID     *uint64     `db:"db_connection_id" json:"db_connection_id,omitempty"`
 	ExportSensitivity  *string     `db:"export_sensitivity" json:"export_sensitivity,omitempty"`
 	ApprovalEnabled    bool        `db:"approval_enabled" json:"approval_enabled"`
+	ExecutionMode      string      `db:"execution_mode" json:"execution_mode"`
 	ApprovalAuthGroups []AuthGroup `json:"approval_auth_groups"`
 	ExecutorAuthGroups []AuthGroup `json:"executor_auth_groups"`
 	Priority           int         `db:"priority" json:"priority"`
@@ -71,6 +76,7 @@ type WorkflowResolution struct {
 	DBConnectionID        *uint64                `json:"db_connection_id,omitempty"`
 	ExportSensitivity     *string                `json:"export_sensitivity,omitempty"`
 	ApprovalEnabled       bool                   `json:"approval_enabled"`
+	ExecutionMode         string                 `json:"execution_mode"`
 	ApprovalUserIDs       []uint64               `json:"approval_user_ids"`
 	ExecutorUserIDs       []uint64               `json:"executor_user_ids"`
 	AdminUserIDs          []uint64               `json:"admin_user_ids,omitempty"`

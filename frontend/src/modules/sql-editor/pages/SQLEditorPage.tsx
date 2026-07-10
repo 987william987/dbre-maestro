@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { javascript } from '@codemirror/lang-javascript'
-import { sql } from '@codemirror/lang-sql'
+import { MySQL, PostgreSQL, StandardSQL, sql, type SQLNamespace } from '@codemirror/lang-sql'
+import { autocompletion, type Completion, type CompletionSource } from '@codemirror/autocomplete'
 import { Prec } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import { format as formatSQL, type SqlLanguage } from 'sql-formatter'
@@ -156,7 +157,6 @@ const SENSITIVE_ACCESS_DURATION_PRESETS = [
   { label: '3d', minutes: 4320 },
 ] as const
 const SQL_EDITOR_PROFILE_ENABLED = import.meta.env.DEV
-const SQL_EDITOR_EXTENSIONS = [sql()]
 const REDIS_EDITOR_EXTENSIONS = [javascript()]
 const SQL_EDITOR_BASIC_SETUP = {
   lineNumbers: true,
@@ -437,6 +437,148 @@ function effectiveTimeoutSeconds(constraints: QueryConstraints, connection: DBCo
     return Math.min(appTimeoutSeconds, Math.floor(constraints.postgres_statement_timeout_ms / 1000))
   }
   return appTimeoutSeconds
+}
+
+function getCodeMirrorSQLDialect(connection: DBConnection | null) {
+  if (connection?.db_type === 'mysql') {
+    return MySQL
+  }
+  if (connection?.db_type === 'postgres') {
+    return PostgreSQL
+  }
+  return StandardSQL
+}
+
+function collectLoadedTables(nodes: AssetTreeNode[]): MetadataItem[] {
+  return nodes.flatMap((node) => [
+    ...(node.kind === 'table' && node.item ? [node.item] : []),
+    ...collectLoadedTables(node.children),
+  ])
+}
+
+function collectCompletionTables(params: {
+  explorerNodes: AssetTreeNode[]
+  searchTreeNodes: AssetTreeNode[]
+  selectedTable: MetadataItem | null
+}): MetadataItem[] {
+  const tablesByKey = new Map<string, MetadataItem>()
+  for (const table of [...collectLoadedTables(params.explorerNodes), ...collectLoadedTables(params.searchTreeNodes)]) {
+    const key = `${table.database ?? ''}\u0000${table.schema ?? ''}\u0000${table.name}`
+    tablesByKey.set(key, table)
+  }
+  if (params.selectedTable) {
+    const key = `${params.selectedTable.database ?? ''}\u0000${params.selectedTable.schema ?? ''}\u0000${params.selectedTable.name}`
+    tablesByKey.set(key, params.selectedTable)
+  }
+  return [...tablesByKey.values()]
+}
+
+function columnCompletion(column: MetadataColumn): Completion {
+  return {
+    label: column.name,
+    type: 'property',
+    detail: column.column_type || column.data_type,
+    info: column.comment || undefined,
+  }
+}
+
+function columnCompletionSchema(columns: MetadataColumn[]): SQLNamespace {
+  return columns.map(columnCompletion)
+}
+
+function tableCompletion(table: MetadataItem): Completion {
+  return {
+    label: table.name,
+    type: 'type',
+    detail: table.schema || table.database,
+    info: table.comment || undefined,
+  }
+}
+
+function tableNamespace(table: MetadataItem, selectedTable: MetadataItem | null, columns: MetadataColumn[]): SQLNamespace {
+  if (selectedTable?.name === table.name && selectedTable.schema === table.schema) {
+    return columnCompletionSchema(columns)
+  }
+  return []
+}
+
+function isSQLNamespaceRecord(namespace: SQLNamespace | undefined): namespace is Record<string, SQLNamespace> {
+  return !!namespace && !Array.isArray(namespace) && !('self' in namespace)
+}
+
+function buildSQLCompletionSchema(params: {
+  connection: DBConnection | null
+  explorerNodes: AssetTreeNode[]
+  searchTreeNodes: AssetTreeNode[]
+  selectedTable: MetadataItem | null
+  columns: MetadataColumn[]
+}): SQLNamespace | undefined {
+  const { connection, explorerNodes, searchTreeNodes, selectedTable, columns } = params
+  if (!connection || connection.db_type === 'redis') {
+    return undefined
+  }
+
+  const tables = collectCompletionTables({ explorerNodes, searchTreeNodes, selectedTable })
+
+  if (tables.length === 0) {
+    return undefined
+  }
+
+  if (connection.db_type === 'postgres') {
+    const schemaNamespace: Record<string, SQLNamespace> = {}
+    for (const table of tables) {
+      const schemaName = table.schema || 'public'
+      const currentSchema = schemaNamespace[schemaName]
+      const children: Record<string, SQLNamespace> =
+        isSQLNamespaceRecord(currentSchema)
+          ? { ...currentSchema }
+          : {}
+      children[table.name] = tableNamespace(table, selectedTable, columns)
+      schemaNamespace[schemaName] = children
+    }
+    return schemaNamespace
+  }
+
+  const schema: Record<string, SQLNamespace> = {}
+  for (const table of tables) {
+    schema[table.name] = tableNamespace(table, selectedTable, columns)
+  }
+  return schema
+}
+
+function isTableCompletionContext(sourceBeforeCursor: string) {
+  const statementStart = Math.max(sourceBeforeCursor.lastIndexOf(';') + 1, sourceBeforeCursor.length - 240)
+  const tail = sourceBeforeCursor.slice(statementStart).toLowerCase()
+  const compactTail = tail.replace(/`[^`]*$|"[^"]*$|'[^']*$/g, '')
+
+  return (
+    /(?:^|[\s(,])(?:from|join|update|into|describe|desc)\s+[`"[\]\w$.-]*$/.test(compactTail) ||
+    /(?:^|[\s(,])(?:alter|drop|truncate)\s+table\s+[`"[\]\w$.-]*$/.test(compactTail) ||
+    /(?:^|[\s(,])from\s+.*,\s*[`"[\]\w$.-]*$/.test(compactTail)
+  )
+}
+
+function buildFocusedSQLCompletionSource(params: {
+  columns: MetadataColumn[]
+  tables: MetadataItem[]
+}): CompletionSource {
+  const columnOptions = params.columns.map(columnCompletion)
+  const tableOptions = params.tables.map(tableCompletion)
+
+  return (context) => {
+    const sourceBeforeCursor = context.state.sliceDoc(0, context.pos)
+    const tableContext = isTableCompletionContext(sourceBeforeCursor)
+    const token = context.matchBefore(tableContext ? /[`"[\]\w$.-]*/ : /[\w$]*/)
+    if (!token || (token.from === token.to && !context.explicit)) {
+      return null
+    }
+
+    return {
+      from: token.from,
+      options: tableContext ? tableOptions : columnOptions,
+      validFor: tableContext ? /^[`"[\]\w$.-]*$/ : /^[\w$]*$/,
+    }
+  }
 }
 
 function matchesAssetKeyword(node: {
@@ -1671,9 +1813,48 @@ export function SQLEditorPage() {
     (item.schema_name ?? '') === activeSchema &&
     (item.redis_db_index ?? null) === (activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : null),
   ))
+  const sqlCompletionSchema = useMemo(
+    () => buildSQLCompletionSchema({
+      connection: activeConnection,
+      explorerNodes: activeExplorerNodes,
+      searchTreeNodes: activeSearchTreeNodes,
+      selectedTable: activeSelectedTable,
+      columns: activeColumns,
+    }),
+    [activeConnection, activeColumns, activeExplorerNodes, activeSearchTreeNodes, activeSelectedTable],
+  )
+  const sqlCompletionTables = useMemo(
+    () => collectCompletionTables({
+      explorerNodes: activeExplorerNodes,
+      searchTreeNodes: activeSearchTreeNodes,
+      selectedTable: activeSelectedTable,
+    }),
+    [activeExplorerNodes, activeSearchTreeNodes, activeSelectedTable],
+  )
+  const sqlEditorSupport = useMemo(
+    () => {
+      const dialect = getCodeMirrorSQLDialect(activeConnection)
+      if (activeSelectedTable && activeColumns.length > 0) {
+        return [
+          dialect.extension,
+          autocompletion({
+            override: [buildFocusedSQLCompletionSource({ columns: activeColumns, tables: sqlCompletionTables })],
+          }),
+        ]
+      }
+
+      return sql({
+        dialect,
+        schema: sqlCompletionSchema,
+        defaultSchema: activeConnection?.db_type === 'postgres' ? activeSchema || activeSelectedTable?.schema : undefined,
+        defaultTable: activeSelectedTable?.name,
+      })
+    },
+    [activeColumns, activeConnection, activeSchema, activeSelectedTable, sqlCompletionSchema, sqlCompletionTables],
+  )
   const editorExtensions = useMemo(
     () => [
-      ...(activeConnection?.db_type === 'redis' ? REDIS_EDITOR_EXTENSIONS : SQL_EDITOR_EXTENSIONS),
+      ...(activeConnection?.db_type === 'redis' ? REDIS_EDITOR_EXTENSIONS : [sqlEditorSupport]),
       Prec.highest(
         keymap.of([
           {
@@ -1689,7 +1870,7 @@ export function SQLEditorPage() {
         ]),
       ),
     ],
-    [activeConnection?.db_type, activeSelectedSQL, activeTab, activeTabRunning],
+    [activeConnection?.db_type, activeSelectedSQL, activeTab, activeTabRunning, sqlEditorSupport],
   )
   const handleEditorChange = useCallback((value: string) => {
     updateActiveTab({ sql: value })

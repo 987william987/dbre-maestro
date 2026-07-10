@@ -16,6 +16,8 @@ const (
 	workflowExcludedInactive          = "inactive"
 	workflowExcludedMissingPermission = "missing_permission"
 	workflowExcludedSubmitter         = "submitter"
+	workflowExecutionModeManual       = "manual"
+	workflowExecutionModeAutoApproval = "auto_after_approval"
 )
 
 type workflowRuleMatcher interface {
@@ -52,6 +54,7 @@ func resolveWorkflowWithMatcher(ctx context.Context, settings workflowRuleMatche
 		ExcludedApprovalUsers: []model.WorkflowExcludedUser{},
 		ExcludedExecutorUsers: []model.WorkflowExcludedUser{},
 		ApprovalEnabled:       true,
+		ExecutionMode:         workflowExecutionModeManual,
 	}
 	if settings == nil || users == nil {
 		resolution.ErrorCode = workflowErrorInvalidRule
@@ -75,6 +78,7 @@ func resolveWorkflowWithMatcher(ctx context.Context, settings workflowRuleMatche
 	resolution.RuleID = &rule.ID
 	resolution.RuleName = rule.RuleName
 	resolution.ApprovalEnabled = rule.ApprovalEnabled
+	resolution.ExecutionMode = normalizeWorkflowExecutionMode(rule.ExecutionMode)
 
 	approvalUsers, missingApprovalGroups, excludedApprovalUsers, err := resolveWorkflowUsers(ctx, users, rule.ApprovalAuthGroups, reviewPermissionsForTicket(ticketType))
 	if err != nil {
@@ -84,13 +88,15 @@ func resolveWorkflowWithMatcher(ctx context.Context, settings workflowRuleMatche
 	resolution.MissingApprovalGroups = missingApprovalGroups
 	resolution.ExcludedApprovalUsers = excludedApprovalUsers
 
-	executorUsers, missingExecutorGroups, excludedExecutorUsers, err := resolveWorkflowUsers(ctx, users, rule.ExecutorAuthGroups, []string{permissionTicketExecute})
-	if err != nil {
-		return nil, err
+	if resolution.ExecutionMode != workflowExecutionModeAutoApproval {
+		executorUsers, missingExecutorGroups, excludedExecutorUsers, err := resolveWorkflowUsers(ctx, users, rule.ExecutorAuthGroups, []string{permissionTicketExecute})
+		if err != nil {
+			return nil, err
+		}
+		resolution.ExecutorUserIDs = executorUsers
+		resolution.MissingExecutorGroups = missingExecutorGroups
+		resolution.ExcludedExecutorUsers = excludedExecutorUsers
 	}
-	resolution.ExecutorUserIDs = executorUsers
-	resolution.MissingExecutorGroups = missingExecutorGroups
-	resolution.ExcludedExecutorUsers = excludedExecutorUsers
 
 	if rule.ApprovalEnabled && len(resolution.ApprovalUserIDs) == 0 {
 		adminIDs, err := workflowAdminUserIDs(ctx, users)
@@ -113,6 +119,13 @@ func resolveWorkflowWithMatcher(ctx context.Context, settings workflowRuleMatche
 		return resolution, nil
 	}
 	return resolution, nil
+}
+
+func normalizeWorkflowExecutionMode(mode string) string {
+	if mode == workflowExecutionModeAutoApproval {
+		return workflowExecutionModeAutoApproval
+	}
+	return workflowExecutionModeManual
 }
 
 func resolveWorkflowUsers(ctx context.Context, users *repository.UserRepo, groups []model.AuthGroup, requiredPermissions []string) ([]uint64, []model.AuthGroup, []model.WorkflowExcludedUser, error) {
@@ -184,6 +197,7 @@ func workflowResolutionFromSnapshot(ticket *model.Ticket, snapshot *model.Ticket
 		DBConnectionID:    ticket.DBConnectionID,
 		ExportSensitivity: workflowExportSensitivity(ticket),
 		ApprovalEnabled:   snapshot.ApprovalEnabled,
+		ExecutionMode:     normalizeWorkflowExecutionMode(snapshot.ExecutionMode),
 		ApprovalUserIDs:   append([]uint64{}, snapshot.ApprovalUserIDs...),
 		ExecutorUserIDs:   append([]uint64{}, snapshot.ExecutorUserIDs...),
 		AdminUserIDs:      append([]uint64{}, snapshot.AdminUserIDs...),

@@ -43,6 +43,7 @@ type TicketHandler struct {
 	notifications      *NotificationRouter
 	forbiddenLimiter   requestRateLimiter
 	appBaseURL         string
+	appEnv             string
 }
 
 type ticketResponse struct {
@@ -73,6 +74,7 @@ type ticketWorkflowTrace struct {
 	RuleID                *uint64                  `json:"workflow_rule_id,omitempty"`
 	RuleName              string                   `json:"workflow_rule_name"`
 	ApprovalEnabled       bool                     `json:"approval_enabled"`
+	ExecutionMode         string                   `json:"execution_mode"`
 	ApprovalUserIDs       []uint64                 `json:"approval_user_ids"`
 	ExecutorUserIDs       []uint64                 `json:"executor_user_ids"`
 	AdminUserIDs          []uint64                 `json:"admin_user_ids"`
@@ -117,6 +119,13 @@ const (
 	ticketEventRevoked          ticketNotificationEvent = "revoked"
 	ticketEventNeedsAdmin       ticketNotificationEvent = "needs_admin_attention"
 )
+
+type ticketExecutionRunOptions struct {
+	Automated        bool
+	ReviewerID       uint64
+	WorkflowRuleID   *uint64
+	WorkflowRuleName string
+}
 
 type ticketRecipientRole string
 
@@ -189,7 +198,7 @@ var ticketNotificationPolicies = map[ticketNotificationEvent]ticketNotificationP
 	ticketEventExecutionFailed: {
 		Title:       "工單執行失敗",
 		NotifType:   "ticket_executed",
-		Roles:       []ticketRecipientRole{ticketRoleSubmitter, ticketRoleAssignedExecutor},
+		Roles:       []ticketRecipientRole{ticketRoleSubmitter, ticketRoleAssignedExecutor, ticketRoleExecutorPool, ticketRoleAdmin},
 		NotifyActor: true,
 		Status:      model.TicketStatusFailed,
 		NextAction:  "請查看錯誤並重新處理",
@@ -212,6 +221,14 @@ var ticketNotificationPolicies = map[ticketNotificationEvent]ticketNotificationP
 	},
 }
 
+type TicketHandlerOption func(*TicketHandler)
+
+func WithTicketHandlerAppEnv(appEnv string) TicketHandlerOption {
+	return func(h *TicketHandler) {
+		h.appEnv = strings.TrimSpace(appEnv)
+	}
+}
+
 func NewTicketHandler(
 	tickets *repository.TicketRepo,
 	queryAccess *repository.QueryAccessRepo,
@@ -230,8 +247,9 @@ func NewTicketHandler(
 	notifRepo *repository.NotificationRepo,
 	broker *realtime.Broker,
 	appBaseURL string,
+	opts ...TicketHandlerOption,
 ) *TicketHandler {
-	return &TicketHandler{
+	h := &TicketHandler{
 		tickets:            tickets,
 		queryAccess:        queryAccess,
 		exports:            exports,
@@ -250,6 +268,10 @@ func NewTicketHandler(
 		forbiddenLimiter:   newRequestRateLimiter(20, time.Minute),
 		appBaseURL:         strings.TrimRight(appBaseURL, "/"),
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 func (h *TicketHandler) ticketLink(ticketNo string) string {
@@ -971,6 +993,7 @@ func workflowAuditDetails(ticket *model.Ticket, resolution *model.WorkflowResolu
 		}
 		details["workflow_rule_name"] = resolution.RuleName
 		details["approval_enabled"] = resolution.ApprovalEnabled
+		details["execution_mode"] = resolution.ExecutionMode
 		details["approval_user_ids"] = resolution.ApprovalUserIDs
 		details["executor_user_ids"] = resolution.ExecutorUserIDs
 		details["admin_user_ids"] = resolution.AdminUserIDs
@@ -1304,6 +1327,7 @@ func (h *TicketHandler) loadWorkflowTrace(ctx context.Context, ticket *model.Tic
 		RuleID:          snapshot.RuleID,
 		RuleName:        snapshot.RuleName,
 		ApprovalEnabled: snapshot.ApprovalEnabled,
+		ExecutionMode:   normalizeWorkflowExecutionMode(snapshot.ExecutionMode),
 		ApprovalUserIDs: append([]uint64{}, snapshot.ApprovalUserIDs...),
 		ExecutorUserIDs: append([]uint64{}, snapshot.ExecutorUserIDs...),
 		AdminUserIDs:    append([]uint64{}, snapshot.AdminUserIDs...),
@@ -1765,7 +1789,19 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		if updated != nil {
 			ticket = updated
 		}
-		h.dispatchTicketNotification(r.Context(), ticket, ticketEventPendingExecution, &userID, "reviewer 已通過審核，工單已進入待執行隊列。")
+		resolution, resolveErr := h.ticketWorkflowResolution(r.Context(), ticket)
+		if resolveErr != nil {
+			jsonErr(w, http.StatusInternalServerError, "load workflow resolution failed")
+			return
+		}
+		if h.shouldAutoExecuteAfterApproval(ticket, resolution) {
+			if err := h.startWorkflowAutoExecution(r.Context(), ticket, userID, resolution); err != nil {
+				jsonErr(w, http.StatusInternalServerError, "workflow auto execution start failed")
+				return
+			}
+		} else {
+			h.dispatchTicketNotification(r.Context(), ticket, ticketEventPendingExecution, &userID, "reviewer 已通過審核，工單已進入待執行隊列。")
+		}
 	} else {
 		h.dispatchTicketNotification(r.Context(), ticket, ticketEventApproved, &userID, body)
 	}
@@ -1779,6 +1815,57 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publishTicketUpdate(r.Context(), updated, &userID)
 	jsonOK(w, updated)
+}
+
+func (h *TicketHandler) shouldAutoExecuteAfterApproval(ticket *model.Ticket, resolution *model.WorkflowResolution) bool {
+	if ticket == nil || resolution == nil {
+		return false
+	}
+	if h.appEnv == "production" {
+		return false
+	}
+	if resolution.ExecutionMode != workflowExecutionModeAutoApproval {
+		return false
+	}
+	return ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML
+}
+
+func (h *TicketHandler) startWorkflowAutoExecution(ctx context.Context, ticket *model.Ticket, reviewerID uint64, resolution *model.WorkflowResolution) error {
+	if ticket == nil || h.tickets == nil {
+		return nil
+	}
+	ok, err := h.tickets.StartExecution(ctx, ticket.ID, 0)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("ticket already taken by another executor")
+	}
+	details := map[string]any{
+		"automated":          true,
+		"reviewer_id":        reviewerID,
+		"workflow_rule_name": resolution.RuleName,
+		"execution_mode":     resolution.ExecutionMode,
+	}
+	if resolution.RuleID != nil {
+		details["workflow_rule_id"] = *resolution.RuleID
+	}
+	h.audit.Log(ctx, repository.AuditEntry{
+		ActorID:      &reviewerID,
+		ActorName:    middleware.UsernameFromCtx(ctx),
+		ActionType:   "workflow_auto_execute_start",
+		ResourceType: "ticket",
+		ResourceID:   &ticket.ID,
+		Details:      details,
+	})
+	h.dispatchTicketNotification(ctx, ticket, ticketEventPendingExecution, &reviewerID, "Workflow Rule 設定為審批後自動執行，系統已開始執行。")
+	go h.runTicketExecutionWithOptions(ticket, 0, ticketExecutionRunOptions{
+		Automated:        true,
+		ReviewerID:       reviewerID,
+		WorkflowRuleID:   resolution.RuleID,
+		WorkflowRuleName: resolution.RuleName,
+	})
+	return nil
 }
 
 // POST /tickets/{id}/reject
@@ -2060,7 +2147,7 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	// Run SQL asynchronously so the HTTP response returns immediately.
 	// Status is persisted to DB; the client polls GET /tickets/{id} for progress.
 	ticket.ExecutorID = &userID
-	go h.runTicketExecution(ticket, userID)
+	go h.runTicketExecutionWithOptions(ticket, userID, ticketExecutionRunOptions{})
 
 	h.publishTicketUpdateByID(r.Context(), id, ticket, &userID)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
@@ -2070,31 +2157,39 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 // runTicketSQL splits the ticket SQL into statements and executes each one serially
 // against the target DB, recording results in ticket_executions.
 func (h *TicketHandler) runTicketExecution(ticket *model.Ticket, executorID uint64) {
+	h.runTicketExecutionWithOptions(ticket, executorID, ticketExecutionRunOptions{})
+}
+
+func (h *TicketHandler) runTicketExecutionWithOptions(ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions) {
 	if ticket.TicketType == model.TicketTypeRedisCommand {
 		h.runTicketRedisCommands(ticket, executorID)
 		return
 	}
-	h.runTicketSQL(ticket, executorID)
+	h.runTicketSQL(ticket, executorID, opts)
 }
 
-func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
+func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions) {
 	ctx := context.Background()
 	executorName, err := h.lookupUsername(ctx, executorID)
 	if err != nil {
 		executorName = ""
 	}
+	if opts.Automated {
+		executorName = "workflow automation"
+	}
 
 	execDB, cleanup, err := h.openTicketSQLDB(ctx, *ticket.DBConnectionID, model.DBCredentialRoleReadwrite, ticket.DatabaseName)
 	if err != nil {
-		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "cannot connect: "+err.Error())
+		h.finishTicketExecutionStartFailure(ctx, ticket, executorID, opts, "cannot connect: "+err.Error())
 		return
 	}
 	defer cleanup()
 
 	finalStatus := model.TicketStatusCompleted
+	executedStatements := []map[string]any{}
 	parsedStatements, _, err := h.parseTicketStatements(ctx, *ticket.DBConnectionID, ticket.SQLContent)
 	if err != nil {
-		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "parse SQL failed: "+err.Error())
+		h.finishTicketExecutionStartFailure(ctx, ticket, executorID, opts, "parse SQL failed: "+err.Error())
 		return
 	}
 
@@ -2133,6 +2228,18 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 				rowsAffected = &value
 			}
 		}
+		statementAudit := map[string]any{
+			"seq":         parsedStatement.Seq,
+			"sql":         stmt,
+			"duration_ms": durationMs,
+		}
+		if rowsAffected != nil {
+			statementAudit["rows_affected"] = *rowsAffected
+		}
+		if errMsg != nil {
+			statementAudit["error"] = *errMsg
+		}
+		executedStatements = append(executedStatements, statementAudit)
 		_ = h.tickets.MarkExecutionDone(ctx, execID, rowsAffected, durationMs, errMsg)
 
 		if execErr != nil {
@@ -2146,25 +2253,98 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64) {
 	if finalStatus == model.TicketStatusFailed {
 		actionType = "ticket_execute_failed"
 	}
+	if opts.Automated {
+		actionType = "workflow_auto_execute_complete"
+		if finalStatus != model.TicketStatusCompleted {
+			actionType = "workflow_auto_execute_failed"
+		}
+	}
+	details := map[string]any{
+		"status":     string(finalStatus),
+		"statements": executedStatements,
+	}
+	if opts.Automated {
+		details["automated"] = true
+		details["reviewer_id"] = opts.ReviewerID
+		details["workflow_rule_name"] = opts.WorkflowRuleName
+		if opts.WorkflowRuleID != nil {
+			details["workflow_rule_id"] = *opts.WorkflowRuleID
+		}
+	}
+	auditActorID := &executorID
+	notificationActorID := &executorID
+	if opts.Automated {
+		auditActorID = &opts.ReviewerID
+		notificationActorID = &opts.ReviewerID
+	}
 	h.audit.Log(ctx, repository.AuditEntry{
-		ActorID:      &executorID,
+		ActorID:      auditActorID,
 		ActorName:    executorName,
 		ActionType:   actionType,
 		ResourceType: "ticket",
 		ResourceID:   &ticket.ID,
-		Details:      map[string]string{"status": string(finalStatus)},
+		Details:      details,
 	})
 
 	if finalStatus == model.TicketStatusCompleted {
-		h.dispatchTicketNotification(ctx, ticket, ticketEventCompleted, &executorID, "工單已執行完成。")
+		detail := "工單已執行完成。"
+		if opts.Automated {
+			detail = "Workflow Rule 已自動執行完成。"
+		}
+		h.dispatchTicketNotification(ctx, ticket, ticketEventCompleted, notificationActorID, detail)
+	} else if opts.Automated {
+		h.dispatchTicketNotification(ctx, ticket, ticketEventExecutionFailed, notificationActorID, "Workflow Rule 自動執行失敗，請 DBA/Admin 查看 execution log 並重新處理。")
 	} else {
 		h.dispatchTicketNotification(ctx, ticket, ticketEventExecutionFailed, &executorID, "工單執行失敗，請查看 execution log。")
 	}
-	h.publishTicketUpdateByID(ctx, ticket.ID, ticket, &executorID)
+	h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
 }
 
 func (h *TicketHandler) finishTicket(ctx context.Context, id uint64, status model.TicketStatus, _ string) {
 	_ = h.tickets.MarkCompleted(ctx, id, status)
+}
+
+func (h *TicketHandler) finishTicketExecutionStartFailure(ctx context.Context, ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions, message string) {
+	if ticket == nil {
+		return
+	}
+	status := model.TicketStatusFailed
+	actionType := "ticket_execute_failed"
+	details := map[string]any{
+		"status": string(status),
+		"error":  message,
+	}
+	actorID := &executorID
+	actorName, _ := h.lookupUsername(ctx, executorID)
+	notificationActorID := &executorID
+	if opts.Automated {
+		actionType = "workflow_auto_execute_failed"
+		details["status"] = string(status)
+		details["automated"] = true
+		details["reviewer_id"] = opts.ReviewerID
+		details["workflow_rule_name"] = opts.WorkflowRuleName
+		if opts.WorkflowRuleID != nil {
+			details["workflow_rule_id"] = *opts.WorkflowRuleID
+		}
+		actorID = &opts.ReviewerID
+		actorName = "workflow automation"
+		notificationActorID = &opts.ReviewerID
+	}
+	h.finishTicket(ctx, ticket.ID, status, message)
+	h.audit.Log(ctx, repository.AuditEntry{
+		ActorID:      actorID,
+		ActorName:    actorName,
+		ActionType:   actionType,
+		ResourceType: "ticket",
+		ResourceID:   &ticket.ID,
+		Details:      details,
+	})
+	if opts.Automated {
+		h.dispatchTicketNotification(ctx, ticket, ticketEventExecutionFailed, notificationActorID, "Workflow Rule 自動執行失敗，請 DBA/Admin 查看 execution log 並重新處理。")
+	} else {
+		h.dispatchTicketNotification(ctx, ticket, ticketEventExecutionFailed, notificationActorID, "工單執行失敗，請查看 execution log。")
+	}
+	h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
 }
 
 // RunScheduledTicket is the public entry point for the background scheduler.

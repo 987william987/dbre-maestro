@@ -199,6 +199,60 @@ func TestAuthHandlerSetupStatus(t *testing.T) {
 	}
 }
 
+func TestLarkEnterpriseEmailAllowed(t *testing.T) {
+	tests := []struct {
+		name           string
+		email          string
+		allowedDomains []string
+		want           bool
+	}{
+		{
+			name:           "allows exact configured enterprise domain",
+			email:          "william@edgex.exchange",
+			allowedDomains: []string{"edgex.exchange"},
+			want:           true,
+		},
+		{
+			name:           "allows subdomain of configured enterprise domain",
+			email:          "william@staff.edgex.exchange",
+			allowedDomains: []string{"edgex.exchange"},
+			want:           true,
+		},
+		{
+			name:           "rejects personal email domain",
+			email:          "william@gmail.com",
+			allowedDomains: []string{"edgex.exchange"},
+			want:           false,
+		},
+		{
+			name:           "rejects suffix spoofing",
+			email:          "william@notedgex.exchange",
+			allowedDomains: []string{"edgex.exchange"},
+			want:           false,
+		},
+		{
+			name:           "rejects invalid email",
+			email:          "william",
+			allowedDomains: []string{"edgex.exchange"},
+			want:           false,
+		},
+		{
+			name:           "empty allowlist only validates email shape",
+			email:          "william@example.com",
+			allowedDomains: nil,
+			want:           true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := larkEnterpriseEmailAllowed(tt.email, tt.allowedDomains); got != tt.want {
+				t.Fatalf("larkEnterpriseEmailAllowed(%q, %#v) = %v, want %v", tt.email, tt.allowedDomains, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAuthHandlerMeReturnsEmptyArrayForNoGroups(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

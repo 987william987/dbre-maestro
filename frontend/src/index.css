@@ -63,6 +63,97 @@ a {
   background: rgba(24,24,27,0.1);
 }
 
+.cm-tooltip.cm-tooltip-autocomplete,
+.cm-tooltip.cm-completionInfo {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 14px 32px rgba(24, 24, 27, 0.10), 0 2px 8px rgba(24, 24, 27, 0.05);
+  color: var(--text);
+  font-family: 'Inter', 'Noto Sans TC', sans-serif;
+}
+
+.cm-tooltip.cm-tooltip-autocomplete > ul {
+  min-width: 300px;
+  max-width: min(480px, 92vw);
+  max-height: 240px;
+  padding: 4px;
+  font-family: 'Inter', 'Noto Sans TC', sans-serif;
+}
+
+.cm-tooltip.cm-tooltip-autocomplete > ul > li,
+.cm-tooltip.cm-tooltip-autocomplete > ul > completion-section {
+  min-height: 28px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  line-height: 1.35;
+}
+
+.cm-tooltip.cm-tooltip-autocomplete > ul > li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+
+.cm-tooltip.cm-tooltip-autocomplete > ul > li:hover {
+  background: var(--panel-soft);
+}
+
+.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected],
+.cm-tooltip.cm-tooltip-autocomplete-disabled > ul > li[aria-selected] {
+  background: var(--panel-soft);
+  color: var(--text);
+}
+
+.cm-tooltip.cm-tooltip-autocomplete > ul > completion-section {
+  margin: 4px 0;
+  border-bottom: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.cm-completionIcon {
+  display: none;
+}
+
+.cm-completionLabel {
+  overflow: hidden;
+  flex: 1 1 auto;
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+.cm-completionMatchedText {
+  color: var(--text);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.cm-completionDetail {
+  overflow: hidden;
+  flex: 0 1 auto;
+  max-width: 170px;
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: normal;
+  text-overflow: ellipsis;
+}
+
+.cm-tooltip.cm-completionInfo {
+  max-width: 320px;
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .attention-pulse {
   animation: attention-pulse-ring 1200ms cubic-bezier(0.2, 0.8, 0.2, 1) 2;
 }

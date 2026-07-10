@@ -103,6 +103,7 @@ type TicketWorkflowSnapshot struct {
 	RuleID          *uint64   `db:"workflow_rule_id" json:"workflow_rule_id,omitempty"`
 	RuleName        string    `db:"workflow_rule_name" json:"workflow_rule_name"`
 	ApprovalEnabled bool      `db:"approval_enabled" json:"approval_enabled"`
+	ExecutionMode   string    `db:"execution_mode" json:"execution_mode"`
 	ApprovalUserIDs []uint64  `json:"approval_user_ids"`
 	ExecutorUserIDs []uint64  `json:"executor_user_ids"`
 	AdminUserIDs    []uint64  `json:"admin_user_ids"`

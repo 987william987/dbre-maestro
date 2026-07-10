@@ -4,6 +4,7 @@ import type { ApprovalResolutionWorkflow, PlatformSettings, WorkflowResolution, 
 
 function normalizeSettings(settings: PlatformSettings): PlatformSettings {
   return {
+    app_env: typeof settings.app_env === 'string' ? settings.app_env : '',
     sensitive_export_reviewer_user_ids: Array.isArray(settings.sensitive_export_reviewer_user_ids)
       ? settings.sensitive_export_reviewer_user_ids
       : [],
@@ -27,6 +28,9 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     lark_app_id: typeof settings.lark_app_id === 'string' ? settings.lark_app_id : '',
     lark_app_secret: typeof settings.lark_app_secret === 'string' ? settings.lark_app_secret : '',
     lark_app_secret_configured: typeof settings.lark_app_secret_configured === 'boolean' ? settings.lark_app_secret_configured : false,
+    lark_oauth_enabled: typeof settings.lark_oauth_enabled === 'boolean' ? settings.lark_oauth_enabled : false,
+    lark_oauth_site: settings.lark_oauth_site === 'feishu' ? 'feishu' : 'lark',
+    lark_oauth_redirect_url: typeof settings.lark_oauth_redirect_url === 'string' ? settings.lark_oauth_redirect_url : '',
     sql_editor_app_timeout_seconds:
       typeof settings.sql_editor_app_timeout_seconds === 'number' ? settings.sql_editor_app_timeout_seconds : 30,
     sql_editor_mysql_max_execution_time_ms:
@@ -58,6 +62,7 @@ function normalizeWorkflowRule(rule: WorkflowRule): WorkflowRule {
     db_connection_id: typeof rule.db_connection_id === 'number' ? rule.db_connection_id : null,
     export_sensitivity: rule.export_sensitivity === 'normal' || rule.export_sensitivity === 'sensitive' ? rule.export_sensitivity : null,
     approval_enabled: typeof rule.approval_enabled === 'boolean' ? rule.approval_enabled : true,
+    execution_mode: rule.execution_mode === 'auto_after_approval' ? 'auto_after_approval' : 'manual',
     approval_auth_groups: Array.isArray(rule.approval_auth_groups) ? rule.approval_auth_groups : [],
     executor_auth_groups: Array.isArray(rule.executor_auth_groups) ? rule.executor_auth_groups : [],
     priority: typeof rule.priority === 'number' ? rule.priority : 100,

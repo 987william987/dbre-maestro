@@ -37,6 +37,9 @@ describe('SettingsPage', () => {
     mockedGetSettings.mockResolvedValue({
       lark_app_id: '',
       lark_app_secret_configured: false,
+      lark_oauth_enabled: false,
+      lark_oauth_site: 'lark',
+      lark_oauth_redirect_url: '',
       sensitive_export_reviewer_user_ids: [],
       sensitive_query_access_reviewer_user_ids: [],
       require_non_sensitive_export_review: true,
@@ -52,6 +55,7 @@ describe('SettingsPage', () => {
           db_connection_id: null,
           export_sensitivity: null,
           approval_enabled: true,
+          execution_mode: 'manual',
           approval_auth_groups: ['data_owner'],
           executor_auth_groups: ['dba'],
           priority: 100,

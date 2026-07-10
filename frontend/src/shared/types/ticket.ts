@@ -127,6 +127,7 @@ export type TicketWorkflowTrace = {
   workflow_rule_id?: number | null
   workflow_rule_name: string
   approval_enabled: boolean
+  execution_mode?: 'manual' | 'auto_after_approval'
   approval_user_ids: number[]
   executor_user_ids: number[]
   admin_user_ids: number[]

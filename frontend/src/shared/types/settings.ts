@@ -1,4 +1,5 @@
 export type PlatformSettings = {
+  app_env?: string
   sensitive_export_reviewer_user_ids: number[]
   sensitive_query_access_reviewer_user_ids: number[]
   require_non_sensitive_export_review: boolean
@@ -7,6 +8,9 @@ export type PlatformSettings = {
   lark_app_id: string
   lark_app_secret?: string
   lark_app_secret_configured: boolean
+  lark_oauth_enabled: boolean
+  lark_oauth_site: 'lark' | 'feishu'
+  lark_oauth_redirect_url: string
   sql_editor_app_timeout_seconds: number
   sql_editor_mysql_max_execution_time_ms: number
   sql_editor_postgres_statement_timeout_ms: number
@@ -45,6 +49,7 @@ export type WorkflowRule = {
   db_connection_id?: number | null
   export_sensitivity?: 'normal' | 'sensitive' | null
   approval_enabled: boolean
+  execution_mode: 'manual' | 'auto_after_approval'
   approval_auth_groups: string[]
   executor_auth_groups: string[]
   priority: number

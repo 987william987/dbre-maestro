@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/crypto"
@@ -31,12 +32,102 @@ type ResourceBoundUser struct {
 	Username string `db:"username" json:"username"`
 }
 
+type LarkIdentityInput struct {
+	OpenID       string
+	UnionID      string
+	Email        string
+	DisplayName  string
+	AvatarURL    string
+	PasswordHash string
+}
+
 func NewUserRepo(db *sqlx.DB, encKey ...[]byte) *UserRepo {
 	var key []byte
 	if len(encKey) > 0 {
 		key = encKey[0]
 	}
 	return &UserRepo{db: db, encKey: key}
+}
+
+func (r *UserRepo) GetByLarkLoginIdentity(ctx context.Context, openID, unionID string) (*model.User, error) {
+	openID = strings.TrimSpace(openID)
+	unionID = strings.TrimSpace(unionID)
+	if openID == "" && unionID == "" {
+		return nil, nil
+	}
+
+	var u model.User
+	var err error
+	switch {
+	case openID != "" && unionID != "":
+		err = r.db.GetContext(ctx, &u, `SELECT * FROM users WHERE lark_login_open_id = ? OR lark_login_union_id = ? ORDER BY id LIMIT 1`, openID, unionID)
+	case openID != "":
+		err = r.db.GetContext(ctx, &u, `SELECT * FROM users WHERE lark_login_open_id = ? ORDER BY id LIMIT 1`, openID)
+	default:
+		err = r.db.GetContext(ctx, &u, `SELECT * FROM users WHERE lark_login_union_id = ? ORDER BY id LIMIT 1`, unionID)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &u, err
+}
+
+func (r *UserRepo) BindLarkIdentity(ctx context.Context, userID uint64, identity LarkIdentityInput) error {
+	now := timeutil.NowUTC()
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE users
+		SET lark_recipient = ?,
+		    external_identity_source = 'lark',
+		    external_identity_id = ?,
+		    lark_login_open_id = ?,
+		    lark_login_union_id = ?,
+		    lark_display_name = ?,
+		    lark_avatar_url = ?,
+		    lark_bound_at = ?,
+		    lark_binding_status = 'bound',
+		    updated_at = ?
+		WHERE id = ?
+	`, strings.TrimSpace(identity.OpenID), firstNonEmptyUserValue(identity.UnionID, identity.OpenID),
+		strings.TrimSpace(identity.OpenID), strings.TrimSpace(identity.UnionID),
+		strings.TrimSpace(identity.DisplayName), strings.TrimSpace(identity.AvatarURL),
+		now, now, userID)
+	return err
+}
+
+func (r *UserRepo) CreateLarkDeveloper(ctx context.Context, username string, identity LarkIdentityInput) (*model.User, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	now := timeutil.NowUTC()
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO users (
+		    username, email, lark_recipient, password,
+		    external_identity_source, external_identity_id, password_login_disabled,
+		    lark_login_open_id, lark_login_union_id, lark_display_name, lark_avatar_url,
+		    lark_bound_at, lark_binding_status,
+		    is_protected, is_active, created_at, updated_at
+		) VALUES (?, ?, ?, ?, 'lark', ?, 1, ?, ?, ?, ?, ?, 'bound', 0, 1, ?, ?)
+	`, username, strings.TrimSpace(identity.Email), strings.TrimSpace(identity.OpenID), identity.PasswordHash,
+		firstNonEmptyUserValue(identity.UnionID, identity.OpenID), strings.TrimSpace(identity.OpenID), strings.TrimSpace(identity.UnionID),
+		strings.TrimSpace(identity.DisplayName), strings.TrimSpace(identity.AvatarURL), now, now, now)
+	if err != nil {
+		return nil, fmt.Errorf("create lark user: %w", err)
+	}
+	id, _ := res.LastInsertId()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO auth_group_memberships (user_id, auth_group, granted_by, expires_at, created_at)
+		VALUES (?, ?, NULL, NULL, ?)
+		ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at), granted_by = VALUES(granted_by)
+	`, id, model.AuthGroupDeveloper, now); err != nil {
+		return nil, fmt.Errorf("grant developer group: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.GetByID(ctx, uint64(id))
 }
 
 func (r *UserRepo) Create(ctx context.Context, username, email, larkRecipient, passwordHash string, isProtected bool) (*model.User, error) {
@@ -598,6 +689,15 @@ func (r *UserRepo) Delete(ctx context.Context, id uint64) error {
 	}
 
 	return tx.Commit()
+}
+
+func firstNonEmptyUserValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func (r *UserRepo) ListUsersByAuthGroup(ctx context.Context, group model.AuthGroup) ([]model.User, error) {
