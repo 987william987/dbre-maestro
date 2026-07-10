@@ -35,11 +35,13 @@ type Config struct {
 }
 
 type LarkOAuthConfig struct {
-	Enabled     bool
-	Site        string
-	AppID       string
-	AppSecret   string
-	RedirectURL string
+	Enabled                bool
+	Site                   string
+	AppID                  string
+	AppSecret              string
+	RedirectURL            string
+	RequireEnterpriseEmail bool
+	EnterpriseEmailDomains []string
 }
 
 func (c LarkOAuthConfig) Configured() bool {
@@ -99,11 +101,13 @@ func Load() (*Config, error) {
 
 	c.LarkWebhookURL = os.Getenv("LARK_WEBHOOK_URL")
 	c.LarkOAuth = LarkOAuthConfig{
-		Enabled:     truthyEnv(os.Getenv("LARK_OAUTH_ENABLE")),
-		Site:        normalizeLarkSite(getEnv("LARK_SITE", "lark")),
-		AppID:       strings.TrimSpace(os.Getenv("LARK_APP_ID")),
-		AppSecret:   strings.TrimSpace(os.Getenv("LARK_APP_SECRET")),
-		RedirectURL: strings.TrimSpace(os.Getenv("LARK_OAUTH_REDIRECT_URL")),
+		Enabled:                truthyEnv(os.Getenv("LARK_OAUTH_ENABLE")),
+		Site:                   normalizeLarkSite(getEnv("LARK_SITE", "lark")),
+		AppID:                  strings.TrimSpace(os.Getenv("LARK_APP_ID")),
+		AppSecret:              strings.TrimSpace(os.Getenv("LARK_APP_SECRET")),
+		RedirectURL:            strings.TrimSpace(os.Getenv("LARK_OAUTH_REDIRECT_URL")),
+		RequireEnterpriseEmail: truthyEnv(getEnv("LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL", "true")),
+		EnterpriseEmailDomains: splitCSV(getEnv("LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS", "edgex.exchange")),
 	}
 	if raw := os.Getenv("RUN_MIGRATIONS_ON_STARTUP"); raw != "" {
 		runMigrations, err := strconv.ParseBool(raw)
@@ -197,6 +201,18 @@ func truthyEnv(value string) bool {
 	default:
 		return false
 	}
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
 }
 
 func normalizeLarkSite(value string) string {

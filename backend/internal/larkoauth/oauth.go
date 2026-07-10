@@ -23,11 +23,12 @@ const (
 )
 
 type Identity struct {
-	OpenID      string
-	UnionID     string
-	Email       string
-	DisplayName string
-	AvatarURL   string
+	OpenID          string
+	UnionID         string
+	Email           string
+	EnterpriseEmail string
+	DisplayName     string
+	AvatarURL       string
 }
 
 type Client interface {
@@ -79,15 +80,17 @@ func (c HTTPClient) ExchangeCode(ctx context.Context, cfg config.LarkOAuthConfig
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
-			AccessToken string `json:"access_token"`
-			OpenID      string `json:"open_id"`
-			UnionID     string `json:"union_id"`
-			Email       string `json:"email"`
+			AccessToken     string `json:"access_token"`
+			OpenID          string `json:"open_id"`
+			UnionID         string `json:"union_id"`
+			Email           string `json:"email"`
+			EnterpriseEmail string `json:"enterprise_email"`
 		} `json:"data"`
-		AccessToken string `json:"access_token"`
-		OpenID      string `json:"open_id"`
-		UnionID     string `json:"union_id"`
-		Email       string `json:"email"`
+		AccessToken     string `json:"access_token"`
+		OpenID          string `json:"open_id"`
+		UnionID         string `json:"union_id"`
+		Email           string `json:"email"`
+		EnterpriseEmail string `json:"enterprise_email"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return Identity{}, err
@@ -96,7 +99,12 @@ func (c HTTPClient) ExchangeCode(ctx context.Context, cfg config.LarkOAuthConfig
 		return Identity{}, fmt.Errorf("lark oauth token failed: %s", payload.Msg)
 	}
 
-	identity := Identity{OpenID: payload.Data.OpenID, UnionID: payload.Data.UnionID, Email: payload.Data.Email}
+	identity := Identity{
+		OpenID:          payload.Data.OpenID,
+		UnionID:         payload.Data.UnionID,
+		Email:           payload.Data.Email,
+		EnterpriseEmail: payload.Data.EnterpriseEmail,
+	}
 	if identity.OpenID == "" {
 		identity.OpenID = payload.OpenID
 	}
@@ -105,6 +113,9 @@ func (c HTTPClient) ExchangeCode(ctx context.Context, cfg config.LarkOAuthConfig
 	}
 	if identity.Email == "" {
 		identity.Email = payload.Email
+	}
+	if identity.EnterpriseEmail == "" {
+		identity.EnterpriseEmail = payload.EnterpriseEmail
 	}
 
 	accessToken := strings.TrimSpace(payload.Data.AccessToken)
@@ -144,19 +155,21 @@ func (c HTTPClient) fetchUserInfo(ctx context.Context, cfg config.LarkOAuthConfi
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
-			OpenID    string `json:"open_id"`
-			UnionID   string `json:"union_id"`
-			Name      string `json:"name"`
-			Email     string `json:"email"`
-			AvatarURL string `json:"avatar_url"`
+			OpenID          string `json:"open_id"`
+			UnionID         string `json:"union_id"`
+			Name            string `json:"name"`
+			Email           string `json:"email"`
+			EnterpriseEmail string `json:"enterprise_email"`
+			AvatarURL       string `json:"avatar_url"`
 		} `json:"data"`
-		OpenID       string `json:"open_id"`
-		UnionID      string `json:"union_id"`
-		Name         string `json:"name"`
-		Email        string `json:"email"`
-		AvatarURL    string `json:"avatar_url"`
-		AvatarMiddle string `json:"avatar_middle"`
-		AvatarThumb  string `json:"avatar_thumb"`
+		OpenID          string `json:"open_id"`
+		UnionID         string `json:"union_id"`
+		Name            string `json:"name"`
+		Email           string `json:"email"`
+		EnterpriseEmail string `json:"enterprise_email"`
+		AvatarURL       string `json:"avatar_url"`
+		AvatarMiddle    string `json:"avatar_middle"`
+		AvatarThumb     string `json:"avatar_thumb"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return Identity{}, err
@@ -165,11 +178,12 @@ func (c HTTPClient) fetchUserInfo(ctx context.Context, cfg config.LarkOAuthConfi
 		return Identity{}, fmt.Errorf("lark user info failed: %s", payload.Msg)
 	}
 	identity := Identity{
-		OpenID:      firstNonEmpty(payload.Data.OpenID, payload.OpenID),
-		UnionID:     firstNonEmpty(payload.Data.UnionID, payload.UnionID),
-		Email:       firstNonEmpty(payload.Data.Email, payload.Email),
-		DisplayName: firstNonEmpty(payload.Data.Name, payload.Name),
-		AvatarURL:   firstNonEmpty(payload.Data.AvatarURL, payload.AvatarURL, payload.AvatarMiddle, payload.AvatarThumb),
+		OpenID:          firstNonEmpty(payload.Data.OpenID, payload.OpenID),
+		UnionID:         firstNonEmpty(payload.Data.UnionID, payload.UnionID),
+		Email:           firstNonEmpty(payload.Data.Email, payload.Email),
+		EnterpriseEmail: firstNonEmpty(payload.Data.EnterpriseEmail, payload.EnterpriseEmail),
+		DisplayName:     firstNonEmpty(payload.Data.Name, payload.Name),
+		AvatarURL:       firstNonEmpty(payload.Data.AvatarURL, payload.AvatarURL, payload.AvatarMiddle, payload.AvatarThumb),
 	}
 	if strings.TrimSpace(identity.OpenID) == "" {
 		return Identity{}, fmt.Errorf("lark user info response missing open_id")
@@ -187,6 +201,7 @@ func mergeIdentity(base Identity, override Identity) Identity {
 	if strings.TrimSpace(override.Email) != "" {
 		base.Email = strings.TrimSpace(override.Email)
 	}
+	base.EnterpriseEmail = strings.TrimSpace(override.EnterpriseEmail)
 	if strings.TrimSpace(override.DisplayName) != "" {
 		base.DisplayName = strings.TrimSpace(override.DisplayName)
 	}

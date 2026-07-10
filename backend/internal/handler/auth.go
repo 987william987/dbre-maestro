@@ -310,7 +310,7 @@ func (h *AuthHandler) CompleteLarkLogin(w http.ResponseWriter, r *http.Request) 
 	user, err := h.findOrCreateLarkUser(r.Context(), identity)
 	if err != nil {
 		_ = h.larkLogins.MarkFailed(r.Context(), state.ID, "resolve_user_failed")
-		h.logLoginFailed(r, nil, strings.TrimSpace(identity.Email), "lark_user_resolve_failed")
+		h.logLoginFailed(r, nil, firstNonEmptyString(identity.EnterpriseEmail, identity.Email), "lark_user_resolve_failed")
 		http.Redirect(w, r, larkLoginRedirect("", "login_failed"), http.StatusFound)
 		return
 	}
@@ -389,10 +389,18 @@ func (h *AuthHandler) ConsumeLarkLoginResult(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *AuthHandler) findOrCreateLarkUser(ctx context.Context, identity larkoauth.Identity) (*model.User, error) {
+	enterpriseEmail := strings.TrimSpace(identity.EnterpriseEmail)
+	if h.larkOAuth.RequireEnterpriseEmail && enterpriseEmail == "" {
+		return nil, fmt.Errorf("lark enterprise_email is required")
+	}
+	if enterpriseEmail != "" && !larkEnterpriseEmailAllowed(enterpriseEmail, h.larkOAuth.EnterpriseEmailDomains) {
+		return nil, fmt.Errorf("lark enterprise_email domain is not allowed")
+	}
+
 	input := repository.LarkIdentityInput{
 		OpenID:      strings.TrimSpace(identity.OpenID),
 		UnionID:     strings.TrimSpace(identity.UnionID),
-		Email:       strings.TrimSpace(identity.Email),
+		Email:       enterpriseEmail,
 		DisplayName: strings.TrimSpace(identity.DisplayName),
 		AvatarURL:   strings.TrimSpace(identity.AvatarURL),
 	}
@@ -437,6 +445,28 @@ func (h *AuthHandler) findOrCreateLarkUser(ctx context.Context, identity larkoau
 	}
 	input.PasswordHash = string(passwordHash)
 	return h.users.CreateLarkDeveloper(ctx, h.uniqueLarkUsername(ctx, identity), input)
+}
+
+func larkEnterpriseEmailAllowed(email string, allowedDomains []string) bool {
+	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
+	at := strings.LastIndex(normalizedEmail, "@")
+	if at < 0 || at == len(normalizedEmail)-1 {
+		return false
+	}
+	if len(allowedDomains) == 0 {
+		return true
+	}
+	domain := normalizedEmail[at+1:]
+	for _, allowed := range allowedDomains {
+		normalizedAllowed := strings.ToLower(strings.TrimSpace(allowed))
+		if normalizedAllowed == "" {
+			continue
+		}
+		if domain == normalizedAllowed || strings.HasSuffix(domain, "."+normalizedAllowed) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *AuthHandler) resolveLarkOAuthConfig(ctx context.Context) (config.LarkOAuthConfig, error) {
