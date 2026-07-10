@@ -71,10 +71,14 @@ Backend Pod 至少需要：
 | `DB_CONNECTION_HOST_ALLOWLIST` | 允許的 host pattern，例如 `*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal` |
 | `DB_CONNECTION_CIDR_ALLOWLIST` | 允許的 DB / Redis subnet CIDR，需由 SRE 依環境提供 |
 | `DB_CONNECTION_CIDR_DENYLIST` | 禁止連線 CIDR，至少擋 metadata / loopback，例如 `127.0.0.0/8,169.254.0.0/16,::1/128` |
+| `LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL` | Lark OAuth 是否要求 `enterprise_email`；建議維持 `true` |
+| `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | 允許登入的企業信箱 domain，例如 `edgex.exchange` |
 
-Lark App ID / Secret 建議透過平台 Settings 管理，不建議寫死在 image。
+Lark App ID / Secret、OAuth enable、OAuth site 與 OAuth redirect URL 建議透過平台 Settings 管理，不建議寫死在 image。
 
 `APP_BASE_URL` 不是 secret，應放在 ArgoCD values / `deploy.envs`。如果未配置，通知內容中的工單連結會退回相對路徑，例如 `/tickets/TK-...`，站內信與 Lark 都不會帶域名。修改 `APP_BASE_URL` 後需要 rollout Pod；已經產生的舊通知內容不會自動回填。
+
+Lark OAuth 的 enterprise email policy 是部署安全邊界，仍應放在 env。若 Lark 回傳的 `enterprise_email` 為空，或 domain 不在 `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` 內，登入會失敗；personal email 不會寫入平台 `users.email`。
 
 ## Secret 管理
 
@@ -161,6 +165,8 @@ deploy:
     DB_CONNECTION_HOST_ALLOWLIST: "*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal"
     DB_CONNECTION_CIDR_ALLOWLIST: "10.183.0.0/16,10.222.38.0/24"
     DB_CONNECTION_CIDR_DENYLIST: "127.0.0.0/8,169.254.0.0/16,::1/128"
+    LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL: "true"
+    LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS: "edgex.exchange"
 ```
 
 上述設定假設 test 仍使用單副本，並由 Deployment Pod 啟動時執行 migration。若 test 已建立 migration Job，建議改成：
@@ -186,6 +192,8 @@ deploy:
     DB_CONNECTION_HOST_ALLOWLIST: "*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal"
     DB_CONNECTION_CIDR_ALLOWLIST: "<prod-db-and-redis-subnet-cidrs>"
     DB_CONNECTION_CIDR_DENYLIST: "127.0.0.0/8,169.254.0.0/16,::1/128"
+    LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL: "true"
+    LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS: "edgex.exchange"
 ```
 
 Host policy 建議先在 test 使用 `warn` 模式觀察 backend log 與 audit log，確認既有 DB / Redis endpoint 沒有誤傷後再於 production 使用 `enforce`。這是第一階段連線前檢查，會檢查 DB Connection 新增 / 修改，以及 SQL Editor、metadata、export、scheduled report、ticket execute、metadata sync 等 runtime 連線前的 resolved endpoint；目前尚未接管 driver custom dialer。
@@ -371,6 +379,29 @@ Service 使用 ClusterIP，Ingress 由 ALB 對外暴露。
 
 正式環境必須使用 HTTPS，否則 refresh cookie 的 Secure 行為會導致瀏覽器不接受 cookie。
 
+## Lark OAuth 部署檢查
+
+第一次部署時，若尚未完成 bootstrap admin 與 Settings 設定，登入頁不一定會顯示 Lark 登入。建議流程：
+
+1. 先用原本帳密流程建立並登入 protected admin。
+2. 在 Settings 設定 `Lark App ID`、`Lark App Secret`、OAuth enable、OAuth site 與 OAuth redirect URL。
+3. 到 Lark app 後台把 OAuth redirect URL 加入允許清單。測試環境範例：
+
+   ```text
+   https://dbre-maestro-test.tskyrocket.xyz/api/auth/lark/login/callback
+   ```
+
+4. 確認 deploy env 已設定：
+
+   ```text
+   LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL=true
+   LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
+   ```
+
+5. 用一個有 `enterprise_email` 且 domain 符合 allowlist 的 Lark user 測試登入。
+
+OAuth 登入只解決身份識別與 `open_id` 綁定，不會自動授予 DBA / admin / query scope。若 Lark `enterprise_email` 找不到既有 user，系統會建立普通 user 並綁定 developer auth group；後續 DB scope 仍由 admin 管理。
+
 ## Test 部署流程
 
 1. 建立或更新 test EKS / RDS / ECR / Secrets
@@ -444,6 +475,7 @@ Rollback 需要分成 image rollback 與 database rollback。
 - SQL Editor query access 正常
 - Scheduled SQL Reports 可建立且 run history 正常
 - Lark App 通知可定向送達
+- Lark OAuth 登入正常，且新 user 只拿到 developer 基礎權限
 - Audit logs 有登入失敗、工單、報表與設定變更紀錄
 
 ## 後續建議補齊

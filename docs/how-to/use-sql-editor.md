@@ -33,6 +33,13 @@
    - 若有反白選取片段，系統會優先使用選取片段
    - 若沒有選取片段，則要求目前內容是單一 statement
 
+   自動補全會依目前選擇的資料源與資產樹狀態調整：
+
+   - MySQL / PostgreSQL 使用 SQL 補全；Redis 不使用 SQL 補全
+   - 若你已在資產樹選中某張表並載入欄位，`SELECT`、`WHERE`、`ORDER BY` 等位置會優先提示該表欄位
+   - 在 `FROM`、`JOIN`、`UPDATE`、`INTO`、`ALTER TABLE` 等位置會優先提示已載入的表名
+   - 若尚未選中表或欄位尚未載入，會退回一般 SQL schema / keyword 補全
+
 4. 點擊 `Format` 美化 SQL。
 
    這會依資料源類型套用對應 SQL formatter。若你有反白選取 SQL，系統只會格式化選取片段。

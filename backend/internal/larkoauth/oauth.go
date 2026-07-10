@@ -201,7 +201,9 @@ func mergeIdentity(base Identity, override Identity) Identity {
 	if strings.TrimSpace(override.Email) != "" {
 		base.Email = strings.TrimSpace(override.Email)
 	}
-	base.EnterpriseEmail = strings.TrimSpace(override.EnterpriseEmail)
+	if strings.TrimSpace(override.EnterpriseEmail) != "" {
+		base.EnterpriseEmail = strings.TrimSpace(override.EnterpriseEmail)
+	}
 	if strings.TrimSpace(override.DisplayName) != "" {
 		base.DisplayName = strings.TrimSpace(override.DisplayName)
 	}

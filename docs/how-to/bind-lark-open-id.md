@@ -2,11 +2,14 @@
 
 這份指南說明管理員如何為平台使用者手動綁定 Lark Open ID，讓工單通知可以正確送到指定人員。
 
+若已啟用 Lark OAuth 登入，使用者用 Lark 登入時系統會自動綁定 `open_id`。手動綁定仍保留，用於 fallback、舊帳號維護與通知問題排查。
+
 ## 適用場景
 
-- 新用戶第一次開通平台帳號
+- 使用者尚未透過 Lark OAuth 登入，但已需要收到 Lark 通知
 - 某位使用者收不到 Lark 工單通知
 - 使用者更換 Lark 帳號，需要更新通知綁定
+- OAuth 無法使用，需臨時手動維護通知 recipient
 
 ## 重要原則
 
@@ -14,6 +17,7 @@
 - `users.lark_recipient` 目前保存的是 Lark `open_id`
 - 工單通知發送時固定使用 `receive_id_type=open_id`
 - 如果 `Lark Open ID` 沒有填，該使用者不會收到定向 Lark 通知
+- Lark OAuth 自動綁定時，平台只使用 Lark `enterprise_email` 匹配或建立 user，不使用 personal email
 
 ## 前置條件
 
@@ -68,8 +72,12 @@
 - Lark app 權限與資料範圍
 - 後端 `notification_failure` audit log 與 app log
 
+### OAuth 登入後仍收不到 Lark 通知
+
+請確認該 user profile 是否已寫入 `Lark Open ID`。若沒有，可能是 OAuth callback 未取得 `open_id`，或登入流程未完成。可重新登入一次，或由 admin 手動填入可投遞的 `open_id`。
+
 ## 維運建議
 
-- 新用戶開通平台帳號時，把「綁定 Lark Open ID」納入固定 onboarding 流程
-- 若團隊人數不多，先採手動維護即可，不必急著做 OAuth 綁定
-- 若未來人數增加，再評估把 `open_id` 綁定自動化
+- 優先讓一般使用者透過 Lark OAuth 首次登入，讓平台自動建立或綁定 `open_id`
+- 對需要在首次登入前就收到通知的既有 user，再手動維護 Lark Open ID
+- 若通知失敗，先查 user profile 的 `lark_recipient`，再查 Lark app 權限與 `notification_failure` audit log
