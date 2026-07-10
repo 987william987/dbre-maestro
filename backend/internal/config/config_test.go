@@ -159,6 +159,37 @@ func TestLoadReadsDBConnectionHostPolicy(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultsLarkOAuthEnterpriseEmailScope(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.LarkOAuth.Scopes) != 1 {
+		t.Fatalf("LarkOAuth.Scopes length = %d, want 1", len(cfg.LarkOAuth.Scopes))
+	}
+	if cfg.LarkOAuth.Scopes[0] != "directory:employee.base.enterprise_email:read" {
+		t.Fatalf("LarkOAuth.Scopes[0] = %q, want enterprise email scope", cfg.LarkOAuth.Scopes[0])
+	}
+}
+
+func TestLoadOverridesLarkOAuthScopes(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("LARK_OAUTH_SCOPES", "directory:employee.base.enterprise_email:read,contact:user.email:readonly")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.LarkOAuth.Scopes) != 2 {
+		t.Fatalf("LarkOAuth.Scopes length = %d, want 2", len(cfg.LarkOAuth.Scopes))
+	}
+	if cfg.LarkOAuth.Scopes[1] != "contact:user.email:readonly" {
+		t.Fatalf("LarkOAuth.Scopes[1] = %q, want contact:user.email:readonly", cfg.LarkOAuth.Scopes[1])
+	}
+}
+
 func TestLoadRejectsInvalidDBConnectionHostPolicy(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("DB_CONNECTION_HOST_POLICY_ENFORCEMENT", "enforce")

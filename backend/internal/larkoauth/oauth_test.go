@@ -1,6 +1,12 @@
 package larkoauth
 
-import "testing"
+import (
+	"net/url"
+	"strings"
+	"testing"
+
+	"github.com/dbre-maestro/maestro/internal/config"
+)
 
 func TestMergeIdentityKeepsBaseEnterpriseEmailWhenOverrideMissing(t *testing.T) {
 	base := Identity{
@@ -35,5 +41,26 @@ func TestMergeIdentityOverridesEnterpriseEmailWhenProvided(t *testing.T) {
 
 	if got.EnterpriseEmail != override.EnterpriseEmail {
 		t.Fatalf("EnterpriseEmail = %q, want %q", got.EnterpriseEmail, override.EnterpriseEmail)
+	}
+}
+
+func TestAuthorizeURLIncludesScopes(t *testing.T) {
+	got := AuthorizeURL(config.LarkOAuthConfig{
+		Site:        "lark",
+		AppID:       "cli_test",
+		RedirectURL: "https://example.test/api/auth/lark/login/callback",
+		Scopes:      []string{"directory:employee.base.enterprise_email:read", "contact:user.email:readonly"},
+	}, "state-token")
+
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("Parse(%q) error = %v", got, err)
+	}
+	scope := parsed.Query().Get("scope")
+	if !strings.Contains(scope, "directory:employee.base.enterprise_email:read") {
+		t.Fatalf("scope = %q, want enterprise email scope", scope)
+	}
+	if !strings.Contains(scope, "contact:user.email:readonly") {
+		t.Fatalf("scope = %q, want user email scope", scope)
 	}
 }

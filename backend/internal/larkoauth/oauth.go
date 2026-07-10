@@ -48,6 +48,9 @@ func AuthorizeURL(cfg config.LarkOAuthConfig, state string) string {
 	values.Set("app_id", cfg.AppID)
 	values.Set("redirect_uri", cfg.RedirectURL)
 	values.Set("state", state)
+	if len(cfg.Scopes) > 0 {
+		values.Set("scope", strings.Join(cfg.Scopes, " "))
+	}
 	return authorizeURL(cfg) + "?" + values.Encode()
 }
 
