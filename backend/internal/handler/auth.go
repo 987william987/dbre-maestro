@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image/png"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -303,6 +304,14 @@ func (h *AuthHandler) CompleteLarkLogin(w http.ResponseWriter, r *http.Request) 
 	identity, err := client.ExchangeCode(r.Context(), cfg, code)
 	if err != nil || strings.TrimSpace(identity.OpenID) == "" {
 		_ = h.larkLogins.MarkFailed(r.Context(), state.ID, "invalid_lark_identity")
+		slog.Warn("lark oauth login failed",
+			"stage", "exchange_code",
+			"err", err,
+			"open_id_present", strings.TrimSpace(identity.OpenID) != "",
+			"enterprise_email_present", strings.TrimSpace(identity.EnterpriseEmail) != "",
+			"enterprise_email_domain", emailDomainForLog(identity.EnterpriseEmail),
+			"personal_email_present", strings.TrimSpace(identity.Email) != "",
+		)
 		h.logLoginFailed(r, nil, "", "lark_oauth_failed")
 		http.Redirect(w, r, larkLoginRedirect("", "login_failed"), http.StatusFound)
 		return
@@ -310,6 +319,15 @@ func (h *AuthHandler) CompleteLarkLogin(w http.ResponseWriter, r *http.Request) 
 	user, err := h.findOrCreateLarkUser(r.Context(), identity)
 	if err != nil {
 		_ = h.larkLogins.MarkFailed(r.Context(), state.ID, "resolve_user_failed")
+		slog.Warn("lark oauth login failed",
+			"stage", "resolve_user",
+			"err", err,
+			"open_id_present", strings.TrimSpace(identity.OpenID) != "",
+			"union_id_present", strings.TrimSpace(identity.UnionID) != "",
+			"enterprise_email_present", strings.TrimSpace(identity.EnterpriseEmail) != "",
+			"enterprise_email_domain", emailDomainForLog(identity.EnterpriseEmail),
+			"personal_email_present", strings.TrimSpace(identity.Email) != "",
+		)
 		h.logLoginFailed(r, nil, firstNonEmptyString(identity.EnterpriseEmail, identity.Email), "lark_user_resolve_failed")
 		http.Redirect(w, r, larkLoginRedirect("", "login_failed"), http.StatusFound)
 		return
@@ -467,6 +485,15 @@ func larkEnterpriseEmailAllowed(email string, allowedDomains []string) bool {
 		}
 	}
 	return false
+}
+
+func emailDomainForLog(email string) string {
+	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
+	at := strings.LastIndex(normalizedEmail, "@")
+	if at < 0 || at == len(normalizedEmail)-1 {
+		return ""
+	}
+	return normalizedEmail[at+1:]
 }
 
 func (h *AuthHandler) resolveLarkOAuthConfig(ctx context.Context) (config.LarkOAuthConfig, error) {
