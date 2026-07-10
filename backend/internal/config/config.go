@@ -40,6 +40,7 @@ type LarkOAuthConfig struct {
 	AppID                  string
 	AppSecret              string
 	RedirectURL            string
+	Scopes                 []string
 	RequireEnterpriseEmail bool
 	EnterpriseEmailDomains []string
 }
@@ -106,6 +107,7 @@ func Load() (*Config, error) {
 		AppID:                  strings.TrimSpace(os.Getenv("LARK_APP_ID")),
 		AppSecret:              strings.TrimSpace(os.Getenv("LARK_APP_SECRET")),
 		RedirectURL:            strings.TrimSpace(os.Getenv("LARK_OAUTH_REDIRECT_URL")),
+		Scopes:                 splitCSV(getEnv("LARK_OAUTH_SCOPES", "directory:employee.base.enterprise_email:read")),
 		RequireEnterpriseEmail: truthyEnv(getEnv("LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL", "true")),
 		EnterpriseEmailDomains: splitCSV(getEnv("LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS", "edgex.exchange")),
 	}

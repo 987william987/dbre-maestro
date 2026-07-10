@@ -42,6 +42,7 @@
 | `AWS_SM_REGION` | AWS Secrets Manager region | 無 |
 | `AWS_SM_SECRET_ID` | AWS Secrets Manager secret id | 無 |
 | `LARK_WEBHOOK_URL` | Lark webhook fallback | 僅在未配置 Settings 內的 Lark App 時使用 |
+| `LARK_OAUTH_SCOPES` | Lark OAuth 授權 URL 顯式要求的 scopes，逗號分隔 | `directory:employee.base.enterprise_email:read` |
 | `LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL` | Lark OAuth 是否要求企業信箱 | `true` |
 | `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | 允許登入的企業信箱 domain，逗號分隔 | `edgex.exchange` |
 | `REFRESH_COOKIE_SECURE` | 非 production 環境強制 refresh cookie Secure | production 永遠強制 Secure |
@@ -240,9 +241,12 @@ OAuth identity 寫入平台 user 時，只接受 Lark 回傳的 `enterprise_emai
 ```dotenv
 LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL=true
 LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
+LARK_OAUTH_SCOPES=directory:employee.base.enterprise_email:read
 ```
 
 `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` 支援逗號分隔。設定 `edgex.exchange` 時，`<user>@edgex.exchange` 與 `<user>@staff.edgex.exchange` 會通過，其他 domain 會被拒絕。
+
+`LARK_OAUTH_SCOPES` 會寫入 Lark OAuth authorize URL。若 Lark app 後台已開通企業郵箱權限，但授權頁仍只顯示基本身份權限，應確認這個 env 是否包含 `directory:employee.base.enterprise_email:read`。
 
 這兩個 enterprise email policy 是 deploy env，不是 Settings。原因是它們屬於部署安全邊界，不能讓有 Settings 權限的使用者在平台內自行放寬登入 domain。
 
@@ -269,6 +273,7 @@ DB_CONNECTION_CIDR_DENYLIST=127.0.0.0/8,169.254.0.0/16,::1/128
 
 LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL=true
 LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
+LARK_OAUTH_SCOPES=directory:employee.base.enterprise_email:read
 ```
 
 `DB_CONNECTION_HOST_POLICY_ENFORCEMENT` 支援：

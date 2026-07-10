@@ -114,6 +114,7 @@ Reset MFA 會清除該使用者 MFA secret、停用 MFA 狀態、撤銷現有 se
 
 | 變數 | 預設 | 說明 |
 |---|---|---|
+| `LARK_OAUTH_SCOPES` | `directory:employee.base.enterprise_email:read` | OAuth authorize URL 要求的 scopes，逗號分隔 |
 | `LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL` | `true` | 是否要求 Lark 回傳 `enterprise_email` |
 | `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | `edgex.exchange` | 允許的企業信箱 domain，逗號分隔 |
 

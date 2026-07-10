@@ -71,6 +71,7 @@ Backend Pod 至少需要：
 | `DB_CONNECTION_HOST_ALLOWLIST` | 允許的 host pattern，例如 `*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal` |
 | `DB_CONNECTION_CIDR_ALLOWLIST` | 允許的 DB / Redis subnet CIDR，需由 SRE 依環境提供 |
 | `DB_CONNECTION_CIDR_DENYLIST` | 禁止連線 CIDR，至少擋 metadata / loopback，例如 `127.0.0.0/8,169.254.0.0/16,::1/128` |
+| `LARK_OAUTH_SCOPES` | Lark OAuth 授權 URL 顯式要求的 scopes；預設包含企業郵箱 scope |
 | `LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL` | Lark OAuth 是否要求 `enterprise_email`；建議維持 `true` |
 | `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | 允許登入的企業信箱 domain，例如 `edgex.exchange` |
 
@@ -167,6 +168,7 @@ deploy:
     DB_CONNECTION_CIDR_DENYLIST: "127.0.0.0/8,169.254.0.0/16,::1/128"
     LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL: "true"
     LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS: "edgex.exchange"
+    LARK_OAUTH_SCOPES: "directory:employee.base.enterprise_email:read"
 ```
 
 上述設定假設 test 仍使用單副本，並由 Deployment Pod 啟動時執行 migration。若 test 已建立 migration Job，建議改成：
@@ -194,6 +196,7 @@ deploy:
     DB_CONNECTION_CIDR_DENYLIST: "127.0.0.0/8,169.254.0.0/16,::1/128"
     LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL: "true"
     LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS: "edgex.exchange"
+    LARK_OAUTH_SCOPES: "directory:employee.base.enterprise_email:read"
 ```
 
 Host policy 建議先在 test 使用 `warn` 模式觀察 backend log 與 audit log，確認既有 DB / Redis endpoint 沒有誤傷後再於 production 使用 `enforce`。這是第一階段連線前檢查，會檢查 DB Connection 新增 / 修改，以及 SQL Editor、metadata、export、scheduled report、ticket execute、metadata sync 等 runtime 連線前的 resolved endpoint；目前尚未接管 driver custom dialer。
@@ -396,6 +399,7 @@ Service 使用 ClusterIP，Ingress 由 ALB 對外暴露。
    ```text
    LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL=true
    LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
+   LARK_OAUTH_SCOPES=directory:employee.base.enterprise_email:read
    ```
 
 5. 用一個有 `enterprise_email` 且 domain 符合 allowlist 的 Lark user 測試登入。
