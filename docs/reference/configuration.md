@@ -42,6 +42,8 @@
 | `AWS_SM_REGION` | AWS Secrets Manager region | 無 |
 | `AWS_SM_SECRET_ID` | AWS Secrets Manager secret id | 無 |
 | `LARK_WEBHOOK_URL` | Lark webhook fallback | 僅在未配置 Settings 內的 Lark App 時使用 |
+| `LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL` | Lark OAuth 是否要求企業信箱 | `true` |
+| `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | 允許登入的企業信箱 domain，逗號分隔 | `edgex.exchange` |
 | `REFRESH_COOKIE_SECURE` | 非 production 環境強制 refresh cookie Secure | production 永遠強制 Secure |
 | `DB_CONNECTION_HOST_POLICY_ENFORCEMENT` | DB Connection host policy 模式 | `off`；可設 `warn` 或 `enforce` |
 | `DB_CONNECTION_HOST_ALLOWLIST` | 允許的 DB/Redis host pattern，逗號分隔 | 無；例如 `*.rds.amazonaws.com,*.cache.amazonaws.com` |
@@ -191,6 +193,9 @@ DB pool 參數不是 secret，仍由 env / ConfigMap / values 管理。
 | `sql_editor_postgres_statement_timeout_ms` | `25000` | PostgreSQL session `statement_timeout` |
 | `lark_app_id` | `""` | Lark App ID |
 | `lark_app_secret` | `""` | Lark App Secret，加密保存且不會回填明文 |
+| `lark_oauth_enabled` | `false` | 是否顯示並啟用 Lark OAuth 登入 |
+| `lark_oauth_site` | `lark` | OAuth 站點，`lark` 或 `feishu` |
+| `lark_oauth_redirect_url` | `""` | Lark app 後台允許的 OAuth callback URL |
 | `require_non_sensitive_export_review` | `true` | 普通 SQL Export 是否需要審批 |
 | `db_metadata_inventory_enabled` | `true` | 是否啟用 inventory scan |
 | `db_metadata_inventory_regions` | `[]` | AWS 掃描 region 清單 |
@@ -211,9 +216,9 @@ DB pool 參數不是 secret，仍由 env / ConfigMap / values 管理。
 
 Compose 會把 `${HOME}/.aws` 掛到 container，因此 app 可以沿用本機 profile。
 
-## Lark 通知設定建議
+## Lark 通知與 OAuth 設定建議
 
-Lark 通知目前有兩種來源，優先順序如下：
+Lark App 憑證同時用於通知與 OAuth 登入。通知目前有兩種來源，優先順序如下：
 
 1. `Settings` 頁的 `Lark App ID` + `Lark App Secret`
 2. process env `LARK_WEBHOOK_URL` fallback
@@ -223,6 +228,23 @@ Lark 通知目前有兩種來源，優先順序如下：
 - 正式環境優先使用 `Settings` 頁的 App 模式，才能定向通知 submitter、reviewer、executor
 - `LARK_WEBHOOK_URL` 保留作相容或過渡用途；它只能做 webhook 廣播，無法依使用者定向送達
 - 定向通知會使用使用者資料上的 `lark_recipient`，值必須是可投遞的 Lark `open_id`
+
+Lark OAuth 登入的開關、站點與 redirect URL 也在 Settings 頁管理：
+
+- `lark_oauth_enabled`
+- `lark_oauth_site`
+- `lark_oauth_redirect_url`
+
+OAuth identity 寫入平台 user 時，只接受 Lark 回傳的 `enterprise_email`。personal email 不會寫入 `users.email`，也不會拿來匹配既有使用者。預設部署要求企業信箱存在，且 domain 必須符合：
+
+```dotenv
+LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL=true
+LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
+```
+
+`LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` 支援逗號分隔。設定 `edgex.exchange` 時，`<user>@edgex.exchange` 與 `<user>@staff.edgex.exchange` 會通過，其他 domain 會被拒絕。
+
+這兩個 enterprise email policy 是 deploy env，不是 Settings。原因是它們屬於部署安全邊界，不能讓有 Settings 權限的使用者在平台內自行放寬登入 domain。
 
 ## DB Connections 讀寫 endpoint
 
@@ -244,6 +266,9 @@ DB_CONNECTION_HOST_POLICY_ENFORCEMENT=warn
 DB_CONNECTION_HOST_ALLOWLIST=*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal
 DB_CONNECTION_CIDR_ALLOWLIST=10.183.0.0/16,10.222.38.0/24
 DB_CONNECTION_CIDR_DENYLIST=127.0.0.0/8,169.254.0.0/16,::1/128
+
+LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL=true
+LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
 ```
 
 `DB_CONNECTION_HOST_POLICY_ENFORCEMENT` 支援：

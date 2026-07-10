@@ -89,6 +89,40 @@ Reset MFA 會清除該使用者 MFA secret、停用 MFA 狀態、撤銷現有 se
 
 擁有 `users.write` 權限的 admin 可以 reset 其他 user 的 MFA，也可以 reset 自己的 MFA。Self-reset 會撤銷自己的 sessions，因此操作後需要重新登入並重新完成 MFA setup。正式環境建議至少保留兩個獨立 admin 帳號，讓管理員可以互相協助 reset MFA；若所有 admin 都無法登入，再使用 break-glass CLI。
 
+## Lark OAuth 登入
+
+平台支援 Lark OAuth 作為登入入口。OAuth 只負責身份識別與 Lark `open_id` 綁定，不會自動授予 DBA / admin / DB scope 權限。
+
+相關 API：
+
+| API | 用途 |
+|---|---|
+| `GET /api/auth/lark/login/start` | 產生 Lark OAuth 授權 URL |
+| `GET /api/auth/lark/login/callback` | 接收 Lark callback，交換 access token 並取得使用者資訊 |
+| `POST /api/auth/lark/login/result/consume` | 前端消費一次性 login result，建立平台 session |
+
+身份匹配順序：
+
+1. 優先用 `lark_login_open_id` 或 `lark_login_union_id` 找既有 user。
+2. 若尚未綁定，使用 Lark 回傳的 `enterprise_email` 匹配 `users.email`。
+3. 若匹配到既有 user，系統會自動綁定 Lark identity 後登入。
+4. 若找不到既有 user，系統會建立普通 user，加入 developer auth group，並停用密碼登入。
+
+平台不使用 Lark personal email 建立或匹配 `users.email`。若 Lark user 沒有 `enterprise_email`，或 enterprise email domain 不符合 deploy env allowlist，登入會失敗。
+
+部署控制：
+
+| 變數 | 預設 | 說明 |
+|---|---|---|
+| `LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL` | `true` | 是否要求 Lark 回傳 `enterprise_email` |
+| `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | `edgex.exchange` | 允許的企業信箱 domain，逗號分隔 |
+
+`LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange` 時，`<user>@edgex.exchange` 與 `<user>@team.edgex.exchange` 允許登入，其他 domain 會被拒絕。
+
+Protected admin 不允許透過 Lark email 自動綁定。這是 bootstrap admin 的安全邊界，避免有人用同 email 的 Lark identity 接管初始管理員。
+
+若環境啟用了 MFA policy，Lark OAuth 成功後仍會套用既有 MFA 要求。也就是說，高權限帳號不會因為改用 Lark 登入而繞過 MFA。
+
 ## Session 管理
 
 使用者可以在 `/account/sessions` 查看自己的 active refresh sessions，並撤銷不認識的 session。
@@ -118,6 +152,7 @@ API：
 - MFA enabled
 - MFA reset
 - break-glass MFA reset
+- Lark OAuth login success / failed
 - refresh token reuse detection
 
 Audit log 用於事後追蹤安全事件，不取代即時 rate limit 或後端授權。

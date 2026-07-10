@@ -41,6 +41,25 @@ SQL Editor 是平台上的受控查詢工作區，用於 MySQL、PostgreSQL 與 
 | PostgreSQL | 查詢、metadata、Format、Explain、export、sensitive access |
 | Redis | 查詢與部分 metadata / DB index 工作流；不使用 SQL formatter |
 
+## 自動補全
+
+SQL Editor 使用 CodeMirror 與 `@codemirror/lang-sql` 提供 MySQL / PostgreSQL 補全；Redis command 不走 SQL 補全。
+
+補全來源：
+
+- dialect 依目前 DB connection type 選擇 MySQL 或 PostgreSQL
+- 資產樹已載入的 database / schema / table 名稱
+- 使用者目前選中的表與其欄位
+- `@codemirror/lang-sql` 內建 schema / keyword completion
+
+為了讓日常查詢更貼近 RD 使用情境，前端有一層輕量 context adapter：
+
+- 在 `SELECT`、`WHERE`、`GROUP BY`、`ORDER BY`、`HAVING` 等位置，若已選中表且欄位已載入，優先只提示該表欄位
+- 在 `FROM`、`JOIN`、`UPDATE`、`INTO`、`DESCRIBE`、`ALTER TABLE`、`DROP TABLE`、`TRUNCATE TABLE` 等位置，優先提示表名
+- 若無法判斷 context，或沒有已選表欄位，退回官方 SQL schema completion
+
+目前補全不是完整 SQL parser，也不保證理解所有 alias、CTE 或跨多表 join 情境。若未來需要更完整的語意補全，可評估導入 Monaco 或 language-server 等方案。
+
 ## 查詢限制
 
 ### Statement 規則

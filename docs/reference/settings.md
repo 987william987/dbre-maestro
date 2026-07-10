@@ -12,7 +12,7 @@
 
 目前 Settings 頁分成以下區塊：
 
-- Lark Notifications
+- Lark Notifications and OAuth
 - SQL Editor Timeout
 - Workflow Rules
 - Inventory Scan
@@ -20,14 +20,17 @@
 
 這些設定是「運行中行為」設定，不是 `.env` 啟動參數編輯器。
 
-## Lark Notifications
+## Lark Notifications and OAuth
 
-這一區用來配置工單相關的 Lark 通知，不是站內信設定。
+這一區用來配置工單相關的 Lark 通知與 Lark OAuth 登入，不是站內信設定。
 
 | 欄位 | 對應 key | 用途 |
 |---|---|---|
 | Lark App ID | `lark_app_id` | Lark app 憑證 ID |
 | Lark App Secret | `lark_app_secret` | Lark app 憑證 secret，寫入時會加密保存 |
+| Enable Lark OAuth Login | `lark_oauth_enabled` | 是否在登入頁顯示並啟用 Lark 登入 |
+| Lark Site | `lark_oauth_site` | `lark` 或 `feishu` |
+| OAuth Redirect URL | `lark_oauth_redirect_url` | Lark app 後台允許的 callback URL |
 
 重點：
 
@@ -36,8 +39,27 @@
 - 第一次配置時，`Lark App ID` 與 `Lark App Secret` 必須一起提供
 - 後續若只修改其他 Settings，可將 `App Secret` 留白，系統會保留既有 secret
 - 若未配置 App 模式，但 process env 有 `LARK_WEBHOOK_URL`，後端仍會 fallback 使用 webhook 模式
+- 啟用 OAuth 時，`OAuth Redirect URL` 必須和 Lark app 後台允許的 redirect URL 完全一致
 
 目前會收到 Lark 通知的對象以工單流程為主，包含 submitter、reviewer、executor 等角色的狀態更新。
+
+Lark OAuth 登入行為：
+
+- 使用 Lark OAuth 取得 `open_id` / `union_id` / `enterprise_email`
+- 若 `open_id` 或 `union_id` 已綁定既有 user，直接登入該 user
+- 若尚未綁定，會用 `enterprise_email` 匹配既有 user，匹配成功後自動綁定 Lark identity
+- 若找不到既有 user，系統會建立普通 user 並加入 developer auth group
+- OAuth 建立的新 user 會停用密碼登入，不會產生可用密碼
+- protected admin 不允許透過 Lark email 自動綁定，避免 bootstrap admin 被接管
+
+enterprise email policy 不是 Settings，而是 deploy env：
+
+```text
+LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL=true
+LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
+```
+
+這代表平台只接受 Lark 回傳的企業信箱。personal email 不會寫進 `users.email`，也不會拿來建立或匹配平台 user。
 
 ## SQL Editor Timeout
 
