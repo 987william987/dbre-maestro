@@ -14,16 +14,12 @@ import (
 )
 
 const (
-	feishuAuthorizeURL   = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
-	feishuTokenURL       = "https://open.feishu.cn/open-apis/authen/v2/oauth/token"
-	feishuUserInfoURL    = "https://open.feishu.cn/open-apis/authen/v1/user_info"
-	feishuTenantTokenURL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
-	feishuContactUserURL = "https://open.feishu.cn/open-apis/contact/v3/users"
-	larkAuthorizeURL     = "https://accounts.larksuite.com/open-apis/authen/v1/authorize"
-	larkTokenURL         = "https://open.larksuite.com/open-apis/authen/v2/oauth/token"
-	larkUserInfoURL      = "https://open.larksuite.com/open-apis/authen/v1/user_info"
-	larkTenantTokenURL   = "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal"
-	larkContactUserURL   = "https://open.larksuite.com/open-apis/contact/v3/users"
+	feishuAuthorizeURL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
+	feishuTokenURL     = "https://open.feishu.cn/open-apis/authen/v2/oauth/token"
+	feishuUserInfoURL  = "https://open.feishu.cn/open-apis/authen/v1/user_info"
+	larkAuthorizeURL   = "https://accounts.larksuite.com/open-apis/authen/v1/authorize"
+	larkTokenURL       = "https://open.larksuite.com/open-apis/authen/v2/oauth/token"
+	larkUserInfoURL    = "https://open.larksuite.com/open-apis/authen/v1/user_info"
 )
 
 type Identity struct {
@@ -140,117 +136,8 @@ func (c HTTPClient) ExchangeCode(ctx context.Context, cfg config.LarkOAuthConfig
 	if strings.TrimSpace(identity.OpenID) == "" {
 		return Identity{}, fmt.Errorf("lark oauth response missing open_id")
 	}
-	if strings.TrimSpace(identity.EnterpriseEmail) == "" {
-		contactInfo, err := c.fetchContactUserInfo(ctx, cfg, strings.TrimSpace(identity.OpenID))
-		if err != nil {
-			if cfg.RequireEnterpriseEmail {
-				return identity, fmt.Errorf("lark contact user info: %w", err)
-			}
-		} else {
-			identity = mergeIdentity(identity, contactInfo)
-			if cfg.RequireEnterpriseEmail && strings.TrimSpace(identity.EnterpriseEmail) == "" {
-				return identity, fmt.Errorf("lark contact user info missing enterprise_email")
-			}
-		}
-	}
-	return identity, nil
-}
-
-func (c HTTPClient) getTenantAccessToken(ctx context.Context, cfg config.LarkOAuthConfig) (string, error) {
-	body, err := json.Marshal(map[string]string{
-		"app_id":     cfg.AppID,
-		"app_secret": cfg.AppSecret,
-	})
-	if err != nil {
-		return "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tenantTokenURL(cfg), bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("tenant token status %d", resp.StatusCode)
-	}
-	var payload struct {
-		Code              int    `json:"code"`
-		Msg               string `json:"msg"`
-		TenantAccessToken string `json:"tenant_access_token"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", err
-	}
-	if payload.Code != 0 {
-		return "", fmt.Errorf("tenant token failed: %s", payload.Msg)
-	}
-	if strings.TrimSpace(payload.TenantAccessToken) == "" {
-		return "", fmt.Errorf("tenant token response missing tenant_access_token")
-	}
-	return strings.TrimSpace(payload.TenantAccessToken), nil
-}
-
-func (c HTTPClient) fetchContactUserInfo(ctx context.Context, cfg config.LarkOAuthConfig, openID string) (Identity, error) {
-	tenantToken, err := c.getTenantAccessToken(ctx, cfg)
-	if err != nil {
-		return Identity{}, err
-	}
-	endpoint := strings.TrimRight(contactUserURL(cfg), "/") + "/" + url.PathEscape(strings.TrimSpace(openID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return Identity{}, err
-	}
-	query := req.URL.Query()
-	query.Set("user_id_type", "open_id")
-	req.URL.RawQuery = query.Encode()
-	req.Header.Set("Authorization", "Bearer "+tenantToken)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return Identity{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return Identity{}, fmt.Errorf("contact user status %d", resp.StatusCode)
-	}
-	var payload struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-		Data struct {
-			User struct {
-				OpenID          string `json:"open_id"`
-				UnionID         string `json:"union_id"`
-				Name            string `json:"name"`
-				Email           string `json:"email"`
-				EnterpriseEmail string `json:"enterprise_email"`
-				Avatar          struct {
-					AvatarOrigin string `json:"avatar_origin"`
-					Avatar640    string `json:"avatar_640"`
-					Avatar240    string `json:"avatar_240"`
-					Avatar72     string `json:"avatar_72"`
-				} `json:"avatar"`
-			} `json:"user"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return Identity{}, err
-	}
-	if payload.Code != 0 {
-		return Identity{}, fmt.Errorf("contact user failed: %s", payload.Msg)
-	}
-	identity := Identity{
-		OpenID:          payload.Data.User.OpenID,
-		UnionID:         payload.Data.User.UnionID,
-		Email:           payload.Data.User.Email,
-		EnterpriseEmail: firstNonEmpty(payload.Data.User.EnterpriseEmail, payload.Data.User.Email),
-		DisplayName:     payload.Data.User.Name,
-		AvatarURL:       firstNonEmpty(payload.Data.User.Avatar.AvatarOrigin, payload.Data.User.Avatar.Avatar640, payload.Data.User.Avatar.Avatar240, payload.Data.User.Avatar.Avatar72),
-	}
-	if strings.TrimSpace(identity.OpenID) == "" {
-		identity.OpenID = strings.TrimSpace(openID)
+	if cfg.RequireEnterpriseEmail && strings.TrimSpace(identity.EnterpriseEmail) == "" {
+		return identity, fmt.Errorf("lark user info missing enterprise_email")
 	}
 	return identity, nil
 }
@@ -351,20 +238,6 @@ func userInfoURL(cfg config.LarkOAuthConfig) string {
 		return feishuUserInfoURL
 	}
 	return larkUserInfoURL
-}
-
-func tenantTokenURL(cfg config.LarkOAuthConfig) string {
-	if cfg.Site == "feishu" {
-		return feishuTenantTokenURL
-	}
-	return larkTenantTokenURL
-}
-
-func contactUserURL(cfg config.LarkOAuthConfig) string {
-	if cfg.Site == "feishu" {
-		return feishuContactUserURL
-	}
-	return larkContactUserURL
 }
 
 func (c HTTPClient) httpClient() *http.Client {

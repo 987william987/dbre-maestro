@@ -74,23 +74,13 @@ func TestAuthorizeURLIncludesScopes(t *testing.T) {
 	}
 }
 
-func TestExchangeCodeFetchesContactEnterpriseEmailWhenUserInfoDoesNotReturnIt(t *testing.T) {
+func TestExchangeCodeUsesUserInfoEnterpriseEmail(t *testing.T) {
 	client := HTTPClient{Client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
 		case req.URL.String() == "https://open.larksuite.com/open-apis/authen/v2/oauth/token":
 			return jsonResponse(http.StatusOK, `{"code":0,"data":{"access_token":"user-token","open_id":"ou_test","union_id":"on_test"}}`), nil
 		case req.URL.String() == "https://open.larksuite.com/open-apis/authen/v1/user_info":
-			return jsonResponse(http.StatusOK, `{"code":0,"data":{"open_id":"ou_test","union_id":"on_test","name":"William"}}`), nil
-		case req.URL.String() == "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal":
-			return jsonResponse(http.StatusOK, `{"code":0,"tenant_access_token":"tenant-token","expire":7200}`), nil
-		case strings.HasPrefix(req.URL.String(), "https://open.larksuite.com/open-apis/contact/v3/users/ou_test"):
-			if got := req.URL.Query().Get("user_id_type"); got != "open_id" {
-				t.Fatalf("user_id_type = %q, want open_id", got)
-			}
-			if got := req.Header.Get("Authorization"); got != "Bearer tenant-token" {
-				t.Fatalf("Authorization = %q, want tenant token", got)
-			}
-			return jsonResponse(http.StatusOK, `{"code":0,"data":{"user":{"open_id":"ou_test","union_id":"on_test","name":"William","enterprise_email":"william@edgex.exchange"}}}`), nil
+			return jsonResponse(http.StatusOK, `{"code":0,"data":{"open_id":"ou_test","union_id":"on_test","name":"William","email":"personal@example.com","enterprise_email":"william@edgex.exchange"}}`), nil
 		default:
 			t.Fatalf("unexpected request: %s", req.URL.String())
 			return nil, nil
@@ -108,53 +98,17 @@ func TestExchangeCodeFetchesContactEnterpriseEmailWhenUserInfoDoesNotReturnIt(t 
 		t.Fatalf("ExchangeCode() error = %v", err)
 	}
 	if identity.EnterpriseEmail != "william@edgex.exchange" {
-		t.Fatalf("EnterpriseEmail = %q, want contact enterprise email", identity.EnterpriseEmail)
+		t.Fatalf("EnterpriseEmail = %q, want user_info enterprise email", identity.EnterpriseEmail)
 	}
 }
 
-func TestExchangeCodeUsesContactEmailAsEnterpriseEmailFallback(t *testing.T) {
+func TestExchangeCodeRequiresUserInfoEnterpriseEmailWhenConfigured(t *testing.T) {
 	client := HTTPClient{Client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
 		case req.URL.String() == "https://open.larksuite.com/open-apis/authen/v2/oauth/token":
 			return jsonResponse(http.StatusOK, `{"code":0,"data":{"access_token":"user-token","open_id":"ou_test","union_id":"on_test","email":"personal@example.com"}}`), nil
 		case req.URL.String() == "https://open.larksuite.com/open-apis/authen/v1/user_info":
 			return jsonResponse(http.StatusOK, `{"code":0,"data":{"open_id":"ou_test","union_id":"on_test","name":"William","email":"personal@example.com"}}`), nil
-		case req.URL.String() == "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal":
-			return jsonResponse(http.StatusOK, `{"code":0,"tenant_access_token":"tenant-token","expire":7200}`), nil
-		case strings.HasPrefix(req.URL.String(), "https://open.larksuite.com/open-apis/contact/v3/users/ou_test"):
-			return jsonResponse(http.StatusOK, `{"code":0,"data":{"user":{"open_id":"ou_test","union_id":"on_test","name":"William","email":"william@edgex.exchange"}}}`), nil
-		default:
-			t.Fatalf("unexpected request: %s", req.URL.String())
-			return nil, nil
-		}
-	})}}
-
-	identity, err := client.ExchangeCode(context.Background(), config.LarkOAuthConfig{
-		Site:                   "lark",
-		AppID:                  "cli_test",
-		AppSecret:              "secret_test",
-		RedirectURL:            "https://example.test/api/auth/lark/login/callback",
-		RequireEnterpriseEmail: true,
-	}, "oauth-code")
-	if err != nil {
-		t.Fatalf("ExchangeCode() error = %v", err)
-	}
-	if identity.EnterpriseEmail != "william@edgex.exchange" {
-		t.Fatalf("EnterpriseEmail = %q, want contact email fallback", identity.EnterpriseEmail)
-	}
-}
-
-func TestExchangeCodeRequiresContactEnterpriseEmailWhenConfigured(t *testing.T) {
-	client := HTTPClient{Client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		switch {
-		case req.URL.String() == "https://open.larksuite.com/open-apis/authen/v2/oauth/token":
-			return jsonResponse(http.StatusOK, `{"code":0,"data":{"access_token":"user-token","open_id":"ou_test","union_id":"on_test"}}`), nil
-		case req.URL.String() == "https://open.larksuite.com/open-apis/authen/v1/user_info":
-			return jsonResponse(http.StatusOK, `{"code":0,"data":{"open_id":"ou_test","union_id":"on_test","name":"William"}}`), nil
-		case req.URL.String() == "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal":
-			return jsonResponse(http.StatusOK, `{"code":0,"tenant_access_token":"tenant-token","expire":7200}`), nil
-		case strings.HasPrefix(req.URL.String(), "https://open.larksuite.com/open-apis/contact/v3/users/ou_test"):
-			return jsonResponse(http.StatusOK, `{"code":0,"data":{"user":{"open_id":"ou_test","union_id":"on_test","name":"William"}}}`), nil
 		default:
 			t.Fatalf("unexpected request: %s", req.URL.String())
 			return nil, nil
@@ -173,15 +127,13 @@ func TestExchangeCodeRequiresContactEnterpriseEmailWhenConfigured(t *testing.T) 
 	}
 }
 
-func TestExchangeCodeIgnoresContactFailureWhenEnterpriseEmailNotRequired(t *testing.T) {
+func TestExchangeCodeAllowsMissingEnterpriseEmailWhenNotRequired(t *testing.T) {
 	client := HTTPClient{Client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch {
 		case req.URL.String() == "https://open.larksuite.com/open-apis/authen/v2/oauth/token":
 			return jsonResponse(http.StatusOK, `{"code":0,"data":{"access_token":"user-token","open_id":"ou_test","union_id":"on_test"}}`), nil
 		case req.URL.String() == "https://open.larksuite.com/open-apis/authen/v1/user_info":
 			return jsonResponse(http.StatusOK, `{"code":0,"data":{"open_id":"ou_test","union_id":"on_test","name":"William"}}`), nil
-		case req.URL.String() == "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal":
-			return jsonResponse(http.StatusForbidden, `{"code":99991663,"msg":"permission denied"}`), nil
 		default:
 			t.Fatalf("unexpected request: %s", req.URL.String())
 			return nil, nil
