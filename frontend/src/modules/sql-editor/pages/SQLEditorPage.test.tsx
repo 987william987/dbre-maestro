@@ -217,7 +217,9 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
+    expect(screen.queryByText('Run read-only queries, browse metadata, and keep query history and saved queries in one workspace. Create export requests directly from the result panel.')).not.toBeInTheDocument()
+    expect(screen.getByText('Select a DB connection to browse objects and run read-only queries.')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('CodeMirror'), {
       target: { value: 'SELECT * FROM tickets;' },
@@ -236,7 +238,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     expect(screen.getAllByText(/Query \d+/)).toHaveLength(1)
     expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT 1;')
   })
@@ -258,7 +260,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     expect(await screen.findByText('Timeout 60s')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(await screen.findByText('Primary MySQL'))
@@ -295,7 +297,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
 
@@ -372,7 +374,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
@@ -424,7 +426,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
 
@@ -466,7 +468,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByRole('button', { name: 'History' }))
@@ -493,7 +495,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.change(screen.getByLabelText('CodeMirror'), {
@@ -522,7 +524,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     const editor = screen.getByLabelText('CodeMirror') as HTMLTextAreaElement
     fireEvent.change(editor, {
       target: { value: 'select id, title from tickets where id = 1' },
@@ -543,7 +545,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Asset Selector' })).toBeInTheDocument()
     expect(mockedListMetadata).not.toHaveBeenCalled()
   })
@@ -610,7 +612,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     expect(screen.getByText('Primary MySQL')).toBeInTheDocument()
     expect(screen.queryByText('Hidden Redis')).not.toBeInTheDocument()
@@ -644,7 +646,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     expect(screen.getByText('No matching assets.')).toBeInTheDocument()
   })
@@ -666,7 +668,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
 
@@ -693,7 +695,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
 
@@ -738,7 +740,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
@@ -764,7 +766,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
@@ -783,7 +785,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
@@ -805,7 +807,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
@@ -855,7 +857,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
 
@@ -881,7 +883,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Save'))
@@ -930,7 +932,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
@@ -958,7 +960,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Run Query'))
@@ -1059,7 +1061,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Shared MySQL'))
 
@@ -1125,7 +1127,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Configured MySQL'))
 
@@ -1192,7 +1194,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Shared Postgres'))
 
@@ -1259,7 +1261,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Search MySQL'))
 
@@ -1356,7 +1358,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Search Tables MySQL'))
 
@@ -1417,7 +1419,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(await screen.findByText('analytics'))
@@ -1502,7 +1504,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(await screen.findByText('dev_edgex_ops_intelligence'))
@@ -1533,7 +1535,7 @@ describe('SQLEditorPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('SQL Editor')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByText('New Tab'))
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))

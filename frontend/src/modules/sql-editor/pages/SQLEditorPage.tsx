@@ -35,7 +35,6 @@ import type { MetadataColumn, MetadataDefinition, MetadataItem, QueryHistoryEntr
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { AttentionPulse } from '@/shared/ui/AttentionPulse'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
@@ -2170,11 +2169,6 @@ export function SQLEditorPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="SQL Editor"
-        description="Run read-only queries, browse metadata, and keep query history and saved queries in one workspace. Create export requests directly from the result panel."
-      />
-
       {connectionsError ? <InlineAlert>{connectionsError}</InlineAlert> : null}
 
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
@@ -2309,7 +2303,7 @@ export function SQLEditorPage() {
                 ) : activeSearchingAssets || activeExplorerRootLoading ? (
                   <p className="px-1 py-1 text-[12px] text-muted">Searching assets...</p>
                 ) : !activeConnection || activeExplorerNodes.length === 0 ? (
-                  <p className="px-1 py-1 text-[12px] text-muted">No DB connections available.</p>
+                  <p className="px-1 py-1 text-[12px] text-muted">Select a DB connection to browse objects and run read-only queries.</p>
                 ) : renderedExplorerNodes.length === 0 ? (
                   <p className="px-1 py-1 text-[12px] text-muted">No matching assets.</p>
                 ) : (
