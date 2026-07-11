@@ -245,7 +245,7 @@ func (c HTTPClient) fetchContactUserInfo(ctx context.Context, cfg config.LarkOAu
 		OpenID:          payload.Data.User.OpenID,
 		UnionID:         payload.Data.User.UnionID,
 		Email:           payload.Data.User.Email,
-		EnterpriseEmail: payload.Data.User.EnterpriseEmail,
+		EnterpriseEmail: firstNonEmpty(payload.Data.User.EnterpriseEmail, payload.Data.User.Email),
 		DisplayName:     payload.Data.User.Name,
 		AvatarURL:       firstNonEmpty(payload.Data.User.Avatar.AvatarOrigin, payload.Data.User.Avatar.Avatar640, payload.Data.User.Avatar.Avatar240, payload.Data.User.Avatar.Avatar72),
 	}
