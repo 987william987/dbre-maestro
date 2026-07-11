@@ -405,12 +405,12 @@ Service 使用 ClusterIP，Ingress 由 ALB 對外暴露。
 5. 確認 Lark app 權限與可見範圍：
 
    - OAuth 授權頁應顯示企業郵箱相關權限。
-   - App 需要可用 Contact v3 user API 讀取使用者基礎資料與 `enterprise_email` 欄位。
-   - 通訊錄可見範圍必須包含要登入的使用者。
+   - `GET /open-apis/authen/v1/user_info` 的調試結果應包含 `enterprise_email`。
+   - `user_info.email` 可能是 personal email，不能作為平台 `users.email` 匹配依據。
 
 6. 用一個有 `enterprise_email` 且 domain 符合 allowlist 的 Lark user 測試登入。
 
-若授權頁已顯示企業郵箱權限，但登入仍失敗並在日誌看到 `lark enterprise_email is required`，代表 OAuth identity 與 Contact v3 fallback 都沒有取得企業郵箱。這時優先檢查 Contact API 權限、企業郵箱欄位權限與通訊錄可見範圍，而不是只看 OAuth scope。
+若授權頁已顯示企業郵箱權限，但登入仍失敗並在日誌看到 `lark user info missing enterprise_email` 或 `lark enterprise_email is required`，代表 OAuth `user_info` 沒有回傳企業郵箱。這時優先檢查「查看員工工作郵箱」欄位權限是否已開通、審核並發布，以及重新授權後調試台是否真的回 `enterprise_email`。
 
 OAuth 登入只解決身份識別與 `open_id` 綁定，不會自動授予 DBA / admin / query scope。若 Lark `enterprise_email` 找不到既有 user，系統會建立普通 user 並綁定 developer auth group；後續 DB scope 仍由 admin 管理。
 
