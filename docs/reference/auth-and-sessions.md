@@ -110,7 +110,7 @@ Reset MFA 會清除該使用者 MFA secret、停用 MFA 狀態、撤銷現有 se
 
 平台不使用 Lark personal email 建立或匹配 `users.email`。若 Lark user 沒有 `enterprise_email`，或 enterprise email domain 不符合 deploy env allowlist，登入會失敗。
 
-實作上會先從 OAuth token / `user_info` 讀取身份資料；若其中沒有 `enterprise_email`，後端會用 app 的 tenant access token 呼叫 Contact v3 user API，透過 `open_id` 補查企業郵箱。因此 Lark app 後台除了 OAuth scope，也需要開通 Contact v3 讀取 user 基礎資料與 `enterprise_email` 欄位的權限，並確認通訊錄可見範圍包含登入使用者。
+實作上會先從 OAuth token / `user_info` 讀取身份資料；若其中沒有 `enterprise_email`，後端會用 app 的 tenant access token 呼叫 Contact v3 user API，透過 `open_id` 補查企業郵箱。Contact v3 若回傳工作郵箱 `email` 但沒有 `enterprise_email`，平台會把 Contact v3 的 `email` 視為企業郵箱候選，並繼續套用 domain allowlist。因此 Lark app 後台除了 OAuth scope，也需要開通 Contact v3 讀取 user 基礎資料與工作郵箱欄位的權限，並確認通訊錄可見範圍包含登入使用者。
 
 部署控制：
 
