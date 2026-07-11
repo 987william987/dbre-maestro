@@ -19,7 +19,7 @@ import { listTickets } from '@/modules/tickets/api'
 const PAGE_SIZE = 20
 
 const STATUS_OPTIONS: Array<{ value: '' | TicketStatus; label: string }> = [
-  { value: '', label: 'All' },
+  { value: '', label: 'All Status' },
   { value: 'pending_review', label: 'Pending Review' },
   { value: 'approved', label: 'Approved' },
   { value: 'rejected', label: 'Rejected' },

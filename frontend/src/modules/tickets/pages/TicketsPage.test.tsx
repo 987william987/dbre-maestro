@@ -57,6 +57,8 @@ describe('TicketsPage', () => {
       </MemoryRouter>,
     )
 
+    expect(screen.getByRole('button', { name: 'Status' })).toHaveTextContent('All Status')
+
     await waitFor(() => expect(mockedListTickets).toHaveBeenCalledWith({
       status: undefined,
       type: undefined,
