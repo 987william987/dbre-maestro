@@ -29,6 +29,7 @@ const mockedUseAuth = vi.mocked(useAuth)
 const mockedListNotifications = vi.mocked(listNotifications)
 const mockedMarkNotificationRead = vi.mocked(markNotificationRead)
 const mockedMarkAllNotificationsRead = vi.mocked(markAllNotificationsRead)
+const storage = new Map<string, string>()
 
 function renderShell(initialEntry = '/tickets') {
   return render(
@@ -54,6 +55,23 @@ function renderShell(initialEntry = '/tickets') {
 
 describe('AppShell notifications', () => {
   beforeEach(() => {
+    storage.clear()
+    Object.defineProperty(window, 'localStorage', {
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          storage.set(key, value)
+        },
+        removeItem: (key: string) => {
+          storage.delete(key)
+        },
+        clear: () => {
+          storage.clear()
+        },
+      },
+      configurable: true,
+    })
+    window.localStorage.removeItem('dbre-maestro.sidebarCollapsed')
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
       isAuthenticated: true,
@@ -183,6 +201,45 @@ describe('AppShell notifications', () => {
 
     fireEvent.click(ticketsToggle)
     expect(ticketsToggle).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('桌面側欄可以收合成 icon rail 並再展開', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'operator',
+        authGroups: ['operator'],
+        authGroupDetails: [],
+        permissions: ['tickets.read', 'tickets.apply', 'sql_editor.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/tickets')
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    const sidebarSubtitle = screen.getByText('Operations Control Plane')
+    expect(sidebarSubtitle).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument()
+    expect(sidebarSubtitle.parentElement).toHaveClass('opacity-0')
+    expect(sidebarSubtitle.parentElement).toHaveClass('max-w-0')
+    expect(window.localStorage.getItem('dbre-maestro.sidebarCollapsed')).toBe('true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }))
+
+    expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument()
+    expect(sidebarSubtitle.parentElement).toHaveClass('opacity-100')
   })
 
   it('users groups 路由會對應到 Auth Groups breadcrumb', async () => {

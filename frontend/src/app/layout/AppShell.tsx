@@ -129,6 +129,9 @@ const NAV_GROUPS = [
   },
 ]
 
+const SIDEBAR_COLLAPSE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 12 9 7v10Z' fill='%2318171b'/%3E%3Cpath d='m21 12-6-5v10Z' fill='%23c7c7cc'/%3E%3C/svg%3E") 12 12, pointer`
+const SIDEBAR_EXPAND_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 12 9 7v10Z' fill='%23c7c7cc'/%3E%3Cpath d='m21 12-6-5v10Z' fill='%2318171b'/%3E%3C/svg%3E") 12 12, pointer`
+
 function findNavGroupTitle(pathname: string, items: NavItem[]) {
   for (const group of NAV_GROUPS) {
     const groupItems = items.filter((item) => (item.to ? group.items.includes(item.to) : false))
@@ -171,6 +174,13 @@ export function AppShell() {
   const { pushToast } = useToast()
   const [menuOpen, setMenuOpen] = useState(false)
   const [notificationOpen, setNotificationOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem('dbre-maestro.sidebarCollapsed') === 'true'
+    } catch {
+      return false
+    }
+  })
   const [expandedNavKeys, setExpandedNavKeys] = useState<string[]>([])
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
@@ -358,26 +368,51 @@ export function AppShell() {
     setExpandedNavKeys((current) => current.filter((key) => navItems.some((item) => item.key === key)))
   }, [navItems])
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('dbre-maestro.sidebarCollapsed', sidebarCollapsed ? 'true' : 'false')
+    } catch {
+      // Ignore storage failures; the sidebar still works for the current session.
+    }
+  }, [sidebarCollapsed])
+
   function toggleNavGroup(key: string) {
     setExpandedNavKeys((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]))
   }
 
   return (
     <div className="flex h-screen text-ink">
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
-        <div className="flex h-16 items-center gap-3 px-5">
+      <aside className={cn(
+        'group/sidebar relative hidden shrink-0 flex-col border-r border-border bg-sidebar transition-[width] duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)] lg:flex',
+        sidebarCollapsed ? 'w-[72px]' : 'w-64',
+      )}>
+        <button
+          type="button"
+          onClick={() => setSidebarCollapsed((current) => !current)}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="absolute -right-2 top-0 z-30 hidden h-full w-4 focus-visible:outline-none lg:block before:absolute before:left-1/2 before:top-0 before:h-full before:w-[2px] before:-translate-x-1/2 before:rounded-full before:bg-ink/20 before:opacity-0 before:transition-opacity before:duration-150 hover:before:opacity-100 focus-visible:before:opacity-100"
+          style={{ cursor: sidebarCollapsed ? SIDEBAR_EXPAND_CURSOR : SIDEBAR_COLLAPSE_CURSOR }}
+        />
+
+        <div className={cn('flex h-16 items-center gap-3 px-4 transition-all duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)]', sidebarCollapsed && 'justify-center px-3')}>
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-transparent">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
               <path d="M3 20 L3 4 L12 13 L21 4 L21 20" />
             </svg>
           </div>
-          <div className="min-w-0">
+          <div className={cn(
+            'min-w-0 flex-1 overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] ease-out',
+            sidebarCollapsed
+              ? 'max-w-0 -translate-x-1 opacity-0 duration-[180ms]'
+              : 'max-w-[172px] translate-x-0 opacity-100 delay-100 duration-300',
+          )}>
             <p className="truncate text-[14px] font-semibold leading-tight text-ink">DBRE Maestro</p>
             <p className="truncate text-[12px] leading-tight text-muted">Operations Control Plane</p>
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+        <div className={cn('min-h-0 flex-1 overflow-y-auto py-4 transition-[padding] duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)]', sidebarCollapsed ? 'px-2' : 'px-3')}>
           {NAV_GROUPS.map((group) => {
             const items = navItems.filter((item) => (item.to ? group.items.includes(item.to) : false))
             if (items.length === 0) {
@@ -385,8 +420,15 @@ export function AppShell() {
             }
 
             return (
-              <div key={group.title} className="mb-6">
-                <p className="px-2 text-[11px] font-medium text-muted">{group.title}</p>
+              <div key={group.title} className={cn('mb-6 transition-[margin] duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)]', sidebarCollapsed && 'mb-3')}>
+                <p
+                  className={cn(
+                    'overflow-hidden whitespace-nowrap px-2 text-[11px] font-medium text-muted transition-[max-height,opacity,transform] ease-out',
+                    sidebarCollapsed ? 'max-h-0 -translate-x-1 opacity-0 duration-[180ms]' : 'max-h-5 translate-x-0 opacity-100 delay-100 duration-300',
+                  )}
+                >
+                  {group.title}
+                </p>
                 <nav className="mt-2 flex flex-col gap-1">
                   {items.map((item) => {
                     const Icon = item.icon
@@ -398,19 +440,33 @@ export function AppShell() {
 
                     if (!hasChildren && item.to) {
                       return (
-                        <NavLink key={item.key} to={item.to} className="block">
+                        <NavLink key={item.key} to={item.to} aria-label={item.label} title={sidebarCollapsed ? item.label : undefined} className="group/navitem relative block">
                           {({ isActive: linkActive }) => (
-                            <div
-                              className={cn(
-                                'flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors',
-                                linkActive
-                                  ? 'bg-panel-soft text-ink'
-                                  : 'text-muted hover:bg-panel-soft/60 hover:text-ink',
-                              )}
-                            >
-                              <Icon className="h-4 w-4 shrink-0" />
-                              <span>{item.label}</span>
-                            </div>
+                            <>
+                              <div
+                                className={cn(
+                                  'flex h-10 items-center rounded-xl text-[13px] font-medium transition-[padding,color,background-color,box-shadow] duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)]',
+                                  sidebarCollapsed ? 'justify-center px-0' : 'gap-2.5 px-3',
+                                  linkActive
+                                    ? 'bg-panel-soft text-ink'
+                                    : 'text-muted hover:bg-panel-soft/60 hover:text-ink',
+                                )}
+                              >
+                                <Icon className="h-4 w-4 shrink-0" />
+                                <span className={cn(
+                                  'min-w-0 flex-1 overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] ease-out',
+                                  sidebarCollapsed ? 'max-w-0 -translate-x-1 opacity-0 duration-[180ms]' : 'max-w-[170px] translate-x-0 opacity-100 delay-100 duration-300',
+                                )}>
+                                  {item.label}
+                                </span>
+                              </div>
+                              <span className={cn(
+                                'pointer-events-none absolute left-[calc(100%+10px)] top-1/2 z-40 -translate-y-1/2 whitespace-nowrap rounded-md bg-ink px-2.5 py-1.5 text-[12px] font-medium text-white opacity-0 shadow-card transition-opacity',
+                                sidebarCollapsed ? 'group-hover/navitem:opacity-100 group-focus-visible/navitem:opacity-100' : 'hidden',
+                              )}>
+                                {item.label}
+                              </span>
+                            </>
                           )}
                         </NavLink>
                       )
@@ -420,25 +476,49 @@ export function AppShell() {
                       <div key={item.key} className="rounded-xl">
                         <button
                           type="button"
-                          onClick={() => toggleNavGroup(item.key)}
+                          onClick={() => {
+                            if (sidebarCollapsed && item.to) {
+                              navigate(item.to)
+                              return
+                            }
+                            toggleNavGroup(item.key)
+                          }}
                           className={cn(
-                            'flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-[13px] font-medium transition-colors',
+                            'group/navitem relative flex h-10 w-full items-center rounded-xl text-left text-[13px] font-medium transition-[padding,color,background-color,box-shadow] duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)]',
+                            sidebarCollapsed ? 'justify-center px-0' : 'gap-2.5 px-3',
                             isActive
                               ? 'bg-panel-soft text-ink'
                               : 'text-muted hover:bg-panel-soft/60 hover:text-ink',
                           )}
                           aria-expanded={isExpanded}
+                          aria-label={item.label}
+                          title={sidebarCollapsed ? item.label : undefined}
                         >
                           <Icon className="h-4 w-4 shrink-0" />
-                          <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                          <span className={cn(
+                            'min-w-0 flex-1 overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] ease-out',
+                            sidebarCollapsed ? 'max-w-0 -translate-x-1 opacity-0 duration-[180ms]' : 'max-w-[150px] translate-x-0 opacity-100 delay-100 duration-300',
+                          )}>
+                            {item.label}
+                          </span>
                           <ChevronDown
                             className={cn(
-                              'h-4 w-4 shrink-0 text-faint transition-transform',
+                              'h-4 w-4 shrink-0 text-faint transition-[max-width,opacity,transform] ease-out',
+                              sidebarCollapsed ? 'max-w-0 opacity-0 duration-[180ms]' : 'max-w-4 opacity-100 delay-100 duration-300',
                               isExpanded ? 'rotate-180' : 'rotate-0',
                             )}
                           />
+                          <span className={cn(
+                            'pointer-events-none absolute left-[calc(100%+10px)] top-1/2 z-40 -translate-y-1/2 whitespace-nowrap rounded-md bg-ink px-2.5 py-1.5 text-[12px] font-medium text-white opacity-0 shadow-card transition-opacity',
+                            sidebarCollapsed ? 'group-hover/navitem:opacity-100 group-focus-visible/navitem:opacity-100' : 'hidden',
+                          )}>
+                            {item.label}
+                          </span>
                         </button>
-                        <div className={cn('overflow-hidden transition-all duration-200 ease-in-out', isExpanded ? 'max-h-40' : 'max-h-0')}>
+                        <div className={cn(
+                          'overflow-hidden transition-[max-height,opacity] ease-in-out',
+                          !sidebarCollapsed && isExpanded ? 'max-h-40 opacity-100 delay-100 duration-300' : 'max-h-0 opacity-0 duration-[180ms]',
+                        )}>
                           <div className="ml-5 mt-1 border-l border-border pb-1 pl-3">
                             <div className="flex flex-col gap-0.5">
                               {item.children?.map((child) => (
@@ -469,12 +549,15 @@ export function AppShell() {
           })}
         </div>
 
-        <div className="border-t border-border px-4 py-3">
-          <div className="flex items-center gap-2.5">
+        <div className={cn('border-t border-border py-3 transition-[padding] duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)]', sidebarCollapsed ? 'px-2' : 'px-4')}>
+          <div className={cn('flex items-center gap-2.5 transition-all duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)]', sidebarCollapsed && 'flex-col gap-2')}>
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-panel-soft text-[12px] font-semibold uppercase text-ink">
               {user.username.slice(0, 2)}
             </div>
-            <div className="min-w-0 flex-1">
+            <div className={cn(
+              'min-w-0 flex-1 overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] ease-out',
+              sidebarCollapsed ? 'max-w-0 -translate-x-1 opacity-0 duration-[180ms]' : 'max-w-[150px] translate-x-0 opacity-100 delay-100 duration-300',
+            )}>
               <p className="truncate text-[13px] font-semibold leading-tight text-ink">{user.username}</p>
               <p className="truncate text-[11px] leading-tight text-muted">
                 {user.authGroups.length > 0 ? user.authGroups.join(', ') : 'No group'}
