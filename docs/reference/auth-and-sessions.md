@@ -110,6 +110,8 @@ Reset MFA 會清除該使用者 MFA secret、停用 MFA 狀態、撤銷現有 se
 
 平台不使用 Lark personal email 建立或匹配 `users.email`。若 Lark user 沒有 `enterprise_email`，或 enterprise email domain 不符合 deploy env allowlist，登入會失敗。
 
+實作上會先從 OAuth token / `user_info` 讀取身份資料；若其中沒有 `enterprise_email`，後端會用 app 的 tenant access token 呼叫 Contact v3 user API，透過 `open_id` 補查企業郵箱。因此 Lark app 後台除了 OAuth scope，也需要開通 Contact v3 讀取 user 基礎資料與 `enterprise_email` 欄位的權限，並確認通訊錄可見範圍包含登入使用者。
+
 部署控制：
 
 | 變數 | 預設 | 說明 |
@@ -119,6 +121,8 @@ Reset MFA 會清除該使用者 MFA secret、停用 MFA 狀態、撤銷現有 se
 | `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | `edgex.exchange` | 允許的企業信箱 domain，逗號分隔 |
 
 `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange` 時，`<user>@edgex.exchange` 與 `<user>@team.edgex.exchange` 允許登入，其他 domain 會被拒絕。
+
+`LARK_OAUTH_SCOPES` 只控制 OAuth 授權頁要求的 scope。若授權頁已顯示企業郵箱權限但登入仍出現 `lark enterprise_email is required`，通常代表 OAuth `user_info` 沒回企業郵箱，且 Contact v3 fallback 也沒有拿到 `enterprise_email`；此時應優先檢查 app 的 Contact API 權限、欄位權限與通訊錄可見範圍。
 
 Protected admin 不允許透過 Lark email 自動綁定。這是 bootstrap admin 的安全邊界，避免有人用同 email 的 Lark identity 接管初始管理員。
 
