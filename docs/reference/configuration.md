@@ -248,6 +248,8 @@ LARK_OAUTH_SCOPES=directory:employee.base.enterprise_email:read
 
 `LARK_OAUTH_SCOPES` 會寫入 Lark OAuth authorize URL。若 Lark app 後台已開通企業郵箱權限，但授權頁仍只顯示基本身份權限，應確認這個 env 是否包含 `directory:employee.base.enterprise_email:read`。
 
+OAuth `user_info` 不保證一定回傳 `enterprise_email`。當 OAuth 回應缺少企業郵箱時，後端會改用 tenant access token 呼叫 Contact v3 user API，透過 `open_id` 補查 `enterprise_email`。因此 Lark app 還需要具備 Contact v3 讀取 user 基礎資料與企業郵箱欄位的權限，且通訊錄可見範圍必須包含登入者。若這些權限不足，即使 OAuth 授權頁已出現企業郵箱 scope，登入仍會因企業郵箱缺失而被拒絕。
+
 這兩個 enterprise email policy 是 deploy env，不是 Settings。原因是它們屬於部署安全邊界，不能讓有 Settings 權限的使用者在平台內自行放寬登入 domain。
 
 ## DB Connections 讀寫 endpoint
