@@ -16,8 +16,3 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     KEY idx_audit_created (created_at),
     KEY idx_audit_resource (resource_type, resource_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- TE8: revoke UPDATE/DELETE on audit_logs from app user so rows are truly append-only.
--- IF EXISTS makes this idempotent (MySQL 8.0.31+): safe to re-run if migration restarts.
--- This must run as root via MIGRATION_DSN.
-REVOKE IF EXISTS UPDATE, DELETE ON maestro.audit_logs FROM 'maestro_app'@'%';

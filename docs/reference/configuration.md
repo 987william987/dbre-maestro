@@ -68,7 +68,7 @@ Secret JSON 至少需要：
 ```json
 {
   "DB_DSN": "maestro_app:<password>@tcp(<host>:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC",
-  "MIGRATION_DSN": "root:<password>@tcp(<host>:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC",
+  "MIGRATION_DSN": "maestro_migration:<password>@tcp(<host>:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC",
   "DBRE_ENCRYPTION_KEY": "BASE64_32_BYTE_KEY",
   "JWT_SECRET": "long-random-string"
 }
@@ -77,6 +77,39 @@ Secret JSON 至少需要：
 `MIGRATION_DSN` 可省略；省略時會 fallback 到 `DB_DSN`。正式環境建議提供獨立 migration DSN。
 
 DB pool 參數不是 secret，仍由 env / ConfigMap / values 管理。
+
+## Meta DB 帳號權限
+
+`DB_DSN` 與 `MIGRATION_DSN` 應使用不同帳號。
+
+App runtime 帳號只負責服務日常讀寫 Meta DB：
+
+```sql
+CREATE USER 'maestro_app'@'%' IDENTIFIED BY '<app_password>';
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON maestro.*
+TO 'maestro_app'@'%';
+```
+
+若要啟用 MySQL DDL shadow validation，DBA/SRE 需在帳號建置時預先授權 app user 建立 shadow schema 內的暫存物件：
+
+```sql
+GRANT CREATE, ALTER, DROP
+ON `shadow\_%`.*
+TO 'maestro_app'@'%';
+```
+
+Migration 帳號只負責 `maestro` schema migration，不負責管理其他帳號授權，也不需要 `WITH GRANT OPTION`：
+
+```sql
+CREATE USER 'maestro_migration'@'%' IDENTIFIED BY '<migration_password>';
+
+GRANT SELECT, INSERT, UPDATE, DELETE,
+      CREATE, ALTER, DROP, INDEX, REFERENCES
+ON maestro.*
+TO 'maestro_migration'@'%';
+```
 
 ## Migration 啟動策略
 
