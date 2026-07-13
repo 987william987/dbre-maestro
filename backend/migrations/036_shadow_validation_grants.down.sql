@@ -1,1 +1,2 @@
-REVOKE CREATE, ALTER, DROP ON `shadow\_%`.* FROM 'maestro_app'@'%';
+-- No-op.
+-- Shadow validation privileges are managed outside migrations.

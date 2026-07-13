@@ -61,7 +61,7 @@ Backend Pod 至少需要：
 | `AWS_SM_REGION` | AWS Secrets Manager region，例如 `ap-northeast-1` |
 | `AWS_SM_SECRET_ID` | DBRE Maestro app secret id |
 | `DB_DSN` | app user 連線 Meta DB；`AWS_SM_ENABLE=true` 時由 secret payload 提供 |
-| `MIGRATION_DSN` | migration 專用連線，權限通常高於 app user；`AWS_SM_ENABLE=true` 時建議由 secret payload 提供 |
+| `MIGRATION_DSN` | migration 專用連線，只需管理 `maestro` schema；`AWS_SM_ENABLE=true` 時建議由 secret payload 提供 |
 | `DBRE_ENCRYPTION_KEY` | base64 32-byte key；`AWS_SM_ENABLE=true` 時由 secret payload 提供 |
 | `JWT_SECRET` | JWT 簽章 secret；`AWS_SM_ENABLE=true` 時由 secret payload 提供 |
 | `RUN_MIGRATIONS_ON_STARTUP` | 是否在 Deployment Pod 啟動時執行 migration；預設 `true` |
@@ -105,7 +105,7 @@ Secrets Manager payload 至少需要：
 ```json
 {
   "DB_DSN": "maestro_app:<password>@tcp(<host>:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC",
-  "MIGRATION_DSN": "root:<password>@tcp(<host>:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC",
+  "MIGRATION_DSN": "maestro_migration:<password>@tcp(<host>:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC",
   "DBRE_ENCRYPTION_KEY": "BASE64_32_BYTE_KEY",
   "JWT_SECRET": "long-random-string"
 }
@@ -130,6 +130,35 @@ openssl rand -base64 48
 `MIGRATION_DSN` 可省略；未提供時程式會 fallback 到 `DB_DSN`。正式環境仍建議提供獨立 migration DSN，避免 app user 擁有 schema migration 所需的高權限。
 
 DB pool 參數不是 secret，應繼續由 env / ConfigMap / values 管理，不放進 Secrets Manager。
+
+## Meta DB 帳號權限
+
+部署前由 DBA/SRE 建立兩個 Meta DB 帳號：
+
+```sql
+CREATE USER 'maestro_app'@'%' IDENTIFIED BY '<app_password>';
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON maestro.*
+TO 'maestro_app'@'%';
+
+GRANT CREATE, ALTER, DROP
+ON `shadow\_%`.*
+TO 'maestro_app'@'%';
+```
+
+`maestro_app` 用於 `DB_DSN`。`shadow_%` 權限供 MySQL DDL shadow validation 使用；這個授權由 DBA/SRE 預先配置，不由 migration 管理。
+
+```sql
+CREATE USER 'maestro_migration'@'%' IDENTIFIED BY '<migration_password>';
+
+GRANT SELECT, INSERT, UPDATE, DELETE,
+      CREATE, ALTER, DROP, INDEX, REFERENCES
+ON maestro.*
+TO 'maestro_migration'@'%';
+```
+
+`maestro_migration` 用於 `MIGRATION_DSN`，只負責 `maestro` schema migration，不需要 `WITH GRANT OPTION`，也不應作為 app runtime 帳號。
 
 IRSA policy 至少需要允許該 secret：
 
@@ -352,7 +381,6 @@ RUN_MIGRATIONS_ON_STARTUP=false
 - `golang-migrate` 會維護 `schema_migrations` 的 version / dirty state
 - 手工執行容易漏跑、順序錯或失敗後狀態不一致
 - 部分 migration 不是完全 idempotent
-- 本專案 migration 包含 `GRANT` / `REVOKE`，仍需要 migration admin 權限
 
 若 emergency 情境必須由 DBA 手工處理，需同步維護 `schema_migrations`，並確認最新 version 與 `dirty=false`。常規流程應使用 app image 的 `/app/maestro -migrate-only` 或單副本 startup migration。
 
