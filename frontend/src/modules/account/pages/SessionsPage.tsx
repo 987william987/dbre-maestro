@@ -5,9 +5,17 @@ import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+  DataTableScroll,
+} from '@/shared/ui/DataTable'
 
 const SESSION_PAGE_SIZE = 5
 
@@ -71,11 +79,6 @@ export function SessionsPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="Account Sessions"
-        description="Review active refresh sessions for your account and revoke sessions you no longer recognize."
-      />
-
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
       {loading ? (
@@ -112,29 +115,29 @@ export function SessionsPage() {
             <div className="px-4 py-6 text-[13px] text-muted">No sessions found.</div>
           ) : (
             <>
-              <div className="overflow-x-auto">
-                <table className="min-w-full border-collapse text-left text-[13px]">
-                  <thead className="bg-panel-soft text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">
+              <DataTableScroll>
+                <DataTable>
+                  <DataTableHead>
                     <tr>
-                      <th className="whitespace-nowrap px-4 py-3">Session</th>
-                      <th className="whitespace-nowrap px-4 py-3">IP</th>
-                      <th className="whitespace-nowrap px-4 py-3">Created</th>
-                      <th className="whitespace-nowrap px-4 py-3">Expires</th>
-                      <th className="whitespace-nowrap px-4 py-3">Status</th>
-                      <th className="whitespace-nowrap px-4 py-3 text-right">Actions</th>
+                      <DataTableHeaderCell>Session</DataTableHeaderCell>
+                      <DataTableHeaderCell>IP</DataTableHeaderCell>
+                      <DataTableHeaderCell>Created</DataTableHeaderCell>
+                      <DataTableHeaderCell>Expires</DataTableHeaderCell>
+                      <DataTableHeaderCell>Status</DataTableHeaderCell>
+                      <DataTableHeaderCell className="text-right">Actions</DataTableHeaderCell>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border bg-white">
+                  </DataTableHead>
+                  <DataTableBody>
                     {pagedSessions.map((session) => {
                       const revoked = session.revoked_at != null
                       return (
-                        <tr key={session.id} className="align-top text-ink">
-                          <td className="max-w-[460px] px-4 py-3">
+                        <DataTableRow key={session.id}>
+                          <DataTableCell className="max-w-[460px]">
                             <div className="flex items-start gap-2">
                               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
-                                  <p className="font-semibold">Session #{session.id}</p>
+                                  <p>Session #{session.id}</p>
                                   {session.is_current ? (
                                     <span className="inline-flex rounded-full border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
                                       Current
@@ -146,16 +149,16 @@ export function SessionsPage() {
                                 </p>
                               </div>
                             </div>
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-muted">{session.ip_address || '-'}</td>
-                          <td className="whitespace-nowrap px-4 py-3 text-muted">{formatDateTime(session.created_at)}</td>
-                          <td className="whitespace-nowrap px-4 py-3 text-muted">{formatDateTime(session.expires_at)}</td>
-                          <td className="whitespace-nowrap px-4 py-3">
+                          </DataTableCell>
+                          <DataTableCell className="whitespace-nowrap">{session.ip_address || '-'}</DataTableCell>
+                          <DataTableCell className="whitespace-nowrap">{formatDateTime(session.created_at)}</DataTableCell>
+                          <DataTableCell className="whitespace-nowrap">{formatDateTime(session.expires_at)}</DataTableCell>
+                          <DataTableCell className="whitespace-nowrap">
                             <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] ${revoked ? 'border-slate-200 bg-slate-100 text-slate-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
                               {revoked ? 'Revoked' : 'Active'}
                             </span>
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-right">
+                          </DataTableCell>
+                          <DataTableCell className="whitespace-nowrap text-right">
                             <button
                               type="button"
                               disabled={acting !== null || revoked || session.is_current}
@@ -165,13 +168,13 @@ export function SessionsPage() {
                               <Trash2 className="h-3.5 w-3.5" />
                               Revoke
                             </button>
-                          </td>
-                        </tr>
+                          </DataTableCell>
+                        </DataTableRow>
                       )
                     })}
-                  </tbody>
-                </table>
-              </div>
+                  </DataTableBody>
+                </DataTable>
+              </DataTableScroll>
               <Pagination
                 total={sessions.length}
                 pageSize={SESSION_PAGE_SIZE}

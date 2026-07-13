@@ -46,8 +46,19 @@ func TestTicketListIncludesWorkflowSnapshotReviewer(t *testing.T) {
 			    OR JSON_CONTAINS(tws.admin_user_ids, ?)
 			    OR (t.status = ? AND JSON_CONTAINS(tws.executor_user_ids, ?))
 			  )
-		)) ORDER BY t.created_at DESC LIMIT ? OFFSET ?`)).
-		WithArgs(reviewerID, "7", "7", model.TicketStatusPendingExecution, "7", 20, 0).
+		)) ORDER BY CASE WHEN t.status IN (?, ?, ?) THEN 0 ELSE 1 END, t.created_at DESC LIMIT ? OFFSET ?`)).
+		WithArgs(
+			reviewerID,
+			"7",
+			"7",
+			model.TicketStatusPendingExecution,
+			"7",
+			model.TicketStatusPendingReview,
+			model.TicketStatusPendingExecution,
+			model.TicketStatusNeedsAdminAttention,
+			20,
+			0,
+		).
 		WillReturnRows(ticketRows().AddRow(
 			uint64(1),
 			"TK-1",
@@ -84,6 +95,78 @@ func TestTicketListIncludesWorkflowSnapshotReviewer(t *testing.T) {
 	}
 	if len(tickets) != 1 || tickets[0].ID != 1 {
 		t.Fatalf("tickets = %#v, want ticket 1", tickets)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
+func TestTicketListFiltersByTicketNoTitleAndSubmitter(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+	ticketNo := "TK-2026"
+	title := "Export"
+	submitter := "alice"
+	createdAt := time.Date(2026, 6, 24, 8, 0, 0, 0, time.UTC)
+	updatedAt := createdAt
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM tickets t LEFT JOIN users u ON u.id = t.submitter_id WHERE 1=1 AND t.ticket_no LIKE ? AND t.title LIKE ? AND u.username LIKE ?`)).
+		WithArgs("%TK-2026%", "%Export%", "%alice%").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT t.* FROM tickets t
+		LEFT JOIN users u ON u.id = t.submitter_id WHERE 1=1 AND t.ticket_no LIKE ? AND t.title LIKE ? AND u.username LIKE ? ORDER BY CASE WHEN t.status IN (?, ?, ?) THEN 0 ELSE 1 END, t.created_at DESC LIMIT ? OFFSET ?`)).
+		WithArgs(
+			"%TK-2026%",
+			"%Export%",
+			"%alice%",
+			model.TicketStatusPendingReview,
+			model.TicketStatusPendingExecution,
+			model.TicketStatusNeedsAdminAttention,
+			20,
+			0,
+		).
+		WillReturnRows(ticketRows().AddRow(
+			uint64(10),
+			"TK-20260624-080000000-ABCDEF",
+			"Export data",
+			nil,
+			"",
+			model.TicketTypeSQLExport,
+			nil,
+			nil,
+			nil,
+			model.TicketStatusPendingReview,
+			uint64(2),
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			createdAt,
+			updatedAt,
+		))
+
+	tickets, total, err := repo.List(context.Background(), TicketListFilter{TicketNo: &ticketNo, Title: &title, Submitter: &submitter}, 20, 0)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("total = %d, want 1", total)
+	}
+	if len(tickets) != 1 || tickets[0].ID != 10 {
+		t.Fatalf("tickets = %#v, want ticket 10", tickets)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("mock expectations not met: %v", err)

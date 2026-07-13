@@ -11,7 +11,7 @@ describe('MaskingDSLGuidePage', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('heading', { name: 'Mask DSL Guide' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Back To Rules' })).not.toBeInTheDocument()
     expect(screen.getByText('Basic Structure')).toBeInTheDocument()
     expect(screen.getByText('Mask Modes')).toBeInTheDocument()
     expect(screen.getByText('How Masking Rules Work With Unmask Whitelist')).toBeInTheDocument()

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, Check, Search, SlidersHorizontal } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, SlidersHorizontal } from 'lucide-react'
 import { DBMetadataSectionTabs } from '@/modules/db-metadata/components/DBMetadataSectionTabs'
 import { listDBObjectSnapshots } from '@/modules/db-metadata/api'
 import { cn } from '@/lib/utils'
@@ -9,8 +9,19 @@ import type { DBObjectConnectionOption, DBObjectSnapshot } from '@/shared/types/
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
+import { SearchInput } from '@/shared/ui/SearchInput'
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableContent,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+  DataTableScroll,
+  DataTableSurface,
+} from '@/shared/ui/DataTable'
 
 const PAGE_SIZE = 20
 
@@ -171,28 +182,19 @@ export function DBMetadataObjectsPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="Objects"
-        description="This view only shows MySQL and PostgreSQL object snapshots. Data comes from scheduled scans rather than live database queries from the page."
-      />
-
       <DBMetadataSectionTabs />
 
       <section>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_220px_auto]">
           <label className="block">
-            <div className="flex h-11 items-center gap-2 rounded-2xl border border-border bg-white px-3 shadow-soft transition focus-within:border-slate-400">
-              <Search className="h-4 w-4 text-faint" />
-              <input
-                value={keyword}
-                onChange={(event) => {
-                  setKeyword(event.target.value)
-                  setOffset(0)
-                }}
-                placeholder="Search connection / database / schema / table"
-                className="h-full w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-muted"
-              />
-            </div>
+            <SearchInput
+              value={keyword}
+              onChange={(event) => {
+                setKeyword(event.target.value)
+                setOffset(0)
+              }}
+              placeholder="Search connection / database / schema / table"
+            />
           </label>
 
           <div>
@@ -234,7 +236,7 @@ export function DBMetadataObjectsPage() {
                 aria-label="Visible Columns"
                 onClick={() => setColumnMenuOpen((current) => !current)}
                 className={cn(
-                  'inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-white text-ink shadow-soft transition',
+                  'inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-white text-ink shadow-soft transition',
                   columnMenuOpen ? 'border-slate-300' : 'hover:border-slate-300',
                 )}
               >
@@ -281,7 +283,7 @@ export function DBMetadataObjectsPage() {
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
-      <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
+      <DataTableSurface>
         {loading ? (
           <LoadingBlock message="Loading database objects..." className="min-h-[320px] rounded-none border-0 bg-transparent" />
         ) : items.length === 0 ? (
@@ -293,59 +295,59 @@ export function DBMetadataObjectsPage() {
             No object snapshots match the current filters.
           </div>
         ) : (
-          <div className="grid gap-3 p-3">
-            <div className="overflow-x-auto">
-              <table className="min-w-full border-collapse">
-                <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+          <DataTableContent>
+            <DataTableScroll>
+              <DataTable>
+                <DataTableHead>
                   <tr>
-                    {visibleColumns.includes('connection') ? <th className="px-3 py-3">Connection</th> : null}
-                    {visibleColumns.includes('engine') ? <th className="px-3 py-3">Engine</th> : null}
-                    {visibleColumns.includes('databaseSchema') ? <th className="px-3 py-3">Database / Schema</th> : null}
-                    {visibleColumns.includes('table') ? <th className="px-3 py-3">Table</th> : null}
+                    {visibleColumns.includes('connection') ? <DataTableHeaderCell>Connection</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('engine') ? <DataTableHeaderCell>Engine</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('databaseSchema') ? <DataTableHeaderCell>Database / Schema</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('table') ? <DataTableHeaderCell>Table</DataTableHeaderCell> : null}
                     {visibleColumns.includes('rows') ? <SortableHeader label="Rows" sortKey="rows" sortState={sortState} onSort={toggleSort} /> : null}
                     {visibleColumns.includes('dataSize') ? <SortableHeader label="Data Size" sortKey="dataSize" sortState={sortState} onSort={toggleSort} /> : null}
                     {visibleColumns.includes('indexSize') ? <SortableHeader label="Index Size" sortKey="indexSize" sortState={sortState} onSort={toggleSort} /> : null}
                     {visibleColumns.includes('totalSize') ? <SortableHeader label="Total Size" sortKey="totalSize" sortState={sortState} onSort={toggleSort} /> : null}
-                    {visibleColumns.includes('snapshotTime') ? <th className="px-3 py-3">Snapshot Time</th> : null}
+                    {visibleColumns.includes('snapshotTime') ? <DataTableHeaderCell>Snapshot Time</DataTableHeaderCell> : null}
                   </tr>
-                </thead>
-                <tbody>
+                </DataTableHead>
+                <DataTableBody>
                   {pagedItems.map((item) => (
-                    <tr key={item.id} className="border-t border-border text-sm text-ink hover:bg-slate-50/70">
+                    <DataTableRow key={item.id}>
                       {visibleColumns.includes('connection') ? (
-                        <td className="px-3 py-2.5 align-top text-[12px] font-semibold">{item.connection_name}</td>
+                        <DataTableCell>{item.connection_name}</DataTableCell>
                       ) : null}
                       {visibleColumns.includes('engine') ? (
-                        <td className="px-3 py-2.5 align-top text-[12px]">{item.engine}</td>
+                        <DataTableCell>{item.engine}</DataTableCell>
                       ) : null}
                       {visibleColumns.includes('databaseSchema') ? (
-                        <td className="px-3 py-2.5 align-top text-[12px]">
+                        <DataTableCell>
                           {formatDatabaseSchema(item)}
-                        </td>
+                        </DataTableCell>
                       ) : null}
                       {visibleColumns.includes('table') ? (
-                        <td className="px-3 py-2.5 align-top font-mono text-[12px]">{item.table_name}</td>
+                        <DataTableCell>{item.table_name}</DataTableCell>
                       ) : null}
                       {visibleColumns.includes('rows') ? (
-                        <td className="px-3 py-2.5 align-top text-[12px] tabular-nums">{formatRows(item.row_count)}</td>
+                        <DataTableCell className="tabular-nums">{formatRows(item.row_count)}</DataTableCell>
                       ) : null}
                       {visibleColumns.includes('dataSize') ? (
-                        <td className="px-3 py-2.5 align-top text-[12px]">{formatGB(item.data_size_bytes)}</td>
+                        <DataTableCell>{formatGB(item.data_size_bytes)}</DataTableCell>
                       ) : null}
                       {visibleColumns.includes('indexSize') ? (
-                        <td className="px-3 py-2.5 align-top text-[12px]">{formatGB(item.index_size_bytes)}</td>
+                        <DataTableCell>{formatGB(item.index_size_bytes)}</DataTableCell>
                       ) : null}
                       {visibleColumns.includes('totalSize') ? (
-                        <td className="px-3 py-2.5 align-top text-[12px]">{formatGB(item.data_size_bytes + item.index_size_bytes)}</td>
+                        <DataTableCell>{formatGB(item.data_size_bytes + item.index_size_bytes)}</DataTableCell>
                       ) : null}
                       {visibleColumns.includes('snapshotTime') ? (
-                        <td className="px-3 py-2.5 align-top whitespace-nowrap text-[12px] text-muted">{formatDateTime(item.snapshot_at)}</td>
+                        <DataTableCell className="whitespace-nowrap">{formatDateTime(item.snapshot_at)}</DataTableCell>
                       ) : null}
-                    </tr>
+                    </DataTableRow>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </DataTableBody>
+              </DataTable>
+            </DataTableScroll>
             <Pagination
               offset={offset}
               pageSize={PAGE_SIZE}
@@ -353,9 +355,9 @@ export function DBMetadataObjectsPage() {
               total={sortedItems.length}
               onChange={setOffset}
             />
-          </div>
+          </DataTableContent>
         )}
-      </section>
+      </DataTableSurface>
     </div>
   )
 }
@@ -373,7 +375,7 @@ function SortableHeader({
 }) {
   const active = sortState.key === sortKey
   return (
-    <th className="px-3 py-3">
+    <DataTableHeaderCell>
       <button
         type="button"
         aria-label={active ? `${label} ${sortState.direction.toUpperCase()}` : label}
@@ -383,7 +385,7 @@ function SortableHeader({
         {label}
         {active ? sortState.direction === 'desc' ? <ArrowDown className="h-3 w-3" aria-hidden="true" /> : <ArrowUp className="h-3 w-3" aria-hidden="true" /> : null}
       </button>
-    </th>
+    </DataTableHeaderCell>
   )
 }
 

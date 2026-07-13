@@ -30,6 +30,9 @@ type TicketListFilter struct {
 	Status                *model.TicketStatus
 	Type                  *model.TicketType
 	Keyword               *string
+	TicketNo              *string
+	Title                 *string
+	Submitter             *string
 	From                  *time.Time
 	To                    *time.Time
 }
@@ -319,6 +322,21 @@ func (r *TicketRepo) List(ctx context.Context, filter TicketListFilter, limit, o
 		where += ` AND (t.ticket_no LIKE ? OR t.title LIKE ? OR u.username LIKE ?)`
 		args = append(args, keyword, keyword, keyword)
 	}
+	if filter.TicketNo != nil && strings.TrimSpace(*filter.TicketNo) != "" {
+		ticketNo := "%" + strings.TrimSpace(*filter.TicketNo) + "%"
+		where += ` AND t.ticket_no LIKE ?`
+		args = append(args, ticketNo)
+	}
+	if filter.Title != nil && strings.TrimSpace(*filter.Title) != "" {
+		title := "%" + strings.TrimSpace(*filter.Title) + "%"
+		where += ` AND t.title LIKE ?`
+		args = append(args, title)
+	}
+	if filter.Submitter != nil && strings.TrimSpace(*filter.Submitter) != "" {
+		submitter := "%" + strings.TrimSpace(*filter.Submitter) + "%"
+		where += ` AND u.username LIKE ?`
+		args = append(args, submitter)
+	}
 	if filter.From != nil {
 		where += ` AND t.created_at >= ?`
 		args = append(args, *filter.From)
@@ -335,7 +353,8 @@ func (r *TicketRepo) List(ctx context.Context, filter TicketListFilter, limit, o
 	}
 
 	query := `SELECT t.* FROM tickets t
-		LEFT JOIN users u ON u.id = t.submitter_id` + where + ` ORDER BY t.created_at DESC LIMIT ? OFFSET ?`
+		LEFT JOIN users u ON u.id = t.submitter_id` + where + ` ORDER BY CASE WHEN t.status IN (?, ?, ?) THEN 0 ELSE 1 END, t.created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, model.TicketStatusPendingReview, model.TicketStatusPendingExecution, model.TicketStatusNeedsAdminAttention)
 	listArgs := append(args, limit, offset)
 
 	var tickets []model.Ticket

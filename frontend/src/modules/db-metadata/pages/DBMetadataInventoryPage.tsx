@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Search, SlidersHorizontal } from 'lucide-react'
+import { Check, SlidersHorizontal } from 'lucide-react'
 import { DBMetadataSectionTabs } from '@/modules/db-metadata/components/DBMetadataSectionTabs'
 import { listInventorySnapshots } from '@/modules/db-metadata/api'
 import { cn } from '@/lib/utils'
@@ -9,10 +9,21 @@ import type { InventorySnapshot } from '@/shared/types/dbMetadata'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
+import { SearchInput } from '@/shared/ui/SearchInput'
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableContent,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+  DataTableScroll,
+  DataTableSurface,
+} from '@/shared/ui/DataTable'
 
-const PAGE_SIZE = 10
+const PAGE_SIZE = 20
 
 const INVENTORY_COLUMNS = [
   { key: 'identifier', label: 'Cluster' },
@@ -159,77 +170,56 @@ export function DBMetadataInventoryPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="Inventory"
-        description="This view shows AWS inventory snapshots rather than real-time status. `Mapping` is determined only by exact matches between discovered endpoints and `DB Connection host` values."
-      />
-
       <DBMetadataSectionTabs />
 
       <section>
         <div className="grid gap-3 xl:grid-cols-[minmax(320px,1.2fr)_minmax(160px,0.55fr)_minmax(160px,0.55fr)_minmax(160px,0.55fr)_170px_170px_170px_auto]">
           <label className="block">
-            <div className="flex h-11 items-center gap-2 rounded-2xl border border-border bg-white px-3 shadow-soft transition focus-within:border-slate-400">
-              <Search className="h-4 w-4 text-faint" />
-              <input
-                aria-label="Inventory endpoint search"
-                value={endpointKeyword}
-                onChange={(event) => {
-                  setEndpointKeyword(event.target.value)
-                  setOffset(0)
-                }}
-                placeholder="Search cluster / instance / writer / reader / endpoint"
-                className="h-full w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-muted"
-              />
-            </div>
+            <SearchInput
+              aria-label="Inventory endpoint search"
+              value={endpointKeyword}
+              onChange={(event) => {
+                setEndpointKeyword(event.target.value)
+                setOffset(0)
+              }}
+              placeholder="Search cluster / instance / writer / reader / endpoint"
+            />
           </label>
 
           <label className="block">
-            <div className="flex h-11 items-center gap-2 rounded-2xl border border-border bg-white px-3 shadow-soft transition focus-within:border-slate-400">
-              <Search className="h-4 w-4 text-faint" />
-              <input
-                aria-label="Version Search"
-                value={versionKeyword}
-                onChange={(event) => {
-                  setVersionKeyword(event.target.value)
-                  setOffset(0)
-                }}
-                placeholder="Version"
-                className="h-full w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-muted"
-              />
-            </div>
+            <SearchInput
+              aria-label="Version Search"
+              value={versionKeyword}
+              onChange={(event) => {
+                setVersionKeyword(event.target.value)
+                setOffset(0)
+              }}
+              placeholder="Version"
+            />
           </label>
 
           <label className="block">
-            <div className="flex h-11 items-center gap-2 rounded-2xl border border-border bg-white px-3 shadow-soft transition focus-within:border-slate-400">
-              <Search className="h-4 w-4 text-faint" />
-              <input
-                aria-label="Size Search"
-                value={sizeKeyword}
-                onChange={(event) => {
-                  setSizeKeyword(event.target.value)
-                  setOffset(0)
-                }}
-                placeholder="Size"
-                className="h-full w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-muted"
-              />
-            </div>
+            <SearchInput
+              aria-label="Size Search"
+              value={sizeKeyword}
+              onChange={(event) => {
+                setSizeKeyword(event.target.value)
+                setOffset(0)
+              }}
+              placeholder="Size"
+            />
           </label>
 
           <label className="block">
-            <div className="flex h-11 items-center gap-2 rounded-2xl border border-border bg-white px-3 shadow-soft transition focus-within:border-slate-400">
-              <Search className="h-4 w-4 text-faint" />
-              <input
-                aria-label="Tags Search"
-                value={tagsKeyword}
-                onChange={(event) => {
-                  setTagsKeyword(event.target.value)
-                  setOffset(0)
-                }}
-                placeholder="Tags"
-                className="h-full w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-muted"
-              />
-            </div>
+            <SearchInput
+              aria-label="Tags Search"
+              value={tagsKeyword}
+              onChange={(event) => {
+                setTagsKeyword(event.target.value)
+                setOffset(0)
+              }}
+              placeholder="Tags"
+            />
           </label>
 
           <div>
@@ -286,7 +276,7 @@ export function DBMetadataInventoryPage() {
                 aria-label="Visible Columns"
                 onClick={() => setColumnMenuOpen((current) => !current)}
                 className={cn(
-                  'inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-white text-ink shadow-soft transition',
+                  'inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-white text-ink shadow-soft transition',
                   columnMenuOpen ? 'border-slate-300' : 'hover:border-slate-300',
                 )}
               >
@@ -333,7 +323,7 @@ export function DBMetadataInventoryPage() {
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
-      <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
+      <DataTableSurface>
         {loading ? (
           <LoadingBlock message="Loading inventory..." className="min-h-[320px] rounded-none border-0 bg-transparent" />
         ) : filteredItems.length === 0 ? (
@@ -341,82 +331,82 @@ export function DBMetadataInventoryPage() {
             No inventory snapshots match the current filters.
           </div>
         ) : (
-          <div className="grid gap-3 p-3">
-            <div className="overflow-x-auto">
-              <table className="min-w-[1920px] border-collapse">
-                <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+          <DataTableContent>
+            <DataTableScroll>
+              <DataTable className="min-w-[1920px]">
+                <DataTableHead>
                   <tr>
-                    {visibleColumns.includes('identifier') ? <th className="w-[240px] px-3 py-3">Cluster</th> : null}
-                    {visibleColumns.includes('instance') ? <th className="w-[240px] px-3 py-3">Instance</th> : null}
-                    {visibleColumns.includes('engine') ? <th className="w-[150px] px-3 py-3">Engine</th> : null}
-                    {visibleColumns.includes('version') ? <th className="w-[130px] px-3 py-3">Version</th> : null}
-                    {visibleColumns.includes('regionAz') ? <th className="w-[150px] px-3 py-3">Region / AZ</th> : null}
-                    {visibleColumns.includes('role') ? <th className="w-[90px] px-3 py-3">Role</th> : null}
-                    {visibleColumns.includes('size') ? <th className="w-[130px] px-3 py-3">Size</th> : null}
-                    {visibleColumns.includes('clusterEndpoint') ? <th className="w-[260px] px-3 py-3">Cluster Writer</th> : null}
-                    {visibleColumns.includes('clusterReaderEndpoint') ? <th className="w-[260px] px-3 py-3">Cluster Reader</th> : null}
-                    {visibleColumns.includes('instanceEndpoint') ? <th className="w-[300px] px-3 py-3">Instance Endpoint</th> : null}
-                    {visibleColumns.includes('tags') ? <th className="w-[240px] px-3 py-3">Tags</th> : null}
-                    {visibleColumns.includes('mapping') ? <th className="w-[120px] px-3 py-3">Mapping</th> : null}
-                    {visibleColumns.includes('lastSynced') ? <th className="w-[120px] px-3 py-3">Last Synced</th> : null}
+                    {visibleColumns.includes('identifier') ? <DataTableHeaderCell className="w-[240px]">Cluster</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('instance') ? <DataTableHeaderCell className="w-[240px]">Instance</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('engine') ? <DataTableHeaderCell className="w-[150px]">Engine</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('version') ? <DataTableHeaderCell className="w-[130px]">Version</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('regionAz') ? <DataTableHeaderCell className="w-[150px]">Region / AZ</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('role') ? <DataTableHeaderCell className="w-[90px]">Role</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('size') ? <DataTableHeaderCell className="w-[130px]">Size</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('clusterEndpoint') ? <DataTableHeaderCell className="w-[260px]">Cluster Writer</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('clusterReaderEndpoint') ? <DataTableHeaderCell className="w-[260px]">Cluster Reader</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('instanceEndpoint') ? <DataTableHeaderCell className="w-[300px]">Instance Endpoint</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('tags') ? <DataTableHeaderCell className="w-[240px]">Tags</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('mapping') ? <DataTableHeaderCell className="w-[120px]">Mapping</DataTableHeaderCell> : null}
+                    {visibleColumns.includes('lastSynced') ? <DataTableHeaderCell className="w-[120px]">Last Synced</DataTableHeaderCell> : null}
                   </tr>
-                </thead>
-                <tbody>
+                </DataTableHead>
+                <DataTableBody>
                   {pagedItems.map((item) => (
-                    <tr key={item.id} className="border-t border-border text-sm text-ink hover:bg-slate-50/70">
+                    <DataTableRow key={item.id}>
                       {visibleColumns.includes('identifier') ? (
-                        <td className="w-[240px] px-3 py-2 align-middle">
-                          <SingleLineValue value={inventoryClusterName(item)} className="font-semibold text-ink" />
-                        </td>
+                        <DataTableCell className="w-[240px]">
+                          <SingleLineValue value={inventoryClusterName(item)} />
+                        </DataTableCell>
                       ) : null}
                       {visibleColumns.includes('instance') ? (
-                        <td className="w-[240px] px-3 py-2 align-middle">
-                          <SingleLineValue value={inventoryInstanceName(item)} className="font-mono text-[11px] text-muted" />
-                        </td>
+                        <DataTableCell className="w-[240px]">
+                          <SingleLineValue value={inventoryInstanceName(item)} />
+                        </DataTableCell>
                       ) : null}
-                      {visibleColumns.includes('engine') ? <td className="w-[150px] px-3 py-2 align-middle whitespace-nowrap text-[12px]">{item.engine}</td> : null}
-                      {visibleColumns.includes('version') ? <td className="w-[130px] px-3 py-2 align-middle text-[12px]">{item.engine_version ?? '-'}</td> : null}
+                      {visibleColumns.includes('engine') ? <DataTableCell className="w-[150px] whitespace-nowrap">{item.engine}</DataTableCell> : null}
+                      {visibleColumns.includes('version') ? <DataTableCell className="w-[130px]">{item.engine_version ?? '-'}</DataTableCell> : null}
                       {visibleColumns.includes('regionAz') ? (
-                        <td className="w-[150px] max-w-[150px] px-3 py-2 align-middle text-[12px]">
+                        <DataTableCell className="w-[150px] max-w-[150px]">
                           <ExpandableValue value={formatRegionAz(item.region, item.az)} />
-                        </td>
+                        </DataTableCell>
                       ) : null}
-                      {visibleColumns.includes('role') ? <td className="w-[90px] px-3 py-2 align-middle text-[12px]">{item.role ?? '-'}</td> : null}
-                      {visibleColumns.includes('size') ? <td className="w-[130px] px-3 py-2 align-middle text-[12px]">{item.instance_class ?? '-'}</td> : null}
+                      {visibleColumns.includes('role') ? <DataTableCell className="w-[90px]">{item.role ?? '-'}</DataTableCell> : null}
+                      {visibleColumns.includes('size') ? <DataTableCell className="w-[130px]">{item.instance_class ?? '-'}</DataTableCell> : null}
                       {visibleColumns.includes('clusterEndpoint') ? (
-                        <td className="w-[260px] max-w-[260px] px-3 py-2 align-middle">
-                          <ExpandableValue value={item.cluster_endpoint} className="font-mono text-[11px] text-muted" />
-                        </td>
+                        <DataTableCell className="w-[260px] max-w-[260px]">
+                          <ExpandableValue value={item.cluster_endpoint} />
+                        </DataTableCell>
                       ) : null}
                       {visibleColumns.includes('clusterReaderEndpoint') ? (
-                        <td className="w-[260px] max-w-[260px] px-3 py-2 align-middle">
-                          <ExpandableValue value={item.cluster_reader_endpoint} className="font-mono text-[11px] text-muted" />
-                        </td>
+                        <DataTableCell className="w-[260px] max-w-[260px]">
+                          <ExpandableValue value={item.cluster_reader_endpoint} />
+                        </DataTableCell>
                       ) : null}
                       {visibleColumns.includes('instanceEndpoint') ? (
-                        <td className="w-[300px] max-w-[300px] px-3 py-2 align-middle">
-                          <ExpandableValue value={item.instance_endpoint} className="font-mono text-[11px] text-muted" />
-                        </td>
+                        <DataTableCell className="w-[300px] max-w-[300px]">
+                          <ExpandableValue value={item.instance_endpoint} />
+                        </DataTableCell>
                       ) : null}
                       {visibleColumns.includes('tags') ? (
-                        <td className="w-[240px] max-w-[240px] px-3 py-2 align-middle">
+                        <DataTableCell className="w-[240px] max-w-[240px]">
                           <InventoryTags tags={item.tags} />
-                        </td>
+                        </DataTableCell>
                       ) : null}
                       {visibleColumns.includes('mapping') ? (
-                        <td className="w-[120px] px-3 py-2 align-middle text-[12px]">
-                          <p className="font-semibold">{item.mapping_status}</p>
-                          {item.mapping_status === 'ambiguous' ? <p className="mt-1 text-muted">{item.mapping_connections?.join(', ') || '-'}</p> : null}
-                        </td>
+                        <DataTableCell className="w-[120px]">
+                          <p>{item.mapping_status}</p>
+                          {item.mapping_status === 'ambiguous' ? <p className="mt-1">{item.mapping_connections?.join(', ') || '-'}</p> : null}
+                        </DataTableCell>
                       ) : null}
                       {visibleColumns.includes('lastSynced') ? (
-                        <td className="w-[120px] px-3 py-2 align-middle whitespace-nowrap text-[12px] text-muted">{formatDateTime(item.snapshot_at)}</td>
+                        <DataTableCell className="w-[120px] whitespace-nowrap">{formatDateTime(item.snapshot_at)}</DataTableCell>
                       ) : null}
-                    </tr>
+                    </DataTableRow>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </DataTableBody>
+              </DataTable>
+            </DataTableScroll>
             <Pagination
               offset={offset}
               pageSize={PAGE_SIZE}
@@ -424,9 +414,9 @@ export function DBMetadataInventoryPage() {
               total={filteredItems.length}
               onChange={setOffset}
             />
-          </div>
+          </DataTableContent>
         )}
-      </section>
+      </DataTableSurface>
     </div>
   )
 }
@@ -496,7 +486,7 @@ function InventoryTags({ tags }: { tags?: Record<string, string> }) {
   const [expanded, setExpanded] = useState(false)
   const entries = Object.entries(tags ?? {}).sort(([left], [right]) => left.localeCompare(right))
   if (entries.length === 0) {
-    return <span className="text-[12px] text-muted">-</span>
+    return <span className="text-[12px] text-ink">-</span>
   }
   const fullText = entries.map(([key, value]) => `${key}=${value || '-'}`).join(', ')
   return (
@@ -505,7 +495,7 @@ function InventoryTags({ tags }: { tags?: Record<string, string> }) {
       aria-expanded={expanded}
       onClick={() => setExpanded((current) => !current)}
       className={cn(
-        'block max-w-full bg-transparent p-0 text-left text-[12px] text-muted outline-none transition hover:text-ink focus-visible:rounded focus-visible:ring-2 focus-visible:ring-slate-300',
+        'block max-w-full bg-transparent p-0 text-left text-[12px] text-ink outline-none transition hover:text-ink focus-visible:rounded focus-visible:ring-2 focus-visible:ring-slate-300',
         expanded ? 'whitespace-normal break-words' : 'truncate whitespace-nowrap',
       )}
     >

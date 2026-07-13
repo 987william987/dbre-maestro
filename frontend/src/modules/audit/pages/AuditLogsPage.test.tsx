@@ -52,8 +52,7 @@ describe('AuditLogsPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByRole('heading', { name: 'Audit Logs' })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Actor')).toBeInTheDocument()
+    expect(await screen.findByPlaceholderText('Actor')).toBeInTheDocument()
     expect(screen.getByText('Unspecified Resource · 18')).toBeInTheDocument()
     expect(screen.getByText('System Event')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument()
@@ -65,5 +64,31 @@ describe('AuditLogsPage', () => {
       expect(screen.getByText('Timestamp')).toBeInTheDocument()
       expect(screen.getByText('Source IP')).toBeInTheDocument()
     })
+  })
+
+  it('maps visible resource labels to resource_type filters', async () => {
+    mockedListAuditLogs.mockResolvedValue({
+      logs: [],
+      total: 0,
+      limit: 20,
+      offset: 0,
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <AuditLogsPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByPlaceholderText('Resource')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('Resource'), { target: { value: 'DB Connection' } })
+
+    await waitFor(() => expect(mockedListAuditLogs).toHaveBeenLastCalledWith(expect.objectContaining({
+      resourceType: 'db_connection',
+      resourceName: '',
+    })))
   })
 })

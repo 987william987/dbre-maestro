@@ -1,7 +1,3 @@
-import { ArrowLeft } from 'lucide-react'
-import { Link } from 'react-router-dom'
-import { PageIntro } from '@/shared/ui/PageIntro'
-
 const MASK_MODE_EXAMPLES = {
   full: '{}',
   partial: '{\n  "keep_prefix": 3,\n  "keep_suffix": 4,\n  "mask_char": "*"\n}',
@@ -104,20 +100,6 @@ const RULE_EXAMPLES = [
 export function MaskingDSLGuidePage() {
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="Mask DSL Guide"
-        description="說明 `column pattern + match type + mask mode + mask config` 的使用方式，供 DBA 在建立規則前查閱。"
-        actions={
-          <Link
-            to="/masking-rules"
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back To Rules
-          </Link>
-        }
-      />
-
       <section className="rounded-xl border border-border bg-panel shadow-soft">
         <div className="border-b border-border/80 px-4 py-3">
           <p className="text-[13px] font-semibold text-ink">Basic Structure</p>

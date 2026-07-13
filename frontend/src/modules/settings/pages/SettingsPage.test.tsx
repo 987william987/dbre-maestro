@@ -102,12 +102,11 @@ describe('SettingsPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByText('Platform Settings')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Workflow Rules')).toBeInTheDocument())
     expect(screen.queryByText('Metadata Scope')).not.toBeInTheDocument()
     expect(screen.getByDisplayValue('ap-northeast-1')).toBeInTheDocument()
     expect(screen.getByDisplayValue('0 9 * * *')).toBeInTheDocument()
     expect(screen.getByDisplayValue('Asia/Taipei')).toBeInTheDocument()
-    expect(screen.getByText('Workflow Rules')).toBeInTheDocument()
     expect(screen.getByDisplayValue('Global DDL')).toBeInTheDocument()
     expect(screen.getAllByText('Data Owner').length).toBeGreaterThan(0)
     expect(screen.getAllByText('DBA').length).toBeGreaterThan(0)

@@ -6,7 +6,6 @@ import { formatDateTime } from '@/shared/lib/format'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import {
   createScheduledSQLReport,
@@ -287,17 +286,6 @@ export function ScheduledSQLReportsPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="Scheduled SQL Reports"
-        description="Run approved read-only SQL on a cron schedule, export CSV, and deliver the file directly to selected Lark users."
-        actions={
-          <button type="button" onClick={startCreate} className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft hover:bg-slate-800">
-            <Plus className="h-4 w-4" />
-            New Report
-          </button>
-        }
-      />
-
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       {notice ? <InlineAlert tone="success">{notice}</InlineAlert> : null}
 
@@ -308,10 +296,18 @@ export function ScheduledSQLReportsPage() {
               <h3 className="text-[16px] font-semibold text-ink">{selectedReport ? 'Edit Report' : 'Create Report'}</h3>
               <p className="mt-1 text-[12px] text-muted">Only SELECT, WITH, and SHOW are accepted. Sensitive columns are rejected during save.</p>
             </div>
-            <label className="inline-flex items-center gap-2 text-[12px] font-semibold text-ink">
-              <input type="checkbox" checked={draft.isActive} onChange={(event) => setDraft((current) => ({ ...current, isActive: event.target.checked }))} />
-              Active
-            </label>
+            <div className="flex shrink-0 items-center gap-3">
+              {selectedReport ? (
+                <button type="button" onClick={startCreate} className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft hover:bg-slate-800">
+                  <Plus className="h-4 w-4" />
+                  New Report
+                </button>
+              ) : null}
+              <label className="inline-flex items-center gap-2 text-[12px] font-semibold text-ink">
+                <input type="checkbox" checked={draft.isActive} onChange={(event) => setDraft((current) => ({ ...current, isActive: event.target.checked }))} />
+                Active
+              </label>
+            </div>
           </div>
 
           <div className="grid gap-3 lg:grid-cols-2">

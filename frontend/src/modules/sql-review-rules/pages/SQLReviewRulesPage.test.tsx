@@ -59,7 +59,7 @@ describe('SQLReviewRulesPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByRole('heading', { name: 'SQL Review Rules' })).toBeInTheDocument()
+    expect(await screen.findByText('high_row_count')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('switch'))
     fireEvent.change(screen.getByPlaceholderText('Row limit'), { target: { value: '5000' } })

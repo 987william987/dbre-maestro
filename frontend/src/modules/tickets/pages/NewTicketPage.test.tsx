@@ -110,13 +110,14 @@ describe('NewTicketPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('New Ticket')).toBeInTheDocument()
+    expect(await screen.findByText('Ticket Info')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('e.g. Add index, backfill order status')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Add context, affected scope, rollback plan, and execution considerations.')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Target Instance' }))
     expect(await screen.findByRole('option', { name: 'Not Selected' })).toBeInTheDocument()
-    const option = screen.getByRole('option', { name: 'orders-primary · MYSQL' })
+    expect(screen.getByText('MySQL')).toBeInTheDocument()
+    const option = screen.getByRole('option', { name: 'orders-primary' })
     expect(option).toBeInTheDocument()
     expect(screen.queryByText(/orders-primary\.internal/)).not.toBeInTheDocument()
     expect(screen.queryByText(/3306/)).not.toBeInTheDocument()
@@ -132,7 +133,7 @@ describe('NewTicketPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('New Ticket')).toBeInTheDocument()
+    expect(await screen.findByText('Ticket Info')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText(/Title/i), { target: { value: 'Add index' } })
     fireEvent.change(screen.getByLabelText('SQL Content'), { target: { value: 'ALTER TABLE orders ADD INDEX idx_status (status);' } })
@@ -140,7 +141,7 @@ describe('NewTicketPage', () => {
     expect(screen.getByRole('button', { name: 'Submit Ticket' })).toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Target Instance' }))
-    fireEvent.click(await screen.findByRole('option', { name: 'orders-primary · MYSQL' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'orders-primary' }))
     await waitFor(() => expect(mockedListTicketDatabases).toHaveBeenCalledWith(1))
 
     expect(screen.getByRole('button', { name: 'Submit Ticket' })).toBeDisabled()
@@ -157,12 +158,12 @@ describe('NewTicketPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('New Ticket')).toBeInTheDocument()
+    expect(await screen.findByText('Ticket Info')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText(/Title/i), { target: { value: 'Add index' } })
     fireEvent.change(screen.getByLabelText('SQL Content'), { target: { value: 'ALTER TABLE orders ADD INDEX idx_status (status);' } })
     fireEvent.click(screen.getByRole('button', { name: 'Target Instance' }))
-    fireEvent.click(await screen.findByRole('option', { name: 'orders-primary · MYSQL' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'orders-primary' }))
     await waitFor(() => expect(mockedListTicketDatabases).toHaveBeenCalledWith(1))
     fireEvent.click(screen.getByRole('button', { name: 'SQL Review' }))
     await waitFor(() => expect(mockedReviewTicketSQL).toHaveBeenCalled())
@@ -192,13 +193,14 @@ describe('NewTicketPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('New Ticket')).toBeInTheDocument()
+    expect(await screen.findByText('Ticket Info')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Ticket Type' }))
     fireEvent.click(await screen.findByRole('option', { name: 'Redis' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Target Instance' }))
-    fireEvent.click(await screen.findByRole('option', { name: 'cache-primary · REDIS' }))
+    await waitFor(() => expect(screen.getAllByText('Redis').length).toBeGreaterThan(1))
+    fireEvent.click(await screen.findByRole('option', { name: 'cache-primary' }))
 
     await waitFor(() => expect(mockedListTicketDatabases).toHaveBeenCalledWith(2))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Target Database Index' })).toHaveTextContent('Not Selected'))

@@ -10,7 +10,6 @@ import type { ApprovalPolicy, PlatformSettings, WorkflowRule, WorkflowRulePrevie
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { Switch } from '@/shared/ui/Switch'
 import { useToast } from '@/shared/ui/ToastContext'
 
@@ -205,11 +204,6 @@ export function SettingsPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="Platform Settings"
-        description="Manage SQL Editor timeout policy and DB metadata scan settings. AWS access still relies on the runtime IAM role, and database credentials are still managed in DB Connections."
-      />
-
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
       {loading || !form ? (

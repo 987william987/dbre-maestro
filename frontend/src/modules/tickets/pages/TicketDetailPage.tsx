@@ -10,10 +10,10 @@ import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWo
 import type { CurrentUser } from '@/shared/types/auth'
 import type { AuditLog } from '@/shared/types/audit'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
+import { DataTable, DataTableBody, DataTableCell, DataTableHead, DataTableHeaderCell, DataTableRow } from '@/shared/ui/DataTable'
 import { ExpandableSql, isExpandableSql } from '@/shared/ui/ExpandableSql'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useToast } from '@/shared/ui/ToastContext'
 import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, retryWorkflowResolution, revokeTicket, withdrawTicket } from '@/modules/tickets/api'
@@ -27,28 +27,28 @@ function DetailTable({
 }) {
   return (
     <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-      <table className="min-w-full border-collapse">
-        <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
+      <DataTable>
+        <DataTableHead>
           <tr>
             {headers.map((header) => (
-              <th key={header} className="px-4 py-3">
+              <DataTableHeaderCell key={header}>
                 {header}
-              </th>
+              </DataTableHeaderCell>
             ))}
           </tr>
-        </thead>
-        <tbody className="divide-y divide-border bg-white text-[13px] text-ink">
+        </DataTableHead>
+        <DataTableBody>
           {rows.map((row, rowIndex) => (
-            <tr key={rowIndex}>
+            <DataTableRow key={rowIndex}>
               {row.map((cell, cellIndex) => (
-                <td key={`${rowIndex}-${cellIndex}`} className="px-4 py-3 align-top">
+                <DataTableCell key={`${rowIndex}-${cellIndex}`} className="align-top">
                   {cell}
-                </td>
+                </DataTableCell>
               ))}
-            </tr>
+            </DataTableRow>
           ))}
-        </tbody>
-      </table>
+        </DataTableBody>
+      </DataTable>
     </div>
   )
 }
@@ -868,10 +868,10 @@ export function TicketDetailPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title={
-          <span className="flex flex-wrap items-center gap-3">
-            <span>{ticket ? ticket.title : 'Ticket Detail'}</span>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <p className="min-w-0 truncate text-[14px] font-semibold text-ink">{ticket ? ticket.title : 'Ticket Detail'}</p>
             {ticket ? (
               <StatusBadge
                 status={ticket.status}
@@ -887,25 +887,17 @@ export function TicketDetailPage() {
                 Updating...
               </span>
             ) : null}
-          </span>
-        }
-        description={
-          ticket ? (
-            <span className="font-mono font-semibold text-ink">{ticket.ticket_no}</span>
-          ) : (
-            'View ticket details, status, and available actions based on your role.'
-          )
-        }
-        actions={
-          <Link
-            to="/tickets"
-            className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to list
-          </Link>
-        }
-      />
+          </div>
+          {ticket ? <p className="mt-1 truncate font-mono text-[12px] font-semibold text-accent">{ticket.ticket_no}</p> : null}
+        </div>
+        <Link
+          to="/tickets"
+          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to list
+        </Link>
+      </div>
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
@@ -922,10 +914,6 @@ export function TicketDetailPage() {
             refreshing={isRefreshing}
           />
           <section className="rounded-xl border border-border bg-panel shadow-soft">
-            <div className="border-b border-border px-4 py-3">
-              <span className="font-mono text-sm font-semibold text-accent">{ticket.ticket_no}</span>
-            </div>
-
             <div className="px-4 py-4">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Overview</p>
               <DetailTable
@@ -957,36 +945,36 @@ export function TicketDetailPage() {
                   ]]}
                 />
                 <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-                  <table className="min-w-full border-collapse">
-                    <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
+                  <DataTable>
+                    <DataTableHead>
                       <tr>
-                        <th className="px-4 py-3">ID</th>
-                        <th className="px-4 py-3">Effect</th>
-                        <th className="px-4 py-3">Connection</th>
-                        <th className="px-4 py-3">Database</th>
-                        <th className="px-4 py-3">Table</th>
-                        <th className="px-4 py-3">Summary</th>
+                        <DataTableHeaderCell>ID</DataTableHeaderCell>
+                        <DataTableHeaderCell>Effect</DataTableHeaderCell>
+                        <DataTableHeaderCell>Connection</DataTableHeaderCell>
+                        <DataTableHeaderCell>Database</DataTableHeaderCell>
+                        <DataTableHeaderCell>Table</DataTableHeaderCell>
+                        <DataTableHeaderCell>Summary</DataTableHeaderCell>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border bg-white text-[13px] text-ink">
+                    </DataTableHead>
+                    <DataTableBody>
                       {queryAccessItems.map((item) => (
-                        <tr key={item.id}>
-                          <td className="px-4 py-3 align-top">{item.id}</td>
-                          <td className="px-4 py-3 align-top">
+                        <DataTableRow key={item.id}>
+                          <DataTableCell className="align-top">{item.id}</DataTableCell>
+                          <DataTableCell className="align-top">
                             <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
                               item.effect === 'deny' ? 'bg-red-50 text-danger' : 'bg-emerald-50 text-emerald-700'
                             }`}>
                               {item.effect === 'deny' ? 'Deny' : 'Allow'}
                             </span>
-                          </td>
-                          <td className="px-4 py-3 align-top">{formatQueryAccessConnection(item)}</td>
-                          <td className="px-4 py-3 align-top">{item.database_pattern === '*' ? 'All Databases' : item.database_pattern || item.database_name}</td>
-                          <td className="px-4 py-3 align-top">{item.table_pattern === '*' ? 'All Tables' : item.table_pattern || item.table_name || '—'}</td>
-                          <td className="px-4 py-3 align-top">{formatQueryAccessRuleSummary(item)}</td>
-                        </tr>
+                          </DataTableCell>
+                          <DataTableCell className="align-top">{formatQueryAccessConnection(item)}</DataTableCell>
+                          <DataTableCell className="align-top">{item.database_pattern === '*' ? 'All Databases' : item.database_pattern || item.database_name}</DataTableCell>
+                          <DataTableCell className="align-top">{item.table_pattern === '*' ? 'All Tables' : item.table_pattern || item.table_name || '—'}</DataTableCell>
+                          <DataTableCell className="align-top">{formatQueryAccessRuleSummary(item)}</DataTableCell>
+                        </DataTableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </DataTableBody>
+                  </DataTable>
                 </div>
               </div>
             ) : null}
@@ -1014,7 +1002,7 @@ export function TicketDetailPage() {
                   ) : null}
                 </div>
                 <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-                  <table className="w-full table-fixed border-collapse">
+                  <DataTable className="w-full table-fixed">
                     <colgroup>
                       <col className="w-[28px]" />
                       <col className="w-[36px]" />
@@ -1028,29 +1016,29 @@ export function TicketDetailPage() {
                       <col className="w-[5%]" />
                       <col className="w-[5%]" />
                     </colgroup>
-                    <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
+                    <DataTableHead>
                       <tr>
-                        <th className="py-3 pl-2 pr-1" aria-label="Expand SQL" />
-                        <th className="py-3 pl-1 pr-2">ID</th>
-                        <th className="py-3 pl-1 pr-2">SQL</th>
-                        <th className="px-3 py-3">Scan / Impact Rows</th>
-                        <th className="px-3 py-3">Review Status</th>
-                        <th className="px-3 py-3">Review Message</th>
-                        <th className="px-3 py-3">Rows Affected</th>
-                        <th className="px-3 py-3">Execution Status</th>
-                        <th className="px-3 py-3">Current Stage</th>
-                        <th className="px-3 py-3">Duration</th>
-                        <th className="px-3 py-3">Error Message</th>
+                        <DataTableHeaderCell className="pl-2 pr-1" aria-label="Expand SQL" />
+                        <DataTableHeaderCell className="pl-1 pr-2">ID</DataTableHeaderCell>
+                        <DataTableHeaderCell className="pl-1 pr-2">SQL</DataTableHeaderCell>
+                        <DataTableHeaderCell>Scan / Impact Rows</DataTableHeaderCell>
+                        <DataTableHeaderCell>Review Status</DataTableHeaderCell>
+                        <DataTableHeaderCell>Review Message</DataTableHeaderCell>
+                        <DataTableHeaderCell>Rows Affected</DataTableHeaderCell>
+                        <DataTableHeaderCell>Execution Status</DataTableHeaderCell>
+                        <DataTableHeaderCell>Current Stage</DataTableHeaderCell>
+                        <DataTableHeaderCell>Duration</DataTableHeaderCell>
+                        <DataTableHeaderCell>Error Message</DataTableHeaderCell>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border bg-white text-[13px] text-ink">
+                    </DataTableHead>
+                    <DataTableBody>
                       {statementResults.map((row) => {
                         const rowKey = statementResultKey(row)
                         const rowExpanded = expandedStatementSQLs.has(rowKey)
                         const rowExpandable = isExpandableSql(row.sql)
                         return (
-                          <tr key={rowKey}>
-                            <td className="py-3 pl-2 pr-1 align-top">
+                          <DataTableRow key={rowKey}>
+                            <DataTableCell className="pl-2 pr-1 align-top">
                               {rowExpandable ? (
                                 <button
                                   type="button"
@@ -1062,34 +1050,45 @@ export function TicketDetailPage() {
                                   {rowExpanded ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
                                 </button>
                               ) : null}
-                            </td>
-                            <td className="py-3 pl-1 pr-2 align-top leading-6">
+                            </DataTableCell>
+                            <DataTableCell className="pl-1 pr-2 align-top leading-6">
                               {row.seq}
-                            </td>
-                            <td className="min-w-0 py-3 pl-1 pr-2 align-top">
+                            </DataTableCell>
+                            <DataTableCell className="min-w-0 pl-1 pr-2 align-top">
                               <ExpandableSql
                                 value={row.sql}
                                 expanded={rowExpanded}
                                 onExpandedChange={(expanded) => setStatementSQLExpanded(rowKey, expanded)}
                                 showToggle={false}
                               />
-                            </td>
-                            <td className="break-words px-3 py-3 align-top leading-6">{row.scanRows ?? '—'}</td>
-                            <td className="break-words px-3 py-3 align-top leading-6">{row.reviewStatus ?? '—'}</td>
-                            <td className="break-words px-3 py-3 align-top leading-6 text-muted">{row.reviewMessage || '—'}</td>
-                            <td className="break-words px-3 py-3 align-top leading-6">{row.rowsAffected ?? '—'}</td>
-                            <td className="break-words px-3 py-3 align-top leading-6">{row.executionStatus ?? '—'}</td>
-                            <td className="break-words px-3 py-3 align-top leading-6">{row.currentStage ?? '—'}</td>
-                            <td className="break-words px-3 py-3 align-top leading-6">{row.duration ?? '—'}</td>
-                            <td className="break-words px-3 py-3 align-top leading-6 text-muted">{row.errorMessage || '—'}</td>
-                          </tr>
+                            </DataTableCell>
+                            <DataTableCell className="break-words align-top leading-6">{row.scanRows ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-top leading-6">{row.reviewStatus ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-top leading-6 text-muted">{row.reviewMessage || '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-top leading-6">{row.rowsAffected ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-top leading-6">{row.executionStatus ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-top leading-6">{row.currentStage ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-top leading-6">{row.duration ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-top leading-6 text-muted">{row.errorMessage || '—'}</DataTableCell>
+                          </DataTableRow>
                         )
                       })}
-                    </tbody>
-                  </table>
+                    </DataTableBody>
+                  </DataTable>
                 </div>
               </div>
             )}
+
+            {detail.scopes.length > 0 ? (
+              <div className="px-4 pb-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Scopes</p>
+                <div className="mt-3 space-y-2">
+                  {detail.scopes.map((scope) => (
+                    <ScopeRow key={scope.id} scope={scope} ticket={ticket} />
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             {shouldShowActionPanel ? (
               <div className="px-4 pb-4">
@@ -1263,17 +1262,6 @@ export function TicketDetailPage() {
               ) : null}
             </div>
 
-            {detail.scopes.length > 0 ? (
-              <div className="px-4 pb-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Scopes</p>
-                <div className="mt-3 space-y-2">
-                  {detail.scopes.map((scope) => (
-                    <ScopeRow key={scope.id} scope={scope} />
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
             {canViewWorkflowTrace && detail.workflow_resolution_trace ? (
               <div className="px-4 pb-4">
                 <button
@@ -1344,25 +1332,29 @@ export function TicketDetailPage() {
   )
 }
 
-function ScopeRow({ scope }: { scope: TicketScope }) {
-  const parts = [scope.connection_id.toString()]
-  if (scope.database_name) {
-    parts.push(scope.database_name)
-  }
-  if (scope.schema_name) {
-    parts.push(scope.schema_name)
-  }
-  if (scope.table_name) {
-    parts.push(scope.table_name)
-  }
-  parts.push(scope.column_name)
+function ScopeRow({ scope, ticket }: { scope: TicketScope; ticket: Ticket }) {
+  const connectionLabel = scope.connection_id === ticket.db_connection_id && ticket.db_connection_name
+    ? ticket.db_connection_name
+    : `Connection #${scope.connection_id}`
+  const scopeParts = [
+    { label: 'Connection', value: connectionLabel },
+    { label: 'Database', value: scope.database_name || '—' },
+    ...(scope.schema_name ? [{ label: 'Schema', value: scope.schema_name }] : []),
+    { label: 'Table', value: scope.table_name || '—' },
+    { label: 'Column', value: scope.column_name },
+  ]
 
   return (
     <div className="rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px] text-ink">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono">{parts.join(' / ')}</span>
+      <div className="flex flex-wrap items-center gap-2.5">
+        {scopeParts.map((part) => (
+          <span key={part.label} className="inline-flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">{part.label}</span>
+            <span className="font-mono text-[12px] text-ink">{part.value}</span>
+          </span>
+        ))}
         {scope.is_sensitive ? (
-          <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">Sensitive</span>
+          <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">Sensitive column</span>
         ) : null}
         <span className="rounded-full border border-border bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">
           {scope.source_kind}

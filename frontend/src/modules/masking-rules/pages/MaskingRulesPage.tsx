@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Pencil, Plus, ShieldAlert, ShieldCheck, Trash2, X } from 'lucide-react'
-import { Link } from 'react-router-dom'
 import {
   createMaskingRule,
   listMaskingConnections,
@@ -28,9 +27,16 @@ import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+} from '@/shared/ui/DataTable'
 
 type ConnectionOption = {
   id: number
@@ -552,25 +558,13 @@ export function MaskingRulesPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="Masking Rules"
-        description="SQL masking supports MySQL and PostgreSQL column results. Redis is managed separately with sensitive key prefixes: key names and metadata may be visible, but value/content reads are blocked for matching prefixes."
-        actions={
-          <>
-            <Link
-              to="/masking-rules/dsl-guide"
-              className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
-            >
-              DSL Guide
-            </Link>
-            {!canWrite ? (
-              <div className="rounded-lg border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
-                This account only has `masking_rules.read`. You can view rules but cannot modify them.
-              </div>
-            ) : null}
-          </>
-        }
-      />
+      {!canWrite ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="rounded-lg border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
+            This account only has `masking_rules.read`. You can view rules but cannot modify them.
+          </div>
+        </div>
+      ) : null}
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
@@ -1167,26 +1161,26 @@ function CompactTable({
   rows: Array<{ key: string; cells: ReactNode[] }>
 }) {
   return (
-    <table className="min-w-full border-collapse">
-      <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+    <DataTable>
+      <DataTableHead>
         <tr>
           {headers.map((header) => (
-            <th key={header} className="px-3 py-2.5">{header}</th>
+            <DataTableHeaderCell key={header}>{header}</DataTableHeaderCell>
           ))}
         </tr>
-      </thead>
-      <tbody>
+      </DataTableHead>
+      <DataTableBody>
         {rows.map((row) => (
-          <tr key={row.key} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
+          <DataTableRow key={row.key}>
             {row.cells.map((cell, index) => (
-              <td key={`${row.key}-${index}`} className="px-3 py-2 align-middle">
+              <DataTableCell key={`${row.key}-${index}`}>
                 {cell}
-              </td>
+              </DataTableCell>
             ))}
-          </tr>
+          </DataTableRow>
         ))}
-      </tbody>
-    </table>
+      </DataTableBody>
+    </DataTable>
   )
 }
 
