@@ -173,6 +173,27 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	jsonCreated(w, map[string]any{"id": user.ID, "username": user.Username})
 }
 
+func (h *AuthHandler) setupCompleted(ctx context.Context) (bool, error) {
+	count, err := h.users.CountUsers(ctx)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (h *AuthHandler) requireSetupCompleted(w http.ResponseWriter, r *http.Request) bool {
+	completed, err := h.setupCompleted(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "setup status check failed")
+		return false
+	}
+	if !completed {
+		jsonErr(w, http.StatusConflict, "setup is required before login")
+		return false
+	}
+	return true
+}
+
 // POST /auth/login
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -185,6 +206,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	username := strings.TrimSpace(req.Username)
 	if !h.allowAuthAttempt(w, r, h.loginRateLimiter, "login", strings.ToLower(username)) {
+		return
+	}
+	if !h.requireSetupCompleted(w, r) {
 		return
 	}
 
@@ -238,6 +262,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 // GET /auth/lark/login/start
 func (h *AuthHandler) StartLarkLogin(w http.ResponseWriter, r *http.Request) {
+	if !h.requireSetupCompleted(w, r) {
+		return
+	}
 	cfg, err := h.resolveLarkOAuthConfig(r.Context())
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "lark login config error")
@@ -265,6 +292,11 @@ func (h *AuthHandler) StartLarkLogin(w http.ResponseWriter, r *http.Request) {
 
 // GET /auth/lark/login/callback
 func (h *AuthHandler) CompleteLarkLogin(w http.ResponseWriter, r *http.Request) {
+	completed, err := h.setupCompleted(r.Context())
+	if err != nil || !completed {
+		http.Redirect(w, r, larkLoginRedirect("", "setup_required"), http.StatusFound)
+		return
+	}
 	cfg, err := h.resolveLarkOAuthConfig(r.Context())
 	if err != nil {
 		http.Redirect(w, r, larkLoginRedirect("", "login_failed"), http.StatusFound)
@@ -351,6 +383,9 @@ func (h *AuthHandler) CompleteLarkLogin(w http.ResponseWriter, r *http.Request) 
 
 // POST /auth/lark/login/result/consume
 func (h *AuthHandler) ConsumeLarkLoginResult(w http.ResponseWriter, r *http.Request) {
+	if !h.requireSetupCompleted(w, r) {
+		return
+	}
 	if h.larkLogins == nil {
 		jsonErr(w, http.StatusServiceUnavailable, "lark login is not configured")
 		return

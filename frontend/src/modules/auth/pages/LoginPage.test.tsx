@@ -100,6 +100,41 @@ describe('LoginPage', () => {
     })
   })
 
+  it('setup 未完成時保留登入控制但全部禁用', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ setup_completed: false }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+    const login = vi.fn()
+
+    mockedUseAuth.mockReturnValue({
+      status: 'anonymous',
+      isAuthenticated: false,
+      user: null,
+      accessToken: null,
+      login,
+      verifyMFA: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Setup Wizard' })).toBeInTheDocument())
+
+    expect(screen.getByPlaceholderText('e.g. admin')).toBeDisabled()
+    expect(screen.getByPlaceholderText('Enter your password')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Sign in with Lark' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(login).not.toHaveBeenCalled()
+  })
+
   it('高權限帳號首次登入時顯示 MFA 設定流程', async () => {
     const login = vi.fn().mockResolvedValue({
       status: 'mfa_required',
