@@ -229,6 +229,78 @@ describe('UsersPage', () => {
     expect(within(row as HTMLTableRowElement).getByText('Dba')).toBeInTheDocument()
   })
 
+  it('Query Access ticket 來源顯示工單號連結', async () => {
+    mockedListUsers.mockResolvedValue({
+      users: [
+        {
+          id: 2,
+          username: 'alice',
+          email: 'alice@example.com',
+          lark_recipient: '',
+          auth_groups: ['developer'],
+          db_connection_ids: [9],
+          protected: false,
+          is_active: true,
+          created_at: '2026-06-10T00:00:00Z',
+          updated_at: '2026-06-10T00:00:00Z',
+        },
+      ],
+    })
+    mockedListUserDBConnections.mockResolvedValue({
+      connections: [
+        {
+          id: 9,
+          name: 'analytics-ro',
+          db_type: 'mysql',
+          host: 'db.internal',
+          port: 3306,
+          username: 'readonly',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          created_by: 1,
+          created_at: '2026-06-10T00:00:00Z',
+          updated_at: '2026-06-10T00:00:00Z',
+        },
+      ],
+    })
+    mockedListQueryAccessRules.mockResolvedValue({
+      rules: [
+        {
+          id: 1,
+          subject_type: 'user',
+          subject_id: 2,
+          effect: 'allow',
+          connection_id: 9,
+          database_pattern: 'analytics',
+          table_pattern: 'events',
+          granted_via: 'ticket',
+          source_ticket_id: 1,
+          source_ticket_no: 'TK-20260713-010101000-ABCDEF',
+          expires_at: '2026-07-20T00:00:00Z',
+          revoked_at: null,
+          revoked_by: null,
+          created_by: 1,
+          updated_by: 1,
+          created_at: '2026-07-13T00:00:00Z',
+          updated_at: '2026-07-13T00:00:00Z',
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <UsersPage initialView="query-access" />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    const link = await screen.findByRole('link', { name: 'TK-20260713-010101000-ABCDEF' })
+
+    expect(link).toHaveAttribute('href', '/tickets/TK-20260713-010101000-ABCDEF')
+    expect(screen.queryByText('Ticket grant #1')).not.toBeInTheDocument()
+  })
+
   it('建立使用者時可一次提交初始 auth groups', async () => {
     mockedCreateUser.mockResolvedValue({
       id: 8,

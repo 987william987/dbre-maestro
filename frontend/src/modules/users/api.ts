@@ -60,6 +60,7 @@ export type QueryAccessRule = {
   table_pattern: string
   granted_via: string
   source_ticket_id?: number | null
+  source_ticket_no?: string | null
   expires_at?: string | null
   revoked_at?: string | null
   revoked_by?: number | null

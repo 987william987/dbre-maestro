@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Database, Info, KeyRound, Loader2, Plus, RefreshCw, Shield, Trash2, UserPlus, Users as UsersIcon, X } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { createAuthGroup, deleteAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
 import { getDBConnectionBindings } from '@/modules/db-connections/api'
 import { listMetadata } from '@/modules/sql-editor/api'
@@ -1012,7 +1012,9 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     </tr>
                   </DataTableHead>
                   <DataTableBody>
-                    {pagedUsers.map((user) => (
+                    {pagedUsers.map((user) => {
+                      const userHasAllPermissions = hasAllPermissionsUser(user, authGroups)
+                      return (
                       <DataTableRow key={user.id}>
                         <DataTableCell>
                           <div className="flex items-center gap-2">
@@ -1027,12 +1029,15 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         </DataTableCell>
                         <DataTableCell>
                           <BindingTags
-                            items={user.protected ? ['All Permissions'] : (user.direct_permissions ?? []).map((permission) => getPermissionMeta(permission).label)}
+                            items={userHasAllPermissions ? ['All Permissions'] : (user.direct_permissions ?? []).map((permission) => getPermissionMeta(permission).label)}
                             emptyLabel="—"
                           />
                         </DataTableCell>
                         <DataTableCell>
-                          <BindingTags items={(user.db_connection_ids ?? []).map((connectionId) => getConnectionLabel(connectionId, connections))} emptyLabel="—" />
+                          <BindingTags
+                            items={userHasAllPermissions ? ['All DB Scope'] : (user.db_connection_ids ?? []).map((connectionId) => getConnectionLabel(connectionId, connections))}
+                            emptyLabel="—"
+                          />
                         </DataTableCell>
                         <DataTableCell>
                           <Tag label={user.is_active ? 'active' : 'disabled'} tone={user.is_active ? 'success' : 'danger'} />
@@ -1049,7 +1054,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           </button>
                         </DataTableCell>
                       </DataTableRow>
-                    ))}
+                      )
+                    })}
                   </DataTableBody>
                 </DataTable>
               </DataTableScroll>
@@ -1079,10 +1085,16 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           <BindingTags items={group.users.map((user) => user.username)} emptyLabel="—" />
                         </DataTableCell>
                         <DataTableCell>
-                          <BindingTags items={(group.permissions ?? []).map((permission) => getPermissionMeta(permission).label)} emptyLabel="—" />
+                          <BindingTags
+                            items={group.all_permissions ? ['All Permissions'] : (group.permissions ?? []).map((permission) => getPermissionMeta(permission).label)}
+                            emptyLabel="—"
+                          />
                         </DataTableCell>
                         <DataTableCell>
-                          <BindingTags items={(group.db_connection_ids ?? []).map((connectionId) => getConnectionLabel(connectionId, connections))} emptyLabel="—" />
+                          <BindingTags
+                            items={group.all_permissions ? ['All DB Scope'] : (group.db_connection_ids ?? []).map((connectionId) => getConnectionLabel(connectionId, connections))}
+                            emptyLabel="—"
+                          />
                         </DataTableCell>
                         <DataTableCell>{formatDateTime(group.created_at ?? '')}</DataTableCell>
                         <DataTableCell>{formatDateTime(group.updated_at ?? '')}</DataTableCell>
@@ -1149,7 +1161,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     <p className="text-[12px] text-muted">Create fallback rules for a user or auth group. * means all; other values are exact names, not fuzzy matches.</p>
                   </div>
                 </div>
-                <div className="grid gap-3 lg:grid-cols-[140px_minmax(170px,0.8fr)_110px_260px_minmax(170px,0.7fr)_minmax(170px,0.7fr)_120px_auto] xl:grid-cols-[150px_minmax(190px,0.9fr)_120px_300px_minmax(190px,0.75fr)_minmax(190px,0.75fr)_130px_auto]">
+                <div className="grid gap-3 xl:grid-cols-[120px_minmax(150px,220px)_100px_120px_auto]">
                   <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Subject Type
                     <DropdownSelect
@@ -1163,7 +1175,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       ]}
                     />
                   </label>
-                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint xl:max-w-[220px]">
                     Subject
                     <DropdownSelect
                       ariaLabel="Query Access Subject"
@@ -1191,6 +1203,38 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       ]}
                     />
                   </label>
+                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Duration
+                    <DropdownSelect
+                      ariaLabel="Query Access Duration"
+                      value={queryAccessRuleDraft.durationMinutes}
+                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, durationMinutes: value }))}
+                      disabled={savingQueryAccessRule}
+                      options={QUERY_ACCESS_DURATION_OPTIONS}
+                    />
+                  </label>
+                  <div className="flex items-end gap-2 xl:justify-self-start">
+                    {editingQueryAccessRuleID != null ? (
+                      <button
+                        type="button"
+                        onClick={handleCancelEditQueryAccessRule}
+                        disabled={savingQueryAccessRule}
+                        className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-white px-3 text-[12px] font-bold text-ink shadow-soft transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                    <button
+                      type="submit"
+                      disabled={savingQueryAccessRule}
+                      className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Plus className="h-4 w-4" />
+                      {editingQueryAccessRuleID == null ? 'Add' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(260px,0.9fr)_minmax(260px,1fr)_minmax(260px,1fr)]">
                   <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     DB Connection
                     <DropdownSelect
@@ -1249,40 +1293,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       />
                     ) : null}
                   </label>
-                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                    Duration
-                    <DropdownSelect
-                      ariaLabel="Query Access Duration"
-                      value={queryAccessRuleDraft.durationMinutes}
-                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, durationMinutes: value }))}
-                      disabled={savingQueryAccessRule}
-                      options={QUERY_ACCESS_DURATION_OPTIONS}
-                    />
-                  </label>
-                  <div className="flex items-center gap-2 self-end">
-                    {editingQueryAccessRuleID != null ? (
-                      <button
-                        type="button"
-                        onClick={handleCancelEditQueryAccessRule}
-                        disabled={savingQueryAccessRule}
-                        className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-white px-3 text-[12px] font-bold text-ink shadow-soft transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
-                    <button
-                      type="submit"
-                      disabled={savingQueryAccessRule}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      <Plus className="h-4 w-4" />
-                      {editingQueryAccessRuleID == null ? 'Add' : 'Save'}
-                    </button>
-                  </div>
                 </div>
-                <p className="mt-3 text-[11px] text-muted">
-                  {queryAccessMetadataLoading ? 'Loading metadata options...' : `Scope preview: ${getConnectionLabel(Number(queryAccessRuleDraft.connectionID), connections)} / ${queryAccessRuleDraft.databasePattern || '—'} / ${queryAccessRuleDraft.tablePattern || '—'}`}
-                </p>
+                {queryAccessMetadataLoading ? <p className="mt-3 text-[11px] text-muted">Loading metadata options...</p> : null}
               </form>
 
               <DataTableSurface>
@@ -1291,6 +1303,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     <DataTableHead>
                       <tr>
                         <DataTableHeaderCell>Subject</DataTableHeaderCell>
+                        <DataTableHeaderCell>Subject Type</DataTableHeaderCell>
                         <DataTableHeaderCell>Effect</DataTableHeaderCell>
                         <DataTableHeaderCell>DB Scope</DataTableHeaderCell>
                         <DataTableHeaderCell>Source</DataTableHeaderCell>
@@ -1305,10 +1318,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         return (
                           <DataTableRow key={rule.id}>
                             <DataTableCell>
-                              <div className="grid gap-1">
-                                <p>{formatQueryAccessSubject(rule, users, authGroups)}</p>
-                                <p className="text-[11px] text-ink">{rule.subject_type}</p>
-                              </div>
+                              {formatQueryAccessSubject(rule, users, authGroups)}
+                            </DataTableCell>
+                            <DataTableCell>
+                              {formatQueryAccessSubjectType(rule.subject_type)}
                             </DataTableCell>
                             <DataTableCell>
                               <Tag label={rule.effect} tone={rule.effect === 'deny' ? 'danger' : 'success'} />
@@ -1316,7 +1329,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                             <DataTableCell>
                               {getConnectionLabel(rule.connection_id, connections)} / {rule.database_pattern === '*' ? 'All databases' : rule.database_pattern} / {rule.table_pattern === '*' ? 'All tables' : rule.table_pattern}
                             </DataTableCell>
-                            <DataTableCell>{rule.granted_via}{rule.source_ticket_id ? ` #${rule.source_ticket_id}` : ''}</DataTableCell>
+                            <DataTableCell>{formatQueryAccessSource(rule)}</DataTableCell>
                             <DataTableCell>{rule.expires_at ? formatDateTime(rule.expires_at) : 'Never'}</DataTableCell>
                             <DataTableCell>
                               <Tag label={active ? 'active' : rule.revoked_at ? 'revoked' : 'expired'} tone={active ? 'success' : 'default'} />
@@ -2120,6 +2133,35 @@ function formatQueryAccessSubject(rule: QueryAccessRule, users: UserSummary[], a
   }
   const group = authGroups.find((item) => item.id === rule.subject_id)
   return group?.label ?? group?.name ?? `Auth Group #${rule.subject_id}`
+}
+
+function formatQueryAccessSubjectType(subjectType: QueryAccessRule['subject_type']) {
+  return subjectType === 'auth_group' ? 'Auth Group' : 'User'
+}
+
+function formatQueryAccessSource(rule: QueryAccessRule) {
+  if (rule.granted_via === 'ticket') {
+    if (rule.source_ticket_no) {
+      return (
+        <Link
+          to={`/tickets/${rule.source_ticket_no}`}
+          className="font-mono text-[12px] text-accent underline-offset-2 transition hover:underline"
+          title={rule.source_ticket_no}
+        >
+          {rule.source_ticket_no}
+        </Link>
+      )
+    }
+    return rule.source_ticket_id ? `Ticket grant #${rule.source_ticket_id}` : 'Ticket grant'
+  }
+  if (rule.granted_via === 'manual') {
+    return 'Manual rule'
+  }
+  return rule.granted_via
+}
+
+function hasAllPermissionsUser(user: UserSummary, authGroups: AuthGroupDetail[]) {
+  return user.protected || user.auth_groups.some((groupName) => authGroups.some((group) => group.name === groupName && group.all_permissions))
 }
 
 function BindingTags({ items, emptyLabel, maxVisible = 2 }: { items: string[]; emptyLabel: string; maxVisible?: number }) {
