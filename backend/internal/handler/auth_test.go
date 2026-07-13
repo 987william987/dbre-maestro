@@ -66,6 +66,11 @@ func mfaChallengeRows(tokenID string, setup bool, usedAt any, revokedAt any, att
 		AddRow(3, tokenID, 7, setup, time.Now().Add(time.Minute), attempts, usedAt, revokedAt, "10.0.0.1", now)
 }
 
+func expectSetupCompleted(mock sqlmock.Sqlmock, count int) {
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM users`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(count))
+}
+
 func sessionRows(id uint64, userID uint64) *sqlmock.Rows {
 	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
 	return sqlmock.NewRows([]string{"id", "user_id", "token_hash", "user_agent", "ip_address", "expires_at", "revoked_at", "created_at"}).
@@ -386,6 +391,7 @@ func TestAuthHandlerLoginDisabledUserReturnsForbidden(t *testing.T) {
 	userRepo := repository.NewUserRepo(sqlxDB)
 	handler := NewAuthHandler(userRepo, repository.NewSessionRepo(sqlxDB), nil, []byte("secret"))
 
+	expectSetupCompleted(mock, 1)
 	mock.ExpectQuery(`SELECT \* FROM users WHERE username = \?`).
 		WithArgs("alice").
 		WillReturnRows(authUserRows(false))
@@ -405,6 +411,60 @@ func TestAuthHandlerLoginDisabledUserReturnsForbidden(t *testing.T) {
 	}
 }
 
+func TestAuthHandlerLoginRequiresSetupCompleted(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), nil, []byte("secret"))
+
+	expectSetupCompleted(mock, 0)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"username":"alice","password":"Password1"}`))
+	rec := httptest.NewRecorder()
+	handler.Login(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+	if !strings.Contains(rec.Body.String(), "setup is required before login") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerStartLarkLoginRequiresSetupCompleted(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), nil, []byte("secret"))
+
+	expectSetupCompleted(mock, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/lark/login/start", nil)
+	rec := httptest.NewRecorder()
+	handler.StartLarkLogin(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+	if !strings.Contains(rec.Body.String(), "setup is required before login") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestAuthHandlerLoginInvalidCredentialsWritesAudit(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -415,6 +475,7 @@ func TestAuthHandlerLoginInvalidCredentialsWritesAudit(t *testing.T) {
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
 	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB), []byte("secret"))
 
+	expectSetupCompleted(mock, 1)
 	mock.ExpectQuery(`SELECT \* FROM users WHERE username = \?`).
 		WithArgs("missing").
 		WillReturnError(sql.ErrNoRows)
@@ -448,6 +509,7 @@ func TestAuthHandlerLoginDisabledUserWritesAudit(t *testing.T) {
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
 	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), repository.NewAuditRepo(sqlxDB), []byte("secret"))
 
+	expectSetupCompleted(mock, 1)
 	mock.ExpectQuery(`SELECT \* FROM users WHERE username = \?`).
 		WithArgs("alice").
 		WillReturnRows(authUserRows(false))
@@ -482,6 +544,7 @@ func TestAuthHandlerLoginRateLimit(t *testing.T) {
 	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), repository.NewSessionRepo(sqlxDB), nil, []byte("secret"))
 	handler.loginRateLimiter = newRequestRateLimiter(1, time.Minute)
 
+	expectSetupCompleted(mock, 1)
 	mock.ExpectQuery(`SELECT \* FROM users WHERE username = \?`).
 		WithArgs("alice").
 		WillReturnError(sql.ErrNoRows)

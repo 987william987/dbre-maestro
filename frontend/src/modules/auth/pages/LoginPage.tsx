@@ -121,8 +121,15 @@ export function LoginPage() {
     return <Navigate to={nextPath ?? defaultRouteForPermissions(user?.permissions ?? [])} replace />
   }
 
+  const setupRequired = setupCompleted === false
+  const loginDisabled = setupRequired || loading || (mfaChallenge ? mfaCode.length !== 6 : username.trim() === '' || password.trim() === '')
+  const larkDisabled = setupRequired || loading || larkLoading
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (setupRequired) {
+      return
+    }
     setError('')
     setLoading(true)
 
@@ -158,6 +165,9 @@ export function LoginPage() {
   }
 
   const handleLarkLogin = async () => {
+    if (setupRequired) {
+      return
+    }
     setError('')
     setLarkLoading(true)
     try {
@@ -187,12 +197,12 @@ export function LoginPage() {
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-semibold text-ink">Username</span>
             <input
-              className="h-10 rounded-control border border-border bg-panel px-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className="h-10 rounded-control border border-border bg-panel px-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               placeholder="e.g. admin"
               autoComplete="username"
-              disabled={loading || mfaChallenge !== null}
+              disabled={setupRequired || loading || mfaChallenge !== null}
             />
           </label>
 
@@ -200,19 +210,19 @@ export function LoginPage() {
             <span className="text-sm font-semibold text-ink">Password</span>
             <div className="relative">
               <input
-                className="h-10 w-full rounded-control border border-border bg-panel px-3 pr-10 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                className="h-10 w-full rounded-control border border-border bg-panel px-3 pr-10 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="Enter your password"
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="current-password"
-                disabled={loading || mfaChallenge !== null}
+                disabled={setupRequired || loading || mfaChallenge !== null}
               />
               <button
                 type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-faint transition hover:text-muted"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-faint transition hover:text-muted disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => setShowPassword((value) => !value)}
-                disabled={loading || mfaChallenge !== null}
+                disabled={setupRequired || loading || mfaChallenge !== null}
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
@@ -273,7 +283,7 @@ export function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading || (mfaChallenge ? mfaCode.length !== 6 : username.trim() === '' || password.trim() === '')}
+            disabled={loginDisabled}
             className={cn(
               'mt-1 inline-flex h-10 items-center justify-center gap-2 rounded-control px-4 text-sm font-bold transition-colors',
               'bg-brand text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50',
@@ -287,7 +297,7 @@ export function LoginPage() {
         {!mfaChallenge ? (
           <button
             type="button"
-            disabled={loading || larkLoading}
+            disabled={larkDisabled}
             onClick={handleLarkLogin}
             className={cn(
               'mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-control border border-border px-4 text-sm font-bold transition-colors',
@@ -326,6 +336,9 @@ function larkLoginErrorMessage(code: string) {
   }
   if (code === 'user_disabled') {
     return 'The Lark account is linked to a disabled user.'
+  }
+  if (code === 'setup_required') {
+    return 'Please complete the Setup Wizard before signing in.'
   }
   return 'Lark login failed. Please try again later.'
 }
