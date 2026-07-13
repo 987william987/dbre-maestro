@@ -1003,6 +1003,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     <tr>
                       <DataTableHeaderCell>Username</DataTableHeaderCell>
                       <DataTableHeaderCell>Auth Groups</DataTableHeaderCell>
+                      <DataTableHeaderCell>Permissions</DataTableHeaderCell>
                       <DataTableHeaderCell>DB Scope</DataTableHeaderCell>
                       <DataTableHeaderCell>Status</DataTableHeaderCell>
                       <DataTableHeaderCell>Created</DataTableHeaderCell>
@@ -1022,34 +1023,16 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           </div>
                         </DataTableCell>
                         <DataTableCell>
-                          <div className="flex flex-wrap gap-1.5">
-                            {user.auth_groups.length > 0
-                              ? user.auth_groups.map((group) => (
-                                  <Tag key={group} label={authGroupLabelMap.get(group) ?? group} />
-                                ))
-                              : <span className="text-[12px] text-muted">—</span>}
-                          </div>
+                          <BindingTags items={user.auth_groups.map((group) => authGroupLabelMap.get(group) ?? group)} emptyLabel="—" />
                         </DataTableCell>
                         <DataTableCell>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {(user.db_connection_ids ?? []).length > 0 ? (
-                              <>
-                                {(user.db_connection_ids ?? []).slice(0, 2).map((connectionId) => (
-                                  <Tag key={connectionId} label={getConnectionLabel(connectionId, connections)} />
-                                ))}
-                                {(user.db_connection_ids ?? []).length > 2 ? (
-                                  <span
-                                    className="whitespace-nowrap text-[11px] font-semibold text-muted"
-                                    title={(user.db_connection_ids ?? []).slice(2).map((id) => getConnectionLabel(id, connections)).join(', ')}
-                                  >
-                                    +{(user.db_connection_ids ?? []).length - 2}
-                                  </span>
-                                ) : null}
-                              </>
-                            ) : (
-                              <span className="text-[12px] text-muted">—</span>
-                            )}
-                          </div>
+                          <BindingTags
+                            items={user.protected ? ['All Permissions'] : (user.direct_permissions ?? []).map((permission) => getPermissionMeta(permission).label)}
+                            emptyLabel="—"
+                          />
+                        </DataTableCell>
+                        <DataTableCell>
+                          <BindingTags items={(user.db_connection_ids ?? []).map((connectionId) => getConnectionLabel(connectionId, connections))} emptyLabel="—" />
                         </DataTableCell>
                         <DataTableCell>
                           <Tag label={user.is_active ? 'active' : 'disabled'} tone={user.is_active ? 'success' : 'danger'} />
@@ -1137,20 +1120,17 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       return (
                         <DataTableRow key={connection.id}>
                           <DataTableCell>
-                            <div className="grid gap-1">
-                              <p>{connection.name}</p>
-                              <p className="text-[11px] text-ink">{getConnectionLabel(connection.id, connections)}</p>
-                            </div>
+                            <p className="whitespace-nowrap">{connection.name}</p>
                           </DataTableCell>
                           <DataTableCell>{formatDBType(connection.db_type)}</DataTableCell>
                           <DataTableCell>
-                            <BindingTags items={bindings?.direct_users.map((user) => user.username) ?? []} emptyLabel="—" />
+                            <BindingTags items={bindings?.direct_users.map((user) => user.username) ?? []} emptyLabel="—" maxVisible={5} />
                           </DataTableCell>
                           <DataTableCell>
-                            <BindingTags items={bindings?.auth_groups.map((group) => group.name || group.group_key) ?? []} emptyLabel="—" />
+                            <BindingTags items={bindings?.auth_groups.map((group) => group.name || group.group_key) ?? []} emptyLabel="—" maxVisible={5} />
                           </DataTableCell>
                           <DataTableCell>
-                            <BindingTags items={bindings?.effective_users.map((user) => user.username) ?? []} emptyLabel="—" />
+                            <BindingTags items={bindings?.effective_users.map((user) => user.username) ?? []} emptyLabel="—" maxVisible={5} />
                           </DataTableCell>
                         </DataTableRow>
                       )
@@ -2142,16 +2122,39 @@ function formatQueryAccessSubject(rule: QueryAccessRule, users: UserSummary[], a
   return group?.label ?? group?.name ?? `Auth Group #${rule.subject_id}`
 }
 
-function BindingTags({ items, emptyLabel }: { items: string[]; emptyLabel: string }) {
+function BindingTags({ items, emptyLabel, maxVisible = 2 }: { items: string[]; emptyLabel: string; maxVisible?: number }) {
+  const [expanded, setExpanded] = useState(false)
+
   if (items.length === 0) {
     return <span className="text-[12px] text-muted">{emptyLabel}</span>
   }
 
+  const visibleItems = expanded ? items : items.slice(0, maxVisible)
+  const hiddenCount = Math.max(0, items.length - visibleItems.length)
+
   return (
     <div className="flex flex-wrap gap-1.5">
-      {items.map((item) => (
-        <Tag key={item} label={item} />
+      {visibleItems.map((item) => (
+        <Tag key={item} label={item} title={item} />
       ))}
+      {hiddenCount > 0 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="inline-flex items-center rounded-full border border-border bg-white px-2 py-0.5 text-[10px] font-semibold text-muted transition hover:bg-panel-soft hover:text-ink"
+          title={items.slice(maxVisible).join(', ')}
+        >
+          +{hiddenCount}
+        </button>
+      ) : expanded && items.length > maxVisible ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="inline-flex items-center rounded-full border border-border bg-white px-2 py-0.5 text-[10px] font-semibold text-muted transition hover:bg-panel-soft hover:text-ink"
+        >
+          Less
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -2256,9 +2259,10 @@ function InfoList({ title, items, emptyMessage }: { title: string; items: string
   )
 }
 
-function Tag({ label, tone = 'default' }: { label: string; tone?: 'default' | 'danger' | 'success' }) {
+function Tag({ label, tone = 'default', title }: { label: string; tone?: 'default' | 'danger' | 'success'; title?: string }) {
   return (
     <span
+      title={title}
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
         tone === 'danger'
           ? 'border-danger/20 bg-red-50 text-danger'

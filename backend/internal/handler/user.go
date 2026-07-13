@@ -70,17 +70,18 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	// Strip password hash before returning
 	type userView struct {
-		ID              uint64            `json:"id"`
-		Username        string            `json:"username"`
-		Email           string            `json:"email"`
-		LarkRecipient   string            `json:"lark_recipient"`
-		AuthGroups      []model.AuthGroup `json:"auth_groups"`
-		Permissions     []string          `json:"permissions"`
-		DBConnectionIDs []uint64          `json:"db_connection_ids"`
-		Protected       bool              `json:"protected"`
-		IsActive        bool              `json:"is_active"`
-		CreatedAt       string            `json:"created_at"`
-		UpdatedAt       string            `json:"updated_at"`
+		ID                uint64            `json:"id"`
+		Username          string            `json:"username"`
+		Email             string            `json:"email"`
+		LarkRecipient     string            `json:"lark_recipient"`
+		AuthGroups        []model.AuthGroup `json:"auth_groups"`
+		Permissions       []string          `json:"permissions"`
+		DirectPermissions []string          `json:"direct_permissions"`
+		DBConnectionIDs   []uint64          `json:"db_connection_ids"`
+		Protected         bool              `json:"protected"`
+		IsActive          bool              `json:"is_active"`
+		CreatedAt         string            `json:"created_at"`
+		UpdatedAt         string            `json:"updated_at"`
 	}
 	views := make([]userView, 0, len(users))
 	for _, u := range users {
@@ -100,6 +101,14 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 		if permissionKeys == nil {
 			permissionKeys = []string{}
 		}
+		directPermissionKeys, err := h.users.ListDirectPermissionKeys(r.Context(), u.ID)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "list user direct permissions failed")
+			return
+		}
+		if directPermissionKeys == nil {
+			directPermissionKeys = []string{}
+		}
 		dbConnectionIDs, err := h.users.GetEffectiveDBConnectionIDs(r.Context(), u.ID)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "list user db scope failed")
@@ -110,17 +119,18 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 
 		views = append(views, userView{
-			ID:              u.ID,
-			Username:        u.Username,
-			Email:           u.Email,
-			LarkRecipient:   u.LarkRecipient,
-			AuthGroups:      groups,
-			Permissions:     permissionKeys,
-			DBConnectionIDs: dbConnectionIDs,
-			Protected:       u.IsProtected,
-			IsActive:        u.IsActive,
-			CreatedAt:       u.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			UpdatedAt:       u.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			ID:                u.ID,
+			Username:          u.Username,
+			Email:             u.Email,
+			LarkRecipient:     u.LarkRecipient,
+			AuthGroups:        groups,
+			Permissions:       permissionKeys,
+			DirectPermissions: directPermissionKeys,
+			DBConnectionIDs:   dbConnectionIDs,
+			Protected:         u.IsProtected,
+			IsActive:          u.IsActive,
+			CreatedAt:         u.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:         u.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}
 	jsonOK(w, map[string]any{"users": views})

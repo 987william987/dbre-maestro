@@ -92,6 +92,7 @@ export function listUsers() {
           lark_recipient: typeof user.lark_recipient === 'string' ? user.lark_recipient : '',
           auth_groups: Array.isArray(user.auth_groups) ? user.auth_groups : [],
           permissions: Array.isArray(user.permissions) ? user.permissions : [],
+          direct_permissions: Array.isArray(user.direct_permissions) ? user.direct_permissions : [],
           db_connection_ids: Array.isArray(user.db_connection_ids) ? user.db_connection_ids : [],
         }))
       : [],
