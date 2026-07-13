@@ -64,6 +64,7 @@ type QueryAccessRule struct {
 	TablePattern    string                 `db:"table_pattern"    json:"table_pattern"`
 	GrantedVia      string                 `db:"granted_via"      json:"granted_via"`
 	SourceTicketID  *uint64                `db:"source_ticket_id" json:"source_ticket_id,omitempty"`
+	SourceTicketNo  *string                `db:"source_ticket_no" json:"source_ticket_no,omitempty"`
 	ExpiresAt       *time.Time             `db:"expires_at"       json:"expires_at,omitempty"`
 	RevokedAt       *time.Time             `db:"revoked_at"       json:"revoked_at,omitempty"`
 	RevokedBy       *uint64                `db:"revoked_by"       json:"revoked_by,omitempty"`

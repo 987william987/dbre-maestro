@@ -290,12 +290,14 @@ func (r *QueryAccessRepo) ListActiveRules(ctx context.Context, subjectID uint64,
 func (r *QueryAccessRepo) ListRules(ctx context.Context) ([]model.QueryAccessRule, error) {
 	rules := make([]model.QueryAccessRule, 0)
 	if err := r.db.SelectContext(ctx, &rules, `
-		SELECT id, subject_type, subject_id, effect, connection_id, database_pattern, table_pattern,
-		       granted_via, source_ticket_id, expires_at, revoked_at, revoked_by, created_by, updated_by, created_at, updated_at
-		FROM query_access_rules
+		SELECT qar.id, qar.subject_type, qar.subject_id, qar.effect, qar.connection_id, qar.database_pattern, qar.table_pattern,
+		       qar.granted_via, qar.source_ticket_id, t.ticket_no AS source_ticket_no,
+		       qar.expires_at, qar.revoked_at, qar.revoked_by, qar.created_by, qar.updated_by, qar.created_at, qar.updated_at
+		FROM query_access_rules qar
+		LEFT JOIN tickets t ON t.id = qar.source_ticket_id
 		ORDER BY
-		  CASE WHEN revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) THEN 0 ELSE 1 END,
-		  id DESC
+		  CASE WHEN qar.revoked_at IS NULL AND (qar.expires_at IS NULL OR qar.expires_at > ?) THEN 0 ELSE 1 END,
+		  qar.id DESC
 	`, timeutil.NowUTC()); err != nil {
 		return nil, fmt.Errorf("list query access rules: %w", err)
 	}

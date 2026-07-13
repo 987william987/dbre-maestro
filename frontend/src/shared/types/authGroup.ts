@@ -5,6 +5,7 @@ export type AuthGroupSummary = {
   description: string
   system_defined: boolean
   protected?: boolean
+  all_permissions?: boolean
   user_count: number
   resource_group_count?: number
   permission_count?: number
@@ -31,6 +32,7 @@ export type AuthGroupDetail = {
   description: string
   system_defined: boolean
   protected?: boolean
+  all_permissions?: boolean
   users: AuthGroupUser[]
   permissions?: string[]
   db_connection_ids?: number[]

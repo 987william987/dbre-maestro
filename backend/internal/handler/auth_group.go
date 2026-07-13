@@ -48,6 +48,7 @@ func (h *AuthGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 		Description       string   `json:"description"`
 		SystemDefined     bool     `json:"system_defined"`
 		Protected         bool     `json:"protected"`
+		AllPermissions    bool     `json:"all_permissions"`
 		UserCount         int      `json:"user_count"`
 		PermissionCount   int      `json:"permission_count"`
 		DBConnectionCount int      `json:"db_connection_count"`
@@ -94,6 +95,7 @@ func (h *AuthGroupHandler) List(w http.ResponseWriter, r *http.Request) {
 			Description:       item.Description,
 			SystemDefined:     item.IsSystem,
 			Protected:         item.IsProtected,
+			AllPermissions:    item.IsAllPermissions,
 			UserCount:         len(users),
 			PermissionCount:   len(permissions),
 			DBConnectionCount: len(dbConnectionIDs),
@@ -173,6 +175,7 @@ func (h *AuthGroupHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"description":       group.Description,
 		"system_defined":    group.IsSystem,
 		"protected":         group.IsProtected,
+		"all_permissions":   group.IsAllPermissions,
 		"created_at":        group.CreatedAt,
 		"updated_at":        group.UpdatedAt,
 		"users":             userViews,
