@@ -7,6 +7,7 @@ export type UserSummary = {
   lark_recipient: string
   auth_groups: AuthGroup[]
   permissions?: string[]
+  direct_permissions?: string[]
   db_connection_ids?: number[]
   protected: boolean
   is_active: boolean
