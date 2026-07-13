@@ -3,6 +3,12 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,6 +52,12 @@ func RunMigrations(dsn string, migrationsPath string) error {
 	}
 	defer rawDB.Close()
 
+	state, err := readMigrationState(rawDB)
+	if err != nil {
+		return fmt.Errorf("read migration state: %w", err)
+	}
+	logMigrationPlan(migrationsPath, state)
+
 	// Clear version-0 state directly via SQL rather than using golang-migrate's
 	// Force(), which fails when the target version has no file.
 	if err := resetMigrationState(rawDB); err != nil {
@@ -70,6 +82,132 @@ func RunMigrations(dsn string, migrationsPath string) error {
 		return fmt.Errorf("migration up: %w", err)
 	}
 	return nil
+}
+
+type migrationState struct {
+	Exists  bool
+	Version int
+	Dirty   bool
+}
+
+type migrationFile struct {
+	Version int
+	Name    string
+	Path    string
+}
+
+func readMigrationState(db *sql.DB) (migrationState, error) {
+	var state migrationState
+	var exists int
+	err := db.QueryRow(`
+		SELECT COUNT(*) FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'schema_migrations'
+	`).Scan(&exists)
+	if err != nil || exists == 0 {
+		return state, err
+	}
+
+	state.Exists = true
+	err = db.QueryRow(`SELECT version, dirty FROM schema_migrations LIMIT 1`).Scan(&state.Version, &state.Dirty)
+	if err == sql.ErrNoRows {
+		return state, nil
+	}
+	if err != nil {
+		return state, err
+	}
+	return state, nil
+}
+
+func logMigrationPlan(migrationsPath string, state migrationState) {
+	files, err := listUpMigrationFiles(migrationsPath)
+	if err != nil {
+		slog.Warn("migration plan unavailable", "migrations_path", migrationsPath, "err", err)
+		return
+	}
+
+	version := 0
+	if state.Exists {
+		version = state.Version
+	}
+	slog.Info("migration state loaded", "version", version, "dirty", state.Dirty, "migrations_path", migrationsPath)
+
+	if state.Dirty {
+		file := migrationFileForVersion(files, state.Version)
+		if file == nil {
+			slog.Warn("migration dirty state has no matching local file", "version", state.Version)
+			return
+		}
+		slog.Error(
+			"migration dirty state detected",
+			"version", state.Version,
+			"file", file.Name,
+			"sql", migrationSQLPreview(file.Path),
+		)
+		return
+	}
+
+	pending := make([]string, 0)
+	for _, file := range files {
+		if file.Version > version {
+			pending = append(pending, file.Name)
+		}
+	}
+	slog.Info("migration pending files", "count", len(pending), "files", pending)
+}
+
+var migrationUpFilePattern = regexp.MustCompile(`^([0-9]+)_.+\.up\.sql$`)
+
+func listUpMigrationFiles(migrationsPath string) ([]migrationFile, error) {
+	entries, err := os.ReadDir(migrationsPath)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]migrationFile, 0, len(entries)/2)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		matches := migrationUpFilePattern.FindStringSubmatch(name)
+		if matches == nil {
+			continue
+		}
+		version, err := strconv.Atoi(matches[1])
+		if err != nil {
+			continue
+		}
+		files = append(files, migrationFile{
+			Version: version,
+			Name:    name,
+			Path:    filepath.Join(migrationsPath, name),
+		})
+	}
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Version < files[j].Version
+	})
+	return files, nil
+}
+
+func migrationFileForVersion(files []migrationFile, version int) *migrationFile {
+	for i := range files {
+		if files[i].Version == version {
+			return &files[i]
+		}
+	}
+	return nil
+}
+
+func migrationSQLPreview(path string) string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Sprintf("unavailable: %v", err)
+	}
+	const limit = 4000
+	sql := strings.TrimSpace(string(content))
+	if len(sql) <= limit {
+		return sql
+	}
+	return sql[:limit] + "\n...<truncated>"
 }
 
 // resetMigrationState clears version=0 rows from schema_migrations so
