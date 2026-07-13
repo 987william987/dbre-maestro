@@ -1,19 +1,64 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, CheckCircle2, FileText, Loader2, Plus, ScrollText, Trash2, Wand2, XCircle } from 'lucide-react'
+import { CheckCircle2, FileText, Loader2, Plus, ScrollText, Trash2, Wand2, XCircle } from 'lucide-react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { format as formatSQL } from 'sql-formatter'
 import { ApiError } from '@/shared/api/client'
+import { DataTable, DataTableBody, DataTableCell, DataTableHead, DataTableHeaderCell, DataTableRow } from '@/shared/ui/DataTable'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
+import type { DropdownOptionGroup } from '@/shared/ui/DropdownSelect'
 import { ExpandableSql, ExpandableText } from '@/shared/ui/ExpandableSql'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataResponse } from '@/shared/types/sqlEditor'
 import type { QueryAccessEffect, TicketReviewResult, TicketType } from '@/shared/types/ticket'
 import { listMetadata } from '@/modules/sql-editor/api'
 import { createTicket, listConnections, listTicketDatabases, reviewTicketSQL } from '@/modules/tickets/api'
 
-function formatConnectionOptionLabel(connection: DBConnection) {
-  return `${connection.name} · ${connection.db_type.toUpperCase()}`
+function formatConnectionGroupLabel(dbType: string) {
+  switch (dbType) {
+    case 'mysql':
+      return 'MySQL'
+    case 'postgres':
+      return 'PgSQL'
+    case 'redis':
+      return 'Redis'
+    default:
+      return dbType.toUpperCase()
+  }
+}
+
+function getConnectionGroupOrder(dbType: string) {
+  switch (dbType) {
+    case 'mysql':
+      return 1
+    case 'redis':
+      return 2
+    case 'postgres':
+      return 3
+    default:
+      return 99
+  }
+}
+
+function groupConnectionOptions(connections: DBConnection[]): DropdownOptionGroup[] {
+  const groups = new Map<string, DBConnection[]>()
+  connections.forEach((connection) => {
+    groups.set(connection.db_type, [...(groups.get(connection.db_type) ?? []), connection])
+  })
+
+  return Array.from(groups.entries())
+    .sort(([leftType], [rightType]) => {
+      const orderDiff = getConnectionGroupOrder(leftType) - getConnectionGroupOrder(rightType)
+      return orderDiff || formatConnectionGroupLabel(leftType).localeCompare(formatConnectionGroupLabel(rightType))
+    })
+    .map(([dbType, groupConnections]) => ({
+      label: formatConnectionGroupLabel(dbType),
+      options: [...groupConnections]
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map((connection) => ({
+          value: String(connection.id),
+          label: connection.name,
+        })),
+    }))
 }
 
 type QueryAccessTableOption = {
@@ -155,6 +200,7 @@ export function NewTicketPage() {
     }
     return connections.filter((connection) => connection.db_type !== 'redis')
   }, [connections, ticketType])
+  const groupedConnectionOptions = useMemo(() => groupConnectionOptions(filteredConnections), [filteredConnections])
   const parserResults = useMemo(() => reviewResults.filter((result) => result.phase === 'parser'), [reviewResults])
   const validationResults = useMemo(() => reviewResults.filter((result) => !result.phase || result.phase === 'validation'), [reviewResults])
   const requiresDatabaseSelection = !isQueryAccessTicket
@@ -482,20 +528,6 @@ export function NewTicketPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="New Ticket"
-        description="Fill in the change details and target database. After submission, a Reviewer / DBA will handle the review and execution."
-        actions={
-          <Link
-            to="/tickets"
-            className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to List
-          </Link>
-        }
-      />
-
       <form className="grid items-start gap-3" onSubmit={handleSubmit}>
         <section className="rounded-xl border border-border bg-panel shadow-soft">
           <div className="border-b border-border/80 px-4 py-3">
@@ -507,8 +539,8 @@ export function NewTicketPage() {
 
           <div className={`grid gap-3 px-4 py-4 ${
             isQueryAccessTicket
-              ? 'lg:grid-cols-[minmax(220px,1.2fr)_minmax(260px,2fr)_220px]'
-              : 'lg:grid-cols-[minmax(220px,1.2fr)_minmax(260px,2fr)_190px_minmax(220px,1fr)_minmax(220px,1fr)]'
+              ? 'lg:grid-cols-[minmax(220px,1.1fr)_minmax(240px,1.4fr)_170px]'
+              : 'lg:grid-cols-[minmax(220px,1fr)_minmax(240px,1.25fr)_150px_minmax(340px,1.9fr)_minmax(220px,1fr)]'
           }`}>
             <label className="flex flex-col gap-1.5">
               <span className="text-[12px] font-semibold text-ink">
@@ -562,10 +594,7 @@ export function NewTicketPage() {
                   disabled={submitting || loadingConnections}
                   options={[
                     { value: '', label: 'Not Selected' },
-                    ...filteredConnections.map((connection) => ({
-                      value: String(connection.id),
-                      label: formatConnectionOptionLabel(connection),
-                    })),
+                    ...groupedConnectionOptions,
                   ]}
                 />
               </label>
@@ -693,10 +722,7 @@ export function NewTicketPage() {
                               disabled={submitting || loadingConnections}
                               options={[
                                 { value: '', label: 'Not Selected' },
-                                ...filteredConnections.map((connection) => ({
-                                  value: String(connection.id),
-                                  label: formatConnectionOptionLabel(connection),
-                                })),
+                                ...groupedConnectionOptions,
                               ]}
                             />
                           </label>
@@ -798,43 +824,43 @@ export function NewTicketPage() {
                 <div className="px-4 pt-4">
                   <p className="text-[12px] font-semibold text-ink">Parser Results</p>
                   <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-                    <table className="min-w-[1060px] w-full table-fixed border-collapse">
+                    <DataTable className="min-w-[1060px] w-full table-fixed">
                       <ReviewResultColumnGroup />
-                      <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
+                      <DataTableHead>
                         <tr>
-                          <th className="px-3 py-3">ID</th>
-                          <th className="px-3 py-3">{ticketType === 'redis_command' ? 'Command' : 'SQL'}</th>
-                          <th className="px-3 py-3">Method</th>
-                          <th className="px-3 py-3">Stage</th>
-                          <th className="px-3 py-3">Kind</th>
-                          <th className="px-3 py-3">Object</th>
-                          <th className="px-3 py-3">Scan / Impact Rows</th>
-                          <th className="px-3 py-3">Status</th>
-                          <th className="px-3 py-3">Message</th>
+                          <DataTableHeaderCell>ID</DataTableHeaderCell>
+                          <DataTableHeaderCell>{ticketType === 'redis_command' ? 'Command' : 'SQL'}</DataTableHeaderCell>
+                          <DataTableHeaderCell>Method</DataTableHeaderCell>
+                          <DataTableHeaderCell>Stage</DataTableHeaderCell>
+                          <DataTableHeaderCell>Kind</DataTableHeaderCell>
+                          <DataTableHeaderCell>Object</DataTableHeaderCell>
+                          <DataTableHeaderCell>Scan / Impact Rows</DataTableHeaderCell>
+                          <DataTableHeaderCell>Status</DataTableHeaderCell>
+                          <DataTableHeaderCell>Message</DataTableHeaderCell>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border text-[13px] text-ink">
+                      </DataTableHead>
+                      <DataTableBody>
                         {parserResults.map((result, index) => (
-                          <tr key={`parser-${result.seq}-${index}`}>
-                            <td className="px-3 py-3 align-top">{result.seq}</td>
-                            <td className="px-3 py-3 align-top"><ExpandableSql value={result.sql_stmt} label={ticketType === 'redis_command' ? 'command' : 'SQL'} /></td>
-                            <td className="px-3 py-3 align-top">—</td>
-                            <td className="px-3 py-3 align-top">—</td>
-                            <td className="px-3 py-3 align-top">{result.statement_kind || '—'}</td>
-                            <td className="px-3 py-3 align-top">{result.object_type || '—'}</td>
-                            <td className="px-3 py-3 align-top">—</td>
-                            <td className="px-3 py-3 align-top">
+                          <DataTableRow key={`parser-${result.seq}-${index}`}>
+                            <DataTableCell className="align-top">{result.seq}</DataTableCell>
+                            <DataTableCell className="align-top"><ExpandableSql value={result.sql_stmt} label={ticketType === 'redis_command' ? 'command' : 'SQL'} /></DataTableCell>
+                            <DataTableCell className="align-top">—</DataTableCell>
+                            <DataTableCell className="align-top">—</DataTableCell>
+                            <DataTableCell className="align-top">{result.statement_kind || '—'}</DataTableCell>
+                            <DataTableCell className="align-top">{result.object_type || '—'}</DataTableCell>
+                            <DataTableCell className="align-top">—</DataTableCell>
+                            <DataTableCell className="align-top">
                               <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
                                 result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
                               }`}>
                                 {result.status}
                               </span>
-                            </td>
-                            <td className="px-3 py-3 align-top"><ExpandableText value={result.message} /></td>
-                          </tr>
+                            </DataTableCell>
+                            <DataTableCell className="align-top"><ExpandableText value={result.message} /></DataTableCell>
+                          </DataTableRow>
                         ))}
-                      </tbody>
-                    </table>
+                      </DataTableBody>
+                    </DataTable>
                   </div>
                 </div>
               ) : null}
@@ -843,43 +869,43 @@ export function NewTicketPage() {
                 <div className="px-4 py-4">
                   <p className="text-[12px] font-semibold text-ink">Validation Results</p>
                   <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-                    <table className="min-w-[1060px] w-full table-fixed border-collapse">
+                    <DataTable className="min-w-[1060px] w-full table-fixed">
                       <ReviewResultColumnGroup />
-                      <thead className="bg-panel-soft text-left text-[11px] font-semibold text-faint">
+                      <DataTableHead>
                         <tr>
-                          <th className="px-3 py-3">ID</th>
-                          <th className="px-3 py-3">{ticketType === 'redis_command' ? 'Command' : 'SQL'}</th>
-                          <th className="px-3 py-3">Method</th>
-                          <th className="px-3 py-3">Stage</th>
-                          <th className="px-3 py-3">Kind</th>
-                          <th className="px-3 py-3">Object</th>
-                          <th className="px-3 py-3">Scan / Impact Rows</th>
-                          <th className="px-3 py-3">Status</th>
-                          <th className="px-3 py-3">Message</th>
+                          <DataTableHeaderCell>ID</DataTableHeaderCell>
+                          <DataTableHeaderCell>{ticketType === 'redis_command' ? 'Command' : 'SQL'}</DataTableHeaderCell>
+                          <DataTableHeaderCell>Method</DataTableHeaderCell>
+                          <DataTableHeaderCell>Stage</DataTableHeaderCell>
+                          <DataTableHeaderCell>Kind</DataTableHeaderCell>
+                          <DataTableHeaderCell>Object</DataTableHeaderCell>
+                          <DataTableHeaderCell>Scan / Impact Rows</DataTableHeaderCell>
+                          <DataTableHeaderCell>Status</DataTableHeaderCell>
+                          <DataTableHeaderCell>Message</DataTableHeaderCell>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border text-[13px] text-ink">
+                      </DataTableHead>
+                      <DataTableBody>
                         {validationResults.map((result, index) => (
-                          <tr key={`validation-${result.seq}-${index}`}>
-                            <td className="px-3 py-3 align-top">{result.seq}</td>
-                            <td className="px-3 py-3 align-top"><ExpandableSql value={result.sql_stmt} label={ticketType === 'redis_command' ? 'command' : 'SQL'} /></td>
-                            <td className="px-3 py-3 align-top">{result.validation_method || '—'}</td>
-                            <td className="px-3 py-3 align-top">{result.validation_stage || '—'}</td>
-                            <td className="px-3 py-3 align-top">{result.statement_kind || '—'}</td>
-                            <td className="px-3 py-3 align-top">{result.object_type || '—'}</td>
-                            <td className="px-3 py-3 align-top">{result.scan_rows}</td>
-                            <td className="px-3 py-3 align-top">
+                          <DataTableRow key={`validation-${result.seq}-${index}`}>
+                            <DataTableCell className="align-top">{result.seq}</DataTableCell>
+                            <DataTableCell className="align-top"><ExpandableSql value={result.sql_stmt} label={ticketType === 'redis_command' ? 'command' : 'SQL'} /></DataTableCell>
+                            <DataTableCell className="align-top">{result.validation_method || '—'}</DataTableCell>
+                            <DataTableCell className="align-top">{result.validation_stage || '—'}</DataTableCell>
+                            <DataTableCell className="align-top">{result.statement_kind || '—'}</DataTableCell>
+                            <DataTableCell className="align-top">{result.object_type || '—'}</DataTableCell>
+                            <DataTableCell className="align-top">{result.scan_rows}</DataTableCell>
+                            <DataTableCell className="align-top">
                               <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
                                 result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
                               }`}>
                                 {result.status}
                               </span>
-                            </td>
-                            <td className="px-3 py-3 align-top"><ExpandableText value={result.message} /></td>
-                          </tr>
+                            </DataTableCell>
+                            <DataTableCell className="align-top"><ExpandableText value={result.message} /></DataTableCell>
+                          </DataTableRow>
                         ))}
-                      </tbody>
-                    </table>
+                      </DataTableBody>
+                    </DataTable>
                   </div>
                 </div>
               ) : null}

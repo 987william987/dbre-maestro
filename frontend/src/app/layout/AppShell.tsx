@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, BriefcaseBusiness, CalendarClock, ChevronDown, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
+import { ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -132,6 +132,163 @@ const NAV_GROUPS = [
 const SIDEBAR_COLLAPSE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 12 9 7v10Z' fill='%2318171b'/%3E%3Cpath d='m21 12-6-5v10Z' fill='%23c7c7cc'/%3E%3C/svg%3E") 12 12, pointer`
 const SIDEBAR_EXPAND_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 12 9 7v10Z' fill='%23c7c7cc'/%3E%3Cpath d='m21 12-6-5v10Z' fill='%2318171b'/%3E%3C/svg%3E") 12 12, pointer`
 
+const PAGE_HELP = [
+  {
+    match: (pathname: string) => pathname === '/tickets',
+    title: 'All Tickets Guide',
+    items: [
+      'Pending Review, Pending Execution, and Needs Admin Attention tickets are pinned above completed history.',
+      'Use column filters to choose visible fields; Description is hidden by default to keep the table compact.',
+      'Visibility is scoped by permissions and workflow participation. For example, regular users only see their own tickets, while reviewers and executors can see tickets assigned by workflow scope.',
+      'DB Connection and Database identify the target instance and database for SQL-related tickets.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/tickets/new',
+    title: 'New Ticket Guide',
+    items: [
+      'Select the ticket type first; the form adapts required fields and workflow behavior by type.',
+      'DML, DDL, Redis, query access, sensitive query access, and SQL export requests all enter workflow resolution after submission.',
+      'SQL review and validation run before submission where applicable, including sensitive field and Redis sensitive prefix checks.',
+      'Workflow rules determine reviewers, executors, approval requirement, and whether non-production tickets can auto-execute after approval.',
+      'Use the ticket list for broad multi-database or multi-table permission requests instead of SQL Editor quick requests.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname.startsWith('/tickets/') && pathname !== '/tickets/new',
+    title: 'Ticket Detail Guide',
+    items: [
+      'The timeline shows current workflow stage, review status, execution status, and terminal result.',
+      'Available actions depend on your role, workflow assignment, and the current ticket status.',
+      'Review, reject, withdraw, execute, and retry actions are recorded in audit logs.',
+      'Statement results are compact by default; expand SQL only when you need to inspect full statements.',
+      'Debug / Resolution Trace is only shown to admin users when the ticket needs admin attention.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/sql-editor',
+    title: 'SQL Editor Guide',
+    items: [
+      'Select a DB connection and database first; object browsing and query execution are based on the active workspace context.',
+      'You can open multiple sub-workspaces to work with different connections or databases without losing the current editor state.',
+      'Run Query supports keyboard shortcuts: Cmd+Enter on macOS, Ctrl+Enter on Windows/Linux. The editor executes one SQL statement at a time; if multiple statements exist, highlight one statement to run only that selection.',
+      'SQL result row limits and query timeout are controlled by backend settings, including separate MySQL and PostgreSQL timeout policies.',
+      'Frequently used SQL can be saved and reused from saved queries.',
+      'Exports are split into normal and sensitive flows. Sensitive exports always require approval; normal exports may skip approval depending on admin workflow settings.',
+      'If query permission is missing, use the quick request action to create an access ticket from the current connection, database, and table context.',
+      'Quick access requests only cover the current context. For multiple databases or tables, submit a dedicated ticket from the ticket workflow.',
+      'Temporary sensitive-data access is also generated from the current context and enters the approval workflow automatically.',
+      'Successful executions are recorded in history and audit logs when the operation reaches the backend.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/scheduled-sql-reports',
+    title: 'Scheduled SQL Reports Guide',
+    items: [
+      'Scheduled reports run approved read-only SQL on a cron schedule and deliver CSV files to selected Lark users.',
+      'Only SELECT, WITH, and SHOW statements are accepted when saving a report.',
+      'Sensitive columns are rejected during save; use ticket/export workflows for sensitive data.',
+      'Recipients must be selected explicitly, and report execution follows the configured connection and database context.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname.startsWith('/users'),
+    title: 'User Management Guide',
+    items: [
+      'Manage users, auth groups, direct permissions, database scopes, resources, and query access rules.',
+      'Permission changes take effect only after saving and confirming the summary.',
+      'Protected admin users have stricter guardrails for password, MFA, active status, auth group, direct permission, and DB scope changes.',
+      'Lark OAuth can bind users by enterprise email and open_id, but does not grant elevated DBA/admin permissions automatically.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/db-connections',
+    title: 'DB Connections Guide',
+    items: [
+      'DB connections support MySQL, PostgreSQL, and Redis endpoints.',
+      'Readonly credentials are used by SQL Editor and metadata browsing; readwrite credentials are used for ticket execution and validation that requires writes.',
+      'Leave database empty when you want SQL Editor to browse available databases automatically.',
+      'Host policy can warn or enforce allowlist/denylist checks based on deployment settings.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/db-metadata/inventory',
+    title: 'Inventory Guide',
+    items: [
+      'Inventory shows AWS inventory snapshots rather than real-time live status.',
+      'Mapping is based on exact matches between discovered endpoints and DB Connection host values.',
+      'Use column filters to hide noisy fields while keeping cluster, instance, endpoint, mapping, and sync fields available.',
+      'Missing inventory usually means IAM discovery permission, region, or inventory sync errors need to be checked in logs.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/db-metadata/objects',
+    title: 'Objects Guide',
+    items: [
+      'Objects shows scheduled metadata snapshots for MySQL and PostgreSQL databases.',
+      'The page does not query live object metadata on demand; results depend on the latest sync job.',
+      'Connection-level failures can come from database permissions, schema visibility, or snapshot write errors.',
+      'Use filters and visible columns to focus on database/schema/table size and sync timestamp.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/masking-rules',
+    title: 'Mask DSL Guide',
+    href: '/masking-rules/dsl-guide',
+    items: [],
+  },
+  {
+    match: (pathname: string) => pathname === '/masking-rules/dsl-guide',
+    title: 'Mask DSL Guide',
+    items: [
+      'Use column_name, match_type, mask_mode, and mask_config to define a masking rule payload.',
+      'Use exact match for one known column name, and regex when one rule should match multiple related columns.',
+      'mask_config is JSON; modes without parameters can use an empty object.',
+      'This guide is reference material for DBAs before creating or reviewing masking rules.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname.startsWith('/sql-review-rules'),
+    title: 'SQL Review Rules Guide',
+    items: [
+      'SQL review rules control parser and validation checks by engine.',
+      'MySQL review rules are implemented; PostgreSQL and Redis tabs are reserved for follow-up rule expansion.',
+      'Rules can enforce create/alter safety requirements, reject risky statements, and configure thresholds.',
+      'Enabled rules affect ticket review and validation before a workflow proceeds.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/audit-logs',
+    title: 'Audit Logs Guide',
+    items: [
+      'Audit logs record logins, tickets, exports, query attempts, permission changes, and platform configuration changes.',
+      'Use common filters for action type, actor, resource, status, and date ranges.',
+      'Complex details are available from the row detail panel instead of being expanded in the table.',
+      'Sensitive or blocked access attempts can still be audited even when history entries are not created.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/settings',
+    title: 'Platform Settings Guide',
+    items: [
+      'Settings control SQL Editor timeout policy, workflow behavior, Lark integration, and DB metadata scan settings.',
+      'AWS access still relies on the runtime IAM role; database credentials are managed in DB Connections.',
+      'Production-sensitive controls should be reviewed carefully because they affect workflow execution and access policy.',
+      'Save changes only after reviewing validation messages and the resulting configuration.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/account/sessions',
+    title: 'Account Sessions Guide',
+    items: [
+      'Review active refresh sessions for your account.',
+      'Revoke sessions you no longer recognize or no longer use.',
+      'Revoking all other sessions keeps the current browser session active.',
+      'Revoking the current session signs you out and returns you to login.',
+    ],
+  },
+]
+
 function findNavGroupTitle(pathname: string, items: NavItem[]) {
   for (const group of NAV_GROUPS) {
     const groupItems = items.filter((item) => (item.to ? group.items.includes(item.to) : false))
@@ -174,6 +331,7 @@ export function AppShell() {
   const { pushToast } = useToast()
   const [menuOpen, setMenuOpen] = useState(false)
   const [notificationOpen, setNotificationOpen] = useState(false)
+  const [pageHelpOpen, setPageHelpOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem('dbre-maestro.sidebarCollapsed') === 'true'
@@ -343,6 +501,10 @@ export function AppShell() {
     [location.pathname, navItems],
   )
   const CurrentSectionIcon = groupIcon(currentSectionTitle)
+  const pageHelp = useMemo(
+    () => PAGE_HELP.find((help) => help.match(location.pathname)) ?? null,
+    [location.pathname],
+  )
   const breadcrumbItems = useMemo(() => {
     const items = ['DBRE Maestro']
     if (activeNavItem?.label) {
@@ -367,6 +529,25 @@ export function AppShell() {
   useEffect(() => {
     setExpandedNavKeys((current) => current.filter((key) => navItems.some((item) => item.key === key)))
   }, [navItems])
+
+  useEffect(() => {
+    setPageHelpOpen(false)
+  }, [location.pathname])
+
+  useEffect(() => {
+    if (!pageHelpOpen) {
+      return undefined
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setPageHelpOpen(false)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [pageHelpOpen])
 
   useEffect(() => {
     try {
@@ -719,15 +900,67 @@ export function AppShell() {
           </div>
 
           <div className="hidden h-14 items-center px-4 sm:px-6 lg:flex">
-            <div className="flex min-w-0 items-center gap-3 overflow-x-auto text-[14px]">
-              {breadcrumbItems.map((item, index) => (
-                <div key={`${item}-${index}`} className="flex shrink-0 items-center gap-3">
-                  {index > 0 ? <span className="text-muted">/</span> : null}
-                  <span className={cn(index === breadcrumbItems.length - 1 ? 'font-medium text-ink' : 'text-muted')}>
-                    {item}
-                  </span>
+            <div className="flex min-w-0 items-center gap-3 text-[14px]">
+              <div className="flex min-w-0 items-center gap-3 overflow-x-auto">
+                {breadcrumbItems.map((item, index) => (
+                  <div key={`${item}-${index}`} className="flex shrink-0 items-center gap-3">
+                    {index > 0 ? <span className="text-muted">/</span> : null}
+                    <span className={cn(index === breadcrumbItems.length - 1 ? 'font-medium text-ink' : 'text-muted')}>
+                      {item}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {pageHelp ? (
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    aria-label={`Show ${pageHelp.title}`}
+                    aria-expanded={pageHelp.href ? undefined : pageHelpOpen}
+                    onClick={() => {
+                      if (pageHelp.href) {
+                        navigate(pageHelp.href)
+                        return
+                      }
+                      setPageHelpOpen((current) => !current)
+                    }}
+                    className={cn(
+                      'inline-flex h-7 w-7 items-center justify-center text-muted transition-colors',
+                      !pageHelp.href && pageHelpOpen ? 'text-ink' : 'hover:text-ink',
+                    )}
+                  >
+                    <CircleHelp className="h-4 w-4" />
+                  </button>
+                  {!pageHelp.href && pageHelpOpen ? (
+                    <div className="absolute left-0 top-[calc(100%+8px)] z-30 max-h-[min(640px,calc(100vh-9rem))] w-[780px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-border bg-white p-4 text-left shadow-[0_22px_45px_rgba(15,23,42,0.14)]">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[13px] font-semibold text-ink">{pageHelp.title}</p>
+                          <p className="mt-1 text-[12px] leading-5 text-muted">Quick notes for this workspace.</p>
+                        </div>
+                      </div>
+                      <ul className="mt-3 grid gap-2 text-[12px] leading-5 text-muted">
+                        {pageHelp.items.map((item) => (
+                          <li key={item} className="flex gap-2">
+                            <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-faint" />
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                 </div>
-              ))}
+              ) : null}
+              {location.pathname === '/masking-rules/dsl-guide' ? (
+                <button
+                  type="button"
+                  onClick={() => navigate('/masking-rules')}
+                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border bg-white px-2 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  Back To Rules
+                </button>
+              ) : null}
             </div>
           </div>
 

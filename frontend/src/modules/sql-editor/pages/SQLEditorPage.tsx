@@ -18,7 +18,6 @@ import {
   Layers3,
   Play,
   Plus,
-  Search,
   Star,
   StarOff,
   Table2,
@@ -38,6 +37,8 @@ import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
+import { DataTable, DataTableBody, DataTableCell, DataTableHead, DataTableHeaderCell, DataTableRow } from '@/shared/ui/DataTable'
+import { SearchInput } from '@/shared/ui/SearchInput'
 import { useNavigate } from 'react-router-dom'
 import { createExportRequest } from '@/modules/exports/api'
 import {
@@ -124,6 +125,7 @@ type SensitiveAccessDurationDialogState = {
 const DEFAULT_SQL = 'SELECT 1;'
 const HISTORY_LIMIT = 20
 const SAVED_QUERY_LIMIT = 10
+const MAX_EDITOR_TABS = 10
 const EDITOR_BASE_VISIBLE_LINES = 12
 const EDITOR_MAX_HEIGHT = 840
 type QueryConstraints = {
@@ -407,6 +409,24 @@ function createTab(seed = 1): EditorTab {
   }
 }
 
+function getNextTabSeed(tabs: EditorTab[]) {
+  const usedSeeds = new Set<number>()
+  tabs.forEach((tab) => {
+    const match = /^Query (\d+)$/.exec(tab.title)
+    if (match) {
+      usedSeeds.add(Number(match[1]))
+    }
+  })
+
+  for (let seed = 1; seed <= tabs.length + 1; seed += 1) {
+    if (!usedSeeds.has(seed)) {
+      return seed
+    }
+  }
+
+  return tabs.length + 1
+}
+
 function createConnectionNode(connection: DBConnection, activeConnectionId: number | null): AssetTreeNode {
   return {
     id: `connection-${connection.id}`,
@@ -425,6 +445,32 @@ function createConnectionNode(connection: DBConnection, activeConnectionId: numb
 
 function formatConnectionBadge(connection: DBConnection) {
   return connection.db_type.toUpperCase()
+}
+
+function formatConnectionGroupLabel(dbType: string) {
+  switch (dbType) {
+    case 'mysql':
+      return 'MySQL'
+    case 'postgres':
+      return 'PgSQL'
+    case 'redis':
+      return 'Redis'
+    default:
+      return dbType.toUpperCase()
+  }
+}
+
+function getConnectionGroupOrder(dbType: string) {
+  switch (dbType) {
+    case 'mysql':
+      return 1
+    case 'redis':
+      return 2
+    case 'postgres':
+      return 3
+    default:
+      return 99
+  }
 }
 
 function effectiveTimeoutSeconds(constraints: QueryConstraints, connection: DBConnection | null) {
@@ -897,6 +943,10 @@ export function SQLEditorPage() {
   const editorContainerRef = useRef<HTMLDivElement | null>(null)
   const formatProfileRef = useRef<SQLFormatProfile | null>(null)
   const formatProfileIDRef = useRef(0)
+  const initialTabRef = useRef<EditorTab | null>(null)
+  if (!initialTabRef.current) {
+    initialTabRef.current = createTab()
+  }
   const navigate = useNavigate()
   const { user } = useAuth()
   const { pushToast } = useToast()
@@ -908,8 +958,8 @@ export function SQLEditorPage() {
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [connectionsLoading, setConnectionsLoading] = useState(true)
   const [connectionsError, setConnectionsError] = useState('')
-  const [tabs, setTabs] = useState<EditorTab[]>([createTab()])
-  const [activeTabId, setActiveTabId] = useState<string>(() => createTab().id)
+  const [tabs, setTabs] = useState<EditorTab[]>(() => [initialTabRef.current!])
+  const [activeTabId, setActiveTabId] = useState<string>(() => initialTabRef.current!.id)
   const [history, setHistory] = useState<QueryHistoryEntry[]>([])
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
   const [queryConstraints, setQueryConstraints] = useState(DEFAULT_QUERY_CONSTRAINTS)
@@ -1085,6 +1135,23 @@ export function SQLEditorPage() {
       (connection.database_name ?? '').toLowerCase().includes(keyword),
     )
   }, [accessibleConnections, activeAssetPickerSearch])
+  const groupedAssetPickerConnections = useMemo(() => {
+    const groups = new Map<string, DBConnection[]>()
+    filteredConnections.forEach((connection) => {
+      groups.set(connection.db_type, [...(groups.get(connection.db_type) ?? []), connection])
+    })
+
+    return Array.from(groups.entries())
+      .sort(([leftType], [rightType]) => {
+        const orderDiff = getConnectionGroupOrder(leftType) - getConnectionGroupOrder(rightType)
+        return orderDiff || formatConnectionGroupLabel(leftType).localeCompare(formatConnectionGroupLabel(rightType))
+      })
+      .map(([dbType, groupConnections]) => ({
+        dbType,
+        label: formatConnectionGroupLabel(dbType),
+        connections: [...groupConnections].sort((left, right) => left.name.localeCompare(right.name)),
+      }))
+  }, [filteredConnections])
   const activeTabRunning = activeTab ? runningTabIDs.includes(activeTab.id) : false
   const activeTabExporting = activeTab ? exportingTabIDs.includes(activeTab.id) : false
   const activeTabCreatingSensitiveAccess = activeTab ? sensitiveAccessTabIDs.includes(activeTab.id) : false
@@ -1443,7 +1510,11 @@ export function SQLEditorPage() {
   }
 
   function handleAddTab() {
-    const nextTab = createTab(tabs.length + 1)
+    if (tabs.length >= MAX_EDITOR_TABS) {
+      pushToast(`You can open up to ${MAX_EDITOR_TABS} query workspaces.`, 'info')
+      return
+    }
+    const nextTab = createTab(getNextTabSeed(tabs))
     setTabs((current) => [...current, nextTab])
     setActiveTabId(nextTab.id)
   }
@@ -2203,7 +2274,9 @@ export function SQLEditorPage() {
             <button
               type="button"
               onClick={handleAddTab}
-              className="inline-flex items-center gap-2 border-b-2 border-transparent px-0.5 py-3 text-[13px] font-medium text-muted transition-colors hover:text-ink"
+              disabled={tabs.length >= MAX_EDITOR_TABS}
+              title={tabs.length >= MAX_EDITOR_TABS ? `最多可開啟 ${MAX_EDITOR_TABS} 個子工作區` : undefined}
+              className="inline-flex items-center gap-2 border-b-2 border-transparent px-0.5 py-3 text-[13px] font-medium text-muted transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:text-muted"
             >
               <Plus className="h-4 w-4" />
               New Tab
@@ -2238,46 +2311,43 @@ export function SQLEditorPage() {
 
               {activeAssetPickerOpen ? (
                 <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-lg border border-border bg-white p-2 shadow-soft">
-                  <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-panel-soft px-2.5">
-                    <Search className="h-3.5 w-3.5 text-faint" />
-                    <input
-                      aria-label="Asset Picker Search"
-                      value={activeAssetPickerSearch}
-                      onChange={(event) => updateActiveTab({ assetPickerSearch: event.target.value })}
-                      placeholder="Select assets"
-                      className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
-                    />
-                  </label>
-                  <div className="mt-2 max-h-[220px] overflow-auto">
+                  <SearchInput
+                    aria-label="Asset Picker Search"
+                    value={activeAssetPickerSearch}
+                    onChange={(event) => updateActiveTab({ assetPickerSearch: event.target.value })}
+                    placeholder="Select assets"
+                  />
+                  <div className="mt-2 max-h-[440px] overflow-auto">
                     {filteredConnections.length === 0 ? (
                       <p className="px-2 py-2 text-[12px] text-muted">No matching assets.</p>
                     ) : (
-                      filteredConnections.map((connection) => (
-                        <button
-                          key={connection.id}
-                          type="button"
-                          onClick={() => handleSelectConnection(connection)}
-                          className={`flex min-w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[12px] ${
-                            activeConnection?.id === connection.id
-                              ? 'bg-panel-soft text-ink ring-1 ring-border-strong'
-                              : 'text-muted hover:bg-panel-soft hover:text-ink'
-                          }`}
-                        >
-                          <span className="flex h-4 w-4 items-center justify-center text-muted">
-                            {activeConnection?.id === connection.id ? (
-                              <Check className="h-3.5 w-3.5 text-ink" />
-                            ) : (
-                              <Workflow className="h-3.5 w-3.5" />
-                            )}
-                          </span>
-                          <div className="pr-2">
-                            <p className="whitespace-nowrap font-medium leading-5" title={connection.name}>{connection.name}</p>
-                            <p className="whitespace-nowrap text-[10px] uppercase tracking-[0.12em] text-faint">
-                              {formatConnectionBadge(connection)}
-                            </p>
+                      <div className="min-w-max">
+                        {groupedAssetPickerConnections.map((group) => (
+                          <div key={group.dbType} className="border-t border-border first:border-t-0">
+                            <p className="px-3 pb-1 pt-3 text-[12px] font-semibold text-muted first:pt-2">{group.label}</p>
+                            <div className="grid gap-0.5 pb-2">
+                              {group.connections.map((connection) => {
+                                const selected = activeConnection?.id === connection.id
+                                return (
+                                  <button
+                                    key={connection.id}
+                                    type="button"
+                                    onClick={() => handleSelectConnection(connection)}
+                                    className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-[12px] ${
+                                      selected
+                                        ? 'bg-panel-soft text-ink ring-1 ring-border-strong'
+                                        : 'text-ink hover:bg-panel-soft'
+                                    }`}
+                                  >
+                                    <span className="whitespace-nowrap font-medium leading-5" title={connection.name}>{connection.name}</span>
+                                    {selected ? <Check className="h-3.5 w-3.5 shrink-0 text-ink" /> : null}
+                                  </button>
+                                )
+                              })}
+                            </div>
                           </div>
-                        </button>
-                      ))
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -2287,16 +2357,12 @@ export function SQLEditorPage() {
 
             <div className="flex min-h-0 flex-1 flex-col px-4 pt-1 pb-3">
               {activeTab?.metadataError ? <InlineAlert className="mb-2" tone="info">{activeTab.metadataError}</InlineAlert> : null}
-              <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-panel-soft px-2.5">
-                <Search className="h-3.5 w-3.5 text-faint" />
-                <input
-                  aria-label="Explorer Search"
-                  value={activeExplorerSearch}
-                  onChange={(event) => updateActiveTab({ explorerSearch: event.target.value })}
-                  placeholder="Search objects"
-                  className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-muted"
-                />
-              </label>
+              <SearchInput
+                aria-label="Explorer Search"
+                value={activeExplorerSearch}
+                onChange={(event) => updateActiveTab({ explorerSearch: event.target.value })}
+                placeholder="Search objects"
+              />
               <div className="mt-1 min-h-0 flex-1 overflow-auto">
                 {connectionsLoading ? (
                   <p className="px-1 py-1 text-[12px] text-muted">Loading connections...</p>
@@ -2637,26 +2703,26 @@ export function SQLEditorPage() {
                               No table structure available.
                             </div>
                           ) : (
-                            <table className="min-w-full border-collapse">
-                              <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+                            <DataTable>
+                              <DataTableHead>
                                 <tr>
-                                  <th className="px-3 py-3">Column</th>
-                                  <th className="px-3 py-3">Type</th>
-                                  <th className="px-3 py-3">Nullable</th>
-                                  <th className="px-3 py-3">Default</th>
+                                  <DataTableHeaderCell>Column</DataTableHeaderCell>
+                                  <DataTableHeaderCell>Type</DataTableHeaderCell>
+                                  <DataTableHeaderCell>Nullable</DataTableHeaderCell>
+                                  <DataTableHeaderCell>Default</DataTableHeaderCell>
                                 </tr>
-                              </thead>
-                              <tbody>
+                              </DataTableHead>
+                              <DataTableBody>
                                 {activeColumns.map((column) => (
-                                  <tr key={column.name} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
-                                    <td className="px-3 py-2.5 font-semibold">{column.name}</td>
-                                    <td className="px-3 py-2.5">{column.column_type}</td>
-                                    <td className="px-3 py-2.5">{column.is_nullable}</td>
-                                    <td className="px-3 py-2.5">{column.default || <span className="text-muted">(none)</span>}</td>
-                                  </tr>
+                                  <DataTableRow key={column.name}>
+                                    <DataTableCell>{column.name}</DataTableCell>
+                                    <DataTableCell>{column.column_type}</DataTableCell>
+                                    <DataTableCell>{column.is_nullable}</DataTableCell>
+                                    <DataTableCell>{column.default || <span className="text-muted">(none)</span>}</DataTableCell>
+                                  </DataTableRow>
                                 ))}
-                              </tbody>
-                            </table>
+                              </DataTableBody>
+                            </DataTable>
                           )
                         ) : activeDefinitionLoading ? (
                           <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
@@ -2707,35 +2773,35 @@ export function SQLEditorPage() {
                       </div>
                     )
                   ) : activeTab.result ? (
-                    <table className="min-w-full border-collapse">
-                      <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+                    <DataTable>
+                      <DataTableHead>
                         <tr>
                           {visibleResultColumnIndexes.map((columnIndex) => (
-                            <th
+                            <DataTableHeaderCell
                               key={`${activeTab.result?.columns[columnIndex]}-${columnIndex}`}
-                              className={`px-3 py-3 ${sensitiveColumnIndexSet.has(columnIndex) ? 'text-[#b9381f]' : ''}`}
+                              className={sensitiveColumnIndexSet.has(columnIndex) ? 'text-[#b9381f]' : ''}
                             >
                               {activeTab.result?.columns[columnIndex]}
-                            </th>
+                            </DataTableHeaderCell>
                           ))}
                         </tr>
-                      </thead>
-                      <tbody>
+                      </DataTableHead>
+                      <DataTableBody>
                         {pagedResultRows.map((row, rowOffset) => (
-                          <tr key={`${activeTab.id}-row-${activeResultPage}-${rowOffset}`} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
+                          <DataTableRow key={`${activeTab.id}-row-${activeResultPage}-${rowOffset}`}>
                             {visibleResultColumnIndexes.map((columnIndex) => (
-                              <td key={`${activeTab.id}-cell-${rowOffset}-${columnIndex}`} className="px-3 py-2.5 align-top">
+                              <DataTableCell key={`${activeTab.id}-cell-${rowOffset}-${columnIndex}`} className="align-top">
                                 {!Array.isArray(row)
                                   ? <span className="text-muted">(empty)</span>
                                   : row[columnIndex] === null
                                     ? <span className="text-muted">(null)</span>
                                     : String(row[columnIndex])}
-                              </td>
+                              </DataTableCell>
                             ))}
-                          </tr>
+                          </DataTableRow>
                         ))}
-                      </tbody>
-                    </table>
+                      </DataTableBody>
+                    </DataTable>
                   ) : (
                     <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
                       No query has been executed yet.

@@ -1036,6 +1036,15 @@ func (h *TicketHandler) List(w http.ResponseWriter, r *http.Request) {
 	if s := strings.TrimSpace(r.URL.Query().Get("q")); s != "" {
 		filter.Keyword = &s
 	}
+	if s := strings.TrimSpace(r.URL.Query().Get("ticket_no")); s != "" {
+		filter.TicketNo = &s
+	}
+	if s := strings.TrimSpace(r.URL.Query().Get("title")); s != "" {
+		filter.Title = &s
+	}
+	if s := strings.TrimSpace(r.URL.Query().Get("submitter")); s != "" {
+		filter.Submitter = &s
+	}
 	if s := r.URL.Query().Get("from"); s != "" {
 		if t, err := time.Parse(time.RFC3339, s); err == nil {
 			filter.From = &t

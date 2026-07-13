@@ -6,11 +6,20 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import type { SQLReviewRule } from '@/shared/types/sqlReviewRule'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
 import { PageTabs } from '@/shared/ui/PageTabs'
 import { Switch } from '@/shared/ui/Switch'
 import { useToast } from '@/shared/ui/ToastContext'
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+  DataTableScroll,
+  DataTableSurface,
+} from '@/shared/ui/DataTable'
 import { listSQLReviewRules, patchSQLReviewRule } from '@/modules/sql-review-rules/api'
 
 type DraftMap = Record<string, { enabled: boolean; threshold: string }>
@@ -139,11 +148,6 @@ export function SQLReviewRulesPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="SQL Review Rules"
-        description="Manage parser and validation rules by engine. The current MySQL page contains the implemented review rules; PostgreSQL and Redis are reserved for follow-up expansion."
-      />
-
       <PageTabs
         items={ENGINE_TABS.map((tab) => ({
           key: tab.key,
@@ -159,30 +163,31 @@ export function SQLReviewRulesPage() {
             : 'Redis review rules will be added after Redis ticket rules are finalized.'}
         </div>
       ) : (
-      <div className="overflow-hidden overflow-x-auto rounded-xl border border-border bg-panel shadow-soft">
+      <DataTableSurface>
           {loading ? (
             <LoadingBlock message="Loading SQL review rules..." className="m-4 min-h-[220px] rounded-xl border-border bg-panel" />
           ) : rules.length === 0 ? (
             <div className="flex h-[220px] items-center justify-center text-[12px] text-muted">No SQL review rules found.</div>
           ) : (
-            <table className="min-w-full border-collapse">
-              <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+            <DataTableScroll>
+            <DataTable>
+              <DataTableHead>
                 <tr>
-                  <th className="px-3 py-3">Rule</th>
-                  <th className="px-3 py-3">Description</th>
-                  <th className="px-3 py-3">Enabled</th>
-                  <th className="px-3 py-3">Threshold</th>
-                  <th className="px-3 py-3">Action</th>
+                  <DataTableHeaderCell>Rule</DataTableHeaderCell>
+                  <DataTableHeaderCell>Description</DataTableHeaderCell>
+                  <DataTableHeaderCell>Enabled</DataTableHeaderCell>
+                  <DataTableHeaderCell>Threshold</DataTableHeaderCell>
+                  <DataTableHeaderCell>Action</DataTableHeaderCell>
                 </tr>
-              </thead>
-              <tbody>
+              </DataTableHead>
+              <DataTableBody>
                 {pagedRules.map((rule) => {
                   const draft = drafts[rule.rule_name]
                   return (
-                    <tr key={rule.rule_name} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
-                      <td className="px-3 py-3 font-mono">{rule.rule_name}</td>
-                      <td className="px-3 py-3 text-muted">{getRuleDescription(rule)}</td>
-                      <td className="px-3 py-3">
+                    <DataTableRow key={rule.rule_name}>
+                      <DataTableCell>{rule.rule_name}</DataTableCell>
+                      <DataTableCell>{getRuleDescription(rule)}</DataTableCell>
+                      <DataTableCell>
                         <div className="inline-flex items-center gap-3">
                           <Switch
                             ariaLabel={`${rule.rule_name} enabled`}
@@ -200,8 +205,8 @@ export function SQLReviewRulesPage() {
                           />
                           <span>{draft?.enabled ? 'Enabled' : 'Disabled'}</span>
                         </div>
-                      </td>
-                      <td className="px-3 py-3">
+                      </DataTableCell>
+                      <DataTableCell>
                         {isThresholdEditable(rule.rule_name) ? (
                           <input
                             value={draft?.threshold ?? ''}
@@ -227,8 +232,8 @@ export function SQLReviewRulesPage() {
                             className="h-9 w-[120px] cursor-not-allowed rounded-md border border-border bg-panel-soft px-3 text-[12px] font-medium text-muted outline-none disabled:cursor-not-allowed disabled:opacity-100"
                           />
                         )}
-                      </td>
-                      <td className="px-3 py-3">
+                      </DataTableCell>
+                      <DataTableCell>
                         <button
                           type="button"
                           onClick={() => void handleSave(rule)}
@@ -238,14 +243,15 @@ export function SQLReviewRulesPage() {
                           {savingRuleName === rule.rule_name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
                           Save
                         </button>
-                      </td>
-                    </tr>
+                      </DataTableCell>
+                    </DataTableRow>
                   )
                 })}
-              </tbody>
-            </table>
+              </DataTableBody>
+            </DataTable>
+            </DataTableScroll>
           )}
-      </div>
+      </DataTableSurface>
       )}
 
       <Pagination

@@ -194,7 +194,7 @@ describe('MaskingRulesPage', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Masking Rules' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New Rule' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: 'New Rule' }))
     fireEvent.change(screen.getByLabelText('Column Pattern'), { target: { value: 'email' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }))

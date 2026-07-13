@@ -20,10 +20,20 @@ import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
 import { PageTabs } from '@/shared/ui/PageTabs'
+import { SearchInput } from '@/shared/ui/SearchInput'
 import { useToast } from '@/shared/ui/ToastContext'
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+  DataTableScroll,
+  DataTableSurface,
+} from '@/shared/ui/DataTable'
 
 type PermissionOption = {
   key: string
@@ -921,101 +931,97 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   return (
     <>
       <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="User Management"
-        description="Manage users and auth groups with their permissions, direct capabilities, and DB scope. All changes take effect only after saving, with a confirmation summary shown first."
-        actions={
-          <>
-            <button
-              type="button"
-              onClick={openCreateUserDrawer}
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
-            >
-              <UserPlus className="h-4 w-4" />
-              Create User
-            </button>
-            <button
-              type="button"
-              onClick={openCreateAuthGroupDrawer}
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
-            >
-              <Shield className="h-4 w-4" />
-              Create Auth Group
-            </button>
-          </>
-        }
-      />
-
-      <PageTabs
-        items={[
-          {
-            key: 'users',
-            label: 'Users',
-            active: viewMode === 'users',
-            onClick: () => {
-              setViewMode('users')
-              navigate('/users')
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border px-1">
+        <PageTabs
+          className="min-w-0 flex-1 border-b-0 px-0"
+          items={[
+            {
+              key: 'users',
+              label: 'Users',
+              active: viewMode === 'users',
+              onClick: () => {
+                setViewMode('users')
+                navigate('/users')
+              },
             },
-          },
-          {
-            key: 'auth-groups',
-            label: 'Auth Groups',
-            active: viewMode === 'auth-groups',
-            onClick: () => {
-              setViewMode('auth-groups')
-              navigate('/users/groups')
+            {
+              key: 'auth-groups',
+              label: 'Auth Groups',
+              active: viewMode === 'auth-groups',
+              onClick: () => {
+                setViewMode('auth-groups')
+                navigate('/users/groups')
+              },
             },
-          },
-          {
-            key: 'resources',
-            label: 'Resources',
-            active: viewMode === 'resources',
-            onClick: () => {
-              setViewMode('resources')
-              navigate('/users/resources')
+            {
+              key: 'resources',
+              label: 'Resources',
+              active: viewMode === 'resources',
+              onClick: () => {
+                setViewMode('resources')
+                navigate('/users/resources')
+              },
             },
-          },
-          {
-            key: 'query-access',
-            label: 'Query Access',
-            active: viewMode === 'query-access',
-            onClick: () => {
-              setViewMode('query-access')
-              navigate('/users/query-access')
+            {
+              key: 'query-access',
+              label: 'Query Access',
+              active: viewMode === 'query-access',
+              onClick: () => {
+                setViewMode('query-access')
+                navigate('/users/query-access')
+              },
             },
-          },
-        ]}
-      />
+          ]}
+        />
+        <div className="flex flex-wrap justify-end gap-2 pb-2">
+          <button
+            type="button"
+            onClick={openCreateUserDrawer}
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
+          >
+            <UserPlus className="h-4 w-4" />
+            Create User
+          </button>
+          <button
+            type="button"
+            onClick={openCreateAuthGroupDrawer}
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+          >
+            <Shield className="h-4 w-4" />
+            Create Auth Group
+          </button>
+        </div>
+      </div>
 
       {loading ? (
         <LoadingBlock message="Loading RBAC workspace..." className="min-h-[320px] rounded-xl border-border bg-panel" />
       ) : viewMode === 'users' ? (
-            <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
-              <div className="overflow-x-auto">
-                <table className="min-w-full border-collapse">
-                  <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+            <DataTableSurface>
+              <DataTableScroll>
+                <DataTable>
+                  <DataTableHead>
                     <tr>
-                      <th className="whitespace-nowrap px-3 py-3">Username</th>
-                      <th className="whitespace-nowrap px-3 py-3">Auth Groups</th>
-                      <th className="whitespace-nowrap px-3 py-3">DB Scope</th>
-                      <th className="whitespace-nowrap px-3 py-3">Status</th>
-                      <th className="whitespace-nowrap px-3 py-3">Created</th>
-                      <th className="whitespace-nowrap px-3 py-3">Updated</th>
-                      <th className="whitespace-nowrap px-3 py-3">Action</th>
+                      <DataTableHeaderCell>Username</DataTableHeaderCell>
+                      <DataTableHeaderCell>Auth Groups</DataTableHeaderCell>
+                      <DataTableHeaderCell>DB Scope</DataTableHeaderCell>
+                      <DataTableHeaderCell>Status</DataTableHeaderCell>
+                      <DataTableHeaderCell>Created</DataTableHeaderCell>
+                      <DataTableHeaderCell>Updated</DataTableHeaderCell>
+                      <DataTableHeaderCell>Action</DataTableHeaderCell>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </DataTableHead>
+                  <DataTableBody>
                     {pagedUsers.map((user) => (
-                      <tr key={user.id} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
-                        <td className="px-3 py-3">
+                      <DataTableRow key={user.id}>
+                        <DataTableCell>
                           <div className="flex items-center gap-2">
                             <div>
-                              <p className="font-semibold">{user.username}</p>
+                              <p>{user.username}</p>
                             </div>
                             {user.protected ? <Tag label="protected" tone="danger" /> : null}
                           </div>
-                        </td>
-                        <td className="px-3 py-3">
+                        </DataTableCell>
+                        <DataTableCell>
                           <div className="flex flex-wrap gap-1.5">
                             {user.auth_groups.length > 0
                               ? user.auth_groups.map((group) => (
@@ -1023,8 +1029,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                                 ))
                               : <span className="text-[12px] text-muted">—</span>}
                           </div>
-                        </td>
-                        <td className="px-3 py-3">
+                        </DataTableCell>
+                        <DataTableCell>
                           <div className="flex flex-wrap items-center gap-1.5">
                             {(user.db_connection_ids ?? []).length > 0 ? (
                               <>
@@ -1044,13 +1050,13 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                               <span className="text-[12px] text-muted">—</span>
                             )}
                           </div>
-                        </td>
-                        <td className="px-3 py-3">
+                        </DataTableCell>
+                        <DataTableCell>
                           <Tag label={user.is_active ? 'active' : 'disabled'} tone={user.is_active ? 'success' : 'danger'} />
-                        </td>
-                        <td className="px-3 py-3 text-muted">{formatDateTime(user.created_at)}</td>
-                        <td className="px-3 py-3 text-muted">{formatDateTime(user.updated_at)}</td>
-                        <td className="px-3 py-3">
+                        </DataTableCell>
+                        <DataTableCell>{formatDateTime(user.created_at)}</DataTableCell>
+                        <DataTableCell>{formatDateTime(user.updated_at)}</DataTableCell>
+                        <DataTableCell>
                           <button
                             type="button"
                             onClick={() => void openEditUserDrawer(user.id)}
@@ -1058,40 +1064,46 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           >
                             Manage
                           </button>
-                        </td>
-                      </tr>
+                        </DataTableCell>
+                      </DataTableRow>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                  </DataTableBody>
+                </DataTable>
+              </DataTableScroll>
+            </DataTableSurface>
           ) : viewMode === 'auth-groups' ? (
-            <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
-              <div className="overflow-x-auto">
-                <table className="min-w-full border-collapse">
-                  <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+            <DataTableSurface>
+              <DataTableScroll>
+                <DataTable>
+                  <DataTableHead>
                     <tr>
-                      <th className="whitespace-nowrap px-3 py-3">Auth Group</th>
-                      <th className="whitespace-nowrap px-3 py-3">Users</th>
-                      <th className="whitespace-nowrap px-3 py-3">Permissions</th>
-                      <th className="whitespace-nowrap px-3 py-3">DB Scope</th>
-                      <th className="whitespace-nowrap px-3 py-3">Created</th>
-                      <th className="whitespace-nowrap px-3 py-3">Updated</th>
-                      <th className="whitespace-nowrap px-3 py-3">Action</th>
+                      <DataTableHeaderCell>Auth Group</DataTableHeaderCell>
+                      <DataTableHeaderCell>Users</DataTableHeaderCell>
+                      <DataTableHeaderCell>Permissions</DataTableHeaderCell>
+                      <DataTableHeaderCell>DB Scope</DataTableHeaderCell>
+                      <DataTableHeaderCell>Created</DataTableHeaderCell>
+                      <DataTableHeaderCell>Updated</DataTableHeaderCell>
+                      <DataTableHeaderCell>Action</DataTableHeaderCell>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </DataTableHead>
+                  <DataTableBody>
                     {pagedAuthGroups.map((group) => (
-                      <tr key={group.name} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
-                        <td className="px-3 py-3">
-                          <p className="font-semibold">{group.label}</p>
-                        </td>
-                        <td className="px-3 py-3 text-muted">{group.users.length}</td>
-                        <td className="px-3 py-3 text-muted">{group.permissions?.length ?? 0}</td>
-                        <td className="px-3 py-3 text-muted">{group.db_connection_ids?.length ?? 0}</td>
-                        <td className="px-3 py-3 text-muted">{formatDateTime(group.created_at ?? '')}</td>
-                        <td className="px-3 py-3 text-muted">{formatDateTime(group.updated_at ?? '')}</td>
-                        <td className="px-3 py-3">
+                      <DataTableRow key={group.name}>
+                        <DataTableCell>
+                          <p>{group.label}</p>
+                        </DataTableCell>
+                        <DataTableCell>
+                          <BindingTags items={group.users.map((user) => user.username)} emptyLabel="—" />
+                        </DataTableCell>
+                        <DataTableCell>
+                          <BindingTags items={(group.permissions ?? []).map((permission) => getPermissionMeta(permission).label)} emptyLabel="—" />
+                        </DataTableCell>
+                        <DataTableCell>
+                          <BindingTags items={(group.db_connection_ids ?? []).map((connectionId) => getConnectionLabel(connectionId, connections))} emptyLabel="—" />
+                        </DataTableCell>
+                        <DataTableCell>{formatDateTime(group.created_at ?? '')}</DataTableCell>
+                        <DataTableCell>{formatDateTime(group.updated_at ?? '')}</DataTableCell>
+                        <DataTableCell>
                           <button
                             type="button"
                             onClick={() => void openEditAuthGroupDrawer(group.name as AuthGroup)}
@@ -1099,54 +1111,54 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           >
                             Manage
                           </button>
-                        </td>
-                      </tr>
+                        </DataTableCell>
+                      </DataTableRow>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                  </DataTableBody>
+                </DataTable>
+              </DataTableScroll>
+            </DataTableSurface>
           ) : viewMode === 'resources' ? (
-            <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
-              <div className="overflow-x-auto">
-                <table className="min-w-full border-collapse">
-                  <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+            <DataTableSurface>
+              <DataTableScroll>
+                <DataTable>
+                  <DataTableHead>
                     <tr>
-                      <th className="whitespace-nowrap px-3 py-3">Resource</th>
-                      <th className="whitespace-nowrap px-3 py-3">Type</th>
-                      <th className="whitespace-nowrap px-3 py-3">Direct Users</th>
-                      <th className="whitespace-nowrap px-3 py-3">Auth Groups</th>
-                      <th className="whitespace-nowrap px-3 py-3">Effective Users</th>
+                      <DataTableHeaderCell>Resource</DataTableHeaderCell>
+                      <DataTableHeaderCell>Type</DataTableHeaderCell>
+                      <DataTableHeaderCell>Direct Users</DataTableHeaderCell>
+                      <DataTableHeaderCell>Auth Groups</DataTableHeaderCell>
+                      <DataTableHeaderCell>Effective Users</DataTableHeaderCell>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </DataTableHead>
+                  <DataTableBody>
                     {pagedResources.map((connection) => {
                       const bindings = connectionBindings[connection.id]
                       return (
-                        <tr key={connection.id} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
-                          <td className="px-3 py-3">
+                        <DataTableRow key={connection.id}>
+                          <DataTableCell>
                             <div className="grid gap-1">
-                              <p className="font-semibold">{connection.name}</p>
-                              <p className="text-[11px] text-muted">{getConnectionLabel(connection.id, connections)}</p>
+                              <p>{connection.name}</p>
+                              <p className="text-[11px] text-ink">{getConnectionLabel(connection.id, connections)}</p>
                             </div>
-                          </td>
-                          <td className="px-3 py-3 text-muted">{formatDBType(connection.db_type)}</td>
-                          <td className="px-3 py-3">
+                          </DataTableCell>
+                          <DataTableCell>{formatDBType(connection.db_type)}</DataTableCell>
+                          <DataTableCell>
                             <BindingTags items={bindings?.direct_users.map((user) => user.username) ?? []} emptyLabel="—" />
-                          </td>
-                          <td className="px-3 py-3">
+                          </DataTableCell>
+                          <DataTableCell>
                             <BindingTags items={bindings?.auth_groups.map((group) => group.name || group.group_key) ?? []} emptyLabel="—" />
-                          </td>
-                          <td className="px-3 py-3">
+                          </DataTableCell>
+                          <DataTableCell>
                             <BindingTags items={bindings?.effective_users.map((user) => user.username) ?? []} emptyLabel="—" />
-                          </td>
-                        </tr>
+                          </DataTableCell>
+                        </DataTableRow>
                       )
                     })}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                  </DataTableBody>
+                </DataTable>
+              </DataTableScroll>
+            </DataTableSurface>
           ) : (
             <section className="grid gap-3">
               <form className="rounded-xl border border-border bg-panel p-4 shadow-soft" onSubmit={handleCreateQueryAccessRule}>
@@ -1293,43 +1305,43 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                 </p>
               </form>
 
-              <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full border-collapse">
-                    <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+              <DataTableSurface>
+                <DataTableScroll>
+                  <DataTable>
+                    <DataTableHead>
                       <tr>
-                        <th className="whitespace-nowrap px-3 py-3">Subject</th>
-                        <th className="whitespace-nowrap px-3 py-3">Effect</th>
-                        <th className="whitespace-nowrap px-3 py-3">DB Scope</th>
-                        <th className="whitespace-nowrap px-3 py-3">Source</th>
-                        <th className="whitespace-nowrap px-3 py-3">Expires</th>
-                        <th className="whitespace-nowrap px-3 py-3">Status</th>
-                        <th className="whitespace-nowrap px-3 py-3">Action</th>
+                        <DataTableHeaderCell>Subject</DataTableHeaderCell>
+                        <DataTableHeaderCell>Effect</DataTableHeaderCell>
+                        <DataTableHeaderCell>DB Scope</DataTableHeaderCell>
+                        <DataTableHeaderCell>Source</DataTableHeaderCell>
+                        <DataTableHeaderCell>Expires</DataTableHeaderCell>
+                        <DataTableHeaderCell>Status</DataTableHeaderCell>
+                        <DataTableHeaderCell>Action</DataTableHeaderCell>
                       </tr>
-                    </thead>
-                    <tbody>
+                    </DataTableHead>
+                    <DataTableBody>
                       {pagedQueryAccessRules.map((rule) => {
                         const active = !rule.revoked_at && (!rule.expires_at || new Date(rule.expires_at).getTime() > Date.now())
                         return (
-                          <tr key={rule.id} className="border-t border-border text-[12px] text-ink hover:bg-slate-50/70">
-                            <td className="px-3 py-3">
+                          <DataTableRow key={rule.id}>
+                            <DataTableCell>
                               <div className="grid gap-1">
-                                <p className="font-semibold">{formatQueryAccessSubject(rule, users, authGroups)}</p>
-                                <p className="text-[11px] text-muted">{rule.subject_type}</p>
+                                <p>{formatQueryAccessSubject(rule, users, authGroups)}</p>
+                                <p className="text-[11px] text-ink">{rule.subject_type}</p>
                               </div>
-                            </td>
-                            <td className="px-3 py-3">
+                            </DataTableCell>
+                            <DataTableCell>
                               <Tag label={rule.effect} tone={rule.effect === 'deny' ? 'danger' : 'success'} />
-                            </td>
-                            <td className="px-3 py-3 text-muted">
+                            </DataTableCell>
+                            <DataTableCell>
                               {getConnectionLabel(rule.connection_id, connections)} / {rule.database_pattern === '*' ? 'All databases' : rule.database_pattern} / {rule.table_pattern === '*' ? 'All tables' : rule.table_pattern}
-                            </td>
-                            <td className="px-3 py-3 text-muted">{rule.granted_via}{rule.source_ticket_id ? ` #${rule.source_ticket_id}` : ''}</td>
-                            <td className="px-3 py-3 text-muted">{rule.expires_at ? formatDateTime(rule.expires_at) : 'Never'}</td>
-                            <td className="px-3 py-3">
+                            </DataTableCell>
+                            <DataTableCell>{rule.granted_via}{rule.source_ticket_id ? ` #${rule.source_ticket_id}` : ''}</DataTableCell>
+                            <DataTableCell>{rule.expires_at ? formatDateTime(rule.expires_at) : 'Never'}</DataTableCell>
+                            <DataTableCell>
                               <Tag label={active ? 'active' : rule.revoked_at ? 'revoked' : 'expired'} tone={active ? 'success' : 'default'} />
-                            </td>
-                            <td className="px-3 py-3">
+                            </DataTableCell>
+                            <DataTableCell>
                               <div className="flex flex-wrap items-center gap-2">
                                 <button
                                   type="button"
@@ -1348,14 +1360,14 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                                 Revoke
                               </button>
                               </div>
-                            </td>
-                          </tr>
+                            </DataTableCell>
+                          </DataTableRow>
                         )
                       })}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
+                    </DataTableBody>
+                  </DataTable>
+                </DataTableScroll>
+              </DataTableSurface>
             </section>
           )}
 
@@ -1649,35 +1661,35 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       ) : (
                         <div className="grid gap-3">
                           <div className="overflow-x-auto rounded-lg border border-border">
-                            <table className="min-w-full border-collapse text-left text-[12px]">
-                              <thead className="bg-panel-soft text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">
+                            <DataTable>
+                              <DataTableHead>
                                 <tr>
-                                  <th className="whitespace-nowrap px-3 py-2">Session</th>
-                                  <th className="whitespace-nowrap px-3 py-2">IP</th>
-                                  <th className="whitespace-nowrap px-3 py-2">Created</th>
-                                  <th className="whitespace-nowrap px-3 py-2">Expires</th>
-                                  <th className="whitespace-nowrap px-3 py-2">Status</th>
-                                  <th className="whitespace-nowrap px-3 py-2 text-right">Actions</th>
+                                  <DataTableHeaderCell>Session</DataTableHeaderCell>
+                                  <DataTableHeaderCell>IP</DataTableHeaderCell>
+                                  <DataTableHeaderCell>Created</DataTableHeaderCell>
+                                  <DataTableHeaderCell>Expires</DataTableHeaderCell>
+                                  <DataTableHeaderCell>Status</DataTableHeaderCell>
+                                  <DataTableHeaderCell className="text-right">Actions</DataTableHeaderCell>
                                 </tr>
-                              </thead>
-                              <tbody className="divide-y divide-border bg-white">
+                              </DataTableHead>
+                              <DataTableBody>
                                 {pagedSelectedUserSessions.map((session) => {
                                   const revoked = session.revoked_at != null
                                   return (
-                                    <tr key={session.id} className="align-top">
-                                      <td className="max-w-[260px] px-3 py-2">
-                                        <p className="font-semibold text-ink">Session #{session.id}</p>
+                                    <DataTableRow key={session.id} className="align-top">
+                                      <DataTableCell className="max-w-[260px]">
+                                        <p>Session #{session.id}</p>
                                         <p className="mt-1 truncate text-[11px] text-muted" title={session.user_agent ?? ''}>
                                           {session.user_agent || 'Unknown user agent'}
                                         </p>
-                                      </td>
-                                      <td className="whitespace-nowrap px-3 py-2 text-muted">{session.ip_address || '-'}</td>
-                                      <td className="whitespace-nowrap px-3 py-2 text-muted">{formatDateTime(session.created_at)}</td>
-                                      <td className="whitespace-nowrap px-3 py-2 text-muted">{formatDateTime(session.expires_at)}</td>
-                                      <td className="whitespace-nowrap px-3 py-2">
+                                      </DataTableCell>
+                                      <DataTableCell className="whitespace-nowrap text-muted">{session.ip_address || '-'}</DataTableCell>
+                                      <DataTableCell className="whitespace-nowrap text-muted">{formatDateTime(session.created_at)}</DataTableCell>
+                                      <DataTableCell className="whitespace-nowrap text-muted">{formatDateTime(session.expires_at)}</DataTableCell>
+                                      <DataTableCell className="whitespace-nowrap">
                                         <Tag label={revoked ? 'Revoked' : 'Active'} tone={revoked ? 'default' : 'success'} />
-                                      </td>
-                                      <td className="whitespace-nowrap px-3 py-2 text-right">
+                                      </DataTableCell>
+                                      <DataTableCell className="whitespace-nowrap text-right">
                                         <button
                                           type="button"
                                           onClick={() => void handleRevokeUserSession(session.id)}
@@ -1687,12 +1699,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                                           <Trash2 className="h-3.5 w-3.5" />
                                           Revoke
                                         </button>
-                                      </td>
-                                    </tr>
+                                      </DataTableCell>
+                                    </DataTableRow>
                                   )
                                 })}
-                              </tbody>
-                            </table>
+                              </DataTableBody>
+                            </DataTable>
                           </div>
                           <Pagination
                             total={selectedUserSessions.length}
@@ -2370,11 +2382,10 @@ function PermissionSearchPanel({
         <p className="text-[12px] font-semibold text-ink">{title}</p>
         <p className="mt-1 text-[11px] text-muted">{description}</p>
       </div>
-      <input
+      <SearchInput
         value={search}
         onChange={(event) => onSearchChange(event.target.value)}
         placeholder="Search module, action, or permission key"
-        className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
         disabled={disabled}
       />
       <div className="grid gap-3">
@@ -2474,11 +2485,10 @@ function DBScopePanel({
         <p className="text-[12px] font-semibold text-ink">{title}</p>
         <p className="mt-1 text-[11px] text-muted">{description}</p>
       </div>
-      <input
+      <SearchInput
         value={search}
         onChange={(event) => onSearchChange(event.target.value)}
         placeholder="Search connection name, type, database"
-        className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
         disabled={disabled}
       />
       <div className="grid gap-2">

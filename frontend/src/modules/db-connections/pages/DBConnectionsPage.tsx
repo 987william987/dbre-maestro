@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Pencil, Plus, ServerCog, Trash2, X } from 'lucide-react'
 import { createDBConnection, deleteDBConnection, getDBConnectionBindings, listDBConnections, patchDBConnection, testDBConnection } from '@/modules/db-connections/api'
+import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import type { DBConnection, DBConnectionBindings } from '@/shared/types/dbConnection'
@@ -10,9 +11,19 @@ import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
+import { SearchInput } from '@/shared/ui/SearchInput'
 import { useToast } from '@/shared/ui/ToastContext'
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+  DataTableScroll,
+  DataTableSurface,
+} from '@/shared/ui/DataTable'
 
 type DrawerState =
   | { mode: 'create' }
@@ -84,6 +95,9 @@ export function DBConnectionsPage() {
   const [testingId, setTestingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
+  const [nameKeyword, setNameKeyword] = useState('')
+  const [typeKeyword, setTypeKeyword] = useState('')
+  const [endpointKeyword, setEndpointKeyword] = useState('')
 
   useEffect(() => {
     void loadConnections()
@@ -238,7 +252,24 @@ export function DBConnectionsPage() {
   }
 
   const sortedConnections = useMemo(() => {
-    return [...connections].sort((left, right) => {
+    const normalizedNameKeyword = nameKeyword.trim().toLowerCase()
+    const normalizedTypeKeyword = typeKeyword.trim().toLowerCase()
+    const normalizedEndpointKeyword = endpointKeyword.trim().toLowerCase()
+
+    return connections.filter((connection) => {
+      const nameMatches = normalizedNameKeyword === '' || connection.name.toLowerCase().includes(normalizedNameKeyword)
+      const typeText = `${connection.db_type} ${formatDBType(connection.db_type)}`.toLowerCase()
+      const typeMatches = normalizedTypeKeyword === '' || typeText.includes(normalizedTypeKeyword)
+      const endpointText = [
+        formatReadonlyConnectionTarget(connection),
+        formatReadwriteConnectionTarget(connection),
+        connection.host,
+        connection.readonly_host,
+        connection.readwrite_host,
+      ].filter(Boolean).join(' ').toLowerCase()
+      const endpointMatches = normalizedEndpointKeyword === '' || endpointText.includes(normalizedEndpointKeyword)
+      return nameMatches && typeMatches && endpointMatches
+    }).sort((left, right) => {
       const leftFailed = left.last_test_status === 'failed' ? 1 : 0
       const rightFailed = right.last_test_status === 'failed' ? 1 : 0
       if (leftFailed !== rightFailed) {
@@ -246,7 +277,7 @@ export function DBConnectionsPage() {
       }
       return right.created_at.localeCompare(left.created_at)
     })
-  }, [connections])
+  }, [connections, endpointKeyword, nameKeyword, typeKeyword])
   const pagedConnections = useMemo(() => sortedConnections.slice(offset, offset + PAGE_SIZE), [offset, sortedConnections])
   const endpointPasswordError = drawerState?.mode === 'edit' && selectedConnection
     ? getEndpointPasswordError(selectedConnection, form)
@@ -260,119 +291,140 @@ export function DBConnectionsPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="DB Connections"
-        description="Supports MySQL, PostgreSQL, and Redis. Leave `database` empty to let the SQL Editor browse available databases automatically."
-        actions={
+      <div className="grid gap-3 lg:grid-cols-[minmax(180px,0.85fr)_140px_minmax(260px,1fr)_auto]">
+        <SearchInput
+          aria-label="Connection name search"
+          value={nameKeyword}
+          onChange={(event) => {
+            setNameKeyword(event.target.value)
+            setOffset(0)
+          }}
+          placeholder="Name"
+        />
+        <SearchInput
+          aria-label="Connection type search"
+          value={typeKeyword}
+          onChange={(event) => {
+            setTypeKeyword(event.target.value)
+            setOffset(0)
+          }}
+          placeholder="Type"
+        />
+        <SearchInput
+          aria-label="Connection endpoint search"
+          value={endpointKeyword}
+          onChange={(event) => {
+            setEndpointKeyword(event.target.value)
+            setOffset(0)
+          }}
+          placeholder="Endpoint"
+        />
+        <div className="flex justify-end">
           <button
             type="button"
             onClick={openCreateDrawer}
-            className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800"
+            className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
           >
             <Plus className="h-4 w-4" />
             New Connection
           </button>
-        }
-      />
+        </div>
+      </div>
 
-      <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
+      <DataTableSurface>
             {loading ? (
               <LoadingBlock message="Loading connections..." className="h-48 rounded-none border-0 bg-transparent" />
             ) : sortedConnections.length === 0 ? (
               <div className="m-4 flex h-48 items-center justify-center rounded-xl border border-dashed border-border bg-panel-soft text-sm text-muted">
-                No database connections yet.
+                {connections.length === 0 ? 'No database connections yet.' : 'No database connections match the current filters.'}
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full border-collapse">
-                  <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+              <DataTableScroll>
+                <DataTable>
+                  <DataTableHead>
                     <tr>
-                      <th className="px-3 py-3">Name</th>
-                      <th className="px-3 py-3">Type</th>
-                      <th className="px-3 py-3">Readonly Endpoint</th>
-                      <th className="px-3 py-3">Readwrite Endpoint</th>
-                      <th className="px-3 py-3">
+                      <DataTableHeaderCell>Name</DataTableHeaderCell>
+                      <DataTableHeaderCell>Type</DataTableHeaderCell>
+                      <DataTableHeaderCell>Readonly Endpoint</DataTableHeaderCell>
+                      <DataTableHeaderCell>Readwrite Endpoint</DataTableHeaderCell>
+                      <DataTableHeaderCell>
                         <div className="group relative inline-flex">
                           <span>SSL</span>
                           <div className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-10 hidden w-52 rounded-md border border-border bg-white px-3 py-2 text-[11px] font-medium normal-case tracking-normal text-muted shadow-soft group-hover:block">
                             Use SSL when supported, otherwise fall back to an unencrypted connection.
                           </div>
                         </div>
-                      </th>
-                      <th className="px-3 py-3">Created</th>
-                      <th className="px-3 py-3">Updated</th>
-                      <th className="px-3 py-3">Actions</th>
+                      </DataTableHeaderCell>
+                      <DataTableHeaderCell>Created</DataTableHeaderCell>
+                      <DataTableHeaderCell>Updated</DataTableHeaderCell>
+                      <DataTableHeaderCell>Actions</DataTableHeaderCell>
                     </tr>
-                  </thead>
-                  <tbody>
+                  </DataTableHead>
+                  <DataTableBody>
                     {pagedConnections.map((connection) => {
                       const isFailed = connection.last_test_status === 'failed'
                       return (
-                        <tr
+                        <DataTableRow
                           key={connection.id}
-                          className={`border-t text-sm transition-colors ${
+                          className={
                             isFailed
                               ? 'border-red-200 bg-red-50/75 text-danger hover:bg-red-50'
-                              : 'border-border text-ink hover:bg-slate-50/70'
-                          }`}
+                              : undefined
+                          }
                         >
-                          <td className="px-3 py-2.5 align-top">
-                            <p className="whitespace-nowrap text-[13px] font-semibold">{connection.name}</p>
-                          </td>
-                          <td className={`px-3 py-2.5 align-top text-[12px] font-medium whitespace-nowrap ${isFailed ? 'text-danger' : 'text-ink'}`}>{formatDBType(connection.db_type)}</td>
-                          <td className="px-3 py-2.5 align-top">
-                            <p className="break-all font-mono text-[12px]">
-                              {formatReadonlyConnectionTarget(connection)}
-                            </p>
-                          </td>
-                          <td className="px-3 py-2.5 align-top">
-                            <p className="break-all font-mono text-[12px]">
-                              {formatReadwriteConnectionTarget(connection)}
-                            </p>
-                          </td>
-                          <td className="px-3 py-2.5 align-top whitespace-nowrap">
-                            <p className={`text-[12px] ${isFailed ? 'text-danger' : 'text-ink'}`}>{connection.ssl_mode}</p>
-                          </td>
-                          <td className={`px-3 py-2.5 align-top text-[12px] whitespace-nowrap ${isFailed ? 'text-danger/80' : 'text-muted'}`}>{formatDateTime(connection.created_at)}</td>
-                          <td className={`px-3 py-2.5 align-top text-[12px] whitespace-nowrap ${isFailed ? 'text-danger/80' : 'text-muted'}`}>{formatDateTime(connection.updated_at)}</td>
-                          <td className="px-3 py-2.5 align-top">
-                            <div className="flex flex-nowrap items-center gap-1.5 whitespace-nowrap">
+                          <DataTableCell>
+                            <p className="whitespace-nowrap">{connection.name}</p>
+                          </DataTableCell>
+                          <DataTableCell className={`whitespace-nowrap ${isFailed ? 'text-danger' : ''}`}>{formatDBType(connection.db_type)}</DataTableCell>
+                          <DataTableCell>
+                            <ExpandableEndpointValue value={formatReadonlyConnectionTarget(connection)} className={isFailed ? 'text-danger' : ''} />
+                          </DataTableCell>
+                          <DataTableCell>
+                            <ExpandableEndpointValue value={formatReadwriteConnectionTarget(connection)} className={isFailed ? 'text-danger' : ''} />
+                          </DataTableCell>
+                          <DataTableCell className="whitespace-nowrap">
+                            <p className={isFailed ? 'text-danger' : ''}>{connection.ssl_mode}</p>
+                          </DataTableCell>
+                          <DataTableCell className={`whitespace-nowrap ${isFailed ? 'text-danger/80' : ''}`}>{formatDateTime(connection.created_at)}</DataTableCell>
+                          <DataTableCell className={`whitespace-nowrap ${isFailed ? 'text-danger/80' : ''}`}>{formatDateTime(connection.updated_at)}</DataTableCell>
+                          <DataTableCell>
+                            <div className="flex flex-nowrap items-center gap-1 whitespace-nowrap">
                               <button
                                 type="button"
                                 onClick={() => void handleTest(connection.id)}
                                 disabled={testingId === connection.id}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
+                                className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2 text-[11px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                               >
-                                {testingId === connection.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                                {testingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
                                 Test
                               </button>
                               <button
                                 type="button"
                                 onClick={() => openEditDrawer(connection)}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2.5 text-[12px] font-semibold text-ink transition hover:bg-page"
+                                className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2 text-[11px] font-semibold text-ink transition hover:bg-page"
                               >
-                                <Pencil className="h-3.5 w-3.5" />
+                                <Pencil className="h-3 w-3" />
                                 Edit
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setPendingDeleteId(connection.id)}
                                 disabled={deletingId === connection.id}
-                                className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2.5 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
+                                className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2 text-[11px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
                               >
-                                {deletingId === connection.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                {deletingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
                                 Delete
                               </button>
                             </div>
-                          </td>
-                        </tr>
+                          </DataTableCell>
+                        </DataTableRow>
                       )
                     })}
-                  </tbody>
-                </table>
-              </div>
+                  </DataTableBody>
+                </DataTable>
+              </DataTableScroll>
             )}
-      </section>
+      </DataTableSurface>
 
       <Pagination
         offset={offset}
@@ -733,6 +785,26 @@ function formatReadonlyConnectionTarget(connection: DBConnection) {
 
 function formatReadwriteConnectionTarget(connection: DBConnection) {
   return `${connection.readwrite_host || connection.readonly_host || connection.host}:${connection.readwrite_port || connection.readonly_port || connection.port}`
+}
+
+function ExpandableEndpointValue({ value, className }: { value: string; className?: string }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      onClick={() => setExpanded((current) => !current)}
+      className={cn(
+        'block max-w-[360px] bg-transparent p-0 text-left text-[12px] outline-none transition hover:text-ink focus-visible:rounded focus-visible:ring-2 focus-visible:ring-slate-300',
+        expanded ? 'whitespace-normal break-all' : 'truncate whitespace-nowrap',
+        className,
+      )}
+      title={value}
+    >
+      {value}
+    </button>
+  )
 }
 
 function BindingList({ title, items, emptyLabel }: { title: string; items: string[]; emptyLabel: string }) {

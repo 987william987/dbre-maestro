@@ -1,19 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
-import { CalendarDays, ChevronLeft, ChevronRight, Plus, Search } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { CalendarDays, Check, ChevronLeft, ChevronRight, SlidersHorizontal } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { EmptyState } from '@/components/tickets/EmptyState'
 import { ApiError } from '@/shared/api/client'
-import { useAuth } from '@/shared/auth/AuthContext'
+import { cn } from '@/lib/utils'
 import { formatDateTime } from '@/shared/lib/format'
+import { useDebouncedValue } from '@/shared/lib/useDebouncedValue'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
 import type { Ticket, TicketStatus, TicketType } from '@/shared/types/ticket'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { Pagination } from '@/shared/ui/Pagination'
+import { SearchInput } from '@/shared/ui/SearchInput'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+  DataTableScroll,
+  DataTableSurface,
+} from '@/shared/ui/DataTable'
 import { listTickets } from '@/modules/tickets/api'
 
 const PAGE_SIZE = 20
@@ -43,6 +54,22 @@ const TYPE_OPTIONS: Array<{ value: '' | TicketType; label: string }> = [
   { value: 'sensitive_query_access', label: 'Sensitive Query Access' },
 ]
 
+type TicketColumnKey = 'ticketNo' | 'title' | 'description' | 'type' | 'status' | 'submitter' | 'dbConnection' | 'database' | 'created'
+
+const TICKET_COLUMNS: Array<{ key: TicketColumnKey; label: string }> = [
+  { key: 'ticketNo', label: 'Ticket No.' },
+  { key: 'title', label: 'Title' },
+  { key: 'description', label: 'Description' },
+  { key: 'type', label: 'Type' },
+  { key: 'status', label: 'Status' },
+  { key: 'submitter', label: 'Submitter' },
+  { key: 'dbConnection', label: 'DB Connection' },
+  { key: 'database', label: 'Database' },
+  { key: 'created', label: 'Created' },
+]
+
+const DEFAULT_VISIBLE_COLUMNS: TicketColumnKey[] = ['ticketNo', 'title', 'type', 'status', 'submitter', 'dbConnection', 'database', 'created']
+
 function formatTicketTypeLabel(ticketType: TicketType) {
   switch (ticketType) {
     case 'ddl':
@@ -63,7 +90,9 @@ function formatTicketTypeLabel(ticketType: TicketType) {
 }
 
 type TicketFilters = {
-  keyword: string
+  ticketNo: string
+  title: string
+  submitter: string
   type: '' | TicketType
   status: '' | TicketStatus
   from: string
@@ -71,7 +100,9 @@ type TicketFilters = {
 }
 
 const EMPTY_FILTERS: TicketFilters = {
-  keyword: '',
+  ticketNo: '',
+  title: '',
+  submitter: '',
   type: '',
   status: '',
   from: '',
@@ -79,14 +110,17 @@ const EMPTY_FILTERS: TicketFilters = {
 }
 
 export function TicketsPage() {
-  const { user } = useAuth()
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [total, setTotal] = useState(0)
   const [filters, setFilters] = useState<TicketFilters>(EMPTY_FILTERS)
-  const [appliedFilters, setAppliedFilters] = useState<TicketFilters>(EMPTY_FILTERS)
   const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [visibleColumns, setVisibleColumns] = useState<TicketColumnKey[]>(DEFAULT_VISIBLE_COLUMNS)
+  const [columnMenuOpen, setColumnMenuOpen] = useState(false)
+  const columnMenuRef = useRef<HTMLDivElement | null>(null)
+  const query = useMemo(() => ({ filters, offset }), [filters, offset])
+  const debouncedQuery = useDebouncedValue(query, 300)
 
   async function loadTickets(nextFilters: TicketFilters, nextOffset: number) {
     setLoading(true)
@@ -96,7 +130,9 @@ export function TicketsPage() {
       const response = await listTickets({
         status: nextFilters.status || undefined,
         type: nextFilters.type || undefined,
-        keyword: nextFilters.keyword.trim() || undefined,
+        ticketNo: nextFilters.ticketNo.trim() || undefined,
+        title: nextFilters.title.trim() || undefined,
+        submitter: nextFilters.submitter.trim() || undefined,
         from: toRFC3339(nextFilters.from) || undefined,
         to: toRFC3339(nextFilters.to) || undefined,
         limit: PAGE_SIZE,
@@ -112,8 +148,30 @@ export function TicketsPage() {
   }
 
   useEffect(() => {
-    void loadTickets(appliedFilters, offset)
-  }, [appliedFilters, offset])
+    void loadTickets(debouncedQuery.filters, debouncedQuery.offset)
+  }, [debouncedQuery])
+
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node
+      if (!columnMenuRef.current?.contains(target)) {
+        setColumnMenuOpen(false)
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setColumnMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [])
 
   useEffect(() => {
     const handleRealtime = (event: Event) => {
@@ -121,117 +179,167 @@ export function TicketsPage() {
       if (realtimeEvent.detail?.event !== 'ticket.updated') {
         return
       }
-      void loadTickets(appliedFilters, offset)
+      void loadTickets(filters, offset)
     }
 
     window.addEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
     return () => {
       window.removeEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
     }
-  }, [appliedFilters, offset])
+  }, [filters, offset])
 
-  const canCreateTicket = user?.permissions.includes('tickets.apply') ?? false
   const hasActiveFilters = useMemo(
-    () => Boolean(appliedFilters.keyword.trim() || appliedFilters.type || appliedFilters.status || appliedFilters.from || appliedFilters.to),
-    [appliedFilters],
+    () => Boolean(filters.ticketNo.trim() || filters.title.trim() || filters.submitter.trim() || filters.type || filters.status || filters.from || filters.to),
+    [filters],
   )
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setAppliedFilters(filters)
+  function updateFilters(patch: Partial<TicketFilters>) {
+    setFilters((current) => ({ ...current, ...patch }))
     setOffset(0)
+  }
+
+  function toggleColumn(key: TicketColumnKey) {
+    setVisibleColumns((current) => {
+      if (current.includes(key)) {
+        return current.length === 1 ? current : current.filter((column) => column !== key)
+      }
+      return [...current, key]
+    })
   }
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="Ticket Workspace"
-        description="View submitted, pending review, pending execution, and historical tickets in a single queue. Visible scope is determined by your current role and backend permissions."
-        actions={
-          canCreateTicket ? (
-            <Link
-              to="/tickets/new"
-              className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition-colors hover:bg-slate-800"
-            >
-              <Plus className="h-4 w-4" />
-              New Ticket
-            </Link>
-          ) : null
-        }
-      />
-
       <section>
-        <form className="py-1" onSubmit={handleSubmit}>
-          <div className="flex flex-wrap items-end gap-2.5">
+        <div className="py-1">
+          <div className="flex w-full flex-nowrap items-end gap-2.5">
             <FilterHint
-              hint="Search by ticket number, title, or submitter."
-              className="min-w-[220px] flex-[1.3] xl:max-w-[320px]"
+              hint="Search by ticket number."
+              className="w-[170px] shrink-0"
             >
-              <input
-                value={filters.keyword}
-                onChange={(event) => setFilters((current) => ({ ...current, keyword: event.target.value }))}
-                className="h-10 w-full rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                placeholder="Ticket no. / title / submitter"
+              <SearchInput
+                value={filters.ticketNo}
+                onChange={(event) => updateFilters({ ticketNo: event.target.value })}
+                placeholder="Ticket no."
+              />
+            </FilterHint>
+            <FilterHint
+              hint="Search by ticket title."
+              className="w-[170px] shrink-0"
+            >
+              <SearchInput
+                value={filters.title}
+                onChange={(event) => updateFilters({ title: event.target.value })}
+                placeholder="Title"
+              />
+            </FilterHint>
+            <FilterHint
+              hint="Search by submitter username."
+              className="w-[160px] shrink-0"
+            >
+              <SearchInput
+                value={filters.submitter}
+                onChange={(event) => updateFilters({ submitter: event.target.value })}
+                placeholder="Submitter"
               />
             </FilterHint>
             <FilterHint
               hint="Filter by ticket type."
-              className="min-w-[180px] flex-1 xl:max-w-[220px]"
+              className="w-[160px] shrink-0"
             >
               <SelectField
                 ariaLabel="Type"
                 value={filters.type}
-                onChange={(value) => setFilters((current) => ({ ...current, type: value as '' | TicketType }))}
+                onChange={(value) => updateFilters({ type: value as '' | TicketType })}
                 options={TYPE_OPTIONS}
               />
             </FilterHint>
             <FilterHint
               hint="Filter by ticket status."
-              className="min-w-[180px] flex-1 xl:max-w-[220px]"
+              className="w-[160px] shrink-0"
             >
               <SelectField
                 ariaLabel="Status"
                 value={filters.status}
-                onChange={(value) => setFilters((current) => ({ ...current, status: value as '' | TicketStatus }))}
+                onChange={(value) => updateFilters({ status: value as '' | TicketStatus })}
                 options={STATUS_OPTIONS}
               />
             </FilterHint>
             <FilterHint
               hint="Show tickets created after this date and time."
-              className="min-w-[210px] flex-1 xl:max-w-[250px]"
+              className="w-[180px] shrink-0"
             >
               <DateTimeField
                 value={filters.from}
-                onChange={(value) => setFilters((current) => ({ ...current, from: value }))}
+                onChange={(value) => updateFilters({ from: value })}
                 placeholder="Start date and time"
                 presets={FROM_DATE_PRESETS}
               />
             </FilterHint>
             <FilterHint
               hint="Show tickets created before this date and time."
-              className="min-w-[210px] flex-1 xl:max-w-[250px]"
+              className="w-[180px] shrink-0"
             >
               <DateTimeField
                 value={filters.to}
-                onChange={(value) => setFilters((current) => ({ ...current, to: value }))}
+                onChange={(value) => updateFilters({ to: value })}
                 placeholder="End date and time"
                 presets={TO_DATE_PRESETS}
               />
             </FilterHint>
-            <button
-              type="submit"
-              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800"
-            >
-              <Search className="h-4 w-4" />
-              Apply
-            </button>
+            <div ref={columnMenuRef} className="relative flex shrink-0 items-end">
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={columnMenuOpen}
+                aria-label="Visible Columns"
+                title="Visible Columns"
+                onClick={() => setColumnMenuOpen((current) => !current)}
+                className={cn(
+                  'inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-panel text-ink shadow-soft transition',
+                  columnMenuOpen ? 'border-slate-300' : 'hover:border-slate-300 hover:bg-panel-soft',
+                )}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+              </button>
+              {columnMenuOpen ? (
+                <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[260px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-border bg-white p-2 shadow-[0_22px_45px_rgba(15,23,42,0.14)]">
+                  <div className="px-3 py-2">
+                    <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-faint">Table fields</p>
+                    <p className="mt-1 text-[14px] font-semibold text-ink">Column Filter</p>
+                  </div>
+                  <div role="menu" aria-label="Visible columns menu" className="grid gap-1">
+                    {TICKET_COLUMNS.map((column) => {
+                      const selected = visibleColumns.includes(column.key)
+                      return (
+                        <button
+                          key={column.key}
+                          type="button"
+                          role="menuitemcheckbox"
+                          aria-checked={selected}
+                          onClick={() => toggleColumn(column.key)}
+                          className={cn(
+                            'flex items-center gap-3 rounded-xl px-4 py-3 text-left text-[13px] transition',
+                            selected ? 'bg-panel-soft text-ink' : 'text-ink hover:bg-panel-soft/70',
+                          )}
+                        >
+                          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                            {selected ? <Check className="h-4 w-4" /> : null}
+                          </span>
+                          <span>{column.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
-        </form>
+        </div>
       </section>
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
-      <div className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
+      <DataTableSurface>
         {loading ? (
           <LoadingBlock message="Loading tickets..." className="h-[320px] rounded-none border-0 bg-transparent" />
         ) : tickets.length === 0 ? (
@@ -239,55 +347,87 @@ export function TicketsPage() {
             <EmptyState variant={hasActiveFilters ? 'search' : 'history'} />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse">
-              <thead className="bg-editor-toolbar">
-                <tr className="text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
-                  <th className="px-4 py-3">Ticket No.</th>
-                  <th className="px-4 py-3">Title</th>
-                  <th className="px-4 py-3">Type</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Submitter</th>
-                  <th className="px-4 py-3">Created</th>
+          <DataTableScroll>
+            <DataTable className="min-w-[1360px] table-fixed">
+              <colgroup>
+                {visibleColumns.includes('ticketNo') ? <col className="w-[230px]" /> : null}
+                {visibleColumns.includes('title') ? <col className="w-[260px]" /> : null}
+                {visibleColumns.includes('description') ? <col className="w-[280px]" /> : null}
+                {visibleColumns.includes('type') ? <col className="w-[110px]" /> : null}
+                {visibleColumns.includes('status') ? <col className="w-[150px]" /> : null}
+                {visibleColumns.includes('submitter') ? <col className="w-[110px]" /> : null}
+                {visibleColumns.includes('dbConnection') ? <col className="w-[260px]" /> : null}
+                {visibleColumns.includes('database') ? <col className="w-[210px]" /> : null}
+                {visibleColumns.includes('created') ? <col className="w-[150px]" /> : null}
+              </colgroup>
+              <DataTableHead>
+                <tr>
+                  {visibleColumns.includes('ticketNo') ? <DataTableHeaderCell>Ticket No.</DataTableHeaderCell> : null}
+                  {visibleColumns.includes('title') ? <DataTableHeaderCell>Title</DataTableHeaderCell> : null}
+                  {visibleColumns.includes('description') ? <DataTableHeaderCell>Description</DataTableHeaderCell> : null}
+                  {visibleColumns.includes('type') ? <DataTableHeaderCell>Type</DataTableHeaderCell> : null}
+                  {visibleColumns.includes('status') ? <DataTableHeaderCell>Status</DataTableHeaderCell> : null}
+                  {visibleColumns.includes('submitter') ? <DataTableHeaderCell>Submitter</DataTableHeaderCell> : null}
+                  {visibleColumns.includes('dbConnection') ? <DataTableHeaderCell>DB Connection</DataTableHeaderCell> : null}
+                  {visibleColumns.includes('database') ? <DataTableHeaderCell>Database</DataTableHeaderCell> : null}
+                  {visibleColumns.includes('created') ? <DataTableHeaderCell>Created</DataTableHeaderCell> : null}
                 </tr>
-              </thead>
-              <tbody>
+              </DataTableHead>
+              <DataTableBody>
                 {tickets.map((ticket) => (
-                  <tr
-                    key={ticket.id}
-                    className="border-t border-border/90 text-sm text-ink transition-colors hover:bg-slate-50/70"
-                  >
-                    <td className="px-4 py-3.5 align-top">
-                      <Link
-                        to={`/tickets/${ticket.ticket_no}`}
-                        className="inline-flex rounded-md border border-transparent px-1.5 py-1 font-mono text-[12px] font-semibold text-accent transition hover:border-accent/15 hover:bg-accent-soft hover:text-blue-700"
-                      >
-                        {ticket.ticket_no}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3.5 align-top">
-                      <div>
-                        <p className="text-[14px] font-semibold tracking-tight text-ink">{ticket.title}</p>
-                        {ticket.description ? <p className="mt-1 max-w-[420px] text-[12px] leading-5 text-muted">{ticket.description}</p> : null}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5 align-top">
-                      <span className="rounded-full border border-border bg-panel-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">
-                        {formatTicketTypeLabel(ticket.ticket_type)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3.5 align-top">
-                      <StatusBadge status={ticket.status} />
-                    </td>
-                    <td className="px-4 py-3.5 align-top text-[12px] text-muted">{ticket.submitter_name || ticket.submitter_id}</td>
-                    <td className="px-4 py-3.5 align-top text-[12px] text-muted">{formatDateTime(ticket.created_at)}</td>
-                  </tr>
+                  <DataTableRow key={ticket.id}>
+                    {visibleColumns.includes('ticketNo') ? (
+                      <DataTableCell>
+                        <Link
+                          to={`/tickets/${ticket.ticket_no}`}
+                          title={ticket.ticket_no}
+                          className="inline-flex max-w-full items-center rounded-md border border-transparent px-1.5 py-0.5 text-[12px] font-normal leading-5 text-ink transition hover:border-accent/15 hover:bg-accent-soft hover:text-accent"
+                        >
+                          <span className="block max-w-[210px] truncate">{ticket.ticket_no}</span>
+                        </Link>
+                      </DataTableCell>
+                    ) : null}
+                    {visibleColumns.includes('title') ? (
+                      <DataTableCell>
+                        <p className="truncate text-[12px] font-normal leading-5 text-ink" title={ticket.title}>{ticket.title}</p>
+                      </DataTableCell>
+                    ) : null}
+                    {visibleColumns.includes('description') ? (
+                      <DataTableCell>
+                        <p className="truncate text-[12px] leading-5 text-ink" title={ticket.description || undefined}>{ticket.description || '-'}</p>
+                      </DataTableCell>
+                    ) : null}
+                    {visibleColumns.includes('type') ? (
+                      <DataTableCell className="whitespace-nowrap">
+                        <span className="inline-flex items-center text-[10px] font-semibold uppercase leading-none tracking-[0.12em] text-muted">
+                          {formatTicketTypeLabel(ticket.ticket_type)}
+                        </span>
+                      </DataTableCell>
+                    ) : null}
+                    {visibleColumns.includes('status') ? (
+                      <DataTableCell className="whitespace-nowrap">
+                        <StatusBadge status={ticket.status} className="h-6 items-center justify-center px-3 py-0 text-[10px] leading-none" />
+                      </DataTableCell>
+                    ) : null}
+                    {visibleColumns.includes('submitter') ? <DataTableCell><p className="truncate" title={String(ticket.submitter_name || ticket.submitter_id)}>{ticket.submitter_name || ticket.submitter_id}</p></DataTableCell> : null}
+                    {visibleColumns.includes('dbConnection') ? (
+                      <DataTableCell>
+                        <p className="truncate" title={ticket.db_connection_name || undefined}>{ticket.db_connection_name || '-'}</p>
+                      </DataTableCell>
+                    ) : null}
+                    {visibleColumns.includes('database') ? (
+                      <DataTableCell>
+                        <p className="truncate" title={ticket.database_name || undefined}>{ticket.database_name || '-'}</p>
+                      </DataTableCell>
+                    ) : null}
+                    {visibleColumns.includes('created') ? <DataTableCell className="whitespace-nowrap">{formatDateTime(ticket.created_at)}</DataTableCell> : null}
+                  </DataTableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </DataTableBody>
+            </DataTable>
+          </DataTableScroll>
         )}
-      </div>
+      </DataTableSurface>
 
       <Pagination offset={offset} pageSize={PAGE_SIZE} count={tickets.length} total={total} onChange={setOffset} />
     </div>
@@ -327,7 +467,7 @@ function FilterHint({
   return (
     <div className={`group relative ${className ?? ''}`}>
       {children}
-      <div className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-20 hidden w-64 rounded-md border border-border bg-white px-3 py-2 text-[11px] font-medium text-muted shadow-soft group-hover:block">
+      <div className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-20 hidden w-full rounded-md border border-border bg-white px-3 py-2 text-[11px] font-medium text-muted shadow-soft group-hover:block">
         {hint}
       </div>
     </div>
@@ -442,7 +582,7 @@ function DateTimeField({
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-label={placeholder}
-        className="inline-flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-border bg-panel-soft px-3 text-left text-[13px] text-ink outline-none transition hover:bg-white focus:border-accent focus:ring-2 focus:ring-accent/20"
+        className="inline-flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-border bg-panel-soft px-3 text-left text-[13px] text-ink outline-none transition hover:bg-white focus:border-accent focus:ring-2 focus:ring-accent/20"
       >
         <span className={value ? 'text-ink' : 'text-muted'}>{value ? formatDateTimeSummary(value) : placeholder}</span>
         <CalendarDays className="h-4 w-4 text-muted" />
@@ -503,13 +643,13 @@ function DateTimeField({
               type="time"
               value={valueTime}
               onChange={(event) => applyTime(event.target.value)}
-              className="h-10 flex-1 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className="h-9 flex-1 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             />
             {value ? (
               <button
                 type="button"
                 onClick={clearValue}
-                className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-panel-soft px-3 text-[12px] font-semibold text-muted transition hover:bg-page hover:text-ink"
+                className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-panel-soft px-3 text-[12px] font-semibold text-muted transition hover:bg-page hover:text-ink"
               >
                 Clear
               </button>

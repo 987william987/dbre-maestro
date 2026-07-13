@@ -40,6 +40,7 @@ function renderShell(initialEntry = '/tickets') {
             <Route path="/tickets" element={<div>tickets page</div>} />
             <Route path="/tickets/new" element={<div>new ticket page</div>} />
             <Route path="/tickets/:id" element={<div>ticket detail page</div>} />
+            <Route path="/sql-editor" element={<div>sql editor page</div>} />
             <Route path="/users" element={<div>users page</div>} />
             <Route path="/users/groups" element={<div>auth groups page</div>} />
             <Route path="/users/resources" element={<div>resources page</div>} />
@@ -192,7 +193,7 @@ describe('AppShell notifications', () => {
 
     await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
     expect(screen.getAllByText('Workbench').length).toBeGreaterThan(0)
-    const ticketsToggle = screen.getByRole('button', { name: /Tickets/i })
+    const ticketsToggle = screen.getByRole('button', { name: 'Tickets' })
     expect(ticketsToggle).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('New Ticket')).toBeInTheDocument()
 
@@ -201,6 +202,64 @@ describe('AppShell notifications', () => {
 
     fireEvent.click(ticketsToggle)
     expect(ticketsToggle).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('tickets breadcrumb 會顯示頁面說明 popover', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'operator',
+        authGroups: ['operator'],
+        authGroupDetails: [],
+        permissions: ['tickets.read', 'tickets.apply'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/tickets')
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Show All Tickets Guide' }))
+
+    expect(screen.getByText('All Tickets Guide')).toBeInTheDocument()
+    expect(screen.getByText(/Description is hidden by default/)).toBeInTheDocument()
+  })
+
+  it('sql editor breadcrumb 會顯示頁面說明 popover', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'developer',
+        authGroups: ['developer'],
+        authGroupDetails: [],
+        permissions: ['sql_editor.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/sql-editor')
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Show SQL Editor Guide' }))
+
+    expect(screen.getByText('SQL Editor Guide')).toBeInTheDocument()
+    expect(screen.getByText(/Select a DB connection/)).toBeInTheDocument()
   })
 
   it('桌面側欄可以收合成 icon rail 並再展開', async () => {

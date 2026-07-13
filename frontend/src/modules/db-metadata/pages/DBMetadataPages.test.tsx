@@ -29,7 +29,7 @@ describe('DBMetadata pages', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Inventory' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('No inventory snapshots match the current filters.')).toBeInTheDocument())
     expect(screen.getByRole('link', { name: 'Inventory' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Objects' })).toBeInTheDocument()
     expect(screen.getByLabelText('Engine')).toBeInTheDocument()
@@ -126,7 +126,7 @@ describe('DBMetadata pages', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Objects' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('No object snapshots yet.')).toBeInTheDocument())
     expect(screen.getByRole('link', { name: 'Inventory' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Objects' })).toBeInTheDocument()
     expect(screen.getByText('No object snapshots yet.')).toBeInTheDocument()

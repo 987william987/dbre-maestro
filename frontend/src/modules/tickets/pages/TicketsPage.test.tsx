@@ -62,7 +62,9 @@ describe('TicketsPage', () => {
     await waitFor(() => expect(mockedListTickets).toHaveBeenCalledWith({
       status: undefined,
       type: undefined,
-      keyword: undefined,
+      ticketNo: undefined,
+      title: undefined,
+      submitter: undefined,
       from: undefined,
       to: undefined,
       limit: 20,
@@ -70,12 +72,13 @@ describe('TicketsPage', () => {
     }))
 
     selectOption('Status', 'Pending Review')
-    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
 
     await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith({
       status: 'pending_review',
       type: undefined,
-      keyword: undefined,
+      ticketNo: undefined,
+      title: undefined,
+      submitter: undefined,
       from: undefined,
       to: undefined,
       limit: 20,
@@ -185,7 +188,9 @@ describe('TicketsPage', () => {
     await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith({
       status: undefined,
       type: undefined,
-      keyword: undefined,
+      ticketNo: undefined,
+      title: undefined,
+      submitter: undefined,
       from: undefined,
       to: undefined,
       limit: 20,
@@ -223,6 +228,8 @@ describe('TicketsPage', () => {
           description: null,
           sql_content: 'SELECT 1;',
           ticket_type: 'ddl',
+          db_connection_name: 'aws-jp-edgex-share-mysql-nonprod',
+          database_name: 'testnet_edgex_user_server',
           status: 'pending_review',
           submitter_id: 99,
           submitter_name: 'alice',
@@ -242,7 +249,67 @@ describe('TicketsPage', () => {
     )
 
     expect(await screen.findByText('alice')).toBeInTheDocument()
+    expect(screen.getByText('aws-jp-edgex-share-mysql-nonprod')).toBeInTheDocument()
+    expect(screen.getByText('testnet_edgex_user_server')).toBeInTheDocument()
     expect(screen.queryByText(/^99$/)).not.toBeInTheDocument()
+  })
+
+  it('description 欄位預設隱藏，但可以透過欄位 filter 顯示', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'dev',
+        authGroups: ['developer'],
+        authGroupDetails: [],
+        permissions: ['tickets.apply'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    mockedListTickets.mockResolvedValueOnce({
+      tickets: [
+        {
+          id: 1,
+          ticket_no: 'T-001',
+          title: 'Column filter ticket',
+          description: 'Description should be hideable',
+          sql_content: 'SELECT 1;',
+          ticket_type: 'ddl',
+          status: 'pending_review',
+          submitter_id: 99,
+          submitter_name: 'alice',
+          created_at: '2026-06-12T00:00:00Z',
+          updated_at: '2026-06-12T00:00:00Z',
+        },
+      ],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    })
+
+    render(
+      <MemoryRouter>
+        <TicketsPage />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('Column filter ticket')
+    expect(screen.queryByRole('columnheader', { name: 'Description' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Description should be hideable')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Visible Columns' }))
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Description' }))
+
+    expect(screen.getByRole('columnheader', { name: 'Description' })).toBeInTheDocument()
+    expect(screen.getByText('Description should be hideable')).toBeInTheDocument()
   })
 
   it('submits keyword, type, and status filters with audit-log-style controls', async () => {
@@ -265,9 +332,7 @@ describe('TicketsPage', () => {
       clearAuth: vi.fn(),
     })
 
-    mockedListTickets
-      .mockResolvedValueOnce({ tickets: [], total: 0, limit: 20, offset: 0 })
-      .mockResolvedValueOnce({ tickets: [], total: 0, limit: 20, offset: 0 })
+    mockedListTickets.mockResolvedValue({ tickets: [], total: 0, limit: 20, offset: 0 })
 
     render(
       <MemoryRouter>
@@ -277,15 +342,18 @@ describe('TicketsPage', () => {
 
     await waitFor(() => expect(mockedListTickets).toHaveBeenCalledTimes(1))
 
-    fireEvent.change(screen.getByPlaceholderText('Ticket no. / title / submitter'), { target: { value: 'TK-2026' } })
+    fireEvent.change(screen.getByPlaceholderText('Ticket no.'), { target: { value: 'TK-2026' } })
+    fireEvent.change(screen.getByPlaceholderText('Title'), { target: { value: 'Export' } })
+    fireEvent.change(screen.getByPlaceholderText('Submitter'), { target: { value: 'alice' } })
     selectOption('Type', 'SQL Export')
     selectOption('Status', 'Approved')
-    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
 
     await waitFor(() => expect(mockedListTickets).toHaveBeenLastCalledWith({
       status: 'approved',
       type: 'sql_export',
-      keyword: 'TK-2026',
+      ticketNo: 'TK-2026',
+      title: 'Export',
+      submitter: 'alice',
       from: undefined,
       to: undefined,
       limit: 20,

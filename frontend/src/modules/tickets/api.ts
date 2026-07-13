@@ -66,6 +66,9 @@ type ListTicketsParams = {
   status?: TicketStatus
   type?: TicketType
   keyword?: string
+  ticketNo?: string
+  title?: string
+  submitter?: string
   from?: string
   to?: string
   limit?: number
@@ -82,6 +85,15 @@ export async function listTickets(params: ListTicketsParams = {}) {
   }
   if (params.keyword?.trim()) {
     query.set('q', params.keyword.trim())
+  }
+  if (params.ticketNo?.trim()) {
+    query.set('ticket_no', params.ticketNo.trim())
+  }
+  if (params.title?.trim()) {
+    query.set('title', params.title.trim())
+  }
+  if (params.submitter?.trim()) {
+    query.set('submitter', params.submitter.trim())
   }
   if (params.from) {
     query.set('from', params.from)

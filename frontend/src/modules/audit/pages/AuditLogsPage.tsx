@@ -1,16 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { CalendarDays, ChevronLeft, ChevronRight, Download, Search, X } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, Download, X } from 'lucide-react'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { getBrowserTimeZone } from '@/shared/lib/format'
+import { useDebouncedValue } from '@/shared/lib/useDebouncedValue'
 import type { AuditLog } from '@/shared/types/audit'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
-import { PageIntro } from '@/shared/ui/PageIntro'
 import { exportAuditLogs, listAuditLogs } from '@/modules/audit/api'
 import { useToast } from '@/shared/ui/ToastContext'
+import { SearchInput } from '@/shared/ui/SearchInput'
+import {
+  DataTable,
+  DataTableBody,
+  DataTableCell,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+  DataTableScroll,
+  DataTableSurface,
+} from '@/shared/ui/DataTable'
 
 const PAGE_SIZE = 20
 
@@ -69,18 +80,21 @@ export function AuditLogsPage() {
   const [offset, setOffset] = useState(0)
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null)
   const canExport = user?.permissions.includes('audit_logs.write') ?? false
+  const query = useMemo(() => ({ filters, offset }), [filters, offset])
+  const debouncedQuery = useDebouncedValue(query, 300)
 
-  async function loadLogs(nextOffset: number) {
+  async function loadLogs(nextFilters: typeof filters, nextOffset: number) {
     setLoading(true)
     setError('')
+    const resourceFilter = resolveResourceFilter(nextFilters.resourceType, nextFilters.resourceKeyword)
     try {
       const response = await listAuditLogs({
-        actionType: filters.actionType,
-        actorName: filters.actorKeyword.trim(),
-        resourceType: filters.resourceType,
-        resourceName: filters.resourceKeyword.trim(),
-        from: toRFC3339(filters.from),
-        to: toRFC3339(filters.to),
+        actionType: nextFilters.actionType,
+        actorName: nextFilters.actorKeyword.trim(),
+        resourceType: resourceFilter.resourceType,
+        resourceName: resourceFilter.resourceName,
+        from: toRFC3339(nextFilters.from),
+        to: toRFC3339(nextFilters.to),
         offset: nextOffset,
         limit: PAGE_SIZE,
       })
@@ -94,32 +108,22 @@ export function AuditLogsPage() {
   }
 
   useEffect(() => {
-    void loadLogs(offset)
-  }, [offset])
+    void loadLogs(debouncedQuery.filters, debouncedQuery.offset)
+  }, [debouncedQuery])
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  function updateFilters(patch: Partial<typeof filters>) {
+    setFilters((current) => ({ ...current, ...patch }))
     setOffset(0)
-    await loadLogs(0)
   }
 
-  const filterHint = useMemo(() => {
-    const active: string[] = []
-    if (filters.actionType) active.push(`Action: ${formatActionType(filters.actionType)}`)
-    if (filters.resourceType) active.push(`Resource: ${formatResourceType(filters.resourceType)}`)
-    if (filters.actorKeyword) active.push(`Actor: ${filters.actorKeyword}`)
-    if (filters.resourceKeyword) active.push(`Resource Name: ${filters.resourceKeyword}`)
-    if (filters.from || filters.to) active.push(`Time Range: ${formatDateFilter(filters.from) || 'Any'} to ${formatDateFilter(filters.to) || 'Any'}`)
-    return active
-  }, [filters])
-
   async function handleExport() {
+    const resourceFilter = resolveResourceFilter(filters.resourceType, filters.resourceKeyword)
     try {
       const response = await exportAuditLogs({
         actionType: filters.actionType,
         actorName: filters.actorKeyword.trim(),
-        resourceType: filters.resourceType,
-        resourceName: filters.resourceKeyword.trim(),
+        resourceType: resourceFilter.resourceType,
+        resourceName: resourceFilter.resourceName,
         from: toRFC3339(filters.from),
         to: toRFC3339(filters.to),
       })
@@ -140,13 +144,8 @@ export function AuditLogsPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <PageIntro
-        title="Audit Logs"
-        description="View operation records for logins, tickets, exports, and configuration changes. Common filters are provided as selects; complex details are shown in the detail panel."
-      />
-
       <section>
-        <form className="py-1" onSubmit={handleSubmit}>
+        <div className="py-1">
           <div className="flex flex-wrap items-end gap-2.5">
             <FilterHint
               hint="Select a common action event, e.g. login, logout, setting change."
@@ -154,7 +153,7 @@ export function AuditLogsPage() {
             >
               <SelectField
                 value={filters.actionType}
-                onChange={(value) => setFilters((current) => ({ ...current, actionType: value }))}
+                onChange={(value) => updateFilters({ actionType: value })}
                 options={ACTION_OPTIONS}
               />
             </FilterHint>
@@ -164,7 +163,7 @@ export function AuditLogsPage() {
             >
               <SelectField
                 value={filters.resourceType}
-                onChange={(value) => setFilters((current) => ({ ...current, resourceType: value }))}
+                onChange={(value) => updateFilters({ resourceType: value })}
                 options={RESOURCE_OPTIONS}
               />
             </FilterHint>
@@ -172,10 +171,9 @@ export function AuditLogsPage() {
               hint="Filter by actor name keyword, e.g. admin or william."
               className="min-w-[160px] flex-1 xl:max-w-[180px]"
             >
-              <input
+              <SearchInput
                 value={filters.actorKeyword}
-                onChange={(event) => setFilters((current) => ({ ...current, actorKeyword: event.target.value }))}
-                className="h-10 w-full rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                onChange={(event) => updateFilters({ actorKeyword: event.target.value })}
                 placeholder="Actor"
               />
             </FilterHint>
@@ -183,10 +181,9 @@ export function AuditLogsPage() {
               hint="Filter by resource name keyword, e.g. a connection name or ticket title."
               className="min-w-[170px] flex-1 xl:max-w-[190px]"
             >
-              <input
+              <SearchInput
                 value={filters.resourceKeyword}
-                onChange={(event) => setFilters((current) => ({ ...current, resourceKeyword: event.target.value }))}
-                className="h-10 w-full rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                onChange={(event) => updateFilters({ resourceKeyword: event.target.value })}
                 placeholder="Resource"
               />
             </FilterHint>
@@ -196,7 +193,7 @@ export function AuditLogsPage() {
             >
               <DateTimeField
                 value={filters.from}
-                onChange={(value) => setFilters((current) => ({ ...current, from: value }))}
+                onChange={(value) => updateFilters({ from: value })}
                 placeholder="Start date and time"
                 presets={FROM_DATE_PRESETS}
               />
@@ -207,7 +204,7 @@ export function AuditLogsPage() {
             >
               <DateTimeField
                 value={filters.to}
-                onChange={(value) => setFilters((current) => ({ ...current, to: value }))}
+                onChange={(value) => updateFilters({ to: value })}
                 placeholder="End date and time"
                 presets={TO_DATE_PRESETS}
               />
@@ -217,75 +214,64 @@ export function AuditLogsPage() {
               <button
                 type="button"
                 onClick={handleExport}
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-page xl:ml-auto"
+                className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-page xl:ml-auto"
               >
                 <Download className="h-4 w-4" />
                 Export
               </button>
             ) : null}
-            <button
-              type="submit"
-              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800"
-            >
-              <Search className="h-4 w-4" />
-              Apply
-            </button>
           </div>
-
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-muted">
-            {filterHint.length > 0 ? <span>Active filters: {filterHint.join(', ')}</span> : null}
-          </div>
-        </form>
+        </div>
       </section>
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
-      <section className="overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
+      <DataTableSurface>
         {loading ? (
           <LoadingBlock message="Loading audit logs..." className="h-60 rounded-none border-0" />
         ) : logs.length === 0 ? (
           <div className="flex h-60 items-center justify-center text-sm text-muted">No matching audit logs.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse">
-              <thead className="bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint">
+          <DataTableScroll>
+            <DataTable>
+              <DataTableHead>
                 <tr>
-                  <th className="px-3 py-3">Created</th>
-                  <th className="px-3 py-3">Actor</th>
-                  <th className="px-3 py-3">Action</th>
-                  <th className="px-3 py-3">Resource</th>
-                  <th className="px-3 py-3">IP</th>
-                  <th className="px-3 py-3">Details</th>
+                  <DataTableHeaderCell>Created</DataTableHeaderCell>
+                  <DataTableHeaderCell>Actor</DataTableHeaderCell>
+                  <DataTableHeaderCell>Action</DataTableHeaderCell>
+                  <DataTableHeaderCell>Resource</DataTableHeaderCell>
+                  <DataTableHeaderCell>IP</DataTableHeaderCell>
+                  <DataTableHeaderCell>Details</DataTableHeaderCell>
                 </tr>
-              </thead>
-              <tbody>
+              </DataTableHead>
+              <DataTableBody>
                 {logs.map((log) => (
-                  <tr key={log.id} className="border-t border-border text-sm text-ink transition-colors hover:bg-slate-50/70">
-                    <td className="px-3 py-2.5 text-[12px] text-muted whitespace-nowrap">{formatAuditDateTime(log.created_at, true)}</td>
-                    <td className="px-3 py-2.5 text-[13px] font-semibold whitespace-nowrap">{formatActor(log)}</td>
-                    <td className="px-3 py-2.5 text-[12px] whitespace-nowrap">{formatActionType(log.action_type)}</td>
-                    <td className="max-w-[360px] px-3 py-2.5 text-[12px] text-muted">
+                  <DataTableRow key={log.id}>
+                    <DataTableCell className="whitespace-nowrap">{formatAuditDateTime(log.created_at, true)}</DataTableCell>
+                    <DataTableCell className="whitespace-nowrap">{formatActor(log)}</DataTableCell>
+                    <DataTableCell className="whitespace-nowrap">{formatActionType(log.action_type)}</DataTableCell>
+                    <DataTableCell className="max-w-[360px]">
                       <div className="truncate" title={formatResource(log)}>
                         {formatResource(log)}
                       </div>
-                    </td>
-                    <td className="px-3 py-2.5 text-[12px] text-muted whitespace-nowrap">{formatIPAddress(log.ip_address)}</td>
-                    <td className="px-3 py-2.5">
+                    </DataTableCell>
+                    <DataTableCell className="whitespace-nowrap">{formatIPAddress(log.ip_address)}</DataTableCell>
+                    <DataTableCell>
                       <button
                         type="button"
                         onClick={() => setSelectedLog(log)}
-                        className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
+                        className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-panel-soft px-3 text-[12px] font-medium text-muted transition hover:bg-page hover:text-ink"
                       >
                         View
                       </button>
-                    </td>
-                  </tr>
+                    </DataTableCell>
+                  </DataTableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </DataTableBody>
+            </DataTable>
+          </DataTableScroll>
         )}
-      </section>
+      </DataTableSurface>
 
       <div className="flex items-center justify-between px-1">
         <p className="text-[12px] text-muted">
@@ -440,6 +426,27 @@ function formatResourceType(resourceType?: string | null) {
   return option?.label ?? resourceType
 }
 
+function normalizeResourceSearchValue(value: string) {
+  return value.trim().toLowerCase().replace(/[\s_-]+/g, ' ')
+}
+
+function resolveResourceFilter(selectedResourceType: string, resourceKeyword: string) {
+  const normalizedKeyword = normalizeResourceSearchValue(resourceKeyword)
+  const matchedType = RESOURCE_OPTIONS.find((option) => option.value && normalizeResourceSearchValue(option.label) === normalizedKeyword)?.value ?? ''
+
+  if (matchedType) {
+    return {
+      resourceType: selectedResourceType || matchedType,
+      resourceName: '',
+    }
+  }
+
+  return {
+    resourceType: selectedResourceType,
+    resourceName: resourceKeyword.trim(),
+  }
+}
+
 function formatResource(log: AuditLog) {
   const label = formatResourceType(log.resource_type)
   const detailsRecord = isRecord(log.details) ? log.details : null
@@ -468,14 +475,6 @@ function toRFC3339(value: string) {
   }
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '' : date.toISOString()
-}
-
-function formatDateFilter(value: string) {
-  if (!value) {
-    return ''
-  }
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : formatAuditDateTime(date.toISOString(), true)
 }
 
 function getDownloadFilename(contentDisposition: string | null) {
@@ -588,7 +587,7 @@ function DateTimeField({
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-label={placeholder}
-        className="inline-flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-border bg-panel-soft px-3 text-left text-[13px] text-ink outline-none transition hover:bg-white focus:border-accent focus:ring-2 focus:ring-accent/20"
+        className="inline-flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-border bg-panel-soft px-3 text-left text-[13px] text-ink outline-none transition hover:bg-white focus:border-accent focus:ring-2 focus:ring-accent/20"
       >
         <span className={value ? 'text-ink' : 'text-muted'}>{value ? formatDateTimeSummary(value) : placeholder}</span>
         <CalendarDays className="h-4 w-4 text-muted" />
@@ -650,13 +649,13 @@ function DateTimeField({
               type="time"
               value={valueTime}
               onChange={(event) => applyTime(event.target.value)}
-              className="h-10 flex-1 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className="h-9 flex-1 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             />
             {value ? (
               <button
                 type="button"
                 onClick={clearValue}
-                className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-panel-soft px-3 text-[12px] font-semibold text-muted transition hover:bg-page hover:text-ink"
+                className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-panel-soft px-3 text-[12px] font-semibold text-muted transition hover:bg-page hover:text-ink"
               >
                 Clear
               </button>

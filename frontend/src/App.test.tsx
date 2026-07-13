@@ -76,7 +76,6 @@ describe('App routing', () => {
       </AppProviders>,
     )
 
-    expect(await screen.findByText('Ticket Workspace')).toBeInTheDocument()
     expect(await screen.findByText('No ticket history yet')).toBeInTheDocument()
 
     await waitFor(() => {
