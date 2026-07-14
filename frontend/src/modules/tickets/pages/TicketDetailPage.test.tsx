@@ -416,6 +416,47 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByRole('button', { name: 'Download Export' })).toBeInTheDocument()
   })
 
+  it('敏感 SQL export scope 只顯示命中的敏感欄位', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 2, username: 'reviewer', authGroups: ['reviewer'], authGroupDetails: [], permissions: ['tickets.review'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      ticket_type: 'sql_export',
+      sql_content: 'SELECT * FROM users;',
+    }, {
+      scopes: [
+        {
+          id: 1,
+          ticket_id: 12,
+          connection_id: 3,
+          database_name: 'nacos',
+          schema_name: null,
+          table_name: 'accounts',
+          column_name: 'phone_number',
+          is_sensitive: true,
+          source_kind: 'QUERY_COLUMN',
+          created_at: '2026-06-09T10:00:00Z',
+        },
+      ],
+    }))
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Scopes')).toBeInTheDocument())
+    expect(screen.getByText('phone_number')).toBeInTheDocument()
+    expect(screen.getByText('Sensitive column')).toBeInTheDocument()
+    expect(screen.queryByText('nacos')).not.toBeInTheDocument()
+    expect(screen.queryByText('accounts')).not.toBeInTheDocument()
+    expect(screen.queryByText('QUERY_COLUMN')).not.toBeInTheDocument()
+  })
+
   it('sensitive access 在 stopped 狀態時，approval flow 不應顯示等待審批完成', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
