@@ -37,6 +37,12 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
       typeof settings.sql_editor_mysql_max_execution_time_ms === 'number' ? settings.sql_editor_mysql_max_execution_time_ms : 25000,
     sql_editor_postgres_statement_timeout_ms:
       typeof settings.sql_editor_postgres_statement_timeout_ms === 'number' ? settings.sql_editor_postgres_statement_timeout_ms : 25000,
+    sql_export_app_timeout_seconds:
+      typeof settings.sql_export_app_timeout_seconds === 'number' ? settings.sql_export_app_timeout_seconds : 30,
+    sql_export_mysql_max_execution_time_ms:
+      typeof settings.sql_export_mysql_max_execution_time_ms === 'number' ? settings.sql_export_mysql_max_execution_time_ms : 25000,
+    sql_export_postgres_statement_timeout_ms:
+      typeof settings.sql_export_postgres_statement_timeout_ms === 'number' ? settings.sql_export_postgres_statement_timeout_ms : 25000,
     db_metadata_inventory_enabled: typeof settings.db_metadata_inventory_enabled === 'boolean' ? settings.db_metadata_inventory_enabled : true,
     db_metadata_inventory_regions: Array.isArray(settings.db_metadata_inventory_regions) ? settings.db_metadata_inventory_regions : [],
     db_metadata_inventory_engines: Array.isArray(settings.db_metadata_inventory_engines) ? settings.db_metadata_inventory_engines : ['aurora-mysql', 'aurora-postgresql', 'redis'],

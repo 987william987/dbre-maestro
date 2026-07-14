@@ -585,6 +585,10 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "At most three downloads are allowed per minute. Please try again later.", http.StatusTooManyRequests)
 		return
 	}
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		http.Error(w, "download streaming unsupported", http.StatusInternalServerError)
+		return
+	}
 
 	conn, err := h.dbConns.GetByID(r.Context(), req.DBConnectionID)
 	if err != nil || conn == nil {
@@ -605,7 +609,8 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	timeoutSettings := h.loadSQLExportTimeoutSettings(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), timeoutSettings.AppTimeout)
 	defer cancel()
 
 	queryCtx, err := h.exportQueryExecutionContext(r.Context(), req, resolvedConn)
@@ -614,7 +619,7 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, req.SQLContent, queryCtx, defaultSQLEditorTimeoutSettings())
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, req.SQLContent, queryCtx, timeoutSettings)
 	if err != nil {
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return
@@ -675,6 +680,28 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		ResourceID:   &reqID,
 		IPAddress:    clientIP(r),
 	})
+}
+
+func (h *ExportHandler) loadSQLExportTimeoutSettings(ctx context.Context) sqlEditorTimeoutSettings {
+	settings := defaultSQLEditorTimeoutSettings()
+	if h.settings == nil {
+		return settings
+	}
+
+	platformSettings, err := h.settings.Get(ctx)
+	if err != nil || platformSettings == nil {
+		return settings
+	}
+	if platformSettings.SQLExportAppTimeoutSeconds > 0 {
+		settings.AppTimeout = time.Duration(platformSettings.SQLExportAppTimeoutSeconds) * time.Second
+	}
+	if platformSettings.SQLExportMySQLMaxExecutionTimeMs > 0 {
+		settings.MySQLMaxExecutionTimeMs = platformSettings.SQLExportMySQLMaxExecutionTimeMs
+	}
+	if platformSettings.SQLExportPostgresStatementTimeoutMs > 0 {
+		settings.PostgresStatementTimeoutMs = platformSettings.SQLExportPostgresStatementTimeoutMs
+	}
+	return settings
 }
 
 func nullableTrimmedString(value string) *string {

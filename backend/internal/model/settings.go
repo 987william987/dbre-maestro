@@ -18,6 +18,9 @@ type PlatformSettings struct {
 	SQLEditorAppTimeoutSeconds           int              `json:"sql_editor_app_timeout_seconds"`
 	SQLEditorMySQLMaxExecutionTimeMs     int              `json:"sql_editor_mysql_max_execution_time_ms"`
 	SQLEditorPostgresStatementTimeoutMs  int              `json:"sql_editor_postgres_statement_timeout_ms"`
+	SQLExportAppTimeoutSeconds           int              `json:"sql_export_app_timeout_seconds"`
+	SQLExportMySQLMaxExecutionTimeMs     int              `json:"sql_export_mysql_max_execution_time_ms"`
+	SQLExportPostgresStatementTimeoutMs  int              `json:"sql_export_postgres_statement_timeout_ms"`
 	DBMetadataInventoryEnabled           bool             `json:"db_metadata_inventory_enabled"`
 	DBMetadataInventoryRegions           []string         `json:"db_metadata_inventory_regions"`
 	DBMetadataInventoryEngines           []string         `json:"db_metadata_inventory_engines"`

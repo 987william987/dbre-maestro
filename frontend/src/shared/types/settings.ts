@@ -14,6 +14,9 @@ export type PlatformSettings = {
   sql_editor_app_timeout_seconds: number
   sql_editor_mysql_max_execution_time_ms: number
   sql_editor_postgres_statement_timeout_ms: number
+  sql_export_app_timeout_seconds: number
+  sql_export_mysql_max_execution_time_ms: number
+  sql_export_postgres_statement_timeout_ms: number
   db_metadata_inventory_enabled: boolean
   db_metadata_inventory_regions: string[]
   db_metadata_inventory_engines: string[]

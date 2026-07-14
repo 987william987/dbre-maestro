@@ -194,15 +194,16 @@ TO 'maestro_migration'@'%';
 
 這是 API 層的 timeout，不等同於 SQL Editor 查詢 timeout，也不直接等同 ticket execute timeout。
 
-### SSE timeout 特例
+### 長請求 timeout 特例
 
-`GET /api/events/stream` 是長連線 SSE endpoint，行為與一般 REST API 不同：
+`GET /api/events/stream` 與 `GET /api/exports/download/{token}` 行為與一般短請求 REST API 不同：
 
 - route middleware 不套用一般 `requestTimeout = 45s`
 - 主 server 仍保留 `writeTimeout = 45s`
-- 但 SSE handler 會在單一 request 內清除 write deadline，避免 stream 被錯誤中斷
+- handler 會在單一 request 內清除 write deadline，避免長連線或大型 export 被錯誤中斷
+- export download 的查詢熔斷由 `sql_export_*_timeout*` settings 控制
 
-也就是說，目前不是把整個 server 的 timeout 全部拿掉，而是只讓 SSE stream 走例外路徑；其他 REST API 仍保有原本的 timeout 保護。
+也就是說，目前不是把整個 server 的 timeout 全部拿掉，而是只讓 SSE stream 與 export download 走例外路徑；其他 REST API 仍保有原本的 timeout 保護。
 
 ## 時間與時區
 
@@ -225,6 +226,9 @@ TO 'maestro_migration'@'%';
 | `sql_editor_app_timeout_seconds` | `30` | SQL Editor `/api/query` app timeout |
 | `sql_editor_mysql_max_execution_time_ms` | `25000` | MySQL session `max_execution_time` |
 | `sql_editor_postgres_statement_timeout_ms` | `25000` | PostgreSQL session `statement_timeout` |
+| `sql_export_app_timeout_seconds` | `30` | SQL Export download query app timeout |
+| `sql_export_mysql_max_execution_time_ms` | `25000` | SQL Export MySQL session `max_execution_time` |
+| `sql_export_postgres_statement_timeout_ms` | `25000` | SQL Export PostgreSQL session `statement_timeout` |
 | `lark_app_id` | `""` | Lark App ID |
 | `lark_app_secret` | `""` | Lark App Secret，加密保存且不會回填明文 |
 | `lark_oauth_enabled` | `false` | 是否顯示並啟用 Lark OAuth 登入 |

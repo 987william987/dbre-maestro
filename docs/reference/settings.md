@@ -61,9 +61,9 @@ LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
 
 這代表平台只接受 Lark 回傳的企業信箱。personal email 不會寫進 `users.email`，也不會拿來建立或匹配平台 user。
 
-## SQL Editor Timeout
+## SQL Editor / Export Timeout
 
-這三個值只作用於 SQL Editor `/api/query`：
+SQL Editor timeout 只作用於 SQL Editor `/api/query`：
 
 | 欄位 | 對應 key | 預設值 | 用途 |
 |---|---|---|---|
@@ -71,11 +71,19 @@ LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
 | MySQL max_execution_time (ms) | `sql_editor_mysql_max_execution_time_ms` | `25000` | MySQL session timeout |
 | PostgreSQL statement_timeout (ms) | `sql_editor_postgres_statement_timeout_ms` | `25000` | PostgreSQL session timeout |
 
+SQL Export timeout 作用於 export download query：
+
+| 欄位 | 對應 key | 預設值 | 用途 |
+|---|---|---|---|
+| App timeout (seconds) | `sql_export_app_timeout_seconds` | `30` | Export query 生存時間上限 |
+| MySQL max_execution_time (ms) | `sql_export_mysql_max_execution_time_ms` | `25000` | MySQL session timeout |
+| PostgreSQL statement_timeout (ms) | `sql_export_postgres_statement_timeout_ms` | `25000` | PostgreSQL session timeout |
+
 重點：
 
 - 這些值不影響 Ticket execute
-- 這些值不直接控制 export download
-- 它們是 SQL Editor 查詢保護機制的一部分
+- SQL Editor 與 SQL Export 使用不同 timeout key
+- Export download 仍使用 DB connection 的 readonly endpoint 與 readonly credential
 
 ## Workflow Rules
 

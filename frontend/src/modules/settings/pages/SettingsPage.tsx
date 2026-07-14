@@ -23,6 +23,9 @@ type SettingsForm = {
   sqlEditorAppTimeoutSeconds: string
   sqlEditorMySQLMaxExecutionTimeMs: string
   sqlEditorPostgresStatementTimeoutMs: string
+  sqlExportAppTimeoutSeconds: string
+  sqlExportMySQLMaxExecutionTimeMs: string
+  sqlExportPostgresStatementTimeoutMs: string
   inventoryEnabled: boolean
   inventoryRegions: string
   inventoryEngines: string
@@ -280,6 +283,30 @@ export function SettingsPage() {
                 label="PostgreSQL statement_timeout (ms)"
                 value={form.sqlEditorPostgresStatementTimeoutMs}
                 onChange={(value) => setForm((current) => current ? { ...current, sqlEditorPostgresStatementTimeoutMs: value } : current)}
+              />
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-border bg-panel shadow-soft">
+            <div className="border-b border-border/80 px-4 py-3">
+              <p className="text-[14px] font-semibold text-ink">SQL Export Timeout</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">These values apply to export download queries. The app timeout caps query execution, while MySQL and PostgreSQL values are applied as session-level circuit breakers.</p>
+            </div>
+            <div className="grid gap-4 px-4 py-4 md:grid-cols-3">
+              <Field
+                label="App timeout (seconds)"
+                value={form.sqlExportAppTimeoutSeconds}
+                onChange={(value) => setForm((current) => current ? { ...current, sqlExportAppTimeoutSeconds: value } : current)}
+              />
+              <Field
+                label="MySQL max_execution_time (ms)"
+                value={form.sqlExportMySQLMaxExecutionTimeMs}
+                onChange={(value) => setForm((current) => current ? { ...current, sqlExportMySQLMaxExecutionTimeMs: value } : current)}
+              />
+              <Field
+                label="PostgreSQL statement_timeout (ms)"
+                value={form.sqlExportPostgresStatementTimeoutMs}
+                onChange={(value) => setForm((current) => current ? { ...current, sqlExportPostgresStatementTimeoutMs: value } : current)}
               />
             </div>
           </section>
@@ -810,6 +837,9 @@ function toForm(settings: PlatformSettings): SettingsForm {
     sqlEditorAppTimeoutSeconds: String(settings.sql_editor_app_timeout_seconds),
     sqlEditorMySQLMaxExecutionTimeMs: String(settings.sql_editor_mysql_max_execution_time_ms),
     sqlEditorPostgresStatementTimeoutMs: String(settings.sql_editor_postgres_statement_timeout_ms),
+    sqlExportAppTimeoutSeconds: String(settings.sql_export_app_timeout_seconds),
+    sqlExportMySQLMaxExecutionTimeMs: String(settings.sql_export_mysql_max_execution_time_ms),
+    sqlExportPostgresStatementTimeoutMs: String(settings.sql_export_postgres_statement_timeout_ms),
     inventoryEnabled: settings.db_metadata_inventory_enabled,
     inventoryRegions: settings.db_metadata_inventory_regions.join(', '),
     inventoryEngines: settings.db_metadata_inventory_engines.join(', '),
@@ -838,6 +868,9 @@ function toPayload(current: PlatformSettings | null, form: SettingsForm): Platfo
     sql_editor_app_timeout_seconds: parsePositiveInt(form.sqlEditorAppTimeoutSeconds, 30),
     sql_editor_mysql_max_execution_time_ms: parsePositiveInt(form.sqlEditorMySQLMaxExecutionTimeMs, 25000),
     sql_editor_postgres_statement_timeout_ms: parsePositiveInt(form.sqlEditorPostgresStatementTimeoutMs, 25000),
+    sql_export_app_timeout_seconds: parsePositiveInt(form.sqlExportAppTimeoutSeconds, 30),
+    sql_export_mysql_max_execution_time_ms: parsePositiveInt(form.sqlExportMySQLMaxExecutionTimeMs, 25000),
+    sql_export_postgres_statement_timeout_ms: parsePositiveInt(form.sqlExportPostgresStatementTimeoutMs, 25000),
     db_metadata_inventory_enabled: form.inventoryEnabled,
     db_metadata_inventory_regions: splitCSV(form.inventoryRegions),
     db_metadata_inventory_engines: splitCSV(form.inventoryEngines),

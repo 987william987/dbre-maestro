@@ -36,10 +36,10 @@ const (
 	writeTimeout   = 45 * time.Second
 )
 
-func timeoutExceptEventStream(timeout time.Duration) func(http.Handler) http.Handler {
+func timeoutExceptLongLivedPaths(timeout time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/api/events/stream" {
+			if r.URL.Path == "/api/events/stream" || strings.HasPrefix(r.URL.Path, "/api/exports/download/") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -268,7 +268,7 @@ func main() {
 	r.Use(chimw.RealIP)
 	r.Use(redactingRequestLogger)
 	r.Use(chimw.Recoverer)
-	r.Use(timeoutExceptEventStream(requestTimeout))
+	r.Use(timeoutExceptLongLivedPaths(requestTimeout))
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", healthH.ServeHTTP)
