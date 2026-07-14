@@ -65,6 +65,9 @@ describe('SettingsPage', () => {
       sql_editor_app_timeout_seconds: 30,
       sql_editor_mysql_max_execution_time_ms: 25000,
       sql_editor_postgres_statement_timeout_ms: 25000,
+      sql_export_app_timeout_seconds: 120,
+      sql_export_mysql_max_execution_time_ms: 90000,
+      sql_export_postgres_statement_timeout_ms: 90000,
       db_metadata_inventory_enabled: true,
       db_metadata_inventory_regions: ['ap-northeast-1'],
       db_metadata_inventory_engines: ['aurora-mysql', 'aurora-postgresql', 'redis'],
@@ -108,6 +111,9 @@ describe('SettingsPage', () => {
     expect(screen.getByDisplayValue('0 9 * * *')).toBeInTheDocument()
     expect(screen.getByDisplayValue('Asia/Taipei')).toBeInTheDocument()
     expect(screen.getByDisplayValue('Global DDL')).toBeInTheDocument()
+    expect(screen.getByText('SQL Export Timeout')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('120')).toBeInTheDocument()
+    expect(screen.getAllByDisplayValue('90000')).toHaveLength(2)
     expect(screen.getAllByText('Data Owner').length).toBeGreaterThan(0)
     expect(screen.getAllByText('DBA').length).toBeGreaterThan(0)
     expect(screen.getAllByText('analytics-ro').length).toBeGreaterThan(0)

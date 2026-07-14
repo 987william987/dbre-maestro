@@ -46,6 +46,10 @@ func analyzeSQLScopes(
 	if err != nil {
 		return nil, err
 	}
+	return buildSQLScopeAnalysisFromDecisions(conn.ID, decisions), nil
+}
+
+func buildSQLScopeAnalysisFromDecisions(connectionID uint64, decisions []sensitiveColumnDecision) *sqlScopeAnalysis {
 	scopeOrigins := make([]masking.ColumnOrigin, 0, len(decisions))
 	for _, decision := range decisions {
 		scopeOrigins = append(scopeOrigins, decision.SensitiveOrigins...)
@@ -63,7 +67,7 @@ func analyzeSQLScopes(
 		schemaName := optionalTrimmedString(origin.Schema)
 		tableName := optionalTrimmedString(origin.Table)
 		key := fmt.Sprintf("%d|%s|%s|%s|%s|%t",
-			conn.ID,
+			connectionID,
 			nullableStringValue(databaseName),
 			nullableStringValue(schemaName),
 			nullableStringValue(tableName),
@@ -76,7 +80,7 @@ func analyzeSQLScopes(
 		seen[key] = struct{}{}
 
 		scopes = append(scopes, model.TicketScope{
-			ConnectionID: conn.ID,
+			ConnectionID: connectionID,
 			DatabaseName: databaseName,
 			SchemaName:   schemaName,
 			TableName:    tableName,
@@ -89,7 +93,7 @@ func analyzeSQLScopes(
 	return &sqlScopeAnalysis{
 		Scopes:            scopes,
 		ContainsSensitive: len(decisions) > 0,
-	}, nil
+	}
 }
 
 func nullableStringValue(value *string) string {

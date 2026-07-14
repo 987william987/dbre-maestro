@@ -239,6 +239,7 @@
 - `GET /api/events/stream` 是 SSE stream endpoint，不是一般短請求 API
 - 它與一般 REST 共用同一台 server，但不套用一般 request timeout，且只在該 request 內清除 write deadline
 - 這個設計是為了讓通知與工單狀態更新可穩定長連線，同時保留其他 API 的 timeout 保護
+- `GET /api/exports/download/{token}` 也不套一般 request timeout，且會在該 request 內清除 write deadline；查詢熔斷由 SQL Export Timeout settings 控制
 
 ## Ticket 類型與 workflow 權限
 

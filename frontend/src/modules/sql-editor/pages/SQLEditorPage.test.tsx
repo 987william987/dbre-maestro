@@ -279,6 +279,7 @@ describe('SQLEditorPage', () => {
       rows: [[1, 'Test ticket']],
       row_count: 1,
       duration_ms: 18,
+      query_context_token: 'query-context-token',
     })
 
     mockedCreateExportRequest.mockResolvedValue({
@@ -328,6 +329,7 @@ describe('SQLEditorPage', () => {
         sql_content: 'SELECT 1;',
         database_name: undefined,
         schema_name: undefined,
+        query_context_token: 'query-context-token',
       })
     })
   })
@@ -354,10 +356,11 @@ describe('SQLEditorPage', () => {
     mockedExecuteQuery.mockResolvedValue({
       columns: ['id'],
       raw_columns: ['id'],
-      sensitive_column_indexes: [],
+      sensitive_column_indexes: [0],
       rows: [[1]],
       row_count: 1,
       duration_ms: 12,
+      query_context_token: 'sensitive-query-context-token',
     })
     mockedCreateSensitiveAccessTicket.mockResolvedValue({
       ticket_id: 11,
@@ -404,6 +407,7 @@ describe('SQLEditorPage', () => {
         database_name: undefined,
         schema_name: undefined,
         approved_duration_minutes: 120,
+        query_context_token: 'sensitive-query-context-token',
       })
     })
   })

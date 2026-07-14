@@ -38,6 +38,7 @@ type ExportHandler struct {
 	notifications       *NotificationRouter
 	downloadRateLimiter requestRateLimiter
 	appBaseURL          string
+	jwtSecret           []byte
 }
 
 func NewExportHandler(
@@ -55,6 +56,7 @@ func NewExportHandler(
 	broker *realtime.Broker,
 	lark *notification.Dispatcher,
 	appBaseURL string,
+	jwtSecret []byte,
 ) *ExportHandler {
 	return &ExportHandler{
 		exports:             exports,
@@ -71,6 +73,7 @@ func NewExportHandler(
 		notifications:       NewNotificationRouter(notifRepo, audit, broker, lark),
 		downloadRateLimiter: newRequestRateLimiter(3, time.Minute),
 		appBaseURL:          strings.TrimRight(appBaseURL, "/"),
+		jwtSecret:           append([]byte(nil), jwtSecret...),
 	}
 }
 
@@ -186,6 +189,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		DBConnectionID uint64 `json:"db_connection_id"`
 		DatabaseName   string `json:"database_name"`
 		SchemaName     string `json:"schema_name"`
+		QueryContext   string `json:"query_context_token"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -228,9 +232,9 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	analysis, err := analyzeSQLScopes(r.Context(), h.dbConns, h.masking, conn, req.SQLContent, buildQueryExecutionContext(req.DatabaseName, req.SchemaName))
+	analysis, err := validateQueryContextToken(h.jwtSecret, req.QueryContext, userID, conn.ID, req.SQLContent, req.DatabaseName, req.SchemaName)
 	if err != nil {
-		jsonErr(w, http.StatusUnprocessableEntity, "analyze export query failed: "+err.Error())
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	containsSensitive := analysis.ContainsSensitive
@@ -585,6 +589,10 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "At most three downloads are allowed per minute. Please try again later.", http.StatusTooManyRequests)
 		return
 	}
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		http.Error(w, "download streaming unsupported", http.StatusInternalServerError)
+		return
+	}
 
 	conn, err := h.dbConns.GetByID(r.Context(), req.DBConnectionID)
 	if err != nil || conn == nil {
@@ -605,7 +613,8 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	timeoutSettings := h.loadSQLExportTimeoutSettings(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), timeoutSettings.AppTimeout)
 	defer cancel()
 
 	queryCtx, err := h.exportQueryExecutionContext(r.Context(), req, resolvedConn)
@@ -614,7 +623,7 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, req.SQLContent, queryCtx, defaultSQLEditorTimeoutSettings())
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, req.SQLContent, queryCtx, timeoutSettings)
 	if err != nil {
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return
@@ -675,6 +684,28 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		ResourceID:   &reqID,
 		IPAddress:    clientIP(r),
 	})
+}
+
+func (h *ExportHandler) loadSQLExportTimeoutSettings(ctx context.Context) sqlEditorTimeoutSettings {
+	settings := defaultSQLEditorTimeoutSettings()
+	if h.settings == nil {
+		return settings
+	}
+
+	platformSettings, err := h.settings.Get(ctx)
+	if err != nil || platformSettings == nil {
+		return settings
+	}
+	if platformSettings.SQLExportAppTimeoutSeconds > 0 {
+		settings.AppTimeout = time.Duration(platformSettings.SQLExportAppTimeoutSeconds) * time.Second
+	}
+	if platformSettings.SQLExportMySQLMaxExecutionTimeMs > 0 {
+		settings.MySQLMaxExecutionTimeMs = platformSettings.SQLExportMySQLMaxExecutionTimeMs
+	}
+	if platformSettings.SQLExportPostgresStatementTimeoutMs > 0 {
+		settings.PostgresStatementTimeoutMs = platformSettings.SQLExportPostgresStatementTimeoutMs
+	}
+	return settings
 }
 
 func nullableTrimmedString(value string) *string {

@@ -1333,6 +1333,17 @@ export function TicketDetailPage() {
 }
 
 function ScopeRow({ scope, ticket }: { scope: TicketScope; ticket: Ticket }) {
+  if (ticket.ticket_type === 'sql_export' && scope.is_sensitive) {
+    return (
+      <div className="rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px] text-ink">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <span className="font-mono text-[12px] text-ink">{scope.column_name}</span>
+          <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">Sensitive column</span>
+        </div>
+      </div>
+    )
+  }
+
   const connectionLabel = scope.connection_id === ticket.db_connection_id && ticket.db_connection_name
     ? ticket.db_connection_name
     : `Connection #${scope.connection_id}`

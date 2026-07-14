@@ -36,10 +36,10 @@ const (
 	writeTimeout   = 45 * time.Second
 )
 
-func timeoutExceptEventStream(timeout time.Duration) func(http.Handler) http.Handler {
+func timeoutExceptLongLivedPaths(timeout time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/api/events/stream" {
+			if r.URL.Path == "/api/events/stream" || strings.HasPrefix(r.URL.Path, "/api/exports/download/") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -237,12 +237,12 @@ func main() {
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret, cfg.RefreshCookieSecure, cfg.MFAEnforcement, mfaChallengeRepo, larkLoginRepo, cfg.LarkOAuth, settingsRepo)
 	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL, handler.WithTicketHandlerAppEnv(cfg.AppEnv))
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo, handler.WithDBConnectionHandlerHostPolicy(dbConnectionHostPolicy))
-	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
+	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL, cfg.JWTSecret)
 	auditH := handler.NewAuditHandler(auditRepo)
 	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
 	redisSensitivePrefixH := handler.NewRedisSensitiveKeyPrefixHandler(redisSensitivePrefixRepo, dbConnRepo, auditRepo)
 	sqlReviewRuleH := handler.NewSQLReviewRuleHandler(sqlReviewRuleRepo, auditRepo)
-	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, redisSensitivePrefixRepo, settingsRepo, queryAccessRepo, maskingEngine, whitelistRepo, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL)
+	queryH := handler.NewQueryHandler(dbConnRepo, userRepo, maskingRuleRepo, auditRepo, queryArtifactRepo, ticketRepo, redisSensitivePrefixRepo, settingsRepo, queryAccessRepo, maskingEngine, whitelistRepo, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL, cfg.JWTSecret)
 	userH := handler.NewUserHandler(userRepo, authGroupRepo, sessionRepo, auditRepo, dbConnRepo)
 	queryAccessAdminH := handler.NewQueryAccessAdminHandler(queryAccessRepo, userRepo, authGroupRepo, auditRepo)
 	metadataH := handler.NewMetadataHandler(dbConnRepo, userRepo)
@@ -268,7 +268,7 @@ func main() {
 	r.Use(chimw.RealIP)
 	r.Use(redactingRequestLogger)
 	r.Use(chimw.Recoverer)
-	r.Use(timeoutExceptEventStream(requestTimeout))
+	r.Use(timeoutExceptLongLivedPaths(requestTimeout))
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", healthH.ServeHTTP)

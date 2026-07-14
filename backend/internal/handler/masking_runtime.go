@@ -77,6 +77,17 @@ func (m *maskingRuntime) applyResult(ctx context.Context, conn *model.DBConnecti
 	if err != nil {
 		return false, nil, err
 	}
+	return m.applyAnalyzedResult(ctx, conn, userID, result, decisions, sensitiveIndexes)
+}
+
+func (m *maskingRuntime) applyAnalyzedResult(
+	ctx context.Context,
+	conn *model.DBConnection,
+	userID uint64,
+	result *masking.QueryResult,
+	decisions []sensitiveColumnDecision,
+	sensitiveIndexes []int,
+) (bool, []int, error) {
 	if len(decisions) == 0 {
 		return false, nil, nil
 	}
