@@ -14,6 +14,7 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/dbre-maestro/maestro/internal/auth"
 	"github.com/dbre-maestro/maestro/internal/crypto"
+	"github.com/dbre-maestro/maestro/internal/larkoauth"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/repository"
@@ -255,6 +256,19 @@ func TestLarkEnterpriseEmailAllowed(t *testing.T) {
 				t.Fatalf("larkEnterpriseEmailAllowed(%q, %#v) = %v, want %v", tt.email, tt.allowedDomains, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLarkUsernameBasePrefersEnterpriseEmail(t *testing.T) {
+	identity := larkoauth.Identity{
+		Email:           "personal.real.name@gmail.com",
+		EnterpriseEmail: "william@edgex.exchange",
+		DisplayName:     "William Yeh",
+		OpenID:          "ou_test",
+	}
+
+	if got := larkUsernameBase(identity); got != "william" {
+		t.Fatalf("larkUsernameBase() = %q, want %q", got, "william")
 	}
 }
 

@@ -576,9 +576,15 @@ func (h *AuthHandler) uniqueLarkUsername(ctx context.Context, identity larkoauth
 }
 
 func larkUsernameBase(identity larkoauth.Identity) string {
-	source := strings.TrimSpace(identity.Email)
+	source := strings.TrimSpace(identity.EnterpriseEmail)
 	if at := strings.Index(source, "@"); at > 0 {
 		source = source[:at]
+	}
+	if source == "" {
+		source = strings.TrimSpace(identity.Email)
+		if at := strings.Index(source, "@"); at > 0 {
+			source = source[:at]
+		}
 	}
 	if source == "" {
 		source = strings.TrimSpace(identity.DisplayName)
