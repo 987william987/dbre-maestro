@@ -6,6 +6,7 @@ export type QueryResult = {
   row_count: number
   duration_ms: number
   sensitive_override_active?: boolean
+  query_context_token?: string
 }
 
 export type QueryHistoryEntry = {

@@ -81,6 +81,10 @@ type EditorTab = {
   sensitiveAccessDuration: number
   resultPage: number
   sql: string
+  executedSQL: string | null
+  executedConnectionId: number | null
+  executedDatabase: string
+  executedSchema: string
   result: QueryResult | null
   error: string
   lastRunAt: string | null
@@ -113,6 +117,7 @@ type QueryRequestConfirmState = {
   schema: string
   tableName: string
   sql: string
+  queryContextToken: string
   sensitiveAccessDuration: number
 }
 
@@ -403,6 +408,10 @@ function createTab(seed = 1): EditorTab {
     sensitiveAccessDuration: DEFAULT_SENSITIVE_ACCESS_DURATION_MINUTES,
     resultPage: 1,
     sql: DEFAULT_SQL,
+    executedSQL: null,
+    executedConnectionId: null,
+    executedDatabase: '',
+    executedSchema: '',
     result: null,
     error: '',
     lastRunAt: null,
@@ -1111,6 +1120,15 @@ export function SQLEditorPage() {
   const activeVisibleColumnIndexes = activeTab?.visibleColumnIndexes ?? null
   const activeSelectedSQL = activeTab?.selectedSQL ?? ''
   const activeExecutionSQL = activeSelectedSQL.trim() || activeTab?.sql.trim() || ''
+  const activeResultMatchesSQL = Boolean(
+    activeTab?.result?.query_context_token &&
+    activeTab.executedSQL &&
+    activeTab.executedSQL === activeExecutionSQL &&
+    activeTab.executedConnectionId === activeTab.connectionId &&
+    activeTab.executedDatabase === activeDatabase &&
+    activeTab.executedSchema === activeSchema,
+  )
+  const activeResultHasSensitiveColumns = (activeTab?.result?.sensitive_column_indexes?.length ?? 0) > 0
   const activeSensitiveAccessDuration = activeTab?.sensitiveAccessDuration ?? DEFAULT_SENSITIVE_ACCESS_DURATION_MINUTES
   const activeResultPage = activeTab?.resultPage ?? 1
   const filteredExplorerNodes = useMemo(
@@ -1559,6 +1577,10 @@ export function SQLEditorPage() {
 
       updateTabByID(tabID, {
         result,
+        executedSQL: finalSQL,
+        executedConnectionId: tabSnapshot.connectionId,
+        executedDatabase: tabSnapshot.database,
+        executedSchema: tabSnapshot.schema,
         error: '',
         lastRunAt: new Date().toISOString(),
         resultView: 'result',
@@ -1570,6 +1592,10 @@ export function SQLEditorPage() {
       updateTabByID(tabID, {
         error: message,
         result: null,
+        executedSQL: null,
+        executedConnectionId: null,
+        executedDatabase: '',
+        executedSchema: '',
       })
       if (tabSnapshot.connectionId && isQueryAccessDeniedMessage(message)) {
         setQueryAccessAttentionKeys((current) => ({
@@ -1686,6 +1712,16 @@ export function SQLEditorPage() {
     if (!sourceTab?.connectionId || !sourceConnection || !sourceSQL) {
       return null
     }
+    const queryContextToken = sourceTab.result?.query_context_token ?? ''
+    if (
+      !queryContextToken ||
+      sourceTab.executedSQL !== sourceSQL ||
+      sourceTab.executedConnectionId !== sourceTab.connectionId ||
+      sourceTab.executedDatabase !== sourceTab.database ||
+      sourceTab.executedSchema !== sourceTab.schema
+    ) {
+      return null
+    }
 
     return {
       kind,
@@ -1697,6 +1733,7 @@ export function SQLEditorPage() {
       schema: sourceTab.schema,
       tableName: sourceTab.selectedTable?.name ?? '',
       sql: sourceSQL,
+      queryContextToken,
       sensitiveAccessDuration: options?.sensitiveAccessDuration ?? sourceTab.sensitiveAccessDuration,
     }
   }
@@ -1707,6 +1744,7 @@ export function SQLEditorPage() {
     }
     const state = buildRequestConfirmState('export')
     if (!state) {
+      pushToast('Run this SQL successfully before exporting.', 'info', { placement: 'center' })
       return
     }
     setRequestConfirmState(state)
@@ -1747,6 +1785,7 @@ export function SQLEditorPage() {
       sensitiveAccessDuration: validation.minutes,
     })
     if (!state) {
+      pushToast('Run this SQL successfully before creating a Sensitive Access request.', 'info', { placement: 'center' })
       setSensitiveAccessDurationDialog(null)
       return
     }
@@ -1768,8 +1807,21 @@ export function SQLEditorPage() {
       sql,
       database,
       schema,
+      queryContextToken,
       sensitiveAccessDuration,
     } = requestConfirmState
+    const sourceTab = tabs.find((tab) => tab.id === tabID) ?? null
+    if (
+      !queryContextToken ||
+      sourceTab?.executedSQL !== sql ||
+      sourceTab.executedConnectionId !== connectionId ||
+      sourceTab.executedDatabase !== database ||
+      sourceTab.executedSchema !== schema
+    ) {
+      pushToast('Run this SQL successfully before creating the request.', 'info', { placement: 'center' })
+      setRequestConfirmState(null)
+      return
+    }
 
     if (kind === 'export') {
       setExportingTabIDs((current) => (current.includes(tabID) ? current : [...current, tabID]))
@@ -1779,6 +1831,7 @@ export function SQLEditorPage() {
           sql_content: sql,
           database_name: database || undefined,
           schema_name: connectionType === 'postgres' ? schema || undefined : undefined,
+          query_context_token: queryContextToken,
         })
         pushToast(`Export ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
         setRequestConfirmState(null)
@@ -1798,6 +1851,7 @@ export function SQLEditorPage() {
         database_name: database || undefined,
         schema_name: schema || undefined,
         approved_duration_minutes: sensitiveAccessDuration,
+        query_context_token: queryContextToken,
       })
       pushToast(`Sensitive Access ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
       setRequestConfirmState(null)
@@ -2510,7 +2564,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={openSensitiveAccessConfirm}
-                      disabled={!canApplySensitiveAccess || activeTabCreatingSensitiveAccess || !activeTab.connectionId || !activeExecutionSQL}
+                      disabled={!canApplySensitiveAccess || activeTabCreatingSensitiveAccess || !activeTab.connectionId || !activeExecutionSQL || !activeResultMatchesSQL || !activeResultHasSensitiveColumns}
                       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {activeTabCreatingSensitiveAccess ? 'Submitting...' : 'Sensitive Access'}
@@ -2568,7 +2622,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={openExportConfirm}
-                      disabled={!canExport || activeTabExporting || !activeTab.connectionId || !activeExecutionSQL}
+                      disabled={!canExport || activeTabExporting || !activeTab.connectionId || !activeExecutionSQL || !activeResultMatchesSQL}
                       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Download className="h-4 w-4" />

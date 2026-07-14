@@ -76,6 +76,7 @@ type QueryHandler struct {
 	lark          *notification.Dispatcher
 	notifications *NotificationRouter
 	appBaseURL    string
+	jwtSecret     []byte
 }
 
 type sqlEditorConstraintsResponse struct {
@@ -108,6 +109,7 @@ func NewQueryHandler(
 	broker *realtime.Broker,
 	lark *notification.Dispatcher,
 	appBaseURL string,
+	jwtSecret []byte,
 ) *QueryHandler {
 	return &QueryHandler{
 		dbConns:       dbConns,
@@ -125,6 +127,7 @@ func NewQueryHandler(
 		lark:          lark,
 		notifications: NewNotificationRouter(notifRepo, audit, broker, lark),
 		appBaseURL:    strings.TrimRight(appBaseURL, "/"),
+		jwtSecret:     append([]byte(nil), jwtSecret...),
 	}
 }
 
@@ -293,9 +296,19 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 	durationMs := time.Since(start).Milliseconds()
 
-	sensitiveOverrideActive, sensitiveColumnIndexes, err := h.masking.applyResult(r.Context(), resolvedConn, userID, result)
+	decisions, sensitiveColumnIndexes, err := h.masking.analyzeSensitiveColumns(r.Context(), resolvedConn, result)
 	if err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "masking failed")
+		return
+	}
+	sensitiveOverrideActive, sensitiveColumnIndexes, err := h.masking.applyAnalyzedResult(r.Context(), resolvedConn, userID, result, decisions, sensitiveColumnIndexes)
+	if err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "masking failed")
+		return
+	}
+	queryContextToken, err := newQueryContextToken(h.jwtSecret, userID, conn.ID, req.SQL, queryCtx.DatabaseName, queryCtx.SchemaName, buildSQLScopeAnalysisFromDecisions(conn.ID, decisions))
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "create query context failed")
 		return
 	}
 
@@ -334,6 +347,7 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		"duration_ms":               durationMs,
 		"sensitive_column_indexes":  sensitiveColumnIndexes,
 		"sensitive_override_active": sensitiveOverrideActive,
+		"query_context_token":       queryContextToken,
 	})
 }
 
@@ -347,6 +361,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		DatabaseName            string `json:"database_name"`
 		SchemaName              string `json:"schema_name"`
 		ApprovedDurationMinutes int    `json:"approved_duration_minutes"`
+		QueryContext            string `json:"query_context_token"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -384,9 +399,9 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		return
 	}
 
-	analysis, err := analyzeSQLScopes(r.Context(), h.dbConns, h.masking, conn, req.SQLContent, buildQueryExecutionContext(req.DatabaseName, req.SchemaName))
+	analysis, err := validateQueryContextToken(h.jwtSecret, req.QueryContext, userID, conn.ID, req.SQLContent, req.DatabaseName, req.SchemaName)
 	if err != nil {
-		jsonErr(w, http.StatusUnprocessableEntity, "analyze sensitive access query failed: "+err.Error())
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	if !analysis.ContainsSensitive {

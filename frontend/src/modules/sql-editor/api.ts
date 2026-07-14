@@ -42,12 +42,13 @@ type QueryConstraintsResponse = {
   postgres_statement_timeout_ms: number
 }
 
-export function executeQuery(payload: QueryPayload) {
+export function executeQuery(payload: QueryPayload): Promise<QueryResult> {
   return apiClient.post<QueryResult>('/query', payload).then((response) => ({
     ...response,
     columns: Array.isArray(response.columns) ? response.columns : [],
     raw_columns: Array.isArray(response.raw_columns) ? response.raw_columns : [],
     sensitive_column_indexes: Array.isArray(response.sensitive_column_indexes) ? response.sensitive_column_indexes : [],
+    query_context_token: typeof response.query_context_token === 'string' ? response.query_context_token : '',
     rows: Array.isArray(response.rows)
       ? response.rows.map((row) => (Array.isArray(row) ? row : []))
       : [],
@@ -164,6 +165,7 @@ type CreateSensitiveAccessPayload = {
   database_name?: string
   schema_name?: string
   approved_duration_minutes?: number
+  query_context_token?: string
 }
 
 export type CreateSensitiveAccessResponse = {

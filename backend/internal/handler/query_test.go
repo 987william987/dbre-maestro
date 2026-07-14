@@ -267,6 +267,7 @@ func TestQueryHandlerExecuteAuditsQueryAccessPolicyBlock(t *testing.T) {
 		nil,
 		nil,
 		"",
+		[]byte("test-secret"),
 	)
 
 	now := time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC)

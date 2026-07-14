@@ -13,6 +13,7 @@ export function createExportRequest(payload: {
   db_connection_id: number
   database_name?: string
   schema_name?: string
+  query_context_token?: string
 }) {
   return apiClient.post<CreateExportResponse>('/exports', payload)
 }

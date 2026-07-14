@@ -38,6 +38,7 @@ type ExportHandler struct {
 	notifications       *NotificationRouter
 	downloadRateLimiter requestRateLimiter
 	appBaseURL          string
+	jwtSecret           []byte
 }
 
 func NewExportHandler(
@@ -55,6 +56,7 @@ func NewExportHandler(
 	broker *realtime.Broker,
 	lark *notification.Dispatcher,
 	appBaseURL string,
+	jwtSecret []byte,
 ) *ExportHandler {
 	return &ExportHandler{
 		exports:             exports,
@@ -71,6 +73,7 @@ func NewExportHandler(
 		notifications:       NewNotificationRouter(notifRepo, audit, broker, lark),
 		downloadRateLimiter: newRequestRateLimiter(3, time.Minute),
 		appBaseURL:          strings.TrimRight(appBaseURL, "/"),
+		jwtSecret:           append([]byte(nil), jwtSecret...),
 	}
 }
 
@@ -186,6 +189,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		DBConnectionID uint64 `json:"db_connection_id"`
 		DatabaseName   string `json:"database_name"`
 		SchemaName     string `json:"schema_name"`
+		QueryContext   string `json:"query_context_token"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -228,9 +232,9 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	analysis, err := analyzeSQLScopes(r.Context(), h.dbConns, h.masking, conn, req.SQLContent, buildQueryExecutionContext(req.DatabaseName, req.SchemaName))
+	analysis, err := validateQueryContextToken(h.jwtSecret, req.QueryContext, userID, conn.ID, req.SQLContent, req.DatabaseName, req.SchemaName)
 	if err != nil {
-		jsonErr(w, http.StatusUnprocessableEntity, "analyze export query failed: "+err.Error())
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	containsSensitive := analysis.ContainsSensitive
