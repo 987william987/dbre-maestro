@@ -83,6 +83,39 @@ Users 模組有三個視角：
 | `security` | Export、Sensitive Access 審批 |
 | `developer` | 一般 RD 使用者 |
 
+上述五個 group 只是初始 seed 資料，不是系統寫死的固定分類。Admin 可在 `Auth Groups` 頁面自由新增、刪除、重新命名群組，並自行組合權限與 DB scope，依團隊實際分工調整即可。
+
+### 3.1 建立一般使用者與密碼管理
+
+在 `Users` 頁面建立新使用者時：
+
+1. 填寫 `username`、`email`、初始密碼（至少 8 碼，需同時包含大小寫字母與數字）。
+2. 新使用者預設 `is_active = true`，可直接登入。
+3. 新使用者**不會自動加入任何 auth group**，需另外在 `Users` 或 `Auth Groups` 頁面把使用者加入對應群組，否則登入後看不到任何功能頁。
+
+密碼相關的重要限制：
+
+- 平台目前**沒有使用者自助改密碼的功能**，也沒有「首次登入強制改密碼」機制。
+- 密碼只能由具備 `users.write` 權限的人員（通常是 admin）透過 `Users` 頁面重設。
+- 建議建立帳號時透過安全管道（例如 Lark 私訊，不要用群組訊息或 email 明碼）個別提供初始密碼，並提醒使用者短期內請 admin 協助重設一次，避免初始密碼長期有效。
+- 忘記密碼的復原路徑同樣是請 admin 重設，沒有「忘記密碼」自助流程。
+
+### 3.2 DBA 與 Admin 的權限邊界
+
+`dba` 與 `admin` 常被視為「都能動 DB」而混用，但實際邊界並非如此：
+
+| 能力 | `dba`（預設 seed 權限） | `admin` |
+|---|---|---|
+| 執行 / 審核 DDL、DML、Redis 工單 | ✅（`tickets.execute`） | ✅（all permissions） |
+| 新增、修改 DB Connections | ✅（`db_connections.write`） | ✅ |
+| 設定 Masking Rules | ✅（`masking_rules.write`） | ✅ |
+| 設定 SQL Review Rules | ✅（`sql_review.write`） | ✅ |
+| 查看 Audit Logs | ✅（`audit_logs.read`） | ✅ |
+| 管理 Users / Auth Groups | ❌（無 `users.write`） | ✅ |
+| 管理 Settings / Workflow Rules | 只能查看（`settings.read`，無 `settings.write`） | ✅ |
+
+也就是說，DBA 預設就能維護 DB Connections 與 Masking Rules，並不是只有 admin 能做；真正只保留給 admin 的邊界是**使用者 / 權限管理**與 **Settings / Workflow Rules 的寫入**。`admin` group 本身標記為 all-permissions，未來新增的權限也會自動涵蓋，不需要額外授權。
+
 ## 4. 建立 DB Connections
 
 DB Connections 是 SQL Editor、Tickets、Metadata 與 DB Scope 的基礎。

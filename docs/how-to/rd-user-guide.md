@@ -34,6 +34,8 @@
 
 正式環境不要共用帳號、密碼或 MFA QR code。每個使用者應使用自己的帳號和自己的 MFA secret。
 
+平台目前沒有使用者自助改密碼或忘記密碼的流程，密碼只能由 admin 重設。如果需要變更密碼，請直接聯絡 admin 協助處理。
+
 ## 2. 提 DDL / DML / Redis 工單
 
 DDL / DML / Redis 工單從 `Tickets > New Ticket` 建立。
