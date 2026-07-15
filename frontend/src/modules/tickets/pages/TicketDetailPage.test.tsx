@@ -412,7 +412,8 @@ describe('TicketDetailPage role visibility', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByText('Export Download')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Download Export' })).toBeInTheDocument())
+    expect(screen.queryByText('Export Download')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Download Export' })).toBeInTheDocument()
   })
 
