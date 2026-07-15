@@ -221,7 +221,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.queryAccess.CheckSQL(r.Context(), userID, conn, req.SQLContent, queryaccess.CheckContext{
 		DatabaseName: strings.TrimSpace(req.DatabaseName),
-		SchemaName:   strings.TrimSpace(req.SchemaName),
+		SchemaName:   queryContextSchemaName(conn, req.SchemaName),
 	}); err != nil {
 		if missingErr, ok := err.(*queryaccess.MissingAccessError); ok {
 			jsonErr(w, http.StatusForbidden, missingErr.Error())
@@ -232,7 +232,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	analysis, err := validateQueryContextToken(h.jwtSecret, req.QueryContext, userID, conn.ID, req.SQLContent, req.DatabaseName, req.SchemaName)
+	analysis, err := validateQueryContextToken(h.jwtSecret, req.QueryContext, userID, conn.ID, req.SQLContent, req.DatabaseName, queryContextSchemaName(conn, req.SchemaName))
 	if err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return

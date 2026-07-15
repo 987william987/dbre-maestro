@@ -115,6 +115,7 @@ type QueryRequestConfirmState = {
   connectionType: string
   database: string
   schema: string
+  contextSchema: string
   tableName: string
   sql: string
   queryContextToken: string
@@ -203,9 +204,13 @@ function buildQueryPayload(tab: EditorTab, sqlText: string, connection: DBConnec
     db_connection_id: tab.connectionId!,
     sql: sqlText,
     database: tab.database || undefined,
-    schema: connection?.db_type === 'postgres' ? tab.schema || undefined : undefined,
+    schema: queryContextSchemaName(connection, tab.schema) || undefined,
     redis_db_index: connection?.db_type === 'redis' && tab.database ? Number(tab.database) : undefined,
   }
+}
+
+function queryContextSchemaName(connection: DBConnection | null, schema: string) {
+  return connection?.db_type === 'postgres' ? schema.trim() : ''
 }
 
 function buildExplainSQL(sqlText: string) {
@@ -1120,13 +1125,14 @@ export function SQLEditorPage() {
   const activeVisibleColumnIndexes = activeTab?.visibleColumnIndexes ?? null
   const activeSelectedSQL = activeTab?.selectedSQL ?? ''
   const activeExecutionSQL = activeSelectedSQL.trim() || activeTab?.sql.trim() || ''
+  const activeContextSchema = queryContextSchemaName(activeConnection, activeSchema)
   const activeResultMatchesSQL = Boolean(
     activeTab?.result?.query_context_token &&
     activeTab.executedSQL &&
     activeTab.executedSQL === activeExecutionSQL &&
     activeTab.executedConnectionId === activeTab.connectionId &&
     activeTab.executedDatabase === activeDatabase &&
-    activeTab.executedSchema === activeSchema,
+    activeTab.executedSchema === activeContextSchema,
   )
   const activeResultHasSensitiveColumns = (activeTab?.result?.sensitive_column_indexes?.length ?? 0) > 0
   const activeSensitiveAccessDuration = activeTab?.sensitiveAccessDuration ?? DEFAULT_SENSITIVE_ACCESS_DURATION_MINUTES
@@ -1580,7 +1586,7 @@ export function SQLEditorPage() {
         executedSQL: finalSQL,
         executedConnectionId: tabSnapshot.connectionId,
         executedDatabase: tabSnapshot.database,
-        executedSchema: tabSnapshot.schema,
+        executedSchema: queryContextSchemaName(connectionSnapshot ?? null, tabSnapshot.schema),
         error: '',
         lastRunAt: new Date().toISOString(),
         resultView: 'result',
@@ -1713,12 +1719,13 @@ export function SQLEditorPage() {
       return null
     }
     const queryContextToken = sourceTab.result?.query_context_token ?? ''
+    const contextSchema = queryContextSchemaName(sourceConnection, sourceTab.schema)
     if (
       !queryContextToken ||
       sourceTab.executedSQL !== sourceSQL ||
       sourceTab.executedConnectionId !== sourceTab.connectionId ||
       sourceTab.executedDatabase !== sourceTab.database ||
-      sourceTab.executedSchema !== sourceTab.schema
+      sourceTab.executedSchema !== contextSchema
     ) {
       return null
     }
@@ -1731,6 +1738,7 @@ export function SQLEditorPage() {
       connectionType: sourceConnection.db_type,
       database: sourceTab.database,
       schema: sourceTab.schema,
+      contextSchema,
       tableName: sourceTab.selectedTable?.name ?? '',
       sql: sourceSQL,
       queryContextToken,
@@ -1803,10 +1811,9 @@ export function SQLEditorPage() {
       kind,
       tabID,
       connectionId,
-      connectionType,
       sql,
       database,
-      schema,
+      contextSchema,
       queryContextToken,
       sensitiveAccessDuration,
     } = requestConfirmState
@@ -1816,7 +1823,7 @@ export function SQLEditorPage() {
       sourceTab?.executedSQL !== sql ||
       sourceTab.executedConnectionId !== connectionId ||
       sourceTab.executedDatabase !== database ||
-      sourceTab.executedSchema !== schema
+      sourceTab.executedSchema !== contextSchema
     ) {
       pushToast('Run this SQL successfully before creating the request.', 'info', { placement: 'center' })
       setRequestConfirmState(null)
@@ -1830,7 +1837,7 @@ export function SQLEditorPage() {
           db_connection_id: connectionId,
           sql_content: sql,
           database_name: database || undefined,
-          schema_name: connectionType === 'postgres' ? schema || undefined : undefined,
+          schema_name: contextSchema || undefined,
           query_context_token: queryContextToken,
         })
         pushToast(`Export ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
@@ -1849,7 +1856,7 @@ export function SQLEditorPage() {
         db_connection_id: connectionId,
         sql_content: sql,
         database_name: database || undefined,
-        schema_name: schema || undefined,
+        schema_name: contextSchema || undefined,
         approved_duration_minutes: sensitiveAccessDuration,
         query_context_token: queryContextToken,
       })
