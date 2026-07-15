@@ -249,7 +249,7 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 
 	queryCtx := queryExecutionContext{
 		DatabaseName: strings.TrimSpace(req.Database),
-		SchemaName:   strings.TrimSpace(req.Schema),
+		SchemaName:   queryContextSchemaName(conn, req.Schema),
 	}
 	if err := h.queryAccess.CheckSQL(r.Context(), userID, conn, req.SQL, queryaccess.CheckContext{
 		DatabaseName: queryCtx.DatabaseName,
@@ -258,7 +258,7 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		if missingErr, ok := err.(*queryaccess.MissingAccessError); ok {
 			h.auditBlockedQuery(r, userID, conn.ID, req.SQL, "query_access_policy", map[string]any{
 				"database": strings.TrimSpace(req.Database),
-				"schema":   strings.TrimSpace(req.Schema),
+				"schema":   queryCtx.SchemaName,
 				"missing":  missingErr.Missing,
 			})
 			jsonErr(w, http.StatusForbidden, missingErr.Error())
@@ -399,7 +399,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		return
 	}
 
-	analysis, err := validateQueryContextToken(h.jwtSecret, req.QueryContext, userID, conn.ID, req.SQLContent, req.DatabaseName, req.SchemaName)
+	analysis, err := validateQueryContextToken(h.jwtSecret, req.QueryContext, userID, conn.ID, req.SQLContent, req.DatabaseName, queryContextSchemaName(conn, req.SchemaName))
 	if err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return

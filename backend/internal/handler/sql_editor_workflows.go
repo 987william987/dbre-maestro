@@ -110,6 +110,18 @@ func buildQueryExecutionContext(databaseName, schemaName string) queryExecutionC
 	}
 }
 
+func queryContextSchemaName(conn *model.DBConnection, schemaName string) string {
+	if conn == nil {
+		return ""
+	}
+	switch conn.DBType {
+	case "postgres", "postgresql":
+		return strings.TrimSpace(schemaName)
+	default:
+		return ""
+	}
+}
+
 func userCanAccessConnection(ctx context.Context, users *repository.UserRepo, userID, connectionID uint64) (bool, error) {
 	accessibleIDs, err := users.GetEffectiveDBConnectionIDs(ctx, userID)
 	if err != nil {
