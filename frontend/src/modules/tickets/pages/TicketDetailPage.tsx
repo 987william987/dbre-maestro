@@ -1204,7 +1204,7 @@ export function TicketDetailPage() {
                             type="button"
                             disabled={acting !== null || ticket.status !== 'approved' || (ticket.ticket_type !== 'sensitive_query_access' && ticket.ticket_type !== 'query_access')}
                             onClick={() => setConfirmAction('revoke')}
-                            className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex h-9 w-auto self-start items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {acting === 'revoke' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
                             {ticket.ticket_type === 'query_access' ? 'Revoke Query Access' : 'Revoke Access'}
@@ -1328,7 +1328,7 @@ export function TicketDetailPage() {
 }
 
 function ScopeRow({ scope, ticket }: { scope: TicketScope; ticket: Ticket }) {
-  if (ticket.ticket_type === 'sql_export' && scope.is_sensitive) {
+  if ((ticket.ticket_type === 'sql_export' || ticket.ticket_type === 'sensitive_query_access') && scope.is_sensitive) {
     return (
       <div className="rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px] text-ink">
         <div className="flex flex-wrap items-center gap-2.5">
