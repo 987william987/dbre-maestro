@@ -136,6 +136,87 @@ func TestCheckExplain_MultiTableJoin_OnlyFullScanFlagged(t *testing.T) {
 	}
 }
 
+func TestCheckExplain_InsertSelectIgnoresInsertPseudoRowWithNullRows(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows(explainCols).
+		AddRow(int64(1), "INSERT", "sys_menu", nil, "ALL", nil, nil, nil, nil, nil, nil, nil).
+		AddRow(int64(1), "SIMPLE", "sys_menu", nil, "const", "PRIMARY", "PRIMARY", "8", "const", int64(1), "100.00", "Using index")
+	mock.ExpectQuery("EXPLAIN").WillReturnRows(rows)
+
+	issues, err := sqlreview.CheckExplain(context.Background(), db,
+		"INSERT INTO sys_menu SELECT * FROM sys_menu WHERE id = 1", sqlreview.DefaultRowThreshold)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("expected no issue for indexed INSERT ... SELECT, got %d: %+v", len(issues), issues)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestCheckExplainWithStats_ReturnsMaxRowsWhenNoIssues(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows(explainCols).
+		AddRow(int64(1), "INSERT", "sys_menu", nil, "ALL", nil, nil, nil, nil, nil, nil, nil).
+		AddRow(int64(1), "SIMPLE", "sys_menu", nil, "const", "PRIMARY", "PRIMARY", "8", "const", int64(1), "100.00", "Using index")
+	mock.ExpectQuery("EXPLAIN").WillReturnRows(rows)
+
+	result, err := sqlreview.CheckExplainWithStats(context.Background(), db,
+		"INSERT INTO sys_menu SELECT * FROM sys_menu WHERE id = 1", sqlreview.DefaultRowThreshold)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Issues) != 0 {
+		t.Fatalf("expected no issues, got %+v", result.Issues)
+	}
+	if result.MaxRows != 1 {
+		t.Fatalf("MaxRows = %d, want 1", result.MaxRows)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestCheckExplainWithStats_ParsesMySQLByteRows(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows(explainCols).
+		AddRow([]byte("1"), []byte("INSERT"), []byte("sys_menu"), nil, []byte("ALL"), nil, nil, nil, nil, nil, nil, nil).
+		AddRow([]byte("1"), []byte("SIMPLE"), []byte("sys_menu"), nil, []byte("const"), []byte("PRIMARY"), []byte("PRIMARY"), []byte("8"), []byte("const"), []byte("1"), []byte("100.00"), []byte("Using index"))
+	mock.ExpectQuery("EXPLAIN").WillReturnRows(rows)
+
+	result, err := sqlreview.CheckExplainWithStats(context.Background(), db,
+		"INSERT INTO sys_menu SELECT * FROM sys_menu WHERE id = 1", sqlreview.DefaultRowThreshold)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Issues) != 0 {
+		t.Fatalf("expected no issues, got %+v", result.Issues)
+	}
+	if result.MaxRows != 1 {
+		t.Fatalf("MaxRows = %d, want 1", result.MaxRows)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestCheckExplain_BelowThresholdNoIssue(t *testing.T) {
 	// Rows below threshold with non-ALL type → no issue
 	db, mock, err := sqlmock.New()

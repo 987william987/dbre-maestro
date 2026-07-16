@@ -2823,7 +2823,7 @@ func (h *TicketHandler) openTicketSQLDBWithConnection(
 func buildPassThroughReviewItems(statements []sqlparse.ParsedStatement) []ticketReviewItem {
 	items := make([]ticketReviewItem, 0)
 	for _, stmt := range statements {
-		items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodStaticRule, nil, string(stmt.Kind), inferDDLObjectType(stmt), 0, nil))
+		items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodStaticRule, nil, string(stmt.Kind), inferReviewObjectType(stmt), 0, nil))
 	}
 	return items
 }
@@ -2849,7 +2849,7 @@ func buildTicketKindReviewItems(statements []sqlparse.ParsedStatement, kindErr e
 	}
 	for _, stmt := range statements {
 		if stmt.Seq == targetSeq {
-			items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodTicketPolicy, nil, string(stmt.Kind), inferDDLObjectType(stmt), 0, []string{message}))
+			items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodTicketPolicy, nil, string(stmt.Kind), inferReviewObjectType(stmt), 0, []string{message}))
 		}
 	}
 	return items
