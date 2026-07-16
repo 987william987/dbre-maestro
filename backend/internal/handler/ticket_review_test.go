@@ -58,6 +58,19 @@ func TestRewriteMySQLDDLForShadowSupportsRenameTable(t *testing.T) {
 	}
 }
 
+func TestInferReviewObjectTypeReturnsTableForDML(t *testing.T) {
+	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "INSERT INTO sys_menu (id) SELECT id FROM sys_menu WHERE id = 1")
+	if err != nil {
+		t.Fatalf("parse insert select: %v", err)
+	}
+	if len(parsed.Statements) != 1 {
+		t.Fatalf("statement count = %d, want 1", len(parsed.Statements))
+	}
+	if got := inferReviewObjectType(parsed.Statements[0]); got != "table" {
+		t.Fatalf("object type = %q, want table", got)
+	}
+}
+
 func assertErr(message string) error {
 	return testError(message)
 }
