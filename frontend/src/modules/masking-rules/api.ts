@@ -22,6 +22,10 @@ type CreateMaskingRulePayload = {
   mask_config?: Record<string, unknown>
 }
 
+type PatchMaskingRulePayload = Partial<CreateMaskingRulePayload> & {
+  enabled?: boolean
+}
+
 type CreateMaskingWhitelistPayload = {
   db_connection_id: number
   database_name: string
@@ -58,6 +62,7 @@ export async function listMaskingRules(): Promise<MaskingRulesResponse> {
           ...rule,
           match_type: rule.match_type === 'regex' ? 'regex' : 'exact',
           mask_config: rule.mask_config && typeof rule.mask_config === 'object' && !Array.isArray(rule.mask_config) ? rule.mask_config : {},
+          enabled: rule.enabled !== false,
         }))
       : [],
   }
@@ -67,7 +72,7 @@ export function createMaskingRule(payload: CreateMaskingRulePayload) {
   return apiClient.post<MaskingRule>('/masking-rules', payload)
 }
 
-export function patchMaskingRule(id: number, payload: CreateMaskingRulePayload) {
+export function patchMaskingRule(id: number, payload: PatchMaskingRulePayload) {
   return apiClient.patch<MaskingRule>(`/masking-rules/${id}`, payload)
 }
 

@@ -34,9 +34,9 @@ func TestMaskingRuntimeApplyResultMasksMySQLColumns(t *testing.T) {
 		Rows:    [][]any{{"alice@example.com"}},
 	}
 
-	mock.ExpectQuery(`SELECT id, column_name, match_type, mask_mode, COALESCE\(mask_config, JSON_OBJECT\(\)\) AS mask_config, created_by, created_at`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "column_name", "match_type", "mask_mode", "mask_config", "created_by", "created_at"}).
-			AddRow(1, "email", "exact", "full", []byte(`{}`), 1, time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)))
+	mock.ExpectQuery(`SELECT id, column_name, match_type, mask_mode, COALESCE\(mask_config, JSON_OBJECT\(\)\) AS mask_config, enabled, created_by, created_at`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "column_name", "match_type", "mask_mode", "mask_config", "enabled", "created_by", "created_at"}).
+			AddRow(1, "email", "exact", "full", []byte(`{}`), true, 1, time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(`SELECT COUNT\(\*\)\s+FROM masking_whitelist`).
 		WithArgs(uint64(7), "analytics", "", "users", "email").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
@@ -80,9 +80,9 @@ func TestMaskingRuntimeApplyResultMasksPostgresColumns(t *testing.T) {
 		Rows:    [][]any{{"alice@example.com"}},
 	}
 
-	mock.ExpectQuery(`SELECT id, column_name, match_type, mask_mode, COALESCE\(mask_config, JSON_OBJECT\(\)\) AS mask_config, created_by, created_at`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "column_name", "match_type", "mask_mode", "mask_config", "created_by", "created_at"}).
-			AddRow(1, "email", "exact", "full", []byte(`{}`), 1, time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)))
+	mock.ExpectQuery(`SELECT id, column_name, match_type, mask_mode, COALESCE\(mask_config, JSON_OBJECT\(\)\) AS mask_config, enabled, created_by, created_at`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "column_name", "match_type", "mask_mode", "mask_config", "enabled", "created_by", "created_at"}).
+			AddRow(1, "email", "exact", "full", []byte(`{}`), true, 1, time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(`SELECT COUNT\(\*\)\s+FROM masking_whitelist`).
 		WithArgs(uint64(7), "app", "public", "users", "email").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
@@ -121,9 +121,9 @@ func TestMaskingRuntimeApplyResultFailsClosedWhenEngineMissing(t *testing.T) {
 		Rows:    [][]any{{"alice@example.com"}},
 	}
 
-	mock.ExpectQuery(`SELECT id, column_name, match_type, mask_mode, COALESCE\(mask_config, JSON_OBJECT\(\)\) AS mask_config, created_by, created_at`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "column_name", "match_type", "mask_mode", "mask_config", "created_by", "created_at"}).
-			AddRow(1, "email", "exact", "full", []byte(`{}`), 1, time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)))
+	mock.ExpectQuery(`SELECT id, column_name, match_type, mask_mode, COALESCE\(mask_config, JSON_OBJECT\(\)\) AS mask_config, enabled, created_by, created_at`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "column_name", "match_type", "mask_mode", "mask_config", "enabled", "created_by", "created_at"}).
+			AddRow(1, "email", "exact", "full", []byte(`{}`), true, 1, time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(`SELECT COUNT\(\*\)\s+FROM masking_whitelist`).
 		WithArgs(uint64(7), "app", "public", "users", "email").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
@@ -161,9 +161,9 @@ func TestMaskingRuntimeApplyResultSkipsWhitelistMatch(t *testing.T) {
 		Rows:    [][]any{{"alice@example.com"}},
 	}
 
-	mock.ExpectQuery(`SELECT id, column_name, match_type, mask_mode, COALESCE\(mask_config, JSON_OBJECT\(\)\) AS mask_config, created_by, created_at`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "column_name", "match_type", "mask_mode", "mask_config", "created_by", "created_at"}).
-			AddRow(1, "email", "exact", "full", []byte(`{}`), 1, time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)))
+	mock.ExpectQuery(`SELECT id, column_name, match_type, mask_mode, COALESCE\(mask_config, JSON_OBJECT\(\)\) AS mask_config, enabled, created_by, created_at`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "column_name", "match_type", "mask_mode", "mask_config", "enabled", "created_by", "created_at"}).
+			AddRow(1, "email", "exact", "full", []byte(`{}`), true, 1, time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(`SELECT COUNT\(\*\)\s+FROM masking_whitelist`).
 		WithArgs(uint64(7), "analytics", "", "users", "email").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))

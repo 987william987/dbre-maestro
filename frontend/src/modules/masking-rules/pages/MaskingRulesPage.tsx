@@ -28,6 +28,7 @@ import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { Pagination } from '@/shared/ui/Pagination'
+import { Switch } from '@/shared/ui/Switch'
 import { useToast } from '@/shared/ui/ToastContext'
 import {
   DataTable,
@@ -171,6 +172,7 @@ export function MaskingRulesPage() {
 
   const [pendingDelete, setPendingDelete] = useState<{ kind: 'rule' | 'whitelist' | 'redisPrefix'; id: number } | null>(null)
   const [deletingKey, setDeletingKey] = useState<string | null>(null)
+  const [togglingRuleID, setTogglingRuleID] = useState<number | null>(null)
 
   const sqlConnections = useMemo(
     () => connections.filter((connection) => connection.dbType === 'mysql' || connection.dbType === 'postgres' || connection.dbType === 'postgresql'),
@@ -464,6 +466,20 @@ export function MaskingRulesPage() {
     }
   }
 
+  async function handleRuleEnabledChange(rule: MaskingRule, enabled: boolean) {
+    setTogglingRuleID(rule.id)
+    setError('')
+    try {
+      const updated = await patchMaskingRule(rule.id, { enabled })
+      setRules((current) => current.map((item) => (item.id === rule.id ? { ...item, enabled: updated.enabled } : item)))
+      pushToast(`Global masking rule ${enabled ? 'enabled' : 'disabled'}.`, 'success')
+    } catch (toggleError) {
+      setError(toggleError instanceof ApiError ? toggleError.message : 'Failed to update the global masking rule.')
+    } finally {
+      setTogglingRuleID(null)
+    }
+  }
+
   async function handleWhitelistSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!whitelistDrawer) {
@@ -587,7 +603,7 @@ export function MaskingRulesPage() {
               <EmptyState message="No global masking rules yet." />
             ) : (
               <CompactTable
-                headers={['Pattern', 'Match', 'Mode', 'Config', 'Created', 'Actions']}
+                headers={['Pattern', 'Match', 'Mode', 'Config', 'Created', 'Status', 'Actions']}
                 rows={pagedRules.map((rule) => ({
                   key: `rule-${rule.id}`,
                   cells: [
@@ -598,6 +614,15 @@ export function MaskingRulesPage() {
                       {JSON.stringify(rule.mask_config ?? {}, null, 2)}
                     </code>,
                     <span key="created" className="whitespace-nowrap text-muted">{formatDateTime(rule.created_at)}</span>,
+                    <div key="enabled" className="inline-flex items-center gap-3">
+                      <Switch
+                        ariaLabel={`${rule.column_name} enabled`}
+                        checked={rule.enabled}
+                        disabled={!canWrite || togglingRuleID === rule.id}
+                        onChange={(checked) => void handleRuleEnabledChange(rule, checked)}
+                      />
+                      <span className="text-[12px] text-muted">{rule.enabled ? 'Enabled' : 'Disabled'}</span>
+                    </div>,
                     <ActionCell
                       key="actions"
                       canWrite={canWrite}

@@ -48,10 +48,12 @@ import {
   listRedisSensitiveKeyPrefixes,
   listMaskingRules,
   listMaskingWhitelists,
+  patchMaskingRule,
 } from '@/modules/masking-rules/api'
 
 const mockedListMaskingRules = vi.mocked(listMaskingRules)
 const mockedCreateMaskingRule = vi.mocked(createMaskingRule)
+const mockedPatchMaskingRule = vi.mocked(patchMaskingRule)
 const mockedDeleteMaskingRule = vi.mocked(deleteMaskingRule)
 const mockedListRedisSensitiveKeyPrefixes = vi.mocked(listRedisSensitiveKeyPrefixes)
 const mockedCreateRedisSensitiveKeyPrefix = vi.mocked(createRedisSensitiveKeyPrefix)
@@ -72,6 +74,7 @@ const rule = {
   match_type: 'exact' as const,
   mask_mode: 'partial' as const,
   mask_config: { keep_prefix: 3, keep_suffix: 4, mask_char: '*' },
+  enabled: true,
   created_by: 1,
   created_at: '2026-01-01T00:00:00Z',
 }
@@ -207,6 +210,20 @@ describe('MaskingRulesPage', () => {
         mask_config: {},
       })
     })
+  })
+
+  it('toggles a global masking rule enabled state', async () => {
+    mockedPatchMaskingRule.mockResolvedValue({ ...rule, enabled: false })
+
+    renderPage()
+
+    const toggle = await screen.findByRole('switch', { name: 'phone enabled' })
+    fireEvent.click(toggle)
+
+    await waitFor(() => {
+      expect(mockedPatchMaskingRule).toHaveBeenCalledWith(2, { enabled: false })
+    })
+    expect(await screen.findByText('Disabled')).toBeInTheDocument()
   })
 
   it('creates a whitelist entry', async () => {
@@ -359,6 +376,7 @@ describe('MaskingRulesPage', () => {
         match_type: 'exact' as const,
         mask_mode: 'partial' as const,
         mask_config: {},
+        enabled: true,
         created_by: 1,
         created_at: '2026-01-01T00:00:00Z',
       })),

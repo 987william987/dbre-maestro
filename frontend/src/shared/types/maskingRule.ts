@@ -4,6 +4,7 @@ export type MaskingRule = {
   match_type: 'exact' | 'regex'
   mask_mode: 'full' | 'partial' | 'hash' | 'email' | 'fixed' | 'numeric' | 'datetime' | 'ip'
   mask_config: Record<string, unknown> | null
+  enabled: boolean
   created_by: number
   created_at: string
 }
