@@ -233,20 +233,20 @@ describe('SettingsPage', () => {
     expect(autoExecute).toHaveAttribute('aria-checked', 'false')
   })
 
-  it('allows non-production workflow rules to combine no approval with auto execution', async () => {
+  it('allows non-production redis workflow rules to combine no approval with auto execution', async () => {
     mockedGetSettings.mockResolvedValue(makeSettings({
       app_env: 'staging',
       workflow_rules: [
         {
           id: 1,
-          rule_name: 'Global DML',
-          ticket_type: 'dml',
+          rule_name: 'Global Redis Command',
+          ticket_type: 'redis_command',
           db_connection_id: null,
           export_sensitivity: null,
           approval_enabled: false,
           execution_mode: 'auto_after_approval',
-          approval_auth_groups: ['data_owner'],
-          executor_auth_groups: ['dba'],
+          approval_auth_groups: [],
+          executor_auth_groups: [],
           priority: 100,
           enabled: true,
         },
@@ -256,8 +256,8 @@ describe('SettingsPage', () => {
 
     renderSettingsPage()
 
-    const approval = await screen.findByRole('switch', { name: 'Global DML approval enabled' })
-    const autoExecute = screen.getByRole('switch', { name: 'Global DML auto execute after approval' })
+    const approval = await screen.findByRole('switch', { name: 'Global Redis Command approval enabled' })
+    const autoExecute = screen.getByRole('switch', { name: 'Global Redis Command auto execute after approval' })
     expect(approval).not.toBeDisabled()
     expect(approval).toHaveAttribute('aria-checked', 'false')
     expect(autoExecute).not.toBeDisabled()

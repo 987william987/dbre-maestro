@@ -69,15 +69,27 @@ func TestValidateWorkflowRuleShapeEnforcesProductionApproval(t *testing.T) {
 
 func TestValidateWorkflowRuleShapeAllowsNonProductionAutoExecuteWithoutApproval(t *testing.T) {
 	handler := &SettingsHandler{appEnv: "staging"}
-	rule := model.WorkflowRule{
-		RuleName:        "Staging DML",
-		TicketType:      model.TicketTypeDML,
-		ApprovalEnabled: false,
-		ExecutionMode:   workflowExecutionModeAutoApproval,
+	cases := []struct {
+		name       string
+		ticketType model.TicketType
+	}{
+		{name: "dml", ticketType: model.TicketTypeDML},
+		{name: "redis command", ticketType: model.TicketTypeRedisCommand},
 	}
 
-	if err := handler.validateWorkflowRuleShape(context.Background(), rule); err != nil {
-		t.Fatalf("expected staging no-approval auto-execute rule to be valid, got %v", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := model.WorkflowRule{
+				RuleName:        "Staging " + tc.name,
+				TicketType:      tc.ticketType,
+				ApprovalEnabled: false,
+				ExecutionMode:   workflowExecutionModeAutoApproval,
+			}
+
+			if err := handler.validateWorkflowRuleShape(context.Background(), rule); err != nil {
+				t.Fatalf("expected staging no-approval auto-execute rule to be valid, got %v", err)
+			}
+		})
 	}
 }
 

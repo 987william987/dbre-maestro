@@ -1853,7 +1853,7 @@ func (h *TicketHandler) shouldAutoExecuteAfterApproval(ticket *model.Ticket, res
 	if resolution.ExecutionMode != workflowExecutionModeAutoApproval {
 		return false
 	}
-	return ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML
+	return ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML || ticket.TicketType == model.TicketTypeRedisCommand
 }
 
 func (h *TicketHandler) moveApprovedTicketToPendingExecution(ctx context.Context, ticket *model.Ticket, actorID *uint64, comment *string) error {
@@ -2211,7 +2211,7 @@ func (h *TicketHandler) runTicketExecution(ticket *model.Ticket, executorID uint
 
 func (h *TicketHandler) runTicketExecutionWithOptions(ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions) {
 	if ticket.TicketType == model.TicketTypeRedisCommand {
-		h.runTicketRedisCommands(ticket, executorID)
+		h.runTicketRedisCommands(ticket, executorID, opts)
 		return
 	}
 	h.runTicketSQL(ticket, executorID, opts)

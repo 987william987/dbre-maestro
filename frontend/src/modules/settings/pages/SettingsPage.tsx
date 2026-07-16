@@ -514,7 +514,7 @@ function WorkflowRuleEditor({
   const executorGroupItems = workflowAuthGroupItems(authGroups, rule.executor_auth_groups)
   const requiredReviewPermissions = WORKFLOW_REVIEW_PERMISSIONS[rule.ticket_type] ?? []
   const hasDeprecatedReviewer = [...rule.approval_auth_groups, ...rule.executor_auth_groups].includes('reviewer')
-  const supportsAutoExecution = rule.ticket_type === 'ddl' || rule.ticket_type === 'dml'
+  const supportsAutoExecution = rule.ticket_type === 'ddl' || rule.ticket_type === 'dml' || rule.ticket_type === 'redis_command'
   const approvalRequired = isProduction ? true : rule.approval_enabled
   const autoExecution = isProduction ? false : rule.execution_mode === 'auto_after_approval'
   const compatibleConnections = connections.filter((connection) => workflowRuleSupportsDBType(rule.ticket_type, connection.db_type))
@@ -781,7 +781,12 @@ function normalizeWorkflowRulePatch(rule: WorkflowRule): WorkflowRule {
   if (nextRule.execution_mode !== 'auto_after_approval') {
     nextRule.execution_mode = 'manual'
   }
-  if (nextRule.execution_mode === 'auto_after_approval' && nextRule.ticket_type !== 'ddl' && nextRule.ticket_type !== 'dml') {
+  if (
+    nextRule.execution_mode === 'auto_after_approval' &&
+    nextRule.ticket_type !== 'ddl' &&
+    nextRule.ticket_type !== 'dml' &&
+    nextRule.ticket_type !== 'redis_command'
+  ) {
     nextRule.execution_mode = 'manual'
   }
   return nextRule

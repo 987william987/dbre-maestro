@@ -764,8 +764,8 @@ func (h *SettingsHandler) validateWorkflowRuleShape(ctx context.Context, rule mo
 		if h.appEnv == "production" {
 			return fmt.Errorf("auto_after_approval execution mode is not allowed in production")
 		}
-		if rule.TicketType != model.TicketTypeDDL && rule.TicketType != model.TicketTypeDML {
-			return fmt.Errorf("auto_after_approval execution mode is only allowed for ddl and dml workflow rules")
+		if rule.TicketType != model.TicketTypeDDL && rule.TicketType != model.TicketTypeDML && rule.TicketType != model.TicketTypeRedisCommand {
+			return fmt.Errorf("auto_after_approval execution mode is only allowed for ddl, dml, and redis_command workflow rules")
 		}
 	}
 	if rule.DBConnectionID != nil {
