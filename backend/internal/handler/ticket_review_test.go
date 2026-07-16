@@ -71,6 +71,20 @@ func TestInferReviewObjectTypeReturnsTableForDML(t *testing.T) {
 	}
 }
 
+func TestBuildRedisTicketDatabaseOptions(t *testing.T) {
+	items := buildRedisTicketDatabaseOptions()
+
+	if len(items) != 16 {
+		t.Fatalf("len(items) = %d, want 16", len(items))
+	}
+	if items[0].Name != "0" {
+		t.Fatalf("items[0].Name = %q, want 0", items[0].Name)
+	}
+	if items[15].Name != "15" {
+		t.Fatalf("items[15].Name = %q, want 15", items[15].Name)
+	}
+}
+
 func assertErr(message string) error {
 	return testError(message)
 }

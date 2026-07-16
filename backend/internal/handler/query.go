@@ -241,12 +241,6 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Whitelist check: only SELECT/SHOW/EXPLAIN/DESC/WITH
-	if err := sqlreview.CheckReadOnly(sqlparse.DialectFromDBType(conn.DBType), req.SQL); err != nil {
-		jsonErr(w, http.StatusUnprocessableEntity, "only read-only SQL is allowed: "+err.Error())
-		return
-	}
-
 	queryCtx := queryExecutionContext{
 		DatabaseName: strings.TrimSpace(req.Database),
 		SchemaName:   queryContextSchemaName(conn, req.Schema),
@@ -266,6 +260,12 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		}
 		slog.Error("query access check failed", "user_id", userID, "connection_id", conn.ID, "err", err)
 		jsonErr(w, http.StatusUnprocessableEntity, "Query access is temporarily unavailable. Please try again later.")
+		return
+	}
+
+	// Whitelist check: only SELECT/SHOW/EXPLAIN/DESC/WITH
+	if err := sqlreview.CheckReadOnly(sqlparse.DialectFromDBType(conn.DBType), req.SQL); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "only read-only SQL is allowed: "+err.Error())
 		return
 	}
 
@@ -1130,33 +1130,33 @@ func truncate(s string, n int) string {
 // executeRedis handles POST /query for Redis connections.
 // Accepts a single read-only Redis command (e.g. "GET mykey", "HGETALL myhash").
 func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn *model.DBConnection, cmdLine string, queryCtx queryExecutionContext) {
-	if err := sqlreview.CheckRedisReadOnly(cmdLine); err != nil {
-		jsonErr(w, http.StatusUnprocessableEntity, "only read-only Redis commands are allowed: "+err.Error())
-		return
-	}
-
-	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-
-	timeoutSettings := h.loadSQLEditorTimeoutSettings(r.Context())
-	ctx, cancel := context.WithTimeout(r.Context(), timeoutSettings.AppTimeout)
-	defer cancel()
-
 	cmd, args, err := sqlreview.ParseRedisCommand(cmdLine)
 	if err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "invalid redis command: "+err.Error())
 		return
 	}
-	ifaces := make([]interface{}, len(args))
-	for i, a := range args {
-		ifaces[i] = a
-	}
 	dbIndex := 0
 	if queryCtx.RedisDBIndex != nil {
 		dbIndex = *queryCtx.RedisDBIndex
+	}
+	userID := middleware.UserIDFromCtx(r.Context())
+	if err := h.queryAccess.CheckRedis(r.Context(), userID, conn, dbIndex, cmd, args); err != nil {
+		if missingErr, ok := err.(*queryaccess.MissingAccessError); ok {
+			h.auditBlockedQuery(r, userID, conn.ID, cmdLine, "query_access_policy", map[string]any{
+				"database":       strconv.Itoa(dbIndex),
+				"redis_db_index": dbIndex,
+				"missing":        missingErr.Missing,
+			})
+			jsonErr(w, http.StatusForbidden, missingErr.Error())
+			return
+		}
+		slog.Error("redis query access check failed", "user_id", userID, "connection_id", conn.ID, "redis_db_index", dbIndex, "err", err)
+		jsonErr(w, http.StatusUnprocessableEntity, "Query access is temporarily unavailable. Please try again later.")
+		return
+	}
+	if err := sqlreview.CheckRedisReadOnly(cmdLine); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "only read-only Redis commands are allowed: "+err.Error())
+		return
 	}
 	if h.redisPrefixes != nil {
 		prefixRules, err := h.redisPrefixes.ListActiveForConnection(r.Context(), conn.ID, dbIndex)
@@ -1172,6 +1172,21 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 			jsonErr(w, http.StatusForbidden, err.Error())
 			return
 		}
+	}
+
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	timeoutSettings := h.loadSQLEditorTimeoutSettings(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), timeoutSettings.AppTimeout)
+	defer cancel()
+
+	ifaces := make([]interface{}, len(args))
+	for i, a := range args {
+		ifaces[i] = a
 	}
 
 	start := time.Now()
@@ -1192,7 +1207,6 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 
 	result := redisResultToQueryResult(val)
 
-	userID := middleware.UserIDFromCtx(r.Context())
 	connID := conn.ID
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,

@@ -3,6 +3,7 @@ package queryaccess
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/dbre-maestro/maestro/internal/model"
@@ -90,6 +91,44 @@ func (s *Service) CheckSQL(ctx context.Context, userID uint64, conn *model.DBCon
 	return nil
 }
 
+func (s *Service) CheckRedis(ctx context.Context, userID uint64, conn *model.DBConnection, dbIndex int, command string, args []string) error {
+	if s == nil || s.repo == nil || conn == nil {
+		return nil
+	}
+	if s.users != nil {
+		hasAllPermissions, err := s.users.HasAllPermissions(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if hasAllPermissions {
+			return nil
+		}
+	}
+
+	authGroupIDs := []uint64{}
+	if s.users != nil {
+		var err error
+		authGroupIDs, err = s.users.GetEffectiveAuthGroupIDs(ctx, userID)
+		if err != nil {
+			return err
+		}
+	}
+	rules, err := s.repo.ListActiveRules(ctx, userID, authGroupIDs, conn.ID)
+	if err != nil {
+		return err
+	}
+
+	ref := ObjectRef{
+		ConnectionID: conn.ID,
+		DatabaseName: strconv.Itoa(dbIndex),
+		TableName:    redisQueryAccessKey(command, args),
+	}
+	if !isAllowedByRules(ref, rules) {
+		return &MissingAccessError{Missing: []ObjectRef{ref}}
+	}
+	return nil
+}
+
 func isAllowedByRules(ref ObjectRef, rules []model.QueryAccessRule) bool {
 	allowed := false
 	for _, rule := range rules {
@@ -120,6 +159,23 @@ func matchesPattern(pattern, value string) bool {
 		return true
 	}
 	return equalFold(pattern, value)
+}
+
+func redisQueryAccessKey(command string, args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	switch strings.ToUpper(strings.TrimSpace(command)) {
+	case "GET", "GETRANGE", "HGET", "HMGET", "HSCAN", "LINDEX", "SISMEMBER", "SMISMEMBER", "SSCAN", "SRANDMEMBER", "ZSCORE", "ZMSCORE", "ZRANK", "ZCOUNT", "ZSCAN":
+		return args[0]
+	case "MGET":
+		if len(args) == 1 {
+			return args[0]
+		}
+		return ""
+	default:
+		return ""
+	}
 }
 
 func matchesAnyGrant(ref ObjectRef, grants []model.QueryAccessGrant) bool {

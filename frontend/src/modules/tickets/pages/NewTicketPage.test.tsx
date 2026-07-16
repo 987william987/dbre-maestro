@@ -126,6 +126,22 @@ describe('NewTicketPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Target Database' })).toHaveTextContent('orders'))
   })
 
+  it('shows Redis instances for query access tickets', async () => {
+    render(
+      <MemoryRouter initialEntries={['/tickets/new?ticket_type=query_access']}>
+        <NewTicketPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Query Access Scope')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Query Access Rule 1 Instance' }))
+
+    expect(screen.getByText('MySQL')).toBeInTheDocument()
+    expect(screen.getByText('Redis')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'cache-primary' })).toBeInTheDocument()
+  })
+
   it('keeps submit disabled until instance, database, and SQL review are completed', async () => {
     render(
       <MemoryRouter>

@@ -18,6 +18,7 @@ import type { UserDetail, UserSummary } from '@/shared/types/user'
 import type { QueryAccessEffect } from '@/shared/types/ticket'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
+import type { DropdownOptionGroup } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { Pagination } from '@/shared/ui/Pagination'
@@ -174,6 +175,54 @@ function scopeSelectValue(pattern: string, options: string[]) {
   return options.includes(pattern) ? pattern : CUSTOM_SCOPE_VALUE
 }
 
+function formatConnectionGroupLabel(dbType: string) {
+  switch (dbType) {
+    case 'mysql':
+      return 'MySQL'
+    case 'postgres':
+      return 'PgSQL'
+    case 'redis':
+      return 'Redis'
+    default:
+      return dbType.toUpperCase()
+  }
+}
+
+function getConnectionGroupOrder(dbType: string) {
+  switch (dbType) {
+    case 'mysql':
+      return 1
+    case 'postgres':
+      return 2
+    case 'redis':
+      return 3
+    default:
+      return 99
+  }
+}
+
+function groupConnectionOptions(connections: DBConnection[]): DropdownOptionGroup[] {
+  const groups = new Map<string, DBConnection[]>()
+  connections.forEach((connection) => {
+    groups.set(connection.db_type, [...(groups.get(connection.db_type) ?? []), connection])
+  })
+
+  return Array.from(groups.entries())
+    .sort(([leftType], [rightType]) => {
+      const orderDiff = getConnectionGroupOrder(leftType) - getConnectionGroupOrder(rightType)
+      return orderDiff || formatConnectionGroupLabel(leftType).localeCompare(formatConnectionGroupLabel(rightType))
+    })
+    .map(([dbType, groupConnections]) => ({
+      label: formatConnectionGroupLabel(dbType),
+      options: [...groupConnections]
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map((connection) => ({
+          value: String(connection.id),
+          label: getConnectionLabel(connection.id, connections),
+        })),
+    }))
+}
+
 function minutesUntil(value?: string | null) {
   if (!value) {
     return String(24 * 60)
@@ -248,7 +297,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
           return
         }
         const databases = response.items
-          .filter((item) => item.kind === 'database' || item.kind === 'schema')
+          .filter((item) => item.kind === 'database' || item.kind === 'schema' || item.kind === 'redis_db')
           .map((item) => item.database || item.schema || item.name)
           .filter((name, index, values) => name.trim() !== '' && values.indexOf(name) === index)
         setQueryAccessDatabases(databases)
@@ -871,6 +920,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     ...queryAccessTables.map((table) => ({ value: table, label: table })),
     { value: CUSTOM_SCOPE_VALUE, label: 'Custom...' },
   ]
+  const groupedQueryAccessConnectionOptions = useMemo(() => groupConnectionOptions(connections), [connections])
   const pagedSelectedUserSessions = useMemo(
     () => selectedUserSessions.slice(selectedUserSessionsOffset, selectedUserSessionsOffset + SESSION_PAGE_SIZE),
     [selectedUserSessions, selectedUserSessionsOffset],
@@ -1244,7 +1294,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       disabled={savingQueryAccessRule}
                       options={[
                         { value: '', label: 'Not Selected' },
-                        ...connections.map((connection) => ({ value: String(connection.id), label: getConnectionLabel(connection.id, connections) })),
+                        ...groupedQueryAccessConnectionOptions,
                       ]}
                       menuClassName="max-h-[360px] overflow-y-auto"
                     />
