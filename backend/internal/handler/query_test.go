@@ -221,11 +221,84 @@ func TestExecuteSQLQueryRunsMultiStatementsSequentially(t *testing.T) {
 	if err != nil {
 		t.Fatalf("executeSQLQuery() error = %v", err)
 	}
-	if len(result.Rows) != 1 || result.Rows[0][0] != int64(2) {
+	if len(result.Rows) != 1 || result.Rows[0][0] != "2" {
 		t.Fatalf("unexpected result rows = %#v", result.Rows)
 	}
 	if len(result.Columns) != 1 || result.Columns[0] != "id" {
 		t.Fatalf("unexpected result columns = %#v", result.Columns)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestExecuteSQLQueryPreservesUnsafeIntegersAsStrings(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	const unsafeUserID int64 = 513787965927850241
+	mock.ExpectExec("SET SESSION max_execution_time = 25000").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT user_id FROM t_account LIMIT 200").
+		WillReturnRows(mock.NewRowsWithColumnDefinition(
+			mock.NewColumn("user_id").OfType("BIGINT", int64(0)),
+		).AddRow(unsafeUserID))
+
+	result, err := executeSQLQuery(
+		context.Background(),
+		&model.DBConnection{DBType: "mysql"},
+		db,
+		"SELECT user_id FROM t_account LIMIT 200",
+		queryExecutionContext{},
+		defaultSQLEditorTimeoutSettings(),
+	)
+	if err != nil {
+		t.Fatalf("executeSQLQuery() error = %v", err)
+	}
+	if got := result.Rows[0][0]; got != "513787965927850241" {
+		t.Fatalf("unsafe integer row value = %#v, want exact string", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestExecuteSQLQueryReturnsDisplayCellsAsStringsOrNull(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	createdAt := time.Date(2026, 7, 16, 12, 34, 56, 789000000, time.UTC)
+	mock.ExpectExec("SET SESSION max_execution_time = 25000").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT mixed_values").
+		WillReturnRows(mock.NewRowsWithColumnDefinition(
+			mock.NewColumn("id").OfType("BIGINT", int64(0)),
+			mock.NewColumn("amount").OfType("DECIMAL", []byte{}),
+			mock.NewColumn("active").OfType("BOOLEAN", false),
+			mock.NewColumn("created_at").OfType("DATETIME", time.Time{}),
+			mock.NewColumn("nullable").OfType("VARCHAR", ""),
+		).AddRow(int64(42), []byte("12345678901234567890.123456789"), true, createdAt, nil))
+
+	result, err := executeSQLQuery(
+		context.Background(),
+		&model.DBConnection{DBType: "mysql"},
+		db,
+		"SELECT mixed_values",
+		queryExecutionContext{},
+		defaultSQLEditorTimeoutSettings(),
+	)
+	if err != nil {
+		t.Fatalf("executeSQLQuery() error = %v", err)
+	}
+	want := []any{"42", "12345678901234567890.123456789", "true", "2026-07-16T12:34:56.789Z", nil}
+	for i := range want {
+		if result.Rows[0][i] != want[i] {
+			t.Fatalf("row[%d] = %#v, want %#v", i, result.Rows[0][i], want[i])
+		}
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
@@ -400,7 +473,7 @@ func TestCollectPostgresQueryResultResolvesOriginsAfterRowsClosed(t *testing.T) 
 	if !rows.closed {
 		t.Fatal("rows were not closed")
 	}
-	if len(result.Rows) != 1 || result.Rows[0][0] != int32(1) {
+	if len(result.Rows) != 1 || result.Rows[0][0] != "1" {
 		t.Fatalf("unexpected rows = %#v", result.Rows)
 	}
 	if len(result.Columns) != 1 || result.Columns[0] != "id" {
@@ -408,6 +481,29 @@ func TestCollectPostgresQueryResultResolvesOriginsAfterRowsClosed(t *testing.T) 
 	}
 	if len(result.Origins) != 1 || result.Origins[0].Table != "watches" {
 		t.Fatalf("unexpected origins = %#v", result.Origins)
+	}
+}
+
+func TestCollectPostgresQueryResultPreservesUnsafeIntegersAsStrings(t *testing.T) {
+	rows := &fakePGXRows{
+		fields: []pgconn.FieldDescription{{Name: "account_id"}},
+		values: [][]any{{int64(704428864692027651)}},
+	}
+
+	result, err := collectPostgresQueryResult(
+		context.Background(),
+		rows,
+		&model.DBConnection{DBType: "postgres"},
+		queryExecutionContext{DatabaseName: "postgres"},
+		func(_ context.Context, fields []pgconn.FieldDescription) ([]masking.ColumnOrigin, error) {
+			return make([]masking.ColumnOrigin, len(fields)), nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("collectPostgresQueryResult() error = %v", err)
+	}
+	if got := result.Rows[0][0]; got != "704428864692027651" {
+		t.Fatalf("unsafe integer row value = %#v, want exact string", got)
 	}
 }
 

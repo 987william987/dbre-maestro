@@ -2,7 +2,7 @@ export type QueryResult = {
   columns: string[]
   raw_columns?: string[]
   sensitive_column_indexes?: number[]
-  rows: Array<Array<string | number | boolean | null>>
+  rows: Array<Array<string | null>>
   row_count: number
   duration_ms: number
   sensitive_override_active?: boolean
