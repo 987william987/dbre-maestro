@@ -2663,17 +2663,7 @@ func (h *TicketHandler) validateTicketConnectionType(ctx context.Context, ticket
 	if conn == nil {
 		return fmt.Errorf("db connection not found")
 	}
-	switch ticketType {
-	case model.TicketTypeRedisCommand:
-		if conn.DBType != "redis" {
-			return fmt.Errorf("redis_command tickets only support redis connections")
-		}
-	case model.TicketTypeDDL, model.TicketTypeDML, model.TicketTypeSQLExport, model.TicketTypeSensitiveQueryAccess, model.TicketTypeQueryAccess:
-		if conn.DBType == "redis" {
-			return fmt.Errorf("%s tickets do not support redis connections", ticketType)
-		}
-	}
-	return nil
+	return validateTicketDBType(ticketType, conn.DBType)
 }
 
 func (h *TicketHandler) mustListQueryAccessItems(ctx context.Context, ticketID uint64) []model.QueryAccessTicketItem {

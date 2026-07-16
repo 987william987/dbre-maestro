@@ -80,3 +80,31 @@ func TestValidateWorkflowRuleShapeAllowsNonProductionAutoExecuteWithoutApproval(
 		t.Fatalf("expected staging no-approval auto-execute rule to be valid, got %v", err)
 	}
 }
+
+func TestValidateTicketDBType(t *testing.T) {
+	cases := []struct {
+		name       string
+		ticketType model.TicketType
+		dbType     string
+		wantErr    bool
+	}{
+		{name: "ddl mysql", ticketType: model.TicketTypeDDL, dbType: "mysql"},
+		{name: "ddl postgres", ticketType: model.TicketTypeDDL, dbType: "postgres"},
+		{name: "ddl rejects redis", ticketType: model.TicketTypeDDL, dbType: "redis", wantErr: true},
+		{name: "redis command accepts redis", ticketType: model.TicketTypeRedisCommand, dbType: "redis"},
+		{name: "redis command rejects mysql", ticketType: model.TicketTypeRedisCommand, dbType: "mysql", wantErr: true},
+		{name: "query access accepts redis", ticketType: model.TicketTypeQueryAccess, dbType: "redis"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateTicketDBType(tc.ticketType, tc.dbType)
+			if tc.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+		})
+	}
+}

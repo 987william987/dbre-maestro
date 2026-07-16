@@ -76,7 +76,9 @@ export function SettingsPage() {
   const [error, setError] = useState('')
   const [workflowPreviews, setWorkflowPreviews] = useState<WorkflowRulePreview[]>([])
   const isProduction = settings?.app_env === 'production'
-  const workflowIssues = form ? findWorkflowRuleIssues(form.workflowRules, authGroups) : []
+  const workflowIssues = form
+    ? findWorkflowRuleIssues(toPayload(settings, form, connections).workflow_rules, authGroups, settings?.app_env === 'production', connections)
+    : []
 
   useEffect(() => {
     let active = true
@@ -148,8 +150,8 @@ export function SettingsPage() {
     setSaving(true)
     setError('')
     try {
-      const payload = toPayload(settings, form)
-      const issues = findWorkflowRuleIssues(payload.workflow_rules, authGroups, settings?.app_env === 'production')
+      const payload = toPayload(settings, form, connections)
+      const issues = findWorkflowRuleIssues(payload.workflow_rules, authGroups, settings?.app_env === 'production', connections)
       if (issues.length > 0) {
         setError(`Workflow rules are incomplete: ${issues.join(', ')}`)
         return
@@ -515,6 +517,8 @@ function WorkflowRuleEditor({
   const supportsAutoExecution = rule.ticket_type === 'ddl' || rule.ticket_type === 'dml'
   const approvalRequired = isProduction ? true : rule.approval_enabled
   const autoExecution = isProduction ? false : rule.execution_mode === 'auto_after_approval'
+  const compatibleConnections = connections.filter((connection) => workflowRuleSupportsDBType(rule.ticket_type, connection.db_type))
+  const selectedConnectionCompatible = rule.db_connection_id == null || compatibleConnections.some((connection) => connection.id === rule.db_connection_id)
 
   return (
     <div className="grid gap-4 px-4 py-4">
@@ -529,7 +533,7 @@ function WorkflowRuleEditor({
           <DropdownSelect
             ariaLabel={`Workflow rule ${index + 1} ticket type`}
             value={rule.ticket_type}
-            onChange={(value) => onChange({ ticket_type: value as WorkflowRule['ticket_type'] })}
+            onChange={(value) => onChange({ ticket_type: value as WorkflowRule['ticket_type'], db_connection_id: null })}
             options={WORKFLOW_TICKET_TYPES.map((ticketType) => ({
               value: ticketType,
               label: WORKFLOW_TICKET_TYPE_LABELS[ticketType],
@@ -555,11 +559,11 @@ function WorkflowRuleEditor({
             <span>DB connection</span>
             <DropdownSelect
               ariaLabel={`Workflow rule ${index + 1} DB connection`}
-              value={rule.db_connection_id == null ? '' : String(rule.db_connection_id)}
+              value={selectedConnectionCompatible && rule.db_connection_id != null ? String(rule.db_connection_id) : ''}
               onChange={(value) => onChange({ db_connection_id: value === '' ? null : Number(value) })}
               options={[
                 { value: '', label: 'All connections' },
-                ...connections.map((connection) => ({ value: String(connection.id), label: connection.name })),
+                ...compatibleConnections.map((connection) => ({ value: String(connection.id), label: connection.name })),
               ]}
               menuClassName="max-h-[360px] overflow-y-auto"
             />
@@ -702,8 +706,14 @@ function workflowAuthGroupItems(authGroups: AuthGroupSummary[], selectedGroups: 
     }))
 }
 
-function findWorkflowRuleIssues(rules: WorkflowRule[], authGroups: AuthGroupSummary[], isProduction = false) {
+function findWorkflowRuleIssues(
+  rules: WorkflowRule[],
+  authGroups: AuthGroupSummary[],
+  isProduction = false,
+  connections: Array<Pick<DBConnection, 'id' | 'db_type'>> = [],
+) {
   const availableGroups = new Set(authGroups.map((group) => group.name))
+  const connectionDBTypes = new Map(connections.map((connection) => [connection.id, connection.db_type]))
   const issues: string[] = []
   for (const [index, rule] of rules.entries()) {
     if (!rule.enabled) {
@@ -715,6 +725,12 @@ function findWorkflowRuleIssues(rules: WorkflowRule[], authGroups: AuthGroupSumm
     }
     if (rule.ticket_type === 'sql_export' && rule.export_sensitivity !== 'normal' && rule.export_sensitivity !== 'sensitive') {
       issues.push(`${label}: SQL Export requires export sensitivity.`)
+    }
+    if (rule.db_connection_id != null) {
+      const dbType = connectionDBTypes.get(rule.db_connection_id)
+      if (dbType && !workflowRuleSupportsDBType(rule.ticket_type, dbType)) {
+        issues.push(`${label}: selected DB connection is not supported by this ticket type.`)
+      }
     }
     if (rule.approval_enabled && rule.approval_auth_groups.length === 0) {
       issues.push(`${label}: approval auth groups are required when approval is enabled.`)
@@ -736,6 +752,20 @@ function findWorkflowRuleIssues(rules: WorkflowRule[], authGroups: AuthGroupSumm
 
 function isExecutableTicketType(ticketType: WorkflowRule['ticket_type']) {
   return ticketType === 'ddl' || ticketType === 'dml' || ticketType === 'redis_command'
+}
+
+function workflowRuleSupportsDBType(ticketType: WorkflowRule['ticket_type'], dbType: string) {
+  const normalized = dbType.toLowerCase()
+  if (ticketType === 'redis_command') {
+    return normalized === 'redis'
+  }
+  if (ticketType === 'ddl' || ticketType === 'dml' || ticketType === 'sql_export' || ticketType === 'sensitive_query_access') {
+    return normalized === 'mysql' || normalized === 'postgres' || normalized === 'postgresql'
+  }
+  if (ticketType === 'query_access') {
+    return normalized === 'mysql' || normalized === 'postgres' || normalized === 'postgresql' || normalized === 'redis'
+  }
+  return false
 }
 
 function normalizeWorkflowRulePatch(rule: WorkflowRule): WorkflowRule {
@@ -856,8 +886,13 @@ function toForm(settings: PlatformSettings): SettingsForm {
   }
 }
 
-function toPayload(current: PlatformSettings | null, form: SettingsForm): PlatformSettings {
+function toPayload(
+  current: PlatformSettings | null,
+  form: SettingsForm,
+  connections: Array<Pick<DBConnection, 'id' | 'db_type'>> = [],
+): PlatformSettings {
   const isProduction = current?.app_env === 'production'
+  const connectionDBTypes = new Map(connections.map((connection) => [connection.id, connection.db_type]))
   return {
     sensitive_export_reviewer_user_ids: current?.sensitive_export_reviewer_user_ids ?? [],
     app_env: current?.app_env,
@@ -886,9 +921,14 @@ function toPayload(current: PlatformSettings | null, form: SettingsForm): Platfo
     db_metadata_object_sync_interval_minutes: current?.db_metadata_object_sync_interval_minutes ?? 60,
     db_metadata_cron_timezone: form.cronTimezone.trim(),
     approval_policies: form.approvalPolicies,
-    workflow_rules: form.workflowRules.map((rule) => isProduction
-      ? normalizeWorkflowRulePatch({ ...rule, approval_enabled: true, execution_mode: 'manual' })
-      : normalizeWorkflowRulePatch(rule)),
+    workflow_rules: form.workflowRules.map((rule) => {
+      const dbType = rule.db_connection_id == null ? null : connectionDBTypes.get(rule.db_connection_id)
+      const compatibleDBConnectionID = dbType && workflowRuleSupportsDBType(rule.ticket_type, dbType) ? rule.db_connection_id : null
+      const nextRule = { ...rule, db_connection_id: compatibleDBConnectionID }
+      return isProduction
+        ? normalizeWorkflowRulePatch({ ...nextRule, approval_enabled: true, execution_mode: 'manual' })
+        : normalizeWorkflowRulePatch(nextRule)
+    }),
   }
 }
 

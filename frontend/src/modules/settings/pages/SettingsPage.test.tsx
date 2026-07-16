@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsPage } from '@/modules/settings/pages/SettingsPage'
@@ -78,6 +78,7 @@ function mockSettingsDependencies() {
     connections: [
       { id: 12, name: 'analytics-ro', db_type: 'mysql', host: 'db-a.internal', port: 3306 },
       { id: 18, name: 'warehouse-ro', db_type: 'postgres', host: 'pg-a.internal', port: 5432 },
+      { id: 19, name: 'cache-redis', db_type: 'redis', host: 'redis.internal', port: 6379 },
     ],
   })
   mockedListUsers.mockResolvedValue({ users: [] })
@@ -261,5 +262,56 @@ describe('SettingsPage', () => {
     expect(approval).toHaveAttribute('aria-checked', 'false')
     expect(autoExecute).not.toBeDisabled()
     expect(autoExecute).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('filters workflow DB connection options by ticket type', async () => {
+    mockedGetSettings.mockResolvedValue(makeSettings({
+      workflow_rules: [
+        {
+          id: 1,
+          rule_name: 'Global DDL',
+          ticket_type: 'ddl',
+          db_connection_id: null,
+          export_sensitivity: null,
+          approval_enabled: true,
+          execution_mode: 'manual',
+          approval_auth_groups: ['data_owner'],
+          executor_auth_groups: ['dba'],
+          priority: 100,
+          enabled: true,
+        },
+        {
+          id: 2,
+          rule_name: 'Global Redis Command',
+          ticket_type: 'redis_command',
+          db_connection_id: null,
+          export_sensitivity: null,
+          approval_enabled: true,
+          execution_mode: 'manual',
+          approval_auth_groups: ['data_owner'],
+          executor_auth_groups: ['dba'],
+          priority: 100,
+          enabled: true,
+        },
+      ],
+    }))
+    mockSettingsDependencies()
+
+    renderSettingsPage()
+
+    const ddlConnection = await screen.findByRole('button', { name: 'Workflow rule 1 DB connection' })
+    fireEvent.click(ddlConnection)
+    let options = within(screen.getByRole('listbox', { name: 'Workflow rule 1 DB connection options' }))
+    expect(options.getByRole('option', { name: 'analytics-ro' })).toBeInTheDocument()
+    expect(options.getByRole('option', { name: 'warehouse-ro' })).toBeInTheDocument()
+    expect(options.queryByRole('option', { name: 'cache-redis' })).not.toBeInTheDocument()
+
+    fireEvent.click(ddlConnection)
+    const redisConnection = screen.getByRole('button', { name: 'Workflow rule 2 DB connection' })
+    fireEvent.click(redisConnection)
+    options = within(screen.getByRole('listbox', { name: 'Workflow rule 2 DB connection options' }))
+    expect(options.getByRole('option', { name: 'cache-redis' })).toBeInTheDocument()
+    expect(options.queryByRole('option', { name: 'analytics-ro' })).not.toBeInTheDocument()
+    expect(options.queryByRole('option', { name: 'warehouse-ro' })).not.toBeInTheDocument()
   })
 })

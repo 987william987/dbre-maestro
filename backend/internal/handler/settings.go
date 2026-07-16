@@ -776,6 +776,9 @@ func (h *SettingsHandler) validateWorkflowRuleShape(ctx context.Context, rule mo
 		if conn == nil {
 			return fmt.Errorf("db connection %d does not exist", *rule.DBConnectionID)
 		}
+		if err := validateTicketDBType(rule.TicketType, conn.DBType); err != nil {
+			return err
+		}
 	}
 	if rule.TicketType == model.TicketTypeSQLExport {
 		if rule.ExportSensitivity == nil || (*rule.ExportSensitivity != "normal" && *rule.ExportSensitivity != "sensitive") {
