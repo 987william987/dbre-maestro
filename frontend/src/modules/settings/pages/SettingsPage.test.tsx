@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsPage } from '@/modules/settings/pages/SettingsPage'
 import { ToastProvider } from '@/shared/ui/ToastContext'
+import type { PlatformSettings } from '@/shared/types/settings'
 
 vi.mock('@/modules/settings/api', () => ({
   getSettings: vi.fn(),
@@ -24,6 +25,79 @@ const mockedGetSettings = vi.mocked(getSettings)
 const mockedListSettingsDBConnections = vi.mocked(listSettingsDBConnections)
 const mockedListUsers = vi.mocked(listUsers)
 const mockedListAuthGroups = vi.mocked(listAuthGroups)
+
+function makeSettings(overrides: Partial<PlatformSettings> = {}): PlatformSettings {
+  return {
+    app_env: '',
+    lark_app_id: '',
+    lark_app_secret_configured: false,
+    lark_oauth_enabled: false,
+    lark_oauth_site: 'lark',
+    lark_oauth_redirect_url: '',
+    sensitive_export_reviewer_user_ids: [],
+    sensitive_query_access_reviewer_user_ids: [],
+    require_non_sensitive_export_review: true,
+    approval_policies: [],
+    workflow_rules: [
+      {
+        id: 1,
+        rule_name: 'Global DDL',
+        ticket_type: 'ddl',
+        db_connection_id: null,
+        export_sensitivity: null,
+        approval_enabled: true,
+        execution_mode: 'manual',
+        approval_auth_groups: ['data_owner'],
+        executor_auth_groups: ['dba'],
+        priority: 100,
+        enabled: true,
+      },
+    ],
+    sql_editor_app_timeout_seconds: 30,
+    sql_editor_mysql_max_execution_time_ms: 25000,
+    sql_editor_postgres_statement_timeout_ms: 25000,
+    sql_export_app_timeout_seconds: 120,
+    sql_export_mysql_max_execution_time_ms: 90000,
+    sql_export_postgres_statement_timeout_ms: 90000,
+    db_metadata_inventory_enabled: true,
+    db_metadata_inventory_regions: ['ap-northeast-1'],
+    db_metadata_inventory_engines: ['aurora-mysql', 'aurora-postgresql', 'redis'],
+    db_metadata_inventory_cron: '0 9 * * *',
+    db_metadata_inventory_sync_interval_minutes: 5,
+    db_metadata_object_enabled: true,
+    db_metadata_object_enabled_connection_ids: [12, 18],
+    db_metadata_object_cron: '0 10 * * *',
+    db_metadata_object_sync_interval_minutes: 60,
+    db_metadata_cron_timezone: 'Asia/Taipei',
+    ...overrides,
+  }
+}
+
+function mockSettingsDependencies() {
+  mockedListSettingsDBConnections.mockResolvedValue({
+    connections: [
+      { id: 12, name: 'analytics-ro', db_type: 'mysql', host: 'db-a.internal', port: 3306 },
+      { id: 18, name: 'warehouse-ro', db_type: 'postgres', host: 'pg-a.internal', port: 5432 },
+    ],
+  })
+  mockedListUsers.mockResolvedValue({ users: [] })
+  mockedListAuthGroups.mockResolvedValue({
+    auth_groups: [
+      { name: 'data_owner', label: 'Data Owner', description: '', system_defined: true, user_count: 1 },
+      { name: 'dba', label: 'DBA', description: '', system_defined: true, user_count: 1 },
+    ],
+  })
+}
+
+function renderSettingsPage() {
+  render(
+    <MemoryRouter>
+      <ToastProvider>
+        <SettingsPage />
+      </ToastProvider>
+    </MemoryRouter>,
+  )
+}
 
 describe('SettingsPage', () => {
   beforeEach(() => {
@@ -125,5 +199,67 @@ describe('SettingsPage', () => {
     expect(screen.queryByText('ID 12')).not.toBeInTheDocument()
     expect(screen.queryByText('db-a.internal:3306')).not.toBeInTheDocument()
     expect(mockedListUsers).not.toHaveBeenCalled()
+  })
+
+  it('locks production workflow execution switches to approval required and manual execution', async () => {
+    mockedGetSettings.mockResolvedValue(makeSettings({
+      app_env: 'production',
+      workflow_rules: [
+        {
+          id: 1,
+          rule_name: 'Global DDL',
+          ticket_type: 'ddl',
+          db_connection_id: null,
+          export_sensitivity: null,
+          approval_enabled: false,
+          execution_mode: 'auto_after_approval',
+          approval_auth_groups: ['data_owner'],
+          executor_auth_groups: ['dba'],
+          priority: 100,
+          enabled: true,
+        },
+      ],
+    }))
+    mockSettingsDependencies()
+
+    renderSettingsPage()
+
+    const approval = await screen.findByRole('switch', { name: 'Global DDL approval enabled' })
+    const autoExecute = screen.getByRole('switch', { name: 'Global DDL auto execute after approval' })
+    expect(approval).toBeDisabled()
+    expect(approval).toHaveAttribute('aria-checked', 'true')
+    expect(autoExecute).toBeDisabled()
+    expect(autoExecute).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('allows non-production workflow rules to combine no approval with auto execution', async () => {
+    mockedGetSettings.mockResolvedValue(makeSettings({
+      app_env: 'staging',
+      workflow_rules: [
+        {
+          id: 1,
+          rule_name: 'Global DML',
+          ticket_type: 'dml',
+          db_connection_id: null,
+          export_sensitivity: null,
+          approval_enabled: false,
+          execution_mode: 'auto_after_approval',
+          approval_auth_groups: ['data_owner'],
+          executor_auth_groups: ['dba'],
+          priority: 100,
+          enabled: true,
+        },
+      ],
+    }))
+    mockSettingsDependencies()
+
+    renderSettingsPage()
+
+    const approval = await screen.findByRole('switch', { name: 'Global DML approval enabled' })
+    const autoExecute = screen.getByRole('switch', { name: 'Global DML auto execute after approval' })
+    expect(approval).not.toBeDisabled()
+    expect(approval).toHaveAttribute('aria-checked', 'false')
+    expect(autoExecute).not.toBeDisabled()
+    expect(autoExecute).toHaveAttribute('aria-checked', 'true')
   })
 })

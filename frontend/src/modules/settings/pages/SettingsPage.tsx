@@ -148,12 +148,12 @@ export function SettingsPage() {
     setSaving(true)
     setError('')
     try {
-      const issues = findWorkflowRuleIssues(form.workflowRules, authGroups)
+      const payload = toPayload(settings, form)
+      const issues = findWorkflowRuleIssues(payload.workflow_rules, authGroups, settings?.app_env === 'production')
       if (issues.length > 0) {
         setError(`Workflow rules are incomplete: ${issues.join(', ')}`)
         return
       }
-      const payload = toPayload(settings, form)
       const saved = await patchSettings(payload)
       setSettings(saved)
       setForm(toForm(saved))
@@ -513,6 +513,8 @@ function WorkflowRuleEditor({
   const requiredReviewPermissions = WORKFLOW_REVIEW_PERMISSIONS[rule.ticket_type] ?? []
   const hasDeprecatedReviewer = [...rule.approval_auth_groups, ...rule.executor_auth_groups].includes('reviewer')
   const supportsAutoExecution = rule.ticket_type === 'ddl' || rule.ticket_type === 'dml'
+  const approvalRequired = isProduction ? true : rule.approval_enabled
+  const autoExecution = isProduction ? false : rule.execution_mode === 'auto_after_approval'
 
   return (
     <div className="grid gap-4 px-4 py-4">
@@ -593,8 +595,9 @@ function WorkflowRuleEditor({
           <label className="flex items-center gap-2 text-[13px] font-semibold text-ink">
             <Switch
               ariaLabel={`${rule.rule_name} approval enabled`}
-              checked={rule.approval_enabled}
-              onChange={(checked) => onChange({ approval_enabled: checked, execution_mode: checked ? rule.execution_mode : 'manual' })}
+              checked={approvalRequired}
+              disabled={isProduction}
+              onChange={(checked) => onChange({ approval_enabled: checked })}
             />
             Approval required
           </label>
@@ -602,8 +605,8 @@ function WorkflowRuleEditor({
             <label className="flex items-center gap-2 text-[13px] font-semibold text-ink">
               <Switch
                 ariaLabel={`${rule.rule_name} auto execute after approval`}
-                checked={rule.execution_mode === 'auto_after_approval'}
-                disabled={!rule.approval_enabled || isProduction}
+                checked={autoExecution}
+                disabled={isProduction}
                 onChange={(checked) => onChange({ execution_mode: checked ? 'auto_after_approval' : 'manual' })}
               />
               Auto execute after approval
@@ -614,7 +617,7 @@ function WorkflowRuleEditor({
           ) : null}
           <div className="rounded-lg border border-border bg-panel-soft px-3 py-2 text-[11px] leading-5 text-muted">
             Review permission: {requiredReviewPermissions.join(' or ') || 'None'}
-            {isExecutable && rule.execution_mode !== 'auto_after_approval' ? <><br />Execution permission: tickets.execute</> : null}
+            {isExecutable && !autoExecution ? <><br />Execution permission: tickets.execute</> : null}
           </div>
         </div>
         <Checklist
@@ -625,7 +628,7 @@ function WorkflowRuleEditor({
           onChange={(selectedIDs) => onChange({ approval_auth_groups: selectedIDs })}
         />
         <div className="grid gap-3">
-          {isExecutable && rule.execution_mode !== 'auto_after_approval' ? (
+          {isExecutable && !autoExecution ? (
             <Checklist
               title="Executor auth groups"
               emptyMessage="No auth groups available."
@@ -699,7 +702,7 @@ function workflowAuthGroupItems(authGroups: AuthGroupSummary[], selectedGroups: 
     }))
 }
 
-function findWorkflowRuleIssues(rules: WorkflowRule[], authGroups: AuthGroupSummary[]) {
+function findWorkflowRuleIssues(rules: WorkflowRule[], authGroups: AuthGroupSummary[], isProduction = false) {
   const availableGroups = new Set(authGroups.map((group) => group.name))
   const issues: string[] = []
   for (const [index, rule] of rules.entries()) {
@@ -716,7 +719,10 @@ function findWorkflowRuleIssues(rules: WorkflowRule[], authGroups: AuthGroupSumm
     if (rule.approval_enabled && rule.approval_auth_groups.length === 0) {
       issues.push(`${label}: approval auth groups are required when approval is enabled.`)
     }
-    if (isExecutableTicketType(rule.ticket_type) && rule.executor_auth_groups.length === 0) {
+    if (isProduction && !rule.approval_enabled) {
+      issues.push(`${label}: approval is required in production.`)
+    }
+    if (isExecutableTicketType(rule.ticket_type) && rule.execution_mode !== 'auto_after_approval' && rule.executor_auth_groups.length === 0) {
       issues.push(`${label}: executor auth groups are required for executable tickets.`)
     }
     for (const group of [...rule.approval_auth_groups, ...rule.executor_auth_groups]) {
@@ -746,9 +752,6 @@ function normalizeWorkflowRulePatch(rule: WorkflowRule): WorkflowRule {
     nextRule.execution_mode = 'manual'
   }
   if (nextRule.execution_mode === 'auto_after_approval' && nextRule.ticket_type !== 'ddl' && nextRule.ticket_type !== 'dml') {
-    nextRule.execution_mode = 'manual'
-  }
-  if (!nextRule.approval_enabled) {
     nextRule.execution_mode = 'manual'
   }
   return nextRule
@@ -854,6 +857,7 @@ function toForm(settings: PlatformSettings): SettingsForm {
 }
 
 function toPayload(current: PlatformSettings | null, form: SettingsForm): PlatformSettings {
+  const isProduction = current?.app_env === 'production'
   return {
     sensitive_export_reviewer_user_ids: current?.sensitive_export_reviewer_user_ids ?? [],
     app_env: current?.app_env,
@@ -882,7 +886,9 @@ function toPayload(current: PlatformSettings | null, form: SettingsForm): Platfo
     db_metadata_object_sync_interval_minutes: current?.db_metadata_object_sync_interval_minutes ?? 60,
     db_metadata_cron_timezone: form.cronTimezone.trim(),
     approval_policies: form.approvalPolicies,
-    workflow_rules: form.workflowRules,
+    workflow_rules: form.workflowRules.map((rule) => isProduction
+      ? normalizeWorkflowRulePatch({ ...rule, approval_enabled: true, execution_mode: 'manual' })
+      : normalizeWorkflowRulePatch(rule)),
   }
 }
 

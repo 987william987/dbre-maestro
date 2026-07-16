@@ -1,6 +1,12 @@
 package handler
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/dbre-maestro/maestro/internal/model"
+)
 
 func TestResolveLarkSecretStateAllowsSavingWhenCurrentSecretExists(t *testing.T) {
 	configured, required := resolveLarkSecretState("cli_existing", "", false, true)
@@ -43,5 +49,34 @@ func TestResolveLarkSecretStateDoesNotRequireSecretWhenAppIDIsEmpty(t *testing.T
 	}
 	if !configured {
 		t.Fatal("configured should preserve the current configured state")
+	}
+}
+
+func TestValidateWorkflowRuleShapeEnforcesProductionApproval(t *testing.T) {
+	handler := &SettingsHandler{appEnv: "production"}
+	rule := model.WorkflowRule{
+		RuleName:        "Production DDL",
+		TicketType:      model.TicketTypeDDL,
+		ApprovalEnabled: false,
+		ExecutionMode:   workflowExecutionModeManual,
+	}
+
+	err := handler.validateWorkflowRuleShape(context.Background(), rule)
+	if err == nil || !strings.Contains(err.Error(), "approval_enabled cannot be disabled in production") {
+		t.Fatalf("expected production approval enforcement error, got %v", err)
+	}
+}
+
+func TestValidateWorkflowRuleShapeAllowsNonProductionAutoExecuteWithoutApproval(t *testing.T) {
+	handler := &SettingsHandler{appEnv: "staging"}
+	rule := model.WorkflowRule{
+		RuleName:        "Staging DML",
+		TicketType:      model.TicketTypeDML,
+		ApprovalEnabled: false,
+		ExecutionMode:   workflowExecutionModeAutoApproval,
+	}
+
+	if err := handler.validateWorkflowRuleShape(context.Background(), rule); err != nil {
+		t.Fatalf("expected staging no-approval auto-execute rule to be valid, got %v", err)
 	}
 }

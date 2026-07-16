@@ -757,12 +757,12 @@ func (h *SettingsHandler) validateWorkflowRuleShape(ctx context.Context, rule mo
 	if rule.TicketType == "" {
 		return fmt.Errorf("ticket_type is required")
 	}
+	if h.appEnv == "production" && !rule.ApprovalEnabled {
+		return fmt.Errorf("approval_enabled cannot be disabled in production")
+	}
 	if rule.ExecutionMode == workflowExecutionModeAutoApproval {
 		if h.appEnv == "production" {
 			return fmt.Errorf("auto_after_approval execution mode is not allowed in production")
-		}
-		if !rule.ApprovalEnabled {
-			return fmt.Errorf("auto_after_approval execution mode requires approval_enabled")
 		}
 		if rule.TicketType != model.TicketTypeDDL && rule.TicketType != model.TicketTypeDML {
 			return fmt.Errorf("auto_after_approval execution mode is only allowed for ddl and dml workflow rules")

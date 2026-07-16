@@ -969,6 +969,23 @@ func (h *TicketHandler) applyWorkflowAfterCreate(ctx context.Context, ticket *mo
 			Details:      workflowAuditDetails(ticket, resolution),
 			IPAddress:    ipAddress,
 		})
+		if h.shouldAutoExecuteAfterApproval(ticket, resolution) {
+			comment := "Workflow Rule 設定為免審批並自動執行，系統已開始執行。"
+			if err := h.moveApprovedTicketToPendingExecution(ctx, ticket, nil, &comment); err != nil {
+				return ticket, err
+			}
+			updated, loadErr := h.tickets.GetByID(ctx, ticket.ID)
+			if loadErr != nil {
+				return ticket, loadErr
+			}
+			if updated != nil {
+				ticket = updated
+			}
+			if err := h.startWorkflowAutoExecution(ctx, ticket, actorID, resolution, comment); err != nil {
+				return ticket, err
+			}
+			return ticket, nil
+		}
 		h.dispatchTicketNotification(ctx, ticket, ticketEventApproved, actorID, "Workflow Rule 設定為免審批，工單已自動核准。")
 		return ticket, nil
 	}
@@ -1804,7 +1821,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if h.shouldAutoExecuteAfterApproval(ticket, resolution) {
-			if err := h.startWorkflowAutoExecution(r.Context(), ticket, userID, resolution); err != nil {
+			if err := h.startWorkflowAutoExecution(r.Context(), ticket, &userID, resolution, "Workflow Rule 設定為審批後自動執行，系統已開始執行。"); err != nil {
 				jsonErr(w, http.StatusInternalServerError, "workflow auto execution start failed")
 				return
 			}
@@ -1839,7 +1856,21 @@ func (h *TicketHandler) shouldAutoExecuteAfterApproval(ticket *model.Ticket, res
 	return ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML
 }
 
-func (h *TicketHandler) startWorkflowAutoExecution(ctx context.Context, ticket *model.Ticket, reviewerID uint64, resolution *model.WorkflowResolution) error {
+func (h *TicketHandler) moveApprovedTicketToPendingExecution(ctx context.Context, ticket *model.Ticket, actorID *uint64, comment *string) error {
+	if ticket == nil || h.tickets == nil {
+		return nil
+	}
+	ok, err := h.tickets.UpdateStatus(ctx, ticket.ID, model.TicketStatusApproved, model.TicketStatusPendingExecution, actorID, comment, nil)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("ticket status changed concurrently")
+	}
+	return nil
+}
+
+func (h *TicketHandler) startWorkflowAutoExecution(ctx context.Context, ticket *model.Ticket, actorID *uint64, resolution *model.WorkflowResolution, notification string) error {
 	if ticket == nil || h.tickets == nil {
 		return nil
 	}
@@ -1852,29 +1883,38 @@ func (h *TicketHandler) startWorkflowAutoExecution(ctx context.Context, ticket *
 	}
 	details := map[string]any{
 		"automated":          true,
-		"reviewer_id":        reviewerID,
 		"workflow_rule_name": resolution.RuleName,
 		"execution_mode":     resolution.ExecutionMode,
+	}
+	if actorID != nil {
+		details["actor_id"] = *actorID
 	}
 	if resolution.RuleID != nil {
 		details["workflow_rule_id"] = *resolution.RuleID
 	}
 	h.audit.Log(ctx, repository.AuditEntry{
-		ActorID:      &reviewerID,
+		ActorID:      actorID,
 		ActorName:    middleware.UsernameFromCtx(ctx),
 		ActionType:   "workflow_auto_execute_start",
 		ResourceType: "ticket",
 		ResourceID:   &ticket.ID,
 		Details:      details,
 	})
-	h.dispatchTicketNotification(ctx, ticket, ticketEventPendingExecution, &reviewerID, "Workflow Rule 設定為審批後自動執行，系統已開始執行。")
+	h.dispatchTicketNotification(ctx, ticket, ticketEventPendingExecution, actorID, notification)
 	go h.runTicketExecutionWithOptions(ticket, 0, ticketExecutionRunOptions{
 		Automated:        true,
-		ReviewerID:       reviewerID,
+		ReviewerID:       optionalUint64Value(actorID),
 		WorkflowRuleID:   resolution.RuleID,
 		WorkflowRuleName: resolution.RuleName,
 	})
 	return nil
+}
+
+func optionalUint64Value(value *uint64) uint64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 // POST /tickets/{id}/reject
