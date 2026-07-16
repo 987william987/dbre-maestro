@@ -34,6 +34,10 @@ type CreateMaskingWhitelistPayload = {
   column_name: string
 }
 
+type PatchMaskingWhitelistPayload = Partial<CreateMaskingWhitelistPayload> & {
+  enabled?: boolean
+}
+
 type RedisSensitiveKeyPrefixPayload = {
   db_connection_id: number
   redis_db_index?: number | null
@@ -104,7 +108,12 @@ export async function listMaskingWhitelists() {
   const response = await apiClient.get<MaskingWhitelistResponse>('/masking-whitelist')
   return {
     ...response,
-    whitelist: Array.isArray(response.whitelist) ? response.whitelist : [],
+    whitelist: Array.isArray(response.whitelist)
+      ? response.whitelist.map((entry) => ({
+          ...entry,
+          enabled: entry.enabled !== false,
+        }))
+      : [],
   }
 }
 
@@ -155,7 +164,7 @@ export function createMaskingWhitelist(payload: CreateMaskingWhitelistPayload) {
   return apiClient.post<MaskingWhitelist>('/masking-whitelist', payload)
 }
 
-export function patchMaskingWhitelist(id: number, payload: CreateMaskingWhitelistPayload) {
+export function patchMaskingWhitelist(id: number, payload: PatchMaskingWhitelistPayload) {
   return apiClient.patch<MaskingWhitelist>(`/masking-whitelist/${id}`, payload)
 }
 

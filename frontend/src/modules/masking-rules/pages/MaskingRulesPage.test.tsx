@@ -49,11 +49,15 @@ import {
   listMaskingRules,
   listMaskingWhitelists,
   patchMaskingRule,
+  patchMaskingWhitelist,
+  patchRedisSensitiveKeyPrefix,
 } from '@/modules/masking-rules/api'
 
 const mockedListMaskingRules = vi.mocked(listMaskingRules)
 const mockedCreateMaskingRule = vi.mocked(createMaskingRule)
 const mockedPatchMaskingRule = vi.mocked(patchMaskingRule)
+const mockedPatchMaskingWhitelist = vi.mocked(patchMaskingWhitelist)
+const mockedPatchRedisSensitiveKeyPrefix = vi.mocked(patchRedisSensitiveKeyPrefix)
 const mockedDeleteMaskingRule = vi.mocked(deleteMaskingRule)
 const mockedListRedisSensitiveKeyPrefixes = vi.mocked(listRedisSensitiveKeyPrefixes)
 const mockedCreateRedisSensitiveKeyPrefix = vi.mocked(createRedisSensitiveKeyPrefix)
@@ -85,6 +89,7 @@ const whitelist = {
   database_name: 'analytics',
   table_name: 'tickets',
   column_name: 'email',
+  enabled: true,
   created_by: 1,
   created_at: '2026-01-01T00:00:00Z',
 }
@@ -222,6 +227,40 @@ describe('MaskingRulesPage', () => {
 
     await waitFor(() => {
       expect(mockedPatchMaskingRule).toHaveBeenCalledWith(2, { enabled: false })
+    })
+    expect(await screen.findByText('Disabled')).toBeInTheDocument()
+  })
+
+  it('toggles a whitelist entry enabled state from the list', async () => {
+    mockedPatchMaskingWhitelist.mockResolvedValue({ ...whitelist, enabled: false })
+
+    renderPage()
+
+    const toggle = await screen.findByRole('switch', { name: 'analytics.tickets.email enabled' })
+    fireEvent.click(toggle)
+
+    await waitFor(() => {
+      expect(mockedPatchMaskingWhitelist).toHaveBeenCalledWith(5, { enabled: false })
+    })
+    expect(await screen.findByText('Disabled')).toBeInTheDocument()
+  })
+
+  it('toggles a Redis sensitive key prefix enabled state from the list', async () => {
+    mockedPatchRedisSensitiveKeyPrefix.mockResolvedValue({ ...redisPrefix, is_active: false })
+
+    renderPage()
+
+    const toggle = await screen.findByRole('switch', { name: 'session: enabled' })
+    fireEvent.click(toggle)
+
+    await waitFor(() => {
+      expect(mockedPatchRedisSensitiveKeyPrefix).toHaveBeenCalledWith(9, {
+        db_connection_id: 6,
+        redis_db_index: null,
+        key_prefix: 'session:',
+        reason: 'login session',
+        is_active: false,
+      })
     })
     expect(await screen.findByText('Disabled')).toBeInTheDocument()
   })

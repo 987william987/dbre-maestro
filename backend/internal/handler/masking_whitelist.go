@@ -123,6 +123,7 @@ func (h *MaskingWhitelistHandler) Create(w http.ResponseWriter, r *http.Request)
 		SchemaName:     req.SchemaName,
 		TableName:      req.TableName,
 		ColumnName:     req.ColumnName,
+		Enabled:        true,
 		CreatedBy:      userID,
 	}
 
@@ -158,19 +159,68 @@ func (h *MaskingWhitelistHandler) Patch(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	req, ok := parseMaskingWhitelistPayload(w, r)
-	if !ok {
-		return
+	var req struct {
+		DBConnectionID *uint64 `json:"db_connection_id"`
+		DatabaseName   *string `json:"database_name"`
+		SchemaName     *string `json:"schema_name"`
+		TableName      *string `json:"table_name"`
+		ColumnName     *string `json:"column_name"`
+		Enabled        *bool   `json:"enabled"`
 	}
-	if !h.validateMySQLConnection(w, r, req.DBConnectionID) {
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	existing.DBConnectionID = req.DBConnectionID
-	existing.DatabaseName = req.DatabaseName
-	existing.SchemaName = req.SchemaName
-	existing.TableName = req.TableName
-	existing.ColumnName = req.ColumnName
+	if req.DBConnectionID == nil && req.DatabaseName == nil && req.SchemaName == nil && req.TableName == nil && req.ColumnName == nil && req.Enabled != nil {
+		updated, err := h.whitelist.SetEnabled(r.Context(), id, *req.Enabled)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "patch failed")
+			return
+		}
+
+		userID := middleware.UserIDFromCtx(r.Context())
+		h.audit.Log(r.Context(), repository.AuditEntry{
+			ActorID:      &userID,
+			ActorName:    middleware.UsernameFromCtx(r.Context()),
+			ActionType:   "setting_change",
+			ResourceType: "masking_whitelist",
+			ResourceID:   &id,
+			Details:      map[string]string{"database": updated.DatabaseName, "table": updated.TableName, "column": updated.ColumnName, "action": "toggle"},
+		})
+
+		jsonOK(w, updated)
+		return
+	}
+
+	if req.DBConnectionID == nil || req.DatabaseName == nil || req.TableName == nil || req.ColumnName == nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "db_connection_id, database_name, table_name, and column_name are required")
+		return
+	}
+	dbConnectionID := *req.DBConnectionID
+	databaseName := strings.TrimSpace(*req.DatabaseName)
+	schemaName := ""
+	if req.SchemaName != nil {
+		schemaName = strings.TrimSpace(*req.SchemaName)
+	}
+	tableName := strings.TrimSpace(*req.TableName)
+	columnName := strings.TrimSpace(*req.ColumnName)
+	if dbConnectionID == 0 || databaseName == "" || tableName == "" || columnName == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "db_connection_id, database_name, table_name, and column_name are required")
+		return
+	}
+	if !h.validateMySQLConnection(w, r, dbConnectionID) {
+		return
+	}
+
+	existing.DBConnectionID = dbConnectionID
+	existing.DatabaseName = databaseName
+	existing.SchemaName = schemaName
+	existing.TableName = tableName
+	existing.ColumnName = columnName
+	if req.Enabled != nil {
+		existing.Enabled = *req.Enabled
+	}
 
 	updated, err := h.whitelist.Patch(r.Context(), existing)
 	if err != nil {

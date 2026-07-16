@@ -23,7 +23,7 @@ func NewMaskingWhitelistRepo(db *sqlx.DB) *MaskingWhitelistRepo {
 func (r *MaskingWhitelistRepo) List(ctx context.Context) ([]model.MaskingWhitelist, error) {
 	var entries []model.MaskingWhitelist
 	err := r.db.SelectContext(ctx, &entries,
-		`SELECT id, db_connection_id, database_name, schema_name, table_name, column_name, created_by, created_at
+		`SELECT id, db_connection_id, database_name, schema_name, table_name, column_name, enabled, created_by, created_at
 		 FROM masking_whitelist
 		 ORDER BY db_connection_id, database_name, schema_name, table_name, column_name`,
 	)
@@ -40,9 +40,9 @@ func (r *MaskingWhitelistRepo) Create(ctx context.Context, entry *model.MaskingW
 	}
 
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO masking_whitelist (db_connection_id, database_name, schema_name, table_name, column_name, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		entry.DBConnectionID, entry.DatabaseName, entry.SchemaName, entry.TableName, entry.ColumnName, entry.CreatedBy, timeutil.NowUTC(),
+		`INSERT INTO masking_whitelist (db_connection_id, database_name, schema_name, table_name, column_name, enabled, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.DBConnectionID, entry.DatabaseName, entry.SchemaName, entry.TableName, entry.ColumnName, entry.Enabled, entry.CreatedBy, timeutil.NowUTC(),
 	)
 	if err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ func (r *MaskingWhitelistRepo) Create(ctx context.Context, entry *model.MaskingW
 func (r *MaskingWhitelistRepo) GetByID(ctx context.Context, id uint64) (*model.MaskingWhitelist, error) {
 	var e model.MaskingWhitelist
 	err := r.db.GetContext(ctx, &e,
-		`SELECT id, db_connection_id, database_name, schema_name, table_name, column_name, created_by, created_at
+		`SELECT id, db_connection_id, database_name, schema_name, table_name, column_name, enabled, created_by, created_at
 		 FROM masking_whitelist
 		 WHERE id = ?`,
 		id,
@@ -81,14 +81,27 @@ func (r *MaskingWhitelistRepo) Patch(ctx context.Context, entry *model.MaskingWh
 
 	_, err = r.db.ExecContext(ctx,
 		`UPDATE masking_whitelist
-		 SET db_connection_id = ?, database_name = ?, schema_name = ?, table_name = ?, column_name = ?
+		 SET db_connection_id = ?, database_name = ?, schema_name = ?, table_name = ?, column_name = ?, enabled = ?
 		 WHERE id = ?`,
-		entry.DBConnectionID, entry.DatabaseName, entry.SchemaName, entry.TableName, entry.ColumnName, entry.ID,
+		entry.DBConnectionID, entry.DatabaseName, entry.SchemaName, entry.TableName, entry.ColumnName, entry.Enabled, entry.ID,
 	)
 	if err != nil {
 		return nil, err
 	}
 	return r.GetByID(ctx, entry.ID)
+}
+
+func (r *MaskingWhitelistRepo) SetEnabled(ctx context.Context, id uint64, enabled bool) (*model.MaskingWhitelist, error) {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE masking_whitelist
+		 SET enabled = ?
+		 WHERE id = ?`,
+		enabled, id,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return r.GetByID(ctx, id)
 }
 
 func (r *MaskingWhitelistRepo) Match(ctx context.Context, connID uint64, databaseName, schemaName, tableName, columnName string) (bool, error) {
@@ -101,6 +114,7 @@ func (r *MaskingWhitelistRepo) Match(ctx context.Context, connID uint64, databas
 		  AND LOWER(schema_name) = LOWER(?)
 		  AND LOWER(table_name) = LOWER(?)
 		  AND LOWER(column_name) = LOWER(?)
+		  AND enabled = 1
 	`, connID, strings.TrimSpace(databaseName), strings.TrimSpace(schemaName), strings.TrimSpace(tableName), strings.TrimSpace(columnName))
 	return count > 0, err
 }

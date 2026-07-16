@@ -16,6 +16,7 @@ export type MaskingWhitelist = {
   schema_name?: string
   table_name: string
   column_name: string
+  enabled: boolean
   created_by: number
   created_at: string
 }

@@ -173,6 +173,8 @@ export function MaskingRulesPage() {
   const [pendingDelete, setPendingDelete] = useState<{ kind: 'rule' | 'whitelist' | 'redisPrefix'; id: number } | null>(null)
   const [deletingKey, setDeletingKey] = useState<string | null>(null)
   const [togglingRuleID, setTogglingRuleID] = useState<number | null>(null)
+  const [togglingWhitelistID, setTogglingWhitelistID] = useState<number | null>(null)
+  const [togglingRedisPrefixID, setTogglingRedisPrefixID] = useState<number | null>(null)
 
   const sqlConnections = useMemo(
     () => connections.filter((connection) => connection.dbType === 'mysql' || connection.dbType === 'postgres' || connection.dbType === 'postgresql'),
@@ -480,6 +482,40 @@ export function MaskingRulesPage() {
     }
   }
 
+  async function handleWhitelistEnabledChange(entry: MaskingWhitelist, enabled: boolean) {
+    setTogglingWhitelistID(entry.id)
+    setError('')
+    try {
+      const updated = await patchMaskingWhitelist(entry.id, { enabled })
+      setWhitelist((current) => current.map((item) => (item.id === entry.id ? { ...item, enabled: updated.enabled } : item)))
+      pushToast(`Whitelist ${enabled ? 'enabled' : 'disabled'}.`, 'success')
+    } catch (toggleError) {
+      setError(toggleError instanceof ApiError ? toggleError.message : 'Failed to update the whitelist entry.')
+    } finally {
+      setTogglingWhitelistID(null)
+    }
+  }
+
+  async function handleRedisPrefixEnabledChange(prefix: RedisSensitiveKeyPrefix, enabled: boolean) {
+    setTogglingRedisPrefixID(prefix.id)
+    setError('')
+    try {
+      const updated = await patchRedisSensitiveKeyPrefix(prefix.id, {
+        db_connection_id: prefix.db_connection_id,
+        redis_db_index: prefix.redis_db_index ?? null,
+        key_prefix: prefix.key_prefix,
+        reason: prefix.reason ?? null,
+        is_active: enabled,
+      })
+      setRedisPrefixes((current) => current.map((item) => (item.id === prefix.id ? { ...item, is_active: updated.is_active } : item)))
+      pushToast(`Redis sensitive prefix ${enabled ? 'enabled' : 'disabled'}.`, 'success')
+    } catch (toggleError) {
+      setError(toggleError instanceof ApiError ? toggleError.message : 'Failed to update the Redis sensitive key prefix.')
+    } finally {
+      setTogglingRedisPrefixID(null)
+    }
+  }
+
   async function handleWhitelistSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!whitelistDrawer) {
@@ -662,13 +698,22 @@ export function MaskingRulesPage() {
               <EmptyState message="No whitelist entries yet." />
             ) : (
               <CompactTable
-                headers={['Connection', 'Target', 'Created', 'Actions']}
+                headers={['Connection', 'Target', 'Created', 'Status', 'Actions']}
                 rows={pagedWhitelist.map((entry) => ({
                   key: `whitelist-${entry.id}`,
                   cells: [
                     <span key="connection" className="text-ink">{formatConnectionName(entry.db_connection_id, connections)}</span>,
                     <span key="target" className="font-semibold text-ink">{formatWhitelistTarget(entry)}</span>,
                     <span key="created" className="whitespace-nowrap text-muted">{formatDateTime(entry.created_at)}</span>,
+                    <div key="enabled" className="inline-flex items-center gap-3">
+                      <Switch
+                        ariaLabel={`${formatWhitelistTarget(entry)} enabled`}
+                        checked={entry.enabled}
+                        disabled={!canWrite || togglingWhitelistID === entry.id}
+                        onChange={(checked) => void handleWhitelistEnabledChange(entry, checked)}
+                      />
+                      <span className="text-[12px] text-muted">{entry.enabled ? 'Enabled' : 'Disabled'}</span>
+                    </div>,
                     <ActionCell
                       key="actions"
                       canWrite={canWrite}
@@ -708,16 +753,24 @@ export function MaskingRulesPage() {
               <EmptyState message="No Redis sensitive key prefixes yet." />
             ) : (
               <CompactTable
-                headers={['Connection', 'DB', 'Prefix', 'Status', 'Reason', 'Created', 'Actions']}
+                headers={['Connection', 'DB', 'Prefix', 'Reason', 'Created', 'Status', 'Actions']}
                 rows={pagedRedisPrefixes.map((prefix) => ({
                   key: `redis-prefix-${prefix.id}`,
                   cells: [
                     <span key="connection" className="text-ink">{formatConnectionName(prefix.db_connection_id, connections)}</span>,
                     <Badge key="db">{prefix.redis_db_index === null || prefix.redis_db_index === undefined ? 'All' : prefix.redis_db_index}</Badge>,
                     <span key="prefix" className="font-mono text-[12px] font-semibold text-ink">{prefix.key_prefix}</span>,
-                    <Badge key="status">{prefix.is_active ? 'active' : 'inactive'}</Badge>,
                     <span key="reason" className="max-w-[320px] truncate text-muted">{prefix.reason || '-'}</span>,
                     <span key="created" className="whitespace-nowrap text-muted">{formatDateTime(prefix.created_at)}</span>,
+                    <div key="enabled" className="inline-flex items-center gap-3">
+                      <Switch
+                        ariaLabel={`${prefix.key_prefix} enabled`}
+                        checked={prefix.is_active}
+                        disabled={!canWrite || togglingRedisPrefixID === prefix.id}
+                        onChange={(checked) => void handleRedisPrefixEnabledChange(prefix, checked)}
+                      />
+                      <span className="text-[12px] text-muted">{prefix.is_active ? 'Enabled' : 'Disabled'}</span>
+                    </div>,
                     <ActionCell
                       key="actions"
                       canWrite={canWrite}
