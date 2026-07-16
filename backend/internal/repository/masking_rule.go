@@ -23,7 +23,7 @@ func NewMaskingRuleRepo(db *sqlx.DB) *MaskingRuleRepo {
 func (r *MaskingRuleRepo) List(ctx context.Context) ([]model.MaskingRule, error) {
 	var rules []model.MaskingRule
 	err := r.db.SelectContext(ctx, &rules,
-		`SELECT id, column_name, match_type, mask_mode, COALESCE(mask_config, JSON_OBJECT()) AS mask_config, created_by, created_at
+		`SELECT id, column_name, match_type, mask_mode, COALESCE(mask_config, JSON_OBJECT()) AS mask_config, enabled, created_by, created_at
 		 FROM masking_rules
 		 WHERE db_connection_id IS NULL
 		   AND COALESCE(database_name, '') = ''
@@ -57,7 +57,7 @@ func (r *MaskingRuleRepo) Create(ctx context.Context, rule *model.MaskingRule) (
 func (r *MaskingRuleRepo) GetByID(ctx context.Context, id uint64) (*model.MaskingRule, error) {
 	var rule model.MaskingRule
 	err := r.db.GetContext(ctx, &rule,
-		`SELECT id, column_name, match_type, mask_mode, COALESCE(mask_config, JSON_OBJECT()) AS mask_config, created_by, created_at
+		`SELECT id, column_name, match_type, mask_mode, COALESCE(mask_config, JSON_OBJECT()) AS mask_config, enabled, created_by, created_at
 		 FROM masking_rules
 		 WHERE id = ?
 		   AND db_connection_id IS NULL
@@ -88,9 +88,9 @@ func (r *MaskingRuleRepo) Patch(ctx context.Context, rule *model.MaskingRule) (*
 
 	_, err = r.db.ExecContext(ctx,
 		`UPDATE masking_rules
-		 SET db_connection_id = NULL, database_name = '', schema_name = '', table_name = '', column_name = ?, match_type = ?, mask_mode = ?, mask_config = ?
+		 SET db_connection_id = NULL, database_name = '', schema_name = '', table_name = '', column_name = ?, match_type = ?, mask_mode = ?, mask_config = ?, enabled = ?
 		 WHERE id = ?`,
-		rule.ColumnName, rule.MatchType, rule.MaskMode, nullableJSON(rule.MaskConfig), rule.ID,
+		rule.ColumnName, rule.MatchType, rule.MaskMode, nullableJSON(rule.MaskConfig), rule.Enabled, rule.ID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("patch masking rule: %w", err)
@@ -102,12 +102,13 @@ func (r *MaskingRuleRepo) Patch(ctx context.Context, rule *model.MaskingRule) (*
 func (r *MaskingRuleRepo) ListForConnection(ctx context.Context, connID uint64) ([]model.MaskingRule, error) {
 	var rules []model.MaskingRule
 	err := r.db.SelectContext(ctx, &rules,
-		`SELECT id, column_name, match_type, mask_mode, COALESCE(mask_config, JSON_OBJECT()) AS mask_config, created_by, created_at
+		`SELECT id, column_name, match_type, mask_mode, COALESCE(mask_config, JSON_OBJECT()) AS mask_config, enabled, created_by, created_at
 		 FROM masking_rules
 		 WHERE db_connection_id IS NULL
 		   AND COALESCE(database_name, '') = ''
 		   AND COALESCE(schema_name, '') = ''
 		   AND COALESCE(table_name, '') = ''
+		   AND enabled = 1
 		 ORDER BY column_name`,
 	)
 	return rules, err

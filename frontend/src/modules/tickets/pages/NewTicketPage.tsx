@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, FileText, Loader2, Plus, ScrollText, Trash2, Wand2, XCircle } from 'lucide-react'
+import { CheckCircle2, FileText, Loader2, Minus, Plus, ScrollText, Trash2, Wand2, XCircle } from 'lucide-react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { format as formatSQL } from 'sql-formatter'
 import { ApiError } from '@/shared/api/client'
 import { DataTable, DataTableBody, DataTableCell, DataTableHead, DataTableHeaderCell, DataTableRow } from '@/shared/ui/DataTable'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import type { DropdownOptionGroup } from '@/shared/ui/DropdownSelect'
-import { ExpandableSql, ExpandableText } from '@/shared/ui/ExpandableSql'
+import { ExpandableSql, ExpandableText, isExpandableSql } from '@/shared/ui/ExpandableSql'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataResponse } from '@/shared/types/sqlEditor'
 import type { QueryAccessEffect, TicketReviewResult, TicketType } from '@/shared/types/ticket'
@@ -127,7 +127,8 @@ function normalizeTableOptions(response: MetadataResponse, databaseName: string)
 function ReviewResultColumnGroup() {
   return (
     <colgroup>
-      <col className="w-16" />
+      <col className="w-9" />
+      <col className="w-12" />
       <col className="w-[360px]" />
       <col className="w-28" />
       <col className="w-24" />
@@ -138,6 +139,10 @@ function ReviewResultColumnGroup() {
       <col className="w-48" />
     </colgroup>
   )
+}
+
+function reviewResultKey(section: string, result: TicketReviewResult, index: number) {
+  return `${section}-${result.seq}-${index}`
 }
 
 function parseQueryAccessDuration(rawValue: string) {
@@ -169,6 +174,7 @@ export function NewTicketPage() {
   const [sqlContent, setSqlContent] = useState('')
   const [reviewResults, setReviewResults] = useState<TicketReviewResult[]>([])
   const [reviewPassed, setReviewPassed] = useState(false)
+  const [expandedReviewResultSQLs, setExpandedReviewResultSQLs] = useState<Set<string>>(() => new Set())
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [databases, setDatabases] = useState<string[]>([])
   const [queryAccessDuration, setQueryAccessDuration] = useState(String(24 * 60))
@@ -461,16 +467,30 @@ export function NewTicketPage() {
       })
       setReviewResults(response.results)
       setReviewPassed(response.passed)
+      setExpandedReviewResultSQLs(new Set())
       if (!response.passed) {
         setError('SQL review did not pass. Fix the issues before submitting.')
       }
     } catch (reviewError) {
       setReviewResults([])
       setReviewPassed(false)
+      setExpandedReviewResultSQLs(new Set())
       setError(reviewError instanceof ApiError ? reviewError.message : 'Failed to review SQL.')
     } finally {
       setReviewing(false)
     }
+  }
+
+  function setReviewResultSQLExpanded(key: string, expanded: boolean) {
+    setExpandedReviewResultSQLs((current) => {
+      const next = new Set(current)
+      if (expanded) {
+        next.add(key)
+      } else {
+        next.delete(key)
+      }
+      return next
+    })
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -828,8 +848,9 @@ export function NewTicketPage() {
                       <ReviewResultColumnGroup />
                       <DataTableHead>
                         <tr>
-                          <DataTableHeaderCell>ID</DataTableHeaderCell>
-                          <DataTableHeaderCell>{ticketType === 'redis_command' ? 'Command' : 'SQL'}</DataTableHeaderCell>
+                          <DataTableHeaderCell className="pl-2 pr-1" aria-label={`Expand ${ticketType === 'redis_command' ? 'command' : 'SQL'}`} />
+                          <DataTableHeaderCell className="pl-1 pr-2">ID</DataTableHeaderCell>
+                          <DataTableHeaderCell className="pl-1 pr-2">{ticketType === 'redis_command' ? 'Command' : 'SQL'}</DataTableHeaderCell>
                           <DataTableHeaderCell>Method</DataTableHeaderCell>
                           <DataTableHeaderCell>Stage</DataTableHeaderCell>
                           <DataTableHeaderCell>Kind</DataTableHeaderCell>
@@ -840,25 +861,51 @@ export function NewTicketPage() {
                         </tr>
                       </DataTableHead>
                       <DataTableBody>
-                        {parserResults.map((result, index) => (
-                          <DataTableRow key={`parser-${result.seq}-${index}`}>
-                            <DataTableCell className="align-top">{result.seq}</DataTableCell>
-                            <DataTableCell className="align-top"><ExpandableSql value={result.sql_stmt} label={ticketType === 'redis_command' ? 'command' : 'SQL'} /></DataTableCell>
-                            <DataTableCell className="align-top">—</DataTableCell>
-                            <DataTableCell className="align-top">—</DataTableCell>
-                            <DataTableCell className="align-top">{result.statement_kind || '—'}</DataTableCell>
-                            <DataTableCell className="align-top">{result.object_type || '—'}</DataTableCell>
-                            <DataTableCell className="align-top">—</DataTableCell>
-                            <DataTableCell className="align-top">
-                              <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
-                                result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
-                              }`}>
-                                {result.status}
-                              </span>
-                            </DataTableCell>
-                            <DataTableCell className="align-top"><ExpandableText value={result.message} /></DataTableCell>
-                          </DataTableRow>
-                        ))}
+                        {parserResults.map((result, index) => {
+                          const rowKey = reviewResultKey('parser', result, index)
+                          const rowExpanded = expandedReviewResultSQLs.has(rowKey)
+                          const rowExpandable = isExpandableSql(result.sql_stmt)
+                          return (
+                            <DataTableRow key={rowKey}>
+                              <DataTableCell className="pl-2 pr-1 align-top">
+                                {rowExpandable ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setReviewResultSQLExpanded(rowKey, !rowExpanded)}
+                                    className="inline-flex h-6 w-5 shrink-0 items-center justify-center rounded-md text-primary transition hover:bg-panel-soft focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    aria-expanded={rowExpanded}
+                                    aria-label={`${rowExpanded ? 'Collapse' : 'Show full'} ${ticketType === 'redis_command' ? 'command' : 'SQL'} statement ${result.seq}`}
+                                  >
+                                    {rowExpanded ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                                  </button>
+                                ) : null}
+                              </DataTableCell>
+                              <DataTableCell className="pl-1 pr-2 align-top">{result.seq}</DataTableCell>
+                              <DataTableCell className="min-w-0 pl-1 pr-2 align-top">
+                                <ExpandableSql
+                                  value={result.sql_stmt}
+                                  label={ticketType === 'redis_command' ? 'command' : 'SQL'}
+                                  expanded={rowExpanded}
+                                  onExpandedChange={(expanded) => setReviewResultSQLExpanded(rowKey, expanded)}
+                                  showToggle={false}
+                                />
+                              </DataTableCell>
+                              <DataTableCell className="align-top">—</DataTableCell>
+                              <DataTableCell className="align-top">—</DataTableCell>
+                              <DataTableCell className="align-top">{result.statement_kind || '—'}</DataTableCell>
+                              <DataTableCell className="align-top">{result.object_type || '—'}</DataTableCell>
+                              <DataTableCell className="align-top">—</DataTableCell>
+                              <DataTableCell className="align-top">
+                                <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
+                                  result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
+                                }`}>
+                                  {result.status}
+                                </span>
+                              </DataTableCell>
+                              <DataTableCell className="align-top"><ExpandableText value={result.message} /></DataTableCell>
+                            </DataTableRow>
+                          )
+                        })}
                       </DataTableBody>
                     </DataTable>
                   </div>
@@ -873,8 +920,9 @@ export function NewTicketPage() {
                       <ReviewResultColumnGroup />
                       <DataTableHead>
                         <tr>
-                          <DataTableHeaderCell>ID</DataTableHeaderCell>
-                          <DataTableHeaderCell>{ticketType === 'redis_command' ? 'Command' : 'SQL'}</DataTableHeaderCell>
+                          <DataTableHeaderCell className="pl-2 pr-1" aria-label={`Expand ${ticketType === 'redis_command' ? 'command' : 'SQL'}`} />
+                          <DataTableHeaderCell className="pl-1 pr-2">ID</DataTableHeaderCell>
+                          <DataTableHeaderCell className="pl-1 pr-2">{ticketType === 'redis_command' ? 'Command' : 'SQL'}</DataTableHeaderCell>
                           <DataTableHeaderCell>Method</DataTableHeaderCell>
                           <DataTableHeaderCell>Stage</DataTableHeaderCell>
                           <DataTableHeaderCell>Kind</DataTableHeaderCell>
@@ -885,25 +933,51 @@ export function NewTicketPage() {
                         </tr>
                       </DataTableHead>
                       <DataTableBody>
-                        {validationResults.map((result, index) => (
-                          <DataTableRow key={`validation-${result.seq}-${index}`}>
-                            <DataTableCell className="align-top">{result.seq}</DataTableCell>
-                            <DataTableCell className="align-top"><ExpandableSql value={result.sql_stmt} label={ticketType === 'redis_command' ? 'command' : 'SQL'} /></DataTableCell>
-                            <DataTableCell className="align-top">{result.validation_method || '—'}</DataTableCell>
-                            <DataTableCell className="align-top">{result.validation_stage || '—'}</DataTableCell>
-                            <DataTableCell className="align-top">{result.statement_kind || '—'}</DataTableCell>
-                            <DataTableCell className="align-top">{result.object_type || '—'}</DataTableCell>
-                            <DataTableCell className="align-top">{result.scan_rows}</DataTableCell>
-                            <DataTableCell className="align-top">
-                              <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
-                                result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
-                              }`}>
-                                {result.status}
-                              </span>
-                            </DataTableCell>
-                            <DataTableCell className="align-top"><ExpandableText value={result.message} /></DataTableCell>
-                          </DataTableRow>
-                        ))}
+                        {validationResults.map((result, index) => {
+                          const rowKey = reviewResultKey('validation', result, index)
+                          const rowExpanded = expandedReviewResultSQLs.has(rowKey)
+                          const rowExpandable = isExpandableSql(result.sql_stmt)
+                          return (
+                            <DataTableRow key={rowKey}>
+                              <DataTableCell className="pl-2 pr-1 align-top">
+                                {rowExpandable ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setReviewResultSQLExpanded(rowKey, !rowExpanded)}
+                                    className="inline-flex h-6 w-5 shrink-0 items-center justify-center rounded-md text-primary transition hover:bg-panel-soft focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    aria-expanded={rowExpanded}
+                                    aria-label={`${rowExpanded ? 'Collapse' : 'Show full'} ${ticketType === 'redis_command' ? 'command' : 'SQL'} statement ${result.seq}`}
+                                  >
+                                    {rowExpanded ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                                  </button>
+                                ) : null}
+                              </DataTableCell>
+                              <DataTableCell className="pl-1 pr-2 align-top">{result.seq}</DataTableCell>
+                              <DataTableCell className="min-w-0 pl-1 pr-2 align-top">
+                                <ExpandableSql
+                                  value={result.sql_stmt}
+                                  label={ticketType === 'redis_command' ? 'command' : 'SQL'}
+                                  expanded={rowExpanded}
+                                  onExpandedChange={(expanded) => setReviewResultSQLExpanded(rowKey, expanded)}
+                                  showToggle={false}
+                                />
+                              </DataTableCell>
+                              <DataTableCell className="align-top">{result.validation_method || '—'}</DataTableCell>
+                              <DataTableCell className="align-top">{result.validation_stage || '—'}</DataTableCell>
+                              <DataTableCell className="align-top">{result.statement_kind || '—'}</DataTableCell>
+                              <DataTableCell className="align-top">{result.object_type || '—'}</DataTableCell>
+                              <DataTableCell className="align-top">{result.scan_rows}</DataTableCell>
+                              <DataTableCell className="align-top">
+                                <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
+                                  result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
+                                }`}>
+                                  {result.status}
+                                </span>
+                              </DataTableCell>
+                              <DataTableCell className="align-top"><ExpandableText value={result.message} /></DataTableCell>
+                            </DataTableRow>
+                          )
+                        })}
                       </DataTableBody>
                     </DataTable>
                   </div>

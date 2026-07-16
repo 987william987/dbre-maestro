@@ -49,6 +49,7 @@ func (h *MaskingRuleHandler) Create(w http.ResponseWriter, r *http.Request) {
 		MatchType:  req.MatchType,
 		MaskMode:   req.MaskMode,
 		MaskConfig: req.MaskConfig,
+		Enabled:    true,
 		CreatedBy:  userID,
 	}
 
@@ -85,7 +86,7 @@ func (h *MaskingRuleHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, ok := parseMaskingRulePayload(w, r)
+	req, ok := parseMaskingRulePatchPayload(w, r, existing)
 	if !ok {
 		return
 	}
@@ -93,6 +94,7 @@ func (h *MaskingRuleHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	existing.MatchType = req.MatchType
 	existing.MaskMode = req.MaskMode
 	existing.MaskConfig = req.MaskConfig
+	existing.Enabled = req.Enabled
 
 	updated, err := h.rules.Patch(r.Context(), existing)
 	if err != nil {
@@ -148,19 +150,20 @@ func (h *MaskingRuleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func parseMaskingRulePayload(w http.ResponseWriter, r *http.Request) (*struct {
-	ColumnName string `json:"column_name"`
-	MatchType  string `json:"match_type"`
-	MaskMode   string `json:"mask_mode"`
+	ColumnName string          `json:"column_name"`
+	MatchType  string          `json:"match_type"`
+	MaskMode   string          `json:"mask_mode"`
 	MaskConfig json.RawMessage `json:"mask_config"`
+	Enabled    bool            `json:"enabled"`
 }, bool) {
 	var req struct {
-		DBConnectionID *uint64 `json:"db_connection_id"`
-		DatabaseName   string  `json:"database_name"`
-		SchemaName     string  `json:"schema_name"`
-		TableName      string  `json:"table_name"`
-		ColumnName     string  `json:"column_name"`
-		MatchType      string  `json:"match_type"`
-		MaskMode       string  `json:"mask_mode"`
+		DBConnectionID *uint64         `json:"db_connection_id"`
+		DatabaseName   string          `json:"database_name"`
+		SchemaName     string          `json:"schema_name"`
+		TableName      string          `json:"table_name"`
+		ColumnName     string          `json:"column_name"`
+		MatchType      string          `json:"match_type"`
+		MaskMode       string          `json:"mask_mode"`
 		MaskConfig     json.RawMessage `json:"mask_config"`
 	}
 	if err := bindJSON(r, &req); err != nil {
@@ -214,15 +217,135 @@ func parseMaskingRulePayload(w http.ResponseWriter, r *http.Request) (*struct {
 		req.MaskConfig = normalized
 	}
 	return &struct {
-		ColumnName string `json:"column_name"`
-		MatchType  string `json:"match_type"`
-		MaskMode   string `json:"mask_mode"`
+		ColumnName string          `json:"column_name"`
+		MatchType  string          `json:"match_type"`
+		MaskMode   string          `json:"mask_mode"`
 		MaskConfig json.RawMessage `json:"mask_config"`
+		Enabled    bool            `json:"enabled"`
 	}{
 		ColumnName: req.ColumnName,
 		MatchType:  req.MatchType,
 		MaskMode:   req.MaskMode,
 		MaskConfig: req.MaskConfig,
+		Enabled:    true,
+	}, true
+}
+
+func parseMaskingRulePatchPayload(w http.ResponseWriter, r *http.Request, existing *model.MaskingRule) (*struct {
+	ColumnName string          `json:"column_name"`
+	MatchType  string          `json:"match_type"`
+	MaskMode   string          `json:"mask_mode"`
+	MaskConfig json.RawMessage `json:"mask_config"`
+	Enabled    bool            `json:"enabled"`
+}, bool) {
+	var req struct {
+		DBConnectionID *uint64         `json:"db_connection_id"`
+		DatabaseName   string          `json:"database_name"`
+		SchemaName     string          `json:"schema_name"`
+		TableName      string          `json:"table_name"`
+		ColumnName     *string         `json:"column_name"`
+		MatchType      *string         `json:"match_type"`
+		MaskMode       *string         `json:"mask_mode"`
+		MaskConfig     json.RawMessage `json:"mask_config"`
+		Enabled        *bool           `json:"enabled"`
+	}
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return nil, false
+	}
+	if req.DBConnectionID != nil || strings.TrimSpace(req.DatabaseName) != "" || strings.TrimSpace(req.SchemaName) != "" || strings.TrimSpace(req.TableName) != "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "only global column_name + mask_mode is supported")
+		return nil, false
+	}
+
+	columnName := existing.ColumnName
+	if req.ColumnName != nil {
+		columnName = normalizeRuleIdentifier(*req.ColumnName)
+	}
+	matchType := existing.MatchType
+	if req.MatchType != nil {
+		matchType = *req.MatchType
+	}
+	maskMode := existing.MaskMode
+	if req.MaskMode != nil {
+		maskMode = *req.MaskMode
+	}
+	maskConfig := existing.MaskConfig
+	if req.MaskConfig != nil {
+		maskConfig = req.MaskConfig
+	}
+	enabled := existing.Enabled
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	normalized, ok := validateMaskingRulePayload(w, columnName, matchType, maskMode, maskConfig)
+	if !ok {
+		return nil, false
+	}
+	normalized.Enabled = enabled
+	return normalized, true
+}
+
+func validateMaskingRulePayload(w http.ResponseWriter, columnName string, matchType string, maskMode string, maskConfig json.RawMessage) (*struct {
+	ColumnName string          `json:"column_name"`
+	MatchType  string          `json:"match_type"`
+	MaskMode   string          `json:"mask_mode"`
+	MaskConfig json.RawMessage `json:"mask_config"`
+	Enabled    bool            `json:"enabled"`
+}, bool) {
+	columnName = normalizeRuleIdentifier(columnName)
+	if columnName == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "column_name is required")
+		return nil, false
+	}
+	switch masking.MatchType(matchType) {
+	case "", masking.MatchTypeExact:
+		matchType = string(masking.MatchTypeExact)
+	case masking.MatchTypeRegex:
+		if _, err := masking.MatchColumnPattern(masking.Rule{
+			Column: columnName,
+			Match:  masking.MatchTypeRegex,
+		}, "validation_probe"); err != nil {
+			jsonErr(w, http.StatusUnprocessableEntity, "column_name regex is invalid")
+			return nil, false
+		}
+	default:
+		jsonErr(w, http.StatusUnprocessableEntity, "match_type must be exact or regex")
+		return nil, false
+	}
+	switch masking.MaskMode(maskMode) {
+	case masking.MaskModeFull,
+		masking.MaskModePartial,
+		masking.MaskModeHash,
+		masking.MaskModeEmail,
+		masking.MaskModeFixed,
+		masking.MaskModeNumeric,
+		masking.MaskModeDateTime,
+		masking.MaskModeIP:
+	case "":
+		maskMode = string(masking.MaskModeFull)
+	default:
+		jsonErr(w, http.StatusUnprocessableEntity, "mask_mode is not supported")
+		return nil, false
+	}
+	normalizedConfig, err := normalizeMaskConfig(masking.MaskMode(maskMode), maskConfig)
+	if err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		return nil, false
+	}
+	return &struct {
+		ColumnName string          `json:"column_name"`
+		MatchType  string          `json:"match_type"`
+		MaskMode   string          `json:"mask_mode"`
+		MaskConfig json.RawMessage `json:"mask_config"`
+		Enabled    bool            `json:"enabled"`
+	}{
+		ColumnName: columnName,
+		MatchType:  matchType,
+		MaskMode:   maskMode,
+		MaskConfig: normalizedConfig,
+		Enabled:    true,
 	}, true
 }
 

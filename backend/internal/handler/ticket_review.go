@@ -144,23 +144,19 @@ func (h *TicketHandler) runMySQLDMLExplainValidation(
 		if stmt.Kind != sqlparse.StatementKindInsert && stmt.Kind != sqlparse.StatementKindUpdate && stmt.Kind != sqlparse.StatementKindDelete {
 			continue
 		}
-		issues, err := sqlreview.CheckExplain(ctx, queryDB, stmt.RawSQL, rowThreshold)
+		explainResult, err := sqlreview.CheckExplainWithStats(ctx, queryDB, stmt.RawSQL, rowThreshold)
 		statementKind := string(stmt.Kind)
 		if err != nil {
 			items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodMySQLExplain, nil, statementKind, "table", 0, []string{err.Error()}))
 			continue
 		}
-		maxRows := int64(0)
-		messages := make([]string, 0, len(issues))
-		for _, issue := range issues {
-			if issue.Rows > maxRows {
-				maxRows = issue.Rows
-			}
+		messages := make([]string, 0, len(explainResult.Issues))
+		for _, issue := range explainResult.Issues {
 			if ruleMap[issue.Kind] {
 				messages = append(messages, issue.Msg)
 			}
 		}
-		items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodMySQLExplain, nil, statementKind, "table", maxRows, messages))
+		items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodMySQLExplain, nil, statementKind, "table", explainResult.MaxRows, messages))
 	}
 	return items
 }
@@ -409,6 +405,20 @@ func rewriteMySQLDDLForShadow(stmt sqlparse.ParsedStatement, shadowDatabase stri
 		needsClone = true
 		ddl.Table.Schema = tidbast.NewCIStr(shadowDatabase)
 		return restoreMySQLNode(ddl), "", needsClone, nil
+	case *tidbast.RenameTableStmt:
+		needsClone = true
+		for _, tablePair := range ddl.TableToTables {
+			if tablePair == nil {
+				continue
+			}
+			if tablePair.OldTable != nil {
+				tablePair.OldTable.Schema = tidbast.NewCIStr(shadowDatabase)
+			}
+			if tablePair.NewTable != nil {
+				tablePair.NewTable.Schema = tidbast.NewCIStr(shadowDatabase)
+			}
+		}
+		return restoreMySQLNode(ddl), "", needsClone, nil
 	case *tidbast.AlterDatabaseStmt:
 		needsClone = true
 		explicitDatabase = ddl.Name.O
@@ -444,8 +454,19 @@ func inferDDLObjectType(stmt sqlparse.ParsedStatement) string {
 		return "database"
 	case *tidbast.CreateTableStmt, *tidbast.AlterTableStmt, *tidbast.DropTableStmt, *tidbast.TruncateTableStmt:
 		return "table"
+	case *tidbast.RenameTableStmt:
+		return "table"
 	default:
 		return "unknown"
+	}
+}
+
+func inferReviewObjectType(stmt sqlparse.ParsedStatement) string {
+	switch stmt.Kind {
+	case sqlparse.StatementKindInsert, sqlparse.StatementKindUpdate, sqlparse.StatementKindDelete:
+		return "table"
+	default:
+		return inferDDLObjectType(stmt)
 	}
 }
 
@@ -664,7 +685,7 @@ func (h *TicketHandler) runTicketRedisCommands(ticket *model.Ticket, executorID 
 func buildParserReviewItems(statements []sqlparse.ParsedStatement) []ticketReviewItem {
 	items := make([]ticketReviewItem, 0, len(statements))
 	for _, stmt := range statements {
-		items = append(items, buildParserPassReviewItem(stmt.Seq, stmt.RawSQL, string(stmt.Kind), inferDDLObjectType(stmt)))
+		items = append(items, buildParserPassReviewItem(stmt.Seq, stmt.RawSQL, string(stmt.Kind), inferReviewObjectType(stmt)))
 	}
 	return items
 }
@@ -673,7 +694,7 @@ func buildStaticValidationItems(statements []sqlparse.ParsedStatement, ruleMap m
 	items := make([]ticketReviewItem, 0, len(statements))
 	for _, stmt := range statements {
 		issues := sqlreview.RunStaticChecksParsed(stmt, ruleMap)
-		items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodStaticRule, nil, string(stmt.Kind), inferDDLObjectType(stmt), 0, issues))
+		items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodStaticRule, nil, string(stmt.Kind), inferReviewObjectType(stmt), 0, issues))
 	}
 	return items
 }

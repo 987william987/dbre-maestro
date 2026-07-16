@@ -22,12 +22,20 @@ type CreateMaskingRulePayload = {
   mask_config?: Record<string, unknown>
 }
 
+type PatchMaskingRulePayload = Partial<CreateMaskingRulePayload> & {
+  enabled?: boolean
+}
+
 type CreateMaskingWhitelistPayload = {
   db_connection_id: number
   database_name: string
   schema_name?: string
   table_name: string
   column_name: string
+}
+
+type PatchMaskingWhitelistPayload = Partial<CreateMaskingWhitelistPayload> & {
+  enabled?: boolean
 }
 
 type RedisSensitiveKeyPrefixPayload = {
@@ -58,6 +66,7 @@ export async function listMaskingRules(): Promise<MaskingRulesResponse> {
           ...rule,
           match_type: rule.match_type === 'regex' ? 'regex' : 'exact',
           mask_config: rule.mask_config && typeof rule.mask_config === 'object' && !Array.isArray(rule.mask_config) ? rule.mask_config : {},
+          enabled: rule.enabled !== false,
         }))
       : [],
   }
@@ -67,7 +76,7 @@ export function createMaskingRule(payload: CreateMaskingRulePayload) {
   return apiClient.post<MaskingRule>('/masking-rules', payload)
 }
 
-export function patchMaskingRule(id: number, payload: CreateMaskingRulePayload) {
+export function patchMaskingRule(id: number, payload: PatchMaskingRulePayload) {
   return apiClient.patch<MaskingRule>(`/masking-rules/${id}`, payload)
 }
 
@@ -99,7 +108,12 @@ export async function listMaskingWhitelists() {
   const response = await apiClient.get<MaskingWhitelistResponse>('/masking-whitelist')
   return {
     ...response,
-    whitelist: Array.isArray(response.whitelist) ? response.whitelist : [],
+    whitelist: Array.isArray(response.whitelist)
+      ? response.whitelist.map((entry) => ({
+          ...entry,
+          enabled: entry.enabled !== false,
+        }))
+      : [],
   }
 }
 
@@ -150,7 +164,7 @@ export function createMaskingWhitelist(payload: CreateMaskingWhitelistPayload) {
   return apiClient.post<MaskingWhitelist>('/masking-whitelist', payload)
 }
 
-export function patchMaskingWhitelist(id: number, payload: CreateMaskingWhitelistPayload) {
+export function patchMaskingWhitelist(id: number, payload: PatchMaskingWhitelistPayload) {
   return apiClient.patch<MaskingWhitelist>(`/masking-whitelist/${id}`, payload)
 }
 

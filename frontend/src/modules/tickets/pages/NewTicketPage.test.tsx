@@ -151,6 +151,48 @@ describe('NewTicketPage', () => {
     expect(screen.getByRole('button', { name: 'Submit Ticket' })).not.toBeDisabled()
   })
 
+  it('uses the left expand control for long SQL review statements', async () => {
+    const longSQL = 'ALTER TABLE orders ADD INDEX idx_status_created_at_customer_id (status, created_at, customer_id), ADD INDEX idx_status_updated_at_customer_id (status, updated_at, customer_id);'
+    mockedReviewTicketSQL.mockResolvedValueOnce({
+      passed: true,
+      results: [
+        {
+          id: 1,
+          ticket_id: 0,
+          seq: 1,
+          sql_stmt: longSQL,
+          phase: 'validation',
+          scan_rows: 0,
+          status: 'pass',
+          message: null,
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <NewTicketPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Ticket Info')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/Title/i), { target: { value: 'Add index' } })
+    fireEvent.change(screen.getByLabelText('SQL Content'), { target: { value: longSQL } })
+    fireEvent.click(screen.getByRole('button', { name: 'Target Instance' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'orders-primary' }))
+    await waitFor(() => expect(mockedListTicketDatabases).toHaveBeenCalledWith(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'SQL Review' }))
+
+    const expandButton = await screen.findByRole('button', { name: /Show full SQL statement 1/i })
+    expect(screen.queryByRole('button', { name: /^Show full SQL$/i })).not.toBeInTheDocument()
+
+    fireEvent.click(expandButton)
+
+    expect(screen.getByRole('button', { name: /Collapse SQL statement 1/i })).toBeInTheDocument()
+  })
+
   it('submits the selected connection id and database name', async () => {
     render(
       <MemoryRouter>
