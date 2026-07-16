@@ -806,9 +806,7 @@ func executeSingleSQLStatement(
 			return nil, err
 		}
 		for i, v := range vals {
-			if b, ok := v.([]byte); ok {
-				vals[i] = string(b)
-			}
+			vals[i] = queryResultCellValue(v)
 		}
 		result.Rows = append(result.Rows, vals)
 	}
@@ -889,9 +887,7 @@ func collectPostgresQueryResult(
 			return nil, err
 		}
 		for i, value := range values {
-			if b, ok := value.([]byte); ok {
-				values[i] = string(b)
-			}
+			values[i] = queryResultCellValue(value)
 		}
 		resultRows = append(resultRows, values)
 	}
@@ -912,6 +908,19 @@ func collectPostgresQueryResult(
 		Dependencies: dependenciesFromOrigins(origins),
 		Rows:         resultRows,
 	}, nil
+}
+
+func queryResultCellValue(value any) any {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case []byte:
+		return string(v)
+	case time.Time:
+		return v.Format(time.RFC3339Nano)
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 func resolvePostgresOrigins(ctx context.Context, conn *pgx.Conn, fields []pgconn.FieldDescription) ([]masking.ColumnOrigin, error) {
@@ -1305,26 +1314,26 @@ func redisResultToQueryResult(val interface{}) *masking.QueryResult {
 	case string:
 		return &masking.QueryResult{Columns: []string{"result"}, Rows: [][]any{{v}}}
 	case int64:
-		return &masking.QueryResult{Columns: []string{"result"}, Rows: [][]any{{fmt.Sprintf("%d", v)}}}
+		return &masking.QueryResult{Columns: []string{"result"}, Rows: [][]any{{queryResultCellValue(v)}}}
 	case []interface{}:
 		result := &masking.QueryResult{Columns: []string{"value"}, Rows: make([][]any, 0)}
 		for _, item := range v {
-			result.Rows = append(result.Rows, []any{fmt.Sprintf("%v", item)})
+			result.Rows = append(result.Rows, []any{queryResultCellValue(item)})
 		}
 		return result
 	case map[interface{}]interface{}:
 		result := &masking.QueryResult{Columns: []string{"field", "value"}, Rows: make([][]any, 0)}
 		for k, fv := range v {
-			result.Rows = append(result.Rows, []any{fmt.Sprintf("%v", k), fmt.Sprintf("%v", fv)})
+			result.Rows = append(result.Rows, []any{queryResultCellValue(k), queryResultCellValue(fv)})
 		}
 		return result
 	case map[string]interface{}:
 		result := &masking.QueryResult{Columns: []string{"field", "value"}, Rows: make([][]any, 0)}
 		for k, fv := range v {
-			result.Rows = append(result.Rows, []any{k, fmt.Sprintf("%v", fv)})
+			result.Rows = append(result.Rows, []any{k, queryResultCellValue(fv)})
 		}
 		return result
 	default:
-		return &masking.QueryResult{Columns: []string{"result"}, Rows: [][]any{{fmt.Sprintf("%v", v)}}}
+		return &masking.QueryResult{Columns: []string{"result"}, Rows: [][]any{{queryResultCellValue(v)}}}
 	}
 }
