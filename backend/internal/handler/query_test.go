@@ -160,6 +160,42 @@ func TestExecuteSQLQueryUsesDatabaseOnPinnedConnection(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryMetadataStatementsDoNotInferMaskingOrigins(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("SET SESSION max_execution_time = 25000").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SHOW DATABASES").
+		WillReturnRows(sqlmock.NewRows([]string{"Database"}).AddRow("analytics"))
+
+	result, err := executeSQLQuery(
+		context.Background(),
+		&model.DBConnection{DBType: "mysql"},
+		db,
+		"SHOW DATABASES",
+		queryExecutionContext{},
+		defaultSQLEditorTimeoutSettings(),
+	)
+	if err != nil {
+		t.Fatalf("executeSQLQuery() error = %v", err)
+	}
+	if len(result.Columns) != 1 || result.Columns[0] != "Database" {
+		t.Fatalf("columns = %#v, want [Database]", result.Columns)
+	}
+	if len(result.Dependencies) != 1 || len(result.Dependencies[0]) != 0 {
+		t.Fatalf("dependencies = %#v, want no masking dependencies for metadata statement", result.Dependencies)
+	}
+	if len(result.Origins) != 1 || result.Origins[0] != (masking.ColumnOrigin{}) {
+		t.Fatalf("origins = %#v, want empty origin for metadata statement", result.Origins)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestExecuteSQLQueryRunsMultiStatementsSequentially(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

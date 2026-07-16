@@ -783,8 +783,12 @@ func executeSingleSQLStatement(
 		return nil, err
 	}
 
-	origins := inferColumnOriginsFromLabels(cols, effectiveQueryDatabaseName(conn, queryCtx))
-	dependencies := dependenciesFromOrigins(origins)
+	origins := make([]masking.ColumnOrigin, len(cols))
+	dependencies := make([][]masking.ColumnOrigin, len(cols))
+	if !isMySQLMetadataStatement(statement) {
+		origins = inferColumnOriginsFromLabels(cols, effectiveQueryDatabaseName(conn, queryCtx))
+		dependencies = dependenciesFromOrigins(origins)
+	}
 	result := &masking.QueryResult{
 		Columns:      buildDisplayColumns(cols, origins),
 		RawColumns:   cols,
@@ -816,7 +820,7 @@ func executeSingleSQLStatement(
 		return nil, err
 	}
 
-	if shouldResolveMySQLOrigins(cols) {
+	if !isMySQLMetadataStatement(statement) && shouldResolveMySQLOrigins(cols) {
 		resolvedColumns, err := resolveMySQLLineageForStatement(ctx, conn, pinnedConn, statement, cols, queryCtx)
 		if err == nil && len(resolvedColumns) == len(cols) {
 			origins = make([]masking.ColumnOrigin, len(resolvedColumns))
@@ -832,6 +836,19 @@ func executeSingleSQLStatement(
 	}
 
 	return result, nil
+}
+
+func isMySQLMetadataStatement(statement string) bool {
+	fields := strings.Fields(strings.TrimSpace(statement))
+	if len(fields) == 0 {
+		return false
+	}
+	switch strings.ToUpper(fields[0]) {
+	case "SHOW", "DESC", "DESCRIBE", "EXPLAIN":
+		return true
+	default:
+		return false
+	}
 }
 
 func executeSinglePostgresStatement(
