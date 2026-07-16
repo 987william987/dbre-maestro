@@ -132,6 +132,71 @@ func TestIsAllowedByRulesRequiresAllowRule(t *testing.T) {
 	}
 }
 
+func TestCheckRedisRequiresActiveAllowRule(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "mysql")
+	service := NewService(repository.NewQueryAccessRepo(sqlxDB), nil)
+
+	mock.ExpectQuery(`SELECT id, subject_type, subject_id, effect, connection_id, database_pattern, table_pattern,`).
+		WithArgs(uint64(7), uint64(2), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "subject_type", "subject_id", "effect", "connection_id", "database_pattern", "table_pattern",
+			"granted_via", "source_ticket_id", "expires_at", "revoked_at", "revoked_by", "created_by", "updated_by", "created_at", "updated_at",
+		}))
+
+	err = service.CheckRedis(context.Background(), 7, redisConnection(2), 0, "GET", []string{"user:1"})
+	if _, ok := err.(*MissingAccessError); !ok {
+		t.Fatalf("CheckRedis() error = %T %[1]v, want MissingAccessError", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestCheckRedisAllowsDatabaseWildcardRule(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC()
+	sqlxDB := sqlx.NewDb(db, "mysql")
+	service := NewService(repository.NewQueryAccessRepo(sqlxDB), nil)
+
+	mock.ExpectQuery(`SELECT id, subject_type, subject_id, effect, connection_id, database_pattern, table_pattern,`).
+		WithArgs(uint64(7), uint64(2), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "subject_type", "subject_id", "effect", "connection_id", "database_pattern", "table_pattern",
+			"granted_via", "source_ticket_id", "expires_at", "revoked_at", "revoked_by", "created_by", "updated_by", "created_at", "updated_at",
+		}).AddRow(uint64(1), model.QueryAccessSubjectTypeUser, uint64(7), model.QueryAccessEffectAllow, uint64(2), "0", "*", "ticket", nil, now.Add(time.Hour), nil, nil, uint64(9), uint64(9), now, now))
+
+	err = service.CheckRedis(context.Background(), 7, redisConnection(2), 0, "GET", []string{"user:1"})
+	if err != nil {
+		t.Fatalf("CheckRedis() error = %v, want nil", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestCheckRedisDenyOverridesAllow(t *testing.T) {
+	ref := ObjectRef{ConnectionID: 2, DatabaseName: "0", TableName: "user:1"}
+	rules := []model.QueryAccessRule{
+		{ConnectionID: 2, Effect: model.QueryAccessEffectAllow, DatabasePattern: "0", TablePattern: "*"},
+		{ConnectionID: 2, Effect: model.QueryAccessEffectDeny, DatabasePattern: "0", TablePattern: "user:1"},
+	}
+
+	if isAllowedByRules(ref, rules) {
+		t.Fatalf("expected exact Redis key deny to override DB wildcard allow")
+	}
+}
+
 func TestCheckSQLAllowsProtectedAdminWithoutQueryAccessGrant(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -221,5 +286,12 @@ func mysqlConnection(id uint64, databaseName string) *model.DBConnection {
 			v := databaseName
 			return &v
 		}(),
+	}
+}
+
+func redisConnection(id uint64) *model.DBConnection {
+	return &model.DBConnection{
+		ID:     id,
+		DBType: "redis",
 	}
 }

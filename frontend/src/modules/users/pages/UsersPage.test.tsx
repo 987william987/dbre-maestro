@@ -51,8 +51,13 @@ vi.mock('@/modules/auth-groups/api', () => ({
   deleteAuthGroup: vi.fn(),
 }))
 
+vi.mock('@/modules/sql-editor/api', () => ({
+  listMetadata: vi.fn(),
+}))
+
 import { createAuthGroup, getAuthGroup, listAuthGroups, patchAuthGroup } from '@/modules/auth-groups/api'
 import { getDBConnectionBindings } from '@/modules/db-connections/api'
+import { listMetadata } from '@/modules/sql-editor/api'
 import { createQueryAccessRule, createUser, deleteUser, getUser, listQueryAccessRules, listUserDBConnections, listUserSessions, listUsers, patchUser, resetUserMFA, revokeQueryAccessRule, revokeUserSession, revokeUserSessions } from '@/modules/users/api'
 
 const mockedListUsers = vi.mocked(listUsers)
@@ -73,6 +78,7 @@ const mockedGetAuthGroup = vi.mocked(getAuthGroup)
 const mockedCreateAuthGroup = vi.mocked(createAuthGroup)
 const mockedPatchAuthGroup = vi.mocked(patchAuthGroup)
 const mockedGetDBConnectionBindings = vi.mocked(getDBConnectionBindings)
+const mockedListMetadata = vi.mocked(listMetadata)
 
 function selectOption(label: string, option: string) {
   fireEvent.click(screen.getByRole('button', { name: label }))
@@ -152,6 +158,11 @@ describe('UsersPage', () => {
       updated_at: '2026-06-10T00:00:00Z',
     })
     mockedRevokeQueryAccessRule.mockResolvedValue({ ok: true })
+    mockedListMetadata.mockResolvedValue({
+      db_type: 'mysql',
+      level: 'database',
+      items: [],
+    })
     mockedGetDBConnectionBindings.mockResolvedValue({
       db_connection_id: 1,
       direct_users: [],
@@ -769,5 +780,70 @@ describe('UsersPage', () => {
 
     await waitFor(() => expect(screen.getByText('user-21')).toBeInTheDocument())
     expect(screen.queryByText('user-1')).not.toBeInTheDocument()
+  })
+
+  it('Query Access 後台會顯示 Redis DB 0 到 15', async () => {
+    mockedListUsers.mockResolvedValue({
+      users: [
+        {
+          id: 2,
+          username: 'fly',
+          email: 'fly@example.com',
+          lark_recipient: '',
+          auth_groups: ['developer'],
+          db_connection_ids: [12],
+          protected: false,
+          is_active: true,
+          created_at: '2026-06-10T00:00:00Z',
+          updated_at: '2026-06-10T00:00:00Z',
+        },
+      ],
+    })
+    mockedListUserDBConnections.mockResolvedValue({
+      connections: [
+        {
+          id: 12,
+          name: 'cache-prod',
+          db_type: 'redis',
+          host: 'redis.internal',
+          port: 6379,
+          username: '',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          created_by: 1,
+          created_at: '2026-06-10T00:00:00Z',
+          updated_at: '2026-06-10T00:00:00Z',
+        },
+      ],
+    })
+    mockedListMetadata.mockResolvedValue({
+      db_type: 'redis',
+      level: 'redis_db',
+      items: Array.from({ length: 16 }, (_, index) => ({
+        kind: 'redis_db',
+        name: String(index),
+        database: String(index),
+        schema: String(index),
+      })),
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <UsersPage initialView="query-access" />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Manual Query Access Rule')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Query Access DB Connection' }))
+    expect(screen.getByText('Redis')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('option', { name: 'cache-prod' }))
+    await waitFor(() => expect(mockedListMetadata).toHaveBeenCalledWith(12))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Query Access Database' }))
+
+    expect(screen.getByRole('option', { name: '0' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '15' })).toBeInTheDocument()
   })
 })

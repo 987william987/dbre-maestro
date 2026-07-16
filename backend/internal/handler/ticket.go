@@ -2709,6 +2709,17 @@ func (h *TicketHandler) parseTicketStatements(ctx context.Context, dbConnID uint
 }
 
 func (h *TicketHandler) listTicketDatabases(ctx context.Context, connID uint64) ([]ticketDatabaseOption, error) {
+	conn, err := h.dbConns.GetByID(ctx, connID)
+	if err != nil {
+		return nil, err
+	}
+	if conn == nil {
+		return nil, fmt.Errorf("db connection not found")
+	}
+	if conn.DBType == "redis" {
+		return buildRedisTicketDatabaseOptions(), nil
+	}
+
 	queryDB, cleanup, conn, err := h.openTicketSQLDBWithConnection(ctx, connID, model.DBCredentialRoleReadonly, nil)
 	if err != nil {
 		return nil, err
@@ -2716,12 +2727,6 @@ func (h *TicketHandler) listTicketDatabases(ctx context.Context, connID uint64) 
 	defer cleanup()
 
 	switch conn.DBType {
-	case "redis":
-		items := make([]ticketDatabaseOption, 0, 16)
-		for index := 0; index < 16; index++ {
-			items = append(items, ticketDatabaseOption{Name: strconv.Itoa(index)})
-		}
-		return items, nil
 	case "postgres", "postgresql":
 		rows, err := queryDB.QueryContext(ctx,
 			`SELECT datname
@@ -2769,6 +2774,14 @@ func (h *TicketHandler) listTicketDatabases(ctx context.Context, connID uint64) 
 		}
 		return items, rows.Err()
 	}
+}
+
+func buildRedisTicketDatabaseOptions() []ticketDatabaseOption {
+	items := make([]ticketDatabaseOption, 0, 16)
+	for index := 0; index < 16; index++ {
+		items = append(items, ticketDatabaseOption{Name: strconv.Itoa(index)})
+	}
+	return items
 }
 
 func (h *TicketHandler) openTicketSQLDB(

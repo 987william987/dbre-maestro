@@ -30,9 +30,9 @@ function getConnectionGroupOrder(dbType: string) {
   switch (dbType) {
     case 'mysql':
       return 1
-    case 'redis':
-      return 2
     case 'postgres':
+      return 2
+    case 'redis':
       return 3
     default:
       return 99
@@ -201,11 +201,14 @@ export function NewTicketPage() {
     [connections, dbConnectionId],
   )
   const filteredConnections = useMemo(() => {
+    if (isQueryAccessTicket) {
+      return connections
+    }
     if (ticketType === 'redis_command') {
       return connections.filter((connection) => connection.db_type === 'redis')
     }
     return connections.filter((connection) => connection.db_type !== 'redis')
-  }, [connections, ticketType])
+  }, [connections, isQueryAccessTicket, ticketType])
   const groupedConnectionOptions = useMemo(() => groupConnectionOptions(filteredConnections), [filteredConnections])
   const parserResults = useMemo(() => reviewResults.filter((result) => result.phase === 'parser'), [reviewResults])
   const validationResults = useMemo(() => reviewResults.filter((result) => !result.phase || result.phase === 'validation'), [reviewResults])
@@ -265,11 +268,11 @@ export function NewTicketPage() {
       setDbConnectionId('')
       setDatabaseName('')
     }
-    if (selectedConnection && ticketType !== 'redis_command' && selectedConnection.db_type === 'redis') {
+    if (selectedConnection && !isQueryAccessTicket && ticketType !== 'redis_command' && selectedConnection.db_type === 'redis') {
       setDbConnectionId('')
       setDatabaseName('')
     }
-  }, [selectedConnection, ticketType])
+  }, [isQueryAccessTicket, selectedConnection, ticketType])
 
   useEffect(() => {
     if (!isQueryAccessTicket) {
