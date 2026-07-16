@@ -409,6 +409,20 @@ func rewriteMySQLDDLForShadow(stmt sqlparse.ParsedStatement, shadowDatabase stri
 		needsClone = true
 		ddl.Table.Schema = tidbast.NewCIStr(shadowDatabase)
 		return restoreMySQLNode(ddl), "", needsClone, nil
+	case *tidbast.RenameTableStmt:
+		needsClone = true
+		for _, tablePair := range ddl.TableToTables {
+			if tablePair == nil {
+				continue
+			}
+			if tablePair.OldTable != nil {
+				tablePair.OldTable.Schema = tidbast.NewCIStr(shadowDatabase)
+			}
+			if tablePair.NewTable != nil {
+				tablePair.NewTable.Schema = tidbast.NewCIStr(shadowDatabase)
+			}
+		}
+		return restoreMySQLNode(ddl), "", needsClone, nil
 	case *tidbast.AlterDatabaseStmt:
 		needsClone = true
 		explicitDatabase = ddl.Name.O
@@ -443,6 +457,8 @@ func inferDDLObjectType(stmt sqlparse.ParsedStatement) string {
 	case *tidbast.CreateDatabaseStmt, *tidbast.AlterDatabaseStmt, *tidbast.DropDatabaseStmt:
 		return "database"
 	case *tidbast.CreateTableStmt, *tidbast.AlterTableStmt, *tidbast.DropTableStmt, *tidbast.TruncateTableStmt:
+		return "table"
+	case *tidbast.RenameTableStmt:
 		return "table"
 	default:
 		return "unknown"

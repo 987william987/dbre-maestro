@@ -9,6 +9,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/repository"
+	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -27,6 +28,34 @@ func TestSanitizeMySQLShadowValidationError(t *testing.T) {
 			t.Fatalf("unexpected sanitized message: %q", got)
 		}
 	})
+}
+
+func TestRewriteMySQLDDLForShadowSupportsRenameTable(t *testing.T) {
+	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "RENAME TABLE `tb_announcement` TO `tb_announcement_legacy_20260715`")
+	if err != nil {
+		t.Fatalf("parse rename table: %v", err)
+	}
+	if len(parsed.Statements) != 1 {
+		t.Fatalf("statement count = %d, want 1", len(parsed.Statements))
+	}
+
+	rewritten, explicitDatabase, needsClone, err := rewriteMySQLDDLForShadow(parsed.Statements[0], "shadow_mainnet")
+	if err != nil {
+		t.Fatalf("rewriteMySQLDDLForShadow() error = %v", err)
+	}
+	if !needsClone {
+		t.Fatal("needsClone = false, want true for RENAME TABLE")
+	}
+	if explicitDatabase != "" {
+		t.Fatalf("explicitDatabase = %q, want empty", explicitDatabase)
+	}
+	want := "RENAME TABLE `shadow_mainnet`.`tb_announcement` TO `shadow_mainnet`.`tb_announcement_legacy_20260715`"
+	if rewritten != want {
+		t.Fatalf("rewritten = %q, want %q", rewritten, want)
+	}
+	if got := inferDDLObjectType(parsed.Statements[0]); got != "table" {
+		t.Fatalf("object type = %q, want table", got)
+	}
 }
 
 func assertErr(message string) error {
