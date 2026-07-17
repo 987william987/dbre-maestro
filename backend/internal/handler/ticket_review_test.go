@@ -346,3 +346,44 @@ func TestWorkflowResolutionExcludesSubmitter(t *testing.T) {
 		t.Fatalf("resolution should remain valid when other candidates exist, got %s", resolution.ErrorCode)
 	}
 }
+
+func TestWorkflowResolutionAutoExecutionDoesNotRequireExecutorAfterSubmitterExclusion(t *testing.T) {
+	connID := uint64(3)
+	for _, ticketType := range []model.TicketType{
+		model.TicketTypeDDL,
+		model.TicketTypeDML,
+		model.TicketTypeRedisCommand,
+	} {
+		t.Run(string(ticketType), func(t *testing.T) {
+			ticket := &model.Ticket{
+				ID:             1,
+				TicketType:     ticketType,
+				Status:         model.TicketStatusPendingReview,
+				SubmitterID:    7,
+				DBConnectionID: &connID,
+			}
+			resolution := &model.WorkflowResolution{
+				TicketType:        ticketType,
+				DBConnectionID:    &connID,
+				ApprovalEnabled:   false,
+				ExecutionMode:     workflowExecutionModeAutoApproval,
+				ApprovalUserIDs:   []uint64{7, 8},
+				ExecutorUserIDs:   []uint64{},
+				AdminUserIDs:      []uint64{},
+				ErrorCode:         "",
+				ErrorMessage:      "",
+				RuleName:          "auto " + string(ticketType),
+				ExportSensitivity: nil,
+			}
+
+			excludeSubmitterFromWorkflowResolution(ticket, resolution)
+
+			if resolution.ErrorCode != "" {
+				t.Fatalf("auto execution should not require executor candidates, got %s: %s", resolution.ErrorCode, resolution.ErrorMessage)
+			}
+			if uint64InSlice(7, resolution.ApprovalUserIDs) {
+				t.Fatalf("submitter still appears in approval candidates: %#v", resolution.ApprovalUserIDs)
+			}
+		})
+	}
+}
