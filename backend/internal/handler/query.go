@@ -453,7 +453,11 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 			Details:      workflowAuditDetails(ticket, resolution),
 			IPAddress:    clientIP(r),
 		})
-		body := buildTicketNotificationBody(ticket, &conn.Name, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.TicketNo))
+		submitterName := strings.TrimSpace(middleware.UsernameFromCtx(r.Context()))
+		if submitterName == "" {
+			submitterName = strconv.FormatUint(userID, 10)
+		}
+		body := buildTicketNotificationBody(ticket, &conn.Name, submitterName, exportTicketStateLabel(ticket.Status), h.ticketLink(ticket.TicketNo))
 		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
 			RecipientIDs: resolution.AdminUserIDs,
 			ActorID:      &userID,
@@ -485,12 +489,15 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		},
 		IPAddress: clientIP(r),
 	})
+	submitterName := strings.TrimSpace(middleware.UsernameFromCtx(r.Context()))
+	if submitterName == "" {
+		submitterName = strconv.FormatUint(userID, 10)
+	}
 	body := buildTicketNotificationBody(
 		ticket,
 		&conn.Name,
+		submitterName,
 		exportTicketStateLabel(model.TicketStatusPendingReview),
-		"請審核是否通過此工單",
-		"提交人已送出工單，等待 reviewer 處理。",
 		h.ticketLink(ticket.TicketNo),
 	)
 	h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{

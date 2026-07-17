@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,6 +156,74 @@ func TestCanReviewTicketRejectsSubmitterEvenWithReviewPermission(t *testing.T) {
 	}
 	if allowed {
 		t.Fatal("submitter must not be allowed to review their own ticket")
+	}
+}
+
+func TestBuildTicketNotificationBodyIncludesSubmitterAndOmitsActionDetail(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+	submitterID := uint64(7)
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(submitterID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id",
+			"username",
+			"email",
+			"lark_recipient",
+			"password",
+			"external_identity_source",
+			"external_identity_id",
+			"password_login_disabled",
+			"lark_login_open_id",
+			"lark_login_union_id",
+			"lark_display_name",
+			"lark_avatar_url",
+			"lark_bound_at",
+			"lark_binding_status",
+			"is_setup",
+			"is_protected",
+			"is_active",
+			"mfa_enabled",
+			"mfa_secret_encrypted",
+			"mfa_enabled_at",
+			"created_at",
+			"updated_at",
+		}).AddRow(submitterID, "william", "william@example.com", "", "hash", "", "", false, "", "", "", "", nil, "", true, false, true, false, nil, nil, now, now))
+
+	databaseName := "testnet_edgex_opt"
+	ticket := &model.Ticket{
+		TicketNo:     "TK-20260716-142959000-503E32",
+		TicketType:   model.TicketTypeDDL,
+		Status:       model.TicketStatusPendingReview,
+		SubmitterID:  submitterID,
+		DatabaseName: &databaseName,
+	}
+	handler := &TicketHandler{users: repository.NewUserRepo(sqlx.NewDb(db, "sqlmock"))}
+
+	body := handler.buildTicketNotificationBody(context.Background(), ticket, model.TicketStatusPendingReview)
+	for _, part := range []string{
+		"工單類型：DDL",
+		"目前狀態：待審核",
+		"提交者：william",
+		"數據庫：testnet_edgex_opt",
+		"工單連結：/tickets/TK-20260716-142959000-503E32",
+	} {
+		if !strings.Contains(body, part) {
+			t.Fatalf("body missing %q: %s", part, body)
+		}
+	}
+	for _, removed := range []string{"待執行操作：", "說明："} {
+		if strings.Contains(body, removed) {
+			t.Fatalf("body should not include %q: %s", removed, body)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
 	}
 }
 
