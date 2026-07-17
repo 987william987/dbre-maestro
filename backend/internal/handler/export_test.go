@@ -54,7 +54,6 @@ func TestRequestRateLimiterAllowsOnlyThreeHitsPerMinute(t *testing.T) {
 
 func TestBuildTicketNotificationBodyIncludesExportContext(t *testing.T) {
 	databaseName := "analytics"
-	description := "submitter already sent the ticket, waiting for reviewer action."
 	connName := "warehouse-prod"
 	containsSensitive := false
 	ticket := &model.Ticket{
@@ -68,24 +67,27 @@ func TestBuildTicketNotificationBodyIncludesExportContext(t *testing.T) {
 	body := buildTicketNotificationBody(
 		ticket,
 		&connName,
+		"william",
 		exportTicketStateLabel(model.TicketStatusPendingReview),
-		"請審核是否通過此工單",
-		description,
 		"/tickets/TK-20260622-080000000-ABCDEF",
 	)
 
 	for _, part := range []string{
 		"工單類型：SQL_EXPORT",
-		"導出類型：普通數據導出",
 		"目前狀態：待審核",
-		"待執行操作：請審核是否通過此工單",
-		"資料來源：warehouse-prod",
-		"資料庫：analytics",
-		"說明：submitter already sent the ticket, waiting for reviewer action.",
+		"提交者：william",
+		"導出類型：普通數據導出",
+		"數據庫實例：warehouse-prod",
+		"數據庫：analytics",
 		"工單連結：/tickets/TK-20260622-080000000-ABCDEF",
 	} {
 		if !strings.Contains(body, part) {
 			t.Fatalf("body missing %q: %s", part, body)
+		}
+	}
+	for _, removed := range []string{"待執行操作：", "說明：", "資料來源：", "資料庫："} {
+		if strings.Contains(body, removed) {
+			t.Fatalf("body should not include %q: %s", removed, body)
 		}
 	}
 }
@@ -102,9 +104,8 @@ func TestBuildTicketNotificationBodyIncludesSensitiveExportType(t *testing.T) {
 	body := buildTicketNotificationBody(
 		ticket,
 		nil,
+		"william",
 		exportTicketStateLabel(model.TicketStatusPendingReview),
-		"請審核是否通過此工單",
-		"",
 		"",
 	)
 

@@ -576,11 +576,14 @@ func parseRedisDatabaseIndex(databaseName *string) (int, error) {
 	return index, nil
 }
 
-func (h *TicketHandler) runTicketRedisCommands(ticket *model.Ticket, executorID uint64) {
+func (h *TicketHandler) runTicketRedisCommands(ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions) {
 	ctx := context.Background()
 	executorName, err := h.lookupUsername(ctx, executorID)
 	if err != nil {
 		executorName = ""
+	}
+	if opts.Automated {
+		executorName = "workflow automation"
 	}
 
 	conn, err := h.dbConns.GetByID(ctx, *ticket.DBConnectionID)
@@ -666,20 +669,48 @@ func (h *TicketHandler) runTicketRedisCommands(ticket *model.Ticket, executorID 
 	if finalStatus == model.TicketStatusFailed {
 		actionType = "ticket_execute_failed"
 	}
+	if opts.Automated {
+		actionType = "workflow_auto_execute_complete"
+		if finalStatus != model.TicketStatusCompleted {
+			actionType = "workflow_auto_execute_failed"
+		}
+	}
+	details := map[string]any{"status": string(finalStatus)}
+	if opts.Automated {
+		details["automated"] = true
+		details["reviewer_id"] = opts.ReviewerID
+		details["workflow_rule_name"] = opts.WorkflowRuleName
+		if opts.WorkflowRuleID != nil {
+			details["workflow_rule_id"] = *opts.WorkflowRuleID
+		}
+	}
+	auditActorID := &executorID
+	notificationActorID := &executorID
+	if opts.Automated {
+		auditActorID = &opts.ReviewerID
+		notificationActorID = &opts.ReviewerID
+	}
 	h.audit.Log(ctx, repository.AuditEntry{
-		ActorID:      &executorID,
+		ActorID:      auditActorID,
 		ActorName:    executorName,
 		ActionType:   actionType,
 		ResourceType: "ticket",
 		ResourceID:   &ticket.ID,
-		Details:      map[string]string{"status": string(finalStatus)},
+		Details:      details,
 	})
 
 	if finalStatus == model.TicketStatusCompleted {
-		h.dispatchTicketNotification(ctx, ticket, ticketEventCompleted, &executorID, "工單已執行完成。")
+		detail := "工單已執行完成。"
+		if opts.Automated {
+			detail = "Workflow Rule 已自動執行完成。"
+		}
+		h.dispatchTicketNotification(ctx, ticket, ticketEventCompleted, notificationActorID, detail)
+	} else if opts.Automated {
+		h.dispatchTicketNotification(ctx, ticket, ticketEventExecutionFailed, notificationActorID, "Workflow Rule 自動執行失敗，請 DBA/Admin 查看 execution log 並重新處理。")
 	} else {
 		h.dispatchTicketNotification(ctx, ticket, ticketEventExecutionFailed, &executorID, "工單執行失敗，請查看 execution log。")
 	}
+	h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
 }
 
 func buildParserReviewItems(statements []sqlparse.ParsedStatement) []ticketReviewItem {

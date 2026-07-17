@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -453,7 +454,11 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 			Details:      workflowAuditDetails(ticket, resolution),
 			IPAddress:    clientIP(r),
 		})
-		body := buildTicketNotificationBody(ticket, &conn.Name, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.TicketNo))
+		submitterName := strings.TrimSpace(middleware.UsernameFromCtx(r.Context()))
+		if submitterName == "" {
+			submitterName = strconv.FormatUint(userID, 10)
+		}
+		body := buildTicketNotificationBody(ticket, &conn.Name, submitterName, exportTicketStateLabel(ticket.Status), h.ticketLink(ticket.TicketNo))
 		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
 			RecipientIDs: resolution.AdminUserIDs,
 			ActorID:      &userID,
@@ -485,12 +490,15 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		},
 		IPAddress: clientIP(r),
 	})
+	submitterName := strings.TrimSpace(middleware.UsernameFromCtx(r.Context()))
+	if submitterName == "" {
+		submitterName = strconv.FormatUint(userID, 10)
+	}
 	body := buildTicketNotificationBody(
 		ticket,
 		&conn.Name,
+		submitterName,
 		exportTicketStateLabel(model.TicketStatusPendingReview),
-		"請審核是否通過此工單",
-		"提交人已送出工單，等待 reviewer 處理。",
 		h.ticketLink(ticket.TicketNo),
 	)
 	h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
@@ -918,6 +926,12 @@ func queryResultCellValue(value any) any {
 		return string(v)
 	case time.Time:
 		return v.Format(time.RFC3339Nano)
+	case driver.Valuer:
+		driverValue, err := v.Value()
+		if err != nil {
+			return fmt.Sprint(v)
+		}
+		return queryResultCellValue(driverValue)
 	default:
 		return fmt.Sprint(v)
 	}
@@ -1036,17 +1050,6 @@ func dependenciesFromOrigins(origins []masking.ColumnOrigin) [][]masking.ColumnO
 func buildDisplayColumns(rawColumns []string, origins []masking.ColumnOrigin) []string {
 	displayColumns := make([]string, len(rawColumns))
 	for i, rawColumn := range rawColumns {
-		if i < len(origins) && strings.TrimSpace(origins[i].Column) != "" {
-			displayColumns[i] = origins[i].Column
-			continue
-		}
-
-		parts := strings.Split(rawColumn, ".")
-		if len(parts) > 1 {
-			displayColumns[i] = parts[len(parts)-1]
-			continue
-		}
-
 		displayColumns[i] = rawColumn
 	}
 	return displayColumns

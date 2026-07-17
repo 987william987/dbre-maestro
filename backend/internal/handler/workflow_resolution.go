@@ -108,7 +108,7 @@ func resolveWorkflowWithMatcher(ctx context.Context, settings workflowRuleMatche
 		resolution.ErrorMessage = fmt.Sprintf("workflow rule %q has no effective approval users", rule.RuleName)
 		return resolution, nil
 	}
-	if isExecutableTicketType(ticketType) && len(resolution.ExecutorUserIDs) == 0 {
+	if isExecutableTicketType(ticketType) && resolution.ExecutionMode != workflowExecutionModeAutoApproval && len(resolution.ExecutorUserIDs) == 0 {
 		adminIDs, err := workflowAdminUserIDs(ctx, users)
 		if err != nil {
 			return nil, err
@@ -236,7 +236,7 @@ func excludeSubmitterFromWorkflowResolution(ticket *model.Ticket, resolution *mo
 		resolution.ErrorMessage = "workflow has no effective approval users after excluding the submitter"
 		return
 	}
-	if isExecutableTicketType(ticket.TicketType) && len(resolution.ExecutorUserIDs) == 0 {
+	if isExecutableTicketType(ticket.TicketType) && resolution.ExecutionMode != workflowExecutionModeAutoApproval && len(resolution.ExecutorUserIDs) == 0 {
 		resolution.ErrorCode = workflowErrorNoEffectiveExecutors
 		resolution.ErrorMessage = "workflow has no effective executor users after excluding the submitter"
 		return

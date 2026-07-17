@@ -77,25 +77,22 @@ func NewExportHandler(
 	}
 }
 
-func buildTicketNotificationBody(ticket *model.Ticket, connName *string, currentStatus, nextAction, detail, link string) string {
+func buildTicketNotificationBody(ticket *model.Ticket, connName *string, submitterName string, currentStatus, link string) string {
 	parts := []string{
 		fmt.Sprintf("工單類型：%s", exportTicketTypeLabel(ticket.TicketType)),
 		fmt.Sprintf("目前狀態：%s", currentStatus),
 	}
+	if strings.TrimSpace(submitterName) != "" {
+		parts = append(parts, fmt.Sprintf("提交者：%s", strings.TrimSpace(submitterName)))
+	}
 	if ticket.TicketType == model.TicketTypeSQLExport && ticket.ContainsSensitive != nil {
 		parts = append(parts, fmt.Sprintf("導出類型：%s", exportSensitivityLabel(*ticket.ContainsSensitive)))
 	}
-	if nextAction != "" {
-		parts = append(parts, fmt.Sprintf("待執行操作：%s", nextAction))
-	}
 	if connName != nil && strings.TrimSpace(*connName) != "" {
-		parts = append(parts, fmt.Sprintf("資料來源：%s", strings.TrimSpace(*connName)))
+		parts = append(parts, fmt.Sprintf("數據庫實例：%s", strings.TrimSpace(*connName)))
 	}
 	if ticket.DatabaseName != nil && strings.TrimSpace(*ticket.DatabaseName) != "" {
-		parts = append(parts, fmt.Sprintf("資料庫：%s", strings.TrimSpace(*ticket.DatabaseName)))
-	}
-	if strings.TrimSpace(detail) != "" {
-		parts = append(parts, fmt.Sprintf("說明：%s", strings.TrimSpace(detail)))
+		parts = append(parts, fmt.Sprintf("數據庫：%s", strings.TrimSpace(*ticket.DatabaseName)))
 	}
 	if strings.TrimSpace(link) != "" {
 		parts = append(parts, fmt.Sprintf("工單連結：%s", strings.TrimSpace(link)))
@@ -177,6 +174,20 @@ func (h *ExportHandler) loadTicketNotificationContext(ctx context.Context, ticke
 		return nil
 	}
 	return &conn.Name
+}
+
+func (h *ExportHandler) ticketSubmitterName(ctx context.Context, ticket *model.Ticket) string {
+	if ticket == nil || ticket.SubmitterID == 0 {
+		return ""
+	}
+	if h.users == nil {
+		return strconv.FormatUint(ticket.SubmitterID, 10)
+	}
+	user, err := h.users.GetByID(ctx, ticket.SubmitterID)
+	if err != nil || user == nil || strings.TrimSpace(user.Username) == "" {
+		return strconv.FormatUint(ticket.SubmitterID, 10)
+	}
+	return user.Username
 }
 
 // POST /exports
@@ -285,7 +296,8 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			IPAddress:    clientIP(r),
 		})
 		connName := h.loadTicketNotificationContext(r.Context(), ticket)
-		body := buildTicketNotificationBody(ticket, connName, exportTicketStateLabel(ticket.Status), "請修正 Workflow Rules 後重試路由", comment, h.ticketLink(ticket.TicketNo))
+		submitterName := h.ticketSubmitterName(r.Context(), ticket)
+		body := buildTicketNotificationBody(ticket, connName, submitterName, exportTicketStateLabel(ticket.Status), h.ticketLink(ticket.TicketNo))
 		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
 			RecipientIDs: resolution.AdminUserIDs,
 			ActorID:      &userID,
@@ -352,13 +364,13 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		IPAddress: clientIP(r),
 	})
 	connName := h.loadTicketNotificationContext(r.Context(), ticket)
+	submitterName := h.ticketSubmitterName(r.Context(), ticket)
 	if resolution.ApprovalEnabled {
 		body := buildTicketNotificationBody(
 			ticket,
 			connName,
+			submitterName,
 			exportTicketStateLabel(ticket.Status),
-			"請審核是否通過此工單",
-			"提交人已送出工單，等待 reviewer 處理。",
 			h.ticketLink(ticket.TicketNo),
 		)
 		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
@@ -380,9 +392,8 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		body := buildTicketNotificationBody(
 			ticket,
 			connName,
+			submitterName,
 			exportTicketStateLabel(ticket.Status),
-			"普通導出已自動通過",
-			"此導出不包含敏感欄位，且目前設定不要求普通導出審批。",
 			h.ticketLink(ticket.TicketNo),
 		)
 		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{

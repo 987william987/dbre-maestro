@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -146,8 +148,8 @@ func TestExecuteSQLQueryUsesDatabaseOnPinnedConnection(t *testing.T) {
 	if len(result.Rows) != 1 || len(result.Columns) != 1 {
 		t.Fatalf("unexpected result = %#v", result)
 	}
-	if result.Columns[0] != "id" {
-		t.Fatalf("display column = %q, want %q", result.Columns[0], "id")
+	if result.Columns[0] != "t_user.id" {
+		t.Fatalf("display column = %q, want %q", result.Columns[0], "t_user.id")
 	}
 	if len(result.RawColumns) != 1 || result.RawColumns[0] != "t_user.id" {
 		t.Fatalf("raw columns = %#v, want [t_user.id]", result.RawColumns)
@@ -224,7 +226,7 @@ func TestExecuteSQLQueryRunsMultiStatementsSequentially(t *testing.T) {
 	if len(result.Rows) != 1 || result.Rows[0][0] != "2" {
 		t.Fatalf("unexpected result rows = %#v", result.Rows)
 	}
-	if len(result.Columns) != 1 || result.Columns[0] != "id" {
+	if len(result.Columns) != 1 || result.Columns[0] != "t_user.id" {
 		t.Fatalf("unexpected result columns = %#v", result.Columns)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -302,6 +304,22 @@ func TestExecuteSQLQueryReturnsDisplayCellsAsStringsOrNull(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestQueryResultCellValuePreservesPostgresNumericPrecision(t *testing.T) {
+	numericInt, ok := big.NewInt(0).SetString("12345678901234567890123456789", 10)
+	if !ok {
+		t.Fatal("parse numeric test integer")
+	}
+	value := pgtype.Numeric{
+		Int:   numericInt,
+		Exp:   -9,
+		Valid: true,
+	}
+
+	if got := queryResultCellValue(value); got != "12345678901234567890.123456789" {
+		t.Fatalf("postgres numeric value = %#v, want exact decimal string", got)
 	}
 }
 
@@ -518,8 +536,8 @@ func expectNonAllPermissionsUser(mock sqlmock.Sqlmock, userID uint64, now time.T
 		WillReturnRows(sqlmock.NewRows([]string{"has_all_permissions"}).AddRow(false))
 }
 
-func TestBuildDisplayColumnsUsesOriginColumnName(t *testing.T) {
-	rawColumns := []string{"t_deposit.id", "t_deposit.user_id", "t_deposit.account_id"}
+func TestBuildDisplayColumnsKeepsDatabaseReturnedLabels(t *testing.T) {
+	rawColumns := []string{"UID", "積分數量", "t_deposit.account_id"}
 	origins := []struct {
 		database string
 		table    string
@@ -536,7 +554,7 @@ func TestBuildDisplayColumnsUsesOriginColumnName(t *testing.T) {
 		{Database: origins[2].database, Table: origins[2].table, Column: origins[2].column},
 	})
 
-	want := []string{"id", "user_id", "account_id"}
+	want := []string{"UID", "積分數量", "t_deposit.account_id"}
 	for i := range want {
 		if display[i] != want[i] {
 			t.Fatalf("display[%d] = %q, want %q", i, display[i], want[i])

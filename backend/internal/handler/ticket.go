@@ -382,16 +382,16 @@ func (h *TicketHandler) ticketWorkflowResolution(ctx context.Context, ticket *mo
 	return resolveTicketWorkflow(ctx, h.settings, h.users, ticket)
 }
 
-func (h *TicketHandler) buildTicketNotificationBody(ticket *model.Ticket, currentStatus model.TicketStatus, nextAction string, detail string) string {
+func (h *TicketHandler) buildTicketNotificationBody(ctx context.Context, ticket *model.Ticket, currentStatus model.TicketStatus) string {
 	parts := []string{
 		fmt.Sprintf("工單類型：%s", h.ticketTypeLabel(ticket.TicketType)),
 		fmt.Sprintf("目前狀態：%s", h.ticketStateLabel(currentStatus)),
 	}
-	if nextAction != "" {
-		parts = append(parts, fmt.Sprintf("待執行操作：%s", nextAction))
+	if submitterName := h.ticketSubmitterName(ctx, ticket); submitterName != "" {
+		parts = append(parts, fmt.Sprintf("提交者：%s", submitterName))
 	}
 	if ticket.DBConnectionID != nil && h.dbConns != nil {
-		conn, err := h.dbConns.GetByID(context.Background(), *ticket.DBConnectionID)
+		conn, err := h.dbConns.GetByID(ctx, *ticket.DBConnectionID)
 		if err == nil && conn != nil {
 			parts = append(parts, fmt.Sprintf("數據庫實例：%s", conn.Name))
 		}
@@ -399,11 +399,22 @@ func (h *TicketHandler) buildTicketNotificationBody(ticket *model.Ticket, curren
 	if ticket.DatabaseName != nil && strings.TrimSpace(*ticket.DatabaseName) != "" {
 		parts = append(parts, fmt.Sprintf("數據庫：%s", strings.TrimSpace(*ticket.DatabaseName)))
 	}
-	if strings.TrimSpace(detail) != "" {
-		parts = append(parts, fmt.Sprintf("說明：%s", strings.TrimSpace(detail)))
-	}
 	parts = append(parts, fmt.Sprintf("工單連結：%s", h.ticketLink(ticket.TicketNo)))
 	return strings.Join(parts, "\n")
+}
+
+func (h *TicketHandler) ticketSubmitterName(ctx context.Context, ticket *model.Ticket) string {
+	if ticket == nil || ticket.SubmitterID == 0 {
+		return ""
+	}
+	if h.users == nil {
+		return strconv.FormatUint(ticket.SubmitterID, 10)
+	}
+	name, err := h.lookupUsername(ctx, ticket.SubmitterID)
+	if err != nil || strings.TrimSpace(name) == "" {
+		return strconv.FormatUint(ticket.SubmitterID, 10)
+	}
+	return name
 }
 
 func (h *TicketHandler) dispatchTicketNotification(
@@ -421,7 +432,7 @@ func (h *TicketHandler) dispatchTicketNotification(
 	if err != nil || len(recipientIDs) == 0 {
 		return
 	}
-	body := h.buildTicketNotificationBody(ticket, policy.Status, policy.NextAction, detail)
+	body := h.buildTicketNotificationBody(ctx, ticket, policy.Status)
 	h.notifications.SendTicket(ctx, ticket, NotificationRoute{
 		RecipientIDs: recipientIDs,
 		ActorID:      actorID,
@@ -969,10 +980,42 @@ func (h *TicketHandler) applyWorkflowAfterCreate(ctx context.Context, ticket *mo
 			Details:      workflowAuditDetails(ticket, resolution),
 			IPAddress:    ipAddress,
 		})
+		return h.finishNoApprovalWorkflow(ctx, ticket, actorID, resolution)
+	}
+	h.dispatchTicketNotification(ctx, ticket, ticketEventPendingReview, actorID, "提交人已送出工單，等待 reviewer 處理。")
+	return ticket, nil
+}
+
+func (h *TicketHandler) finishNoApprovalWorkflow(ctx context.Context, ticket *model.Ticket, actorID *uint64, resolution *model.WorkflowResolution) (*model.Ticket, error) {
+	if ticket == nil {
+		return ticket, nil
+	}
+	if !isExecutableTicketType(ticket.TicketType) {
 		h.dispatchTicketNotification(ctx, ticket, ticketEventApproved, actorID, "Workflow Rule 設定為免審批，工單已自動核准。")
 		return ticket, nil
 	}
-	h.dispatchTicketNotification(ctx, ticket, ticketEventPendingReview, actorID, "提交人已送出工單，等待 reviewer 處理。")
+
+	comment := "Workflow Rule 設定為免審批，工單已進入待執行隊列。"
+	if h.shouldAutoExecuteAfterApproval(ticket, resolution) {
+		comment = "Workflow Rule 設定為免審批並自動執行，系統已開始執行。"
+	}
+	if err := h.moveApprovedTicketToPendingExecution(ctx, ticket, nil, &comment); err != nil {
+		return ticket, err
+	}
+	updated, loadErr := h.tickets.GetByID(ctx, ticket.ID)
+	if loadErr != nil {
+		return ticket, loadErr
+	}
+	if updated != nil {
+		ticket = updated
+	}
+	if h.shouldAutoExecuteAfterApproval(ticket, resolution) {
+		if err := h.startWorkflowAutoExecution(ctx, ticket, actorID, resolution, comment); err != nil {
+			return ticket, err
+		}
+		return ticket, nil
+	}
+	h.dispatchTicketNotification(ctx, ticket, ticketEventPendingExecution, actorID, comment)
 	return ticket, nil
 }
 
@@ -1530,7 +1573,11 @@ func (h *TicketHandler) RetryWorkflowResolution(w http.ResponseWriter, r *http.R
 		IPAddress:    clientIP(r),
 	})
 	if target == model.TicketStatusApproved {
-		h.dispatchTicketNotification(r.Context(), updated, ticketEventApproved, &actorID, "Workflow Rule 設定為免審批，工單已自動核准。")
+		updated, err = h.finishNoApprovalWorkflow(r.Context(), updated, &actorID, resolution)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "finish no-approval workflow failed")
+			return
+		}
 	} else {
 		h.dispatchTicketNotification(r.Context(), updated, ticketEventPendingReview, &actorID, "Workflow Rule 已重新解析，工單等待 reviewer 處理。")
 	}
@@ -1604,7 +1651,11 @@ func (h *TicketHandler) RetryWorkflowResolutionBatch(w http.ResponseWriter, r *h
 			updated.Status = target
 		}
 		if target == model.TicketStatusApproved {
-			h.dispatchTicketNotification(r.Context(), updated, ticketEventApproved, &actorID, "Workflow Rule 設定為免審批，工單已自動核准。")
+			updated, err = h.finishNoApprovalWorkflow(r.Context(), updated, &actorID, resolution)
+			if err != nil {
+				results = append(results, map[string]any{"ticket_id": ticket.ID, "status": "failed", "error": err.Error()})
+				continue
+			}
 		} else {
 			h.dispatchTicketNotification(r.Context(), updated, ticketEventPendingReview, &actorID, "Workflow Rule 已批次重新解析，工單等待 reviewer 處理。")
 		}
@@ -1804,7 +1855,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if h.shouldAutoExecuteAfterApproval(ticket, resolution) {
-			if err := h.startWorkflowAutoExecution(r.Context(), ticket, userID, resolution); err != nil {
+			if err := h.startWorkflowAutoExecution(r.Context(), ticket, &userID, resolution, "Workflow Rule 設定為審批後自動執行，系統已開始執行。"); err != nil {
 				jsonErr(w, http.StatusInternalServerError, "workflow auto execution start failed")
 				return
 			}
@@ -1836,10 +1887,24 @@ func (h *TicketHandler) shouldAutoExecuteAfterApproval(ticket *model.Ticket, res
 	if resolution.ExecutionMode != workflowExecutionModeAutoApproval {
 		return false
 	}
-	return ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML
+	return ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML || ticket.TicketType == model.TicketTypeRedisCommand
 }
 
-func (h *TicketHandler) startWorkflowAutoExecution(ctx context.Context, ticket *model.Ticket, reviewerID uint64, resolution *model.WorkflowResolution) error {
+func (h *TicketHandler) moveApprovedTicketToPendingExecution(ctx context.Context, ticket *model.Ticket, actorID *uint64, comment *string) error {
+	if ticket == nil || h.tickets == nil {
+		return nil
+	}
+	ok, err := h.tickets.UpdateStatus(ctx, ticket.ID, model.TicketStatusApproved, model.TicketStatusPendingExecution, actorID, comment, nil)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("ticket status changed concurrently")
+	}
+	return nil
+}
+
+func (h *TicketHandler) startWorkflowAutoExecution(ctx context.Context, ticket *model.Ticket, actorID *uint64, resolution *model.WorkflowResolution, notification string) error {
 	if ticket == nil || h.tickets == nil {
 		return nil
 	}
@@ -1852,29 +1917,38 @@ func (h *TicketHandler) startWorkflowAutoExecution(ctx context.Context, ticket *
 	}
 	details := map[string]any{
 		"automated":          true,
-		"reviewer_id":        reviewerID,
 		"workflow_rule_name": resolution.RuleName,
 		"execution_mode":     resolution.ExecutionMode,
+	}
+	if actorID != nil {
+		details["actor_id"] = *actorID
 	}
 	if resolution.RuleID != nil {
 		details["workflow_rule_id"] = *resolution.RuleID
 	}
 	h.audit.Log(ctx, repository.AuditEntry{
-		ActorID:      &reviewerID,
+		ActorID:      actorID,
 		ActorName:    middleware.UsernameFromCtx(ctx),
 		ActionType:   "workflow_auto_execute_start",
 		ResourceType: "ticket",
 		ResourceID:   &ticket.ID,
 		Details:      details,
 	})
-	h.dispatchTicketNotification(ctx, ticket, ticketEventPendingExecution, &reviewerID, "Workflow Rule 設定為審批後自動執行，系統已開始執行。")
+	h.dispatchTicketNotification(ctx, ticket, ticketEventPendingExecution, actorID, notification)
 	go h.runTicketExecutionWithOptions(ticket, 0, ticketExecutionRunOptions{
 		Automated:        true,
-		ReviewerID:       reviewerID,
+		ReviewerID:       optionalUint64Value(actorID),
 		WorkflowRuleID:   resolution.RuleID,
 		WorkflowRuleName: resolution.RuleName,
 	})
 	return nil
+}
+
+func optionalUint64Value(value *uint64) uint64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 // POST /tickets/{id}/reject
@@ -2171,7 +2245,7 @@ func (h *TicketHandler) runTicketExecution(ticket *model.Ticket, executorID uint
 
 func (h *TicketHandler) runTicketExecutionWithOptions(ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions) {
 	if ticket.TicketType == model.TicketTypeRedisCommand {
-		h.runTicketRedisCommands(ticket, executorID)
+		h.runTicketRedisCommands(ticket, executorID, opts)
 		return
 	}
 	h.runTicketSQL(ticket, executorID, opts)
@@ -2623,17 +2697,7 @@ func (h *TicketHandler) validateTicketConnectionType(ctx context.Context, ticket
 	if conn == nil {
 		return fmt.Errorf("db connection not found")
 	}
-	switch ticketType {
-	case model.TicketTypeRedisCommand:
-		if conn.DBType != "redis" {
-			return fmt.Errorf("redis_command tickets only support redis connections")
-		}
-	case model.TicketTypeDDL, model.TicketTypeDML, model.TicketTypeSQLExport, model.TicketTypeSensitiveQueryAccess, model.TicketTypeQueryAccess:
-		if conn.DBType == "redis" {
-			return fmt.Errorf("%s tickets do not support redis connections", ticketType)
-		}
-	}
-	return nil
+	return validateTicketDBType(ticketType, conn.DBType)
 }
 
 func (h *TicketHandler) mustListQueryAccessItems(ctx context.Context, ticketID uint64) []model.QueryAccessTicketItem {
