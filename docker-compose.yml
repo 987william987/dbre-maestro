@@ -29,8 +29,8 @@ services:
     environment:
       DB_DSN: "maestro_app:${MYSQL_APP_PASSWORD:-changeme_app}@tcp(mysql:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC"
       MIGRATION_DSN: "root:${MYSQL_ROOT_PASSWORD:-changeme_root}@tcp(mysql:3306)/maestro?parseTime=true&charset=utf8mb4&loc=UTC"
-      DBRE_ENCRYPTION_KEY: ${DBRE_ENCRYPTION_KEY:-KTl1OMVyPzxSLxbtC+FILuVfeMYjnsYq5b7WrNaykqY}
-      JWT_SECRET: ${JWT_SECRET:-123456}
+      DBRE_ENCRYPTION_KEY: ${DBRE_ENCRYPTION_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-}
       PORT: "8080"
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5173}
       AWS_PROFILE: ${AWS_PROFILE:-default}
