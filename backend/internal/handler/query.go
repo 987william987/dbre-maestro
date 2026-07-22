@@ -366,6 +366,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		SchemaName              string `json:"schema_name"`
 		ApprovedDurationMinutes int    `json:"approved_duration_minutes"`
 		QueryContext            string `json:"query_context_token"`
+		Reason                  string `json:"reason"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -373,6 +374,11 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 	}
 	if req.DBConnectionID == 0 || strings.TrimSpace(req.SQLContent) == "" {
 		jsonErr(w, http.StatusUnprocessableEntity, "db_connection_id and sql_content are required")
+		return
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "reason is required")
 		return
 	}
 	approvedDurationMinutes, err := normalizeSensitiveAccessDurationMinutes(req.ApprovedDurationMinutes)
@@ -412,7 +418,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		jsonErr(w, http.StatusUnprocessableEntity, "query does not contain sensitive columns")
 		return
 	}
-	description := fmt.Sprintf("由 SQL Editor 建立的臨時敏感查詢申請。Duration=%d minutes", approvedDurationMinutes)
+	description := fmt.Sprintf("申請原因：%s\nDuration=%d minutes\nSensitive=true", reason, approvedDurationMinutes)
 	ticket, err := h.tickets.CreateWithScopes(r.Context(), &model.Ticket{
 		Title:                   fmt.Sprintf("Sensitive Query Access / %s", conn.Name),
 		Description:             &description,

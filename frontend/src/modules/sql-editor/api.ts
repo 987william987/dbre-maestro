@@ -166,6 +166,7 @@ type CreateSensitiveAccessPayload = {
   schema_name?: string
   approved_duration_minutes?: number
   query_context_token?: string
+  reason: string
 }
 
 export type CreateSensitiveAccessResponse = {

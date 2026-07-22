@@ -402,6 +402,10 @@ describe('SQLEditorPage', () => {
     expect(mockedCreateSensitiveAccessTicket).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Confirm and Submit' }))
+    expect(mockedCreateSensitiveAccessTicket).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Access Reason'), { target: { value: 'Need to verify customer identity.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and Submit' }))
 
     await waitFor(() => {
       expect(mockedCreateSensitiveAccessTicket).toHaveBeenCalledWith({
@@ -411,6 +415,7 @@ describe('SQLEditorPage', () => {
         schema_name: undefined,
         approved_duration_minutes: 120,
         query_context_token: 'sensitive-query-context-token',
+        reason: 'Need to verify customer identity.',
       })
     })
   })

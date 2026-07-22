@@ -1934,12 +1934,13 @@ export function SQLEditorPage() {
       return
     }
 
+    const reason = exportReason.trim()
+    if (!reason) {
+      pushToast(kind === 'export' ? 'Enter an export reason before submitting.' : 'Enter an access reason before submitting.', 'info', { placement: 'center' })
+      return
+    }
+
     if (kind === 'export') {
-      const reason = exportReason.trim()
-      if (!reason) {
-        pushToast('Enter an export reason before submitting.', 'info', { placement: 'center' })
-        return
-      }
       setExportingTabIDs((current) => (current.includes(tabID) ? current : [...current, tabID]))
       try {
         const response = await createExportRequest({
@@ -1970,9 +1971,11 @@ export function SQLEditorPage() {
         schema_name: contextSchema || undefined,
         approved_duration_minutes: sensitiveAccessDuration,
         query_context_token: queryContextToken,
+        reason,
       })
       pushToast(`Sensitive Access ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
       setRequestConfirmState(null)
+      setExportReason('')
     } catch (error) {
       pushToast(error instanceof ApiError ? error.message : 'Failed to create Sensitive Access ticket.', 'error')
     } finally {
@@ -3163,24 +3166,22 @@ export function SQLEditorPage() {
                 ) : null}
               </div>
             </div>
-            {requestConfirmState.kind === 'export' ? (
-              <div className="space-y-2">
-                <label
-                  htmlFor="export-reason"
-                  className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint"
-                >
-                  Export Reason
-                </label>
-                <textarea
-                  id="export-reason"
-                  value={exportReason}
-                  onChange={(event) => setExportReason(event.target.value)}
-                  rows={3}
-                  className="w-full resize-y rounded-control border border-border bg-panel px-3 py-2 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                  placeholder="Explain why this data export is needed."
-                />
-              </div>
-            ) : null}
+            <div className="space-y-2">
+              <label
+                htmlFor="request-reason"
+                className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint"
+              >
+                {requestConfirmState.kind === 'export' ? 'Export Reason' : 'Access Reason'}
+              </label>
+              <textarea
+                id="request-reason"
+                value={exportReason}
+                onChange={(event) => setExportReason(event.target.value)}
+                rows={3}
+                className="w-full resize-y rounded-control border border-border bg-panel px-3 py-2 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                placeholder={requestConfirmState.kind === 'export' ? 'Explain why this data export is needed.' : 'Explain why unmasked sensitive data access is needed.'}
+              />
+            </div>
             <div className="rounded-xl border border-border bg-slate-950 p-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">SQL To Submit</p>
               <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-all font-mono text-[12px] leading-5 text-slate-100">
@@ -3192,7 +3193,7 @@ export function SQLEditorPage() {
         confirmLabel={requestConfirmState?.kind === 'sensitive-access' ? 'Confirm and Submit' : 'Confirm and Export'}
         cancelLabel="Cancel"
         loading={requestConfirmLoading}
-        confirmDisabled={requestConfirmState?.kind === 'export' && exportReason.trim() === ''}
+        confirmDisabled={requestConfirmState !== null && exportReason.trim() === ''}
         panelClassName="max-w-3xl"
         onCancel={() => {
           setRequestConfirmState(null)
