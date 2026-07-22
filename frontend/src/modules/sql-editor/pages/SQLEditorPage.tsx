@@ -982,6 +982,7 @@ export function SQLEditorPage() {
   const [sensitiveAccessTabIDs, setSensitiveAccessTabIDs] = useState<string[]>([])
   const [savedQueryToDelete, setSavedQueryToDelete] = useState<SavedQuery | null>(null)
   const [requestConfirmState, setRequestConfirmState] = useState<QueryRequestConfirmState | null>(null)
+  const [exportReason, setExportReason] = useState('')
   const [sensitiveAccessDurationDialog, setSensitiveAccessDurationDialog] = useState<SensitiveAccessDurationDialogState | null>(null)
   const [editorHeights, setEditorHeights] = useState<Record<string, string>>({})
   const [queryAccessAttentionKeys, setQueryAccessAttentionKeys] = useState<Record<string, number>>({})
@@ -1831,6 +1832,11 @@ export function SQLEditorPage() {
     }
 
     if (kind === 'export') {
+      const reason = exportReason.trim()
+      if (!reason) {
+        pushToast('Enter an export reason before submitting.', 'info', { placement: 'center' })
+        return
+      }
       setExportingTabIDs((current) => (current.includes(tabID) ? current : [...current, tabID]))
       try {
         const response = await createExportRequest({
@@ -1839,9 +1845,11 @@ export function SQLEditorPage() {
           database_name: database || undefined,
           schema_name: contextSchema || undefined,
           query_context_token: queryContextToken,
+          reason,
         })
         pushToast(`Export ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
         setRequestConfirmState(null)
+        setExportReason('')
       } catch (error) {
         pushToast(error instanceof ApiError ? error.message : 'Failed to create export request.', 'error')
       } finally {
@@ -3024,6 +3032,24 @@ export function SQLEditorPage() {
                 ) : null}
               </div>
             </div>
+            {requestConfirmState.kind === 'export' ? (
+              <div className="space-y-2">
+                <label
+                  htmlFor="export-reason"
+                  className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint"
+                >
+                  Export Reason
+                </label>
+                <textarea
+                  id="export-reason"
+                  value={exportReason}
+                  onChange={(event) => setExportReason(event.target.value)}
+                  rows={3}
+                  className="w-full resize-y rounded-control border border-border bg-panel px-3 py-2 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                  placeholder="Explain why this data export is needed."
+                />
+              </div>
+            ) : null}
             <div className="rounded-xl border border-border bg-slate-950 p-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">SQL To Submit</p>
               <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-all font-mono text-[12px] leading-5 text-slate-100">
@@ -3035,8 +3061,12 @@ export function SQLEditorPage() {
         confirmLabel={requestConfirmState?.kind === 'sensitive-access' ? 'Confirm and Submit' : 'Confirm and Export'}
         cancelLabel="Cancel"
         loading={requestConfirmLoading}
+        confirmDisabled={requestConfirmState?.kind === 'export' && exportReason.trim() === ''}
         panelClassName="max-w-3xl"
-        onCancel={() => setRequestConfirmState(null)}
+        onCancel={() => {
+          setRequestConfirmState(null)
+          setExportReason('')
+        }}
         onConfirm={() => {
           void handleConfirmRequest()
         }}

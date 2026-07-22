@@ -7,7 +7,7 @@ import (
 )
 
 // GenerateToken creates a 32-byte crypto/rand token encoded as hex (64 chars).
-// TE6: stored in export_requests.download_token; the URL path IS the auth credential.
+// Stored for legacy download links; new UI uses authenticated export IDs.
 func GenerateToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {

@@ -399,6 +399,9 @@ func (h *TicketHandler) buildTicketNotificationBody(ctx context.Context, ticket 
 	if ticket.DatabaseName != nil && strings.TrimSpace(*ticket.DatabaseName) != "" {
 		parts = append(parts, fmt.Sprintf("數據庫：%s", strings.TrimSpace(*ticket.DatabaseName)))
 	}
+	if ticket.SchemaName != nil && strings.TrimSpace(*ticket.SchemaName) != "" {
+		parts = append(parts, fmt.Sprintf("Schema：%s", strings.TrimSpace(*ticket.SchemaName)))
+	}
 	parts = append(parts, fmt.Sprintf("工單連結：%s", h.ticketLink(ticket.TicketNo)))
 	return strings.Join(parts, "\n")
 }
@@ -1241,12 +1244,20 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if exportReq != nil {
+			canDownloadExport := ticket.Status == model.TicketStatusApproved &&
+				exportReq.Status == model.ExportStatusReady &&
+				time.Now().Before(exportReq.ExpiresAt) &&
+				(ticket.SubmitterID == userID ||
+					(exportReq.ApproverID != nil && *exportReq.ApproverID == userID) ||
+					middleware.HasPermission(r.Context(), permissionSQLEditorExportReview))
 			exportDetail = map[string]any{
-				"status":     exportReq.Status,
-				"expires_at": exportReq.ExpiresAt,
+				"id":            exportReq.ID,
+				"status":        exportReq.Status,
+				"expires_at":    exportReq.ExpiresAt,
+				"downloaded_at": exportReq.DownloadedAt,
 			}
-			if ticket.SubmitterID == userID && exportReq.Status == model.ExportStatusReady {
-				exportDetail["download_url"] = fmt.Sprintf("/api/exports/download/%s", exportReq.DownloadToken)
+			if canDownloadExport {
+				exportDetail["download_url"] = fmt.Sprintf("/api/exports/%d/download", exportReq.ID)
 			}
 		}
 	}
@@ -1306,7 +1317,7 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"can_execute":  canExecute,
 			"can_retry_workflow_resolution": middleware.HasPermission(r.Context(), "settings.write") &&
 				ticket.Status == model.TicketStatusNeedsAdminAttention,
-			"can_download_export": ticket.TicketType == model.TicketTypeSQLExport && ticket.Status == model.TicketStatusApproved && ticket.SubmitterID == userID,
+			"can_download_export": exportDetail != nil && exportDetail["download_url"] != nil,
 		},
 	})
 }
@@ -1827,7 +1838,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		body += " — " + *req.Comment
 	}
 	if ticket.TicketType == model.TicketTypeSQLExport {
-		if _, err := h.ensureReadyExportRequest(r.Context(), ticket); err != nil {
+		if _, err := h.ensureReadyExportRequest(r.Context(), ticket, &userID); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "create ready export failed")
 			return
 		}
@@ -2724,7 +2735,7 @@ func (h *TicketHandler) mustListQueryAccessItems(ctx context.Context, ticketID u
 	return items
 }
 
-func (h *TicketHandler) ensureReadyExportRequest(ctx context.Context, ticket *model.Ticket) (*model.ExportRequest, error) {
+func (h *TicketHandler) ensureReadyExportRequest(ctx context.Context, ticket *model.Ticket, approverID *uint64) (*model.ExportRequest, error) {
 	if h.exports == nil {
 		return nil, fmt.Errorf("export repository is not configured")
 	}
@@ -2733,6 +2744,12 @@ func (h *TicketHandler) ensureReadyExportRequest(ctx context.Context, ticket *mo
 		return nil, err
 	}
 	if existing != nil {
+		if existing.ApproverID == nil && approverID != nil {
+			if err := h.exports.UpdateStatus(ctx, existing.ID, existing.Status, approverID); err != nil {
+				return nil, err
+			}
+			existing.ApproverID = approverID
+		}
 		return existing, nil
 	}
 
@@ -2740,6 +2757,7 @@ func (h *TicketHandler) ensureReadyExportRequest(ctx context.Context, ticket *mo
 	id, token, err := h.exports.Create(ctx, &model.ExportRequest{
 		TicketID:       &exportTicketID,
 		RequesterID:    ticket.SubmitterID,
+		ApproverID:     approverID,
 		SQLContent:     ticket.SQLContent,
 		DBConnectionID: *ticket.DBConnectionID,
 	}, model.ExportStatusReady)

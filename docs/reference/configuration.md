@@ -196,7 +196,7 @@ TO 'maestro_migration'@'%';
 
 ### 長請求 timeout 特例
 
-`GET /api/events/stream` 與 `GET /api/exports/download/{token}` 行為與一般短請求 REST API 不同：
+`GET /api/events/stream`、`GET /api/exports/{id}/download` 與 legacy `GET /api/exports/download/{token}` 行為與一般短請求 REST API 不同：
 
 - route middleware 不套用一般 `requestTimeout = 45s`
 - 主 server 仍保留 `writeTimeout = 45s`

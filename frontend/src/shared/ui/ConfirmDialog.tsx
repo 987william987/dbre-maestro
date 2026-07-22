@@ -10,6 +10,7 @@ type ConfirmDialogProps = {
   cancelLabel?: string
   tone?: 'default' | 'danger'
   loading?: boolean
+  confirmDisabled?: boolean
   panelClassName?: string
   onConfirm: () => void
   onCancel: () => void
@@ -23,6 +24,7 @@ export function ConfirmDialog({
   cancelLabel = 'Cancel',
   tone = 'default',
   loading = false,
+  confirmDisabled = false,
   panelClassName,
   onConfirm,
   onCancel,
@@ -48,7 +50,7 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
             className={`inline-flex h-10 items-center justify-center rounded-control px-4 text-sm font-bold text-white transition disabled:opacity-50 ${
               tone === 'danger' ? 'bg-danger hover:bg-red-600' : 'bg-brand hover:bg-slate-800'
             }`}

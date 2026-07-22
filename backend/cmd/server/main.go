@@ -39,13 +39,18 @@ const (
 func timeoutExceptLongLivedPaths(timeout time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/api/events/stream" || strings.HasPrefix(r.URL.Path, "/api/exports/download/") {
+			if r.URL.Path == "/api/events/stream" || isExportDownloadPath(r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
 			}
 			chimw.Timeout(timeout)(next).ServeHTTP(w, r)
 		})
 	}
+}
+
+func isExportDownloadPath(path string) bool {
+	return strings.HasPrefix(path, "/api/exports/download/") ||
+		(strings.HasPrefix(path, "/api/exports/") && strings.HasSuffix(path, "/download"))
 }
 
 func redactingRequestLogger(next http.Handler) http.Handler {
@@ -317,6 +322,11 @@ func main() {
 				middleware.RequireActiveUser(userRepo),
 				middleware.InjectPermissions(userRepo),
 			).Get("/download/{token}", exportH.Download)
+			r.With(
+				middleware.RequireAuth(cfg.JWTSecret),
+				middleware.RequireActiveUser(userRepo),
+				middleware.InjectPermissions(userRepo),
+			).Get("/{id}/download", exportH.DownloadByID)
 		})
 
 		r.Route("/db-connections", func(r chi.Router) {

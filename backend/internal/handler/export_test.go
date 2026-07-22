@@ -17,11 +17,29 @@ func TestExportQueryExecutionContextFromScopesUsesTicketScopes(t *testing.T) {
 		DatabaseName: &databaseName,
 	}
 
-	queryCtx := exportQueryExecutionContextFromScopes(conn, nil)
+	queryCtx := exportQueryExecutionContextFromContext(conn, "", "", nil)
 	if queryCtx.DatabaseName != "default_db" {
 		t.Fatalf("queryCtx.DatabaseName = %q, want %q", queryCtx.DatabaseName, "default_db")
 	}
-	queryCtx = exportQueryExecutionContextFromScopes(conn, []model.TicketScope{
+	queryCtx = exportQueryExecutionContextFromContext(conn, "ticket_db", "ticket_schema", []model.TicketScope{
+		{
+			DatabaseName: &scopeDatabaseName,
+			SchemaName:   &scopeSchemaName,
+		},
+	})
+	if queryCtx.DatabaseName != "ticket_db" {
+		t.Fatalf("queryCtx.DatabaseName = %q, want %q", queryCtx.DatabaseName, "ticket_db")
+	}
+	if queryCtx.SchemaName != "ticket_schema" {
+		t.Fatalf("queryCtx.SchemaName = %q, want %q", queryCtx.SchemaName, "ticket_schema")
+	}
+
+	queryCtx = exportQueryExecutionContextFromContext(conn, "ticket_db", "", nil)
+	if queryCtx.DatabaseName != "ticket_db" {
+		t.Fatalf("queryCtx.DatabaseName = %q, want %q", queryCtx.DatabaseName, "ticket_db")
+	}
+
+	queryCtx = exportQueryExecutionContextFromContext(conn, "", "", []model.TicketScope{
 		{
 			DatabaseName: &scopeDatabaseName,
 			SchemaName:   &scopeSchemaName,
@@ -35,19 +53,22 @@ func TestExportQueryExecutionContextFromScopesUsesTicketScopes(t *testing.T) {
 	}
 }
 
-func TestRequestRateLimiterAllowsOnlyThreeHitsPerMinute(t *testing.T) {
-	limiter := newRequestRateLimiter(3, time.Minute)
+func TestRequestRateLimiterAllowsOnlyFiveHitsPerMinutePerKey(t *testing.T) {
+	limiter := newRequestRateLimiter(5, time.Minute)
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
-	for i := 0; i < 3; i++ {
-		if !limiter.Allow("token-1", now.Add(time.Duration(i)*time.Second)) {
+	for i := 0; i < 5; i++ {
+		if !limiter.Allow("export-download:1:user:10", now.Add(time.Duration(i)*time.Second)) {
 			t.Fatalf("Allow() denied hit %d, want allowed", i+1)
 		}
 	}
-	if limiter.Allow("token-1", now.Add(30*time.Second)) {
-		t.Fatal("Allow() = true on 4th hit within one minute, want false")
+	if limiter.Allow("export-download:1:user:10", now.Add(30*time.Second)) {
+		t.Fatal("Allow() = true on 6th hit within one minute, want false")
 	}
-	if !limiter.Allow("token-1", now.Add(61*time.Second)) {
+	if !limiter.Allow("export-download:1:user:11", now.Add(30*time.Second)) {
+		t.Fatal("Allow() = false for a different user key, want true")
+	}
+	if !limiter.Allow("export-download:1:user:10", now.Add(61*time.Second)) {
 		t.Fatal("Allow() = false after window elapsed, want true")
 	}
 }

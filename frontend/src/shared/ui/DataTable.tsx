@@ -25,14 +25,14 @@ export function DataTable({ className, ...props }: TableHTMLAttributes<HTMLTable
 export function DataTableHead({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
   return (
     <thead
-      className={cn('bg-editor-toolbar text-left text-[10px] font-bold uppercase tracking-[0.16em] text-faint', className)}
+      className={cn('bg-editor-toolbar text-left text-[11px] font-semibold text-faint', className)}
       {...props}
     />
   )
 }
 
 export function DataTableHeaderCell({ className, ...props }: ThHTMLAttributes<HTMLTableCellElement>) {
-  return <th className={cn('whitespace-nowrap align-middle px-3 py-3', className)} {...props} />
+  return <th className={cn('whitespace-nowrap align-middle px-3 py-3 leading-4', className)} {...props} />
 }
 
 export function DataTableBody({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
