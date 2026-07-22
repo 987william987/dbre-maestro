@@ -17,11 +17,29 @@ func TestExportQueryExecutionContextFromScopesUsesTicketScopes(t *testing.T) {
 		DatabaseName: &databaseName,
 	}
 
-	queryCtx := exportQueryExecutionContextFromScopes(conn, nil)
+	queryCtx := exportQueryExecutionContextFromContext(conn, "", "", nil)
 	if queryCtx.DatabaseName != "default_db" {
 		t.Fatalf("queryCtx.DatabaseName = %q, want %q", queryCtx.DatabaseName, "default_db")
 	}
-	queryCtx = exportQueryExecutionContextFromScopes(conn, []model.TicketScope{
+	queryCtx = exportQueryExecutionContextFromContext(conn, "ticket_db", "ticket_schema", []model.TicketScope{
+		{
+			DatabaseName: &scopeDatabaseName,
+			SchemaName:   &scopeSchemaName,
+		},
+	})
+	if queryCtx.DatabaseName != "ticket_db" {
+		t.Fatalf("queryCtx.DatabaseName = %q, want %q", queryCtx.DatabaseName, "ticket_db")
+	}
+	if queryCtx.SchemaName != "ticket_schema" {
+		t.Fatalf("queryCtx.SchemaName = %q, want %q", queryCtx.SchemaName, "ticket_schema")
+	}
+
+	queryCtx = exportQueryExecutionContextFromContext(conn, "ticket_db", "", nil)
+	if queryCtx.DatabaseName != "ticket_db" {
+		t.Fatalf("queryCtx.DatabaseName = %q, want %q", queryCtx.DatabaseName, "ticket_db")
+	}
+
+	queryCtx = exportQueryExecutionContextFromContext(conn, "", "", []model.TicketScope{
 		{
 			DatabaseName: &scopeDatabaseName,
 			SchemaName:   &scopeSchemaName,

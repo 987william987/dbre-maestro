@@ -917,11 +917,12 @@ export function TicketDetailPage() {
             <div className="px-4 py-4">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Overview</p>
               <DetailTable
-                headers={['Ticket Type', 'DB Connection', 'Database', 'Submitter', 'Reviewer', 'Executor', 'Description', 'Current Status']}
+                headers={['Ticket Type', 'DB Connection', 'Database', 'Schema', 'Submitter', 'Reviewer', 'Executor', 'Description', 'Current Status']}
                 rows={[[
                   formatTicketTypeLabel(ticket.ticket_type),
                   ticket.ticket_type === 'query_access' ? queryAccessConnections : ticket.db_connection_name || ticket.db_connection_id || 'Not specified',
                   ticket.ticket_type === 'query_access' ? queryAccessScopeSummary : ticket.database_name || '—',
+                  ticket.schema_name || '—',
                   formatTicketActor(ticket.submitter_name, ticket.submitter_id),
                   formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null),
                   formatTicketActor(ticket.executor_name, ticket.executor_id ?? null),

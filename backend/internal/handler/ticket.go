@@ -399,6 +399,9 @@ func (h *TicketHandler) buildTicketNotificationBody(ctx context.Context, ticket 
 	if ticket.DatabaseName != nil && strings.TrimSpace(*ticket.DatabaseName) != "" {
 		parts = append(parts, fmt.Sprintf("數據庫：%s", strings.TrimSpace(*ticket.DatabaseName)))
 	}
+	if ticket.SchemaName != nil && strings.TrimSpace(*ticket.SchemaName) != "" {
+		parts = append(parts, fmt.Sprintf("Schema：%s", strings.TrimSpace(*ticket.SchemaName)))
+	}
 	parts = append(parts, fmt.Sprintf("工單連結：%s", h.ticketLink(ticket.TicketNo)))
 	return strings.Join(parts, "\n")
 }

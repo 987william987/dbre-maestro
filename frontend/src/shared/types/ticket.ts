@@ -46,6 +46,7 @@ export type Ticket = {
   db_connection_id?: number | null
   db_connection_name?: string | null
   database_name?: string | null
+  schema_name?: string | null
   status: TicketStatus
   submitter_id: number
   submitter_name?: string | null

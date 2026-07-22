@@ -94,6 +94,9 @@ func buildTicketNotificationBody(ticket *model.Ticket, connName *string, submitt
 	if ticket.DatabaseName != nil && strings.TrimSpace(*ticket.DatabaseName) != "" {
 		parts = append(parts, fmt.Sprintf("數據庫：%s", strings.TrimSpace(*ticket.DatabaseName)))
 	}
+	if ticket.SchemaName != nil && strings.TrimSpace(*ticket.SchemaName) != "" {
+		parts = append(parts, fmt.Sprintf("Schema：%s", strings.TrimSpace(*ticket.SchemaName)))
+	}
 	if strings.TrimSpace(link) != "" {
 		parts = append(parts, fmt.Sprintf("工單連結：%s", strings.TrimSpace(link)))
 	}
@@ -265,6 +268,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ContainsSensitive: &containsSensitive,
 		DBConnectionID:    &req.DBConnectionID,
 		DatabaseName:      nullableTrimmedString(req.DatabaseName),
+		SchemaName:        nullableTrimmedString(queryContextSchemaName(conn, req.SchemaName)),
 		SubmitterID:       userID,
 	}, analysis.Scopes)
 	if err != nil {
@@ -835,28 +839,46 @@ func nullableTrimmedString(value string) *string {
 }
 
 func (h *ExportHandler) exportQueryExecutionContext(ctx context.Context, req *model.ExportRequest, conn *model.DBConnection) (queryExecutionContext, error) {
-	queryCtx := exportQueryExecutionContextFromScopes(conn, nil)
+	queryCtx := exportQueryExecutionContextFromContext(conn, "", "", nil)
 
 	if req == nil || req.TicketID == nil || h.tickets == nil {
 		return queryCtx, nil
 	}
 
+	ticket, err := h.tickets.GetByID(ctx, *req.TicketID)
+	if err != nil {
+		return queryCtx, err
+	}
+	ticketDatabaseName := ""
+	ticketSchemaName := ""
+	if ticket != nil && ticket.DatabaseName != nil {
+		ticketDatabaseName = *ticket.DatabaseName
+	}
+	if ticket != nil && ticket.SchemaName != nil {
+		ticketSchemaName = *ticket.SchemaName
+	}
 	scopes, err := h.tickets.ListScopes(ctx, *req.TicketID)
 	if err != nil {
 		return queryCtx, err
 	}
-	return exportQueryExecutionContextFromScopes(conn, scopes), nil
+	return exportQueryExecutionContextFromContext(conn, ticketDatabaseName, ticketSchemaName, scopes), nil
 }
 
-func exportQueryExecutionContextFromScopes(conn *model.DBConnection, scopes []model.TicketScope) queryExecutionContext {
+func exportQueryExecutionContextFromContext(conn *model.DBConnection, ticketDatabaseName string, ticketSchemaName string, scopes []model.TicketScope) queryExecutionContext {
 	queryCtx := queryExecutionContext{}
 
+	if queryCtx.DatabaseName == "" {
+		queryCtx.DatabaseName = strings.TrimSpace(ticketDatabaseName)
+	}
+	if queryCtx.SchemaName == "" {
+		queryCtx.SchemaName = strings.TrimSpace(ticketSchemaName)
+	}
 	for _, scope := range scopes {
 		if queryCtx.DatabaseName == "" && scope.DatabaseName != nil {
-			queryCtx.DatabaseName = *scope.DatabaseName
+			queryCtx.DatabaseName = strings.TrimSpace(*scope.DatabaseName)
 		}
 		if queryCtx.SchemaName == "" && scope.SchemaName != nil {
-			queryCtx.SchemaName = *scope.SchemaName
+			queryCtx.SchemaName = strings.TrimSpace(*scope.SchemaName)
 		}
 		if queryCtx.DatabaseName != "" && queryCtx.SchemaName != "" {
 			break
