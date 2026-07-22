@@ -54,6 +54,10 @@ import {
   listQueryHistory,
   listSavedQueries,
 } from '@/modules/sql-editor/api'
+import {
+  getSQLEditorWorkspaceSnapshot,
+  saveSQLEditorWorkspaceSnapshot,
+} from '@/modules/sql-editor/workspaceMemory'
 
 type EditorTab = {
   id: string
@@ -126,6 +130,12 @@ type SensitiveAccessDurationDialogState = {
   tabID: string
   value: string
   error: string
+}
+
+type SQLEditorWorkspaceDraft = {
+  tabs: EditorTab[]
+  activeTabId: string
+  editorHeights: Record<string, string>
 }
 
 const DEFAULT_SQL = 'SELECT 1;'
@@ -435,6 +445,55 @@ function createTab(seed = 1): EditorTab {
     result: null,
     error: '',
     lastRunAt: null,
+  }
+}
+
+function sanitizeAssetTreeForWorkspaceMemory(nodes: AssetTreeNode[]): AssetTreeNode[] {
+  return nodes.map((node) => ({
+    ...node,
+    loading: false,
+    children: sanitizeAssetTreeForWorkspaceMemory(node.children),
+  }))
+}
+
+function sanitizeTabForWorkspaceMemory(tab: EditorTab): EditorTab {
+  return {
+    ...tab,
+    metadataError: '',
+    explorerNodes: sanitizeAssetTreeForWorkspaceMemory(tab.explorerNodes),
+    searchTreeNodes: sanitizeAssetTreeForWorkspaceMemory(tab.searchTreeNodes),
+    searchingAssets: false,
+    assetPickerOpen: false,
+    resultView: tab.resultView === 'vertical' ? 'result' : tab.resultView,
+    columns: [],
+    definition: null,
+    columnsLoading: false,
+    definitionLoading: false,
+    columnFilterOpen: false,
+    visibleColumnIndexes: null,
+    executedSQL: null,
+    executedConnectionId: null,
+    executedDatabase: '',
+    executedSchema: '',
+    result: null,
+    error: '',
+    lastRunAt: null,
+  }
+}
+
+function workspaceDraftFromSnapshot(ownerKey: string): SQLEditorWorkspaceDraft | null {
+  const snapshot = getSQLEditorWorkspaceSnapshot<EditorTab>(ownerKey)
+  if (!snapshot || snapshot.tabs.length === 0) {
+    return null
+  }
+  const tabs = snapshot.tabs.map(sanitizeTabForWorkspaceMemory)
+  const activeTabId = tabs.some((tab) => tab.id === snapshot.activeTabId)
+    ? snapshot.activeTabId
+    : tabs[0].id
+  return {
+    tabs,
+    activeTabId,
+    editorHeights: { ...snapshot.editorHeights },
   }
 }
 
@@ -1060,13 +1119,21 @@ export function SQLEditorPage() {
   const editorContainerRef = useRef<HTMLDivElement | null>(null)
   const formatProfileRef = useRef<SQLFormatProfile | null>(null)
   const formatProfileIDRef = useRef(0)
-  const initialTabRef = useRef<EditorTab | null>(null)
-  if (!initialTabRef.current) {
-    initialTabRef.current = createTab()
-  }
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, accessToken } = useAuth()
   const { pushToast } = useToast()
+  const workspaceOwnerKey = user && accessToken ? `${user.id}:${accessToken}` : ''
+  const initialWorkspaceRef = useRef<SQLEditorWorkspaceDraft | null>(null)
+  if (!initialWorkspaceRef.current) {
+    initialWorkspaceRef.current = workspaceDraftFromSnapshot(workspaceOwnerKey) ?? {
+      tabs: [createTab()],
+      activeTabId: '',
+      editorHeights: {},
+    }
+    if (!initialWorkspaceRef.current.activeTabId) {
+      initialWorkspaceRef.current.activeTabId = initialWorkspaceRef.current.tabs[0].id
+    }
+  }
   const hasSensitiveOverride = Boolean(user?.permissions.includes('global.sensitive'))
   const canQuery = Boolean(user?.permissions.includes('sql_editor.query'))
   const canExport = Boolean(user?.permissions.includes('sql_editor.export'))
@@ -1075,8 +1142,8 @@ export function SQLEditorPage() {
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [connectionsLoading, setConnectionsLoading] = useState(true)
   const [connectionsError, setConnectionsError] = useState('')
-  const [tabs, setTabs] = useState<EditorTab[]>(() => [initialTabRef.current!])
-  const [activeTabId, setActiveTabId] = useState<string>(() => initialTabRef.current!.id)
+  const [tabs, setTabs] = useState<EditorTab[]>(() => initialWorkspaceRef.current!.tabs)
+  const [activeTabId, setActiveTabId] = useState<string>(() => initialWorkspaceRef.current!.activeTabId)
   const [history, setHistory] = useState<QueryHistoryEntry[]>([])
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
   const [queryConstraints, setQueryConstraints] = useState(DEFAULT_QUERY_CONSTRAINTS)
@@ -1087,8 +1154,42 @@ export function SQLEditorPage() {
   const [requestConfirmState, setRequestConfirmState] = useState<QueryRequestConfirmState | null>(null)
   const [exportReason, setExportReason] = useState('')
   const [sensitiveAccessDurationDialog, setSensitiveAccessDurationDialog] = useState<SensitiveAccessDurationDialogState | null>(null)
-  const [editorHeights, setEditorHeights] = useState<Record<string, string>>({})
+  const [editorHeights, setEditorHeights] = useState<Record<string, string>>(() => initialWorkspaceRef.current!.editorHeights)
   const [queryAccessAttentionKeys, setQueryAccessAttentionKeys] = useState<Record<string, number>>({})
+  const workspaceOwnerKeyRef = useRef(workspaceOwnerKey)
+
+  useEffect(() => {
+    if (!workspaceOwnerKey) {
+      return
+    }
+    if (workspaceOwnerKeyRef.current !== workspaceOwnerKey) {
+      workspaceOwnerKeyRef.current = workspaceOwnerKey
+      const nextDraft = workspaceDraftFromSnapshot(workspaceOwnerKey) ?? {
+        tabs: [createTab()],
+        activeTabId: '',
+        editorHeights: {},
+      }
+      const nextActiveTabId = nextDraft.activeTabId || nextDraft.tabs[0].id
+      setTabs(nextDraft.tabs)
+      setActiveTabId(nextActiveTabId)
+      setEditorHeights(nextDraft.editorHeights)
+      setRunningTabIDs([])
+      setExportingTabIDs([])
+      setSensitiveAccessTabIDs([])
+      setSavedQueryToDelete(null)
+      setRequestConfirmState(null)
+      setExportReason('')
+      setSensitiveAccessDurationDialog(null)
+      setQueryAccessAttentionKeys({})
+      return
+    }
+    saveSQLEditorWorkspaceSnapshot({
+      ownerKey: workspaceOwnerKey,
+      tabs: tabs.map(sanitizeTabForWorkspaceMemory),
+      activeTabId,
+      editorHeights,
+    })
+  }, [activeTabId, editorHeights, tabs, workspaceOwnerKey])
 
   useEffect(() => {
     let active = true
@@ -1298,6 +1399,13 @@ export function SQLEditorPage() {
     : false
 
   useEffect(() => {
+    if (connectionsLoading) {
+      return
+    }
+    if (accessibleConnectionIDs.length > 0 && connections.length === 0) {
+      return
+    }
+
     if (accessibleConnections.length === 0) {
       setTabs((currentTabs) => {
         let changed = false
@@ -1325,7 +1433,7 @@ export function SQLEditorPage() {
       })
       return changed ? nextTabs : currentTabs
     })
-  }, [accessibleConnections])
+  }, [accessibleConnectionIDs.length, accessibleConnections, connections.length, connectionsLoading])
 
   useEffect(() => {
     if (!activeConnection) {

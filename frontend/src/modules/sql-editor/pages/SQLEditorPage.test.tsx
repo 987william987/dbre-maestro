@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '@/shared/ui/ToastContext'
 import { SQLEditorPage } from '@/modules/sql-editor/pages/SQLEditorPage'
+import { clearSQLEditorWorkspaceSnapshot, getSQLEditorWorkspaceSnapshot } from '@/modules/sql-editor/workspaceMemory'
 import { ApiError } from '@/shared/api/client'
 
 vi.mock('@uiw/react-codemirror', () => ({
@@ -85,6 +86,7 @@ describe('SQLEditorPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     vi.clearAllMocks()
+    clearSQLEditorWorkspaceSnapshot()
     storage.clear()
     mockedUseAuth.mockReturnValue({
       user: {
@@ -208,7 +210,46 @@ describe('SQLEditorPage', () => {
     mockedDeleteSavedQuery.mockResolvedValue(undefined)
   })
 
-  it('重新掛載後會重置成單一預設 tab 與 SELECT 1;', async () => {
+  it('同一個瀏覽器執行環境內重新掛載會保留 workspace 草稿，但不保留查詢結果', async () => {
+    mockedListMetadata.mockImplementation(async (_connectionID, params) => {
+      if (params?.database) {
+        return {
+          db_type: 'mysql',
+          level: 'table',
+          database: params.database,
+          items: [
+            {
+              kind: 'table',
+              database: params.database,
+              schema: params.database,
+              name: 'tickets',
+              engine: 'InnoDB',
+              row_count: 12,
+              data_size_bytes: 1024,
+              index_size_bytes: 512,
+              comment: '',
+            },
+          ],
+        }
+      }
+
+      return {
+        db_type: 'mysql',
+        level: 'database',
+        items: [
+          { kind: 'database', name: 'maestro' },
+        ],
+      }
+    })
+    mockedExecuteQuery.mockResolvedValue({
+      columns: ['id', 'title'],
+      raw_columns: ['id', 'title'],
+      sensitive_column_indexes: [],
+      rows: [['1', 'Test ticket']],
+      row_count: 1,
+      duration_ms: 18,
+    })
+
     const { unmount } = render(
       <MemoryRouter>
         <ToastProvider>
@@ -224,9 +265,20 @@ describe('SQLEditorPage', () => {
     fireEvent.change(screen.getByLabelText('CodeMirror'), {
       target: { value: 'SELECT * FROM tickets;' },
     })
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(await screen.findByText('maestro'))
+    expect(await screen.findByText('tickets')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Run Query'))
+    expect(await screen.findByText('Test ticket')).toBeInTheDocument()
+
     fireEvent.click(screen.getByRole('button', { name: 'New Tab' }))
 
     expect(screen.getAllByText(/Query \d+/)).toHaveLength(2)
+    await waitFor(() => {
+      const snapshot = getSQLEditorWorkspaceSnapshot<unknown>('7:token')
+      expect(JSON.stringify(snapshot)).toContain('tickets')
+    })
 
     unmount()
 
@@ -239,8 +291,13 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
-    expect(screen.getAllByText(/Query \d+/)).toHaveLength(1)
-    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT 1;')
+    expect(screen.getAllByText(/Query \d+/)).toHaveLength(2)
+    fireEvent.click(screen.getByText('Query 1'))
+    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT * FROM tickets;')
+    expect(await screen.findByText('maestro')).toBeInTheDocument()
+    expect(screen.getByText('tickets')).toBeInTheDocument()
+    expect(screen.queryByText('Test ticket')).not.toBeInTheDocument()
+    expect(screen.getByText('No query has been executed yet.')).toBeInTheDocument()
   })
 
   it('依照目前選取的連線類型顯示 SQL Editor timeout', async () => {
