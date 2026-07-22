@@ -41,7 +41,7 @@ function DetailTable({
           {rows.map((row, rowIndex) => (
             <DataTableRow key={rowIndex}>
               {row.map((cell, cellIndex) => (
-                <DataTableCell key={`${rowIndex}-${cellIndex}`} className="align-top">
+                <DataTableCell key={`${rowIndex}-${cellIndex}`} className="align-middle">
                   {cell}
                 </DataTableCell>
               ))}
@@ -915,7 +915,7 @@ export function TicketDetailPage() {
           />
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="px-4 py-4">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Overview</p>
+              <p className="text-[12px] font-semibold text-faint">Overview</p>
               <DetailTable
                 headers={['Ticket Type', 'DB Connection', 'Database', 'Schema', 'Submitter', 'Reviewer', 'Executor', 'Description', 'Current Status']}
                 rows={[[
@@ -934,7 +934,7 @@ export function TicketDetailPage() {
 
             {ticket.ticket_type === 'query_access' ? (
               <div className="px-4 pb-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Query Access Details</p>
+                <p className="text-[12px] font-semibold text-faint">Query Access Details</p>
                 <DetailTable
                   headers={['Rule Count', 'Access Duration', 'Approved Until', 'Revoked At', 'Revoked By']}
                   rows={[[
@@ -982,7 +982,7 @@ export function TicketDetailPage() {
 
             {ticket.ticket_type === 'query_access' ? null : statementResults.length === 0 ? (
               <div className="px-4 pb-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">SQL Content</p>
+                <p className="text-[12px] font-semibold text-faint">SQL Content</p>
                 <pre className="mt-2 overflow-x-auto rounded-xl border border-border bg-panel-soft p-4 font-mono text-[13px] leading-7 text-ink">
                   <code>{ticket.sql_content}</code>
                 </pre>
@@ -990,7 +990,7 @@ export function TicketDetailPage() {
             ) : (
               <div className="px-4 pb-4">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Statement Results</p>
+                  <p className="text-[12px] font-semibold text-faint">Statement Results</p>
                   {expandableStatementKeys.length > 0 ? (
                     <button
                       type="button"
@@ -1003,19 +1003,19 @@ export function TicketDetailPage() {
                   ) : null}
                 </div>
                 <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-                  <DataTable className="w-full table-fixed">
+                  <DataTable className="min-w-[1720px] table-fixed">
                     <colgroup>
                       <col className="w-[28px]" />
                       <col className="w-[36px]" />
-                      <col className="w-[38%]" />
-                      <col className="w-[8%]" />
-                      <col className="w-[8%]" />
-                      <col className="w-[9%]" />
-                      <col className="w-[7%]" />
-                      <col className="w-[8%]" />
-                      <col className="w-[8%]" />
-                      <col className="w-[5%]" />
-                      <col className="w-[5%]" />
+                      <col className="w-[470px]" />
+                      <col className="w-[160px]" />
+                      <col className="w-[140px]" />
+                      <col className="w-[180px]" />
+                      <col className="w-[150px]" />
+                      <col className="w-[160px]" />
+                      <col className="w-[150px]" />
+                      <col className="w-[90px]" />
+                      <col className="w-[220px]" />
                     </colgroup>
                     <DataTableHead>
                       <tr>
@@ -1039,7 +1039,7 @@ export function TicketDetailPage() {
                         const rowExpandable = isExpandableSql(row.sql)
                         return (
                           <DataTableRow key={rowKey}>
-                            <DataTableCell className="pl-2 pr-1 align-top">
+                            <DataTableCell className="pl-2 pr-1 align-middle">
                               {rowExpandable ? (
                                 <button
                                   type="button"
@@ -1052,10 +1052,10 @@ export function TicketDetailPage() {
                                 </button>
                               ) : null}
                             </DataTableCell>
-                            <DataTableCell className="pl-1 pr-2 align-top leading-6">
+                            <DataTableCell className="pl-1 pr-2 align-middle leading-6">
                               {row.seq}
                             </DataTableCell>
-                            <DataTableCell className="min-w-0 pl-1 pr-2 align-top">
+                            <DataTableCell className="min-w-0 pl-1 pr-2 align-middle">
                               <ExpandableSql
                                 value={row.sql}
                                 expanded={rowExpanded}
@@ -1063,14 +1063,14 @@ export function TicketDetailPage() {
                                 showToggle={false}
                               />
                             </DataTableCell>
-                            <DataTableCell className="break-words align-top leading-6">{row.scanRows ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-top leading-6">{row.reviewStatus ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-top leading-6 text-muted">{row.reviewMessage || '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-top leading-6">{row.rowsAffected ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-top leading-6">{row.executionStatus ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-top leading-6">{row.currentStage ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-top leading-6">{row.duration ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-top leading-6 text-muted">{row.errorMessage || '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-middle leading-6">{row.scanRows ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-middle leading-6">{row.reviewStatus ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-middle leading-6 text-muted">{row.reviewMessage || '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-middle leading-6">{row.rowsAffected ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-middle leading-6">{row.executionStatus ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-middle leading-6">{row.currentStage ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-middle leading-6">{row.duration ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-middle leading-6 text-muted">{row.errorMessage || '—'}</DataTableCell>
                           </DataTableRow>
                         )
                       })}
@@ -1082,7 +1082,7 @@ export function TicketDetailPage() {
 
             {detail.scopes.length > 0 ? (
               <div className="px-4 pb-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Scopes</p>
+                <p className="text-[12px] font-semibold text-faint">Scopes</p>
                 <div className="mt-3 space-y-2">
                   {detail.scopes.map((scope) => (
                     <ScopeRow key={scope.id} scope={scope} ticket={ticket} />
@@ -1093,7 +1093,7 @@ export function TicketDetailPage() {
 
             {shouldShowActionPanel ? (
               <div className="px-4 pb-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">Actions</p>
+                <p className="text-[12px] font-semibold text-faint">Actions</p>
                 <div className="mt-3">
                   {(canReview || canWithdraw) && ticket.status === 'pending_review' ? (
                     <div className="p-0">
@@ -1247,7 +1247,7 @@ export function TicketDetailPage() {
                 className="inline-flex items-center gap-1.5 text-left"
                 aria-expanded={otherDetailsOpen}
               >
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">Other Details</span>
+                <span className="text-[12px] font-semibold text-faint">Other Details</span>
                 <ChevronDown className={`h-4 w-4 text-muted transition-transform ${otherDetailsOpen ? 'rotate-180' : ''}`} />
               </button>
               {otherDetailsOpen ? (
@@ -1271,7 +1271,7 @@ export function TicketDetailPage() {
                   className="inline-flex items-center gap-1.5 text-left"
                   aria-expanded={debugTraceOpen}
                 >
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">Debug / Resolution Trace</span>
+                  <span className="text-[12px] font-semibold text-faint">Debug / Resolution Trace</span>
                   <ChevronDown className={`h-4 w-4 text-muted transition-transform ${debugTraceOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {debugTraceOpen ? (
