@@ -71,7 +71,7 @@ func NewExportHandler(
 		broker:              broker,
 		lark:                lark,
 		notifications:       NewNotificationRouter(notifRepo, audit, broker, lark),
-		downloadRateLimiter: newRequestRateLimiter(3, time.Minute),
+		downloadRateLimiter: newRequestRateLimiter(5, time.Minute),
 		appBaseURL:          strings.TrimRight(appBaseURL, "/"),
 		jwtSecret:           append([]byte(nil), jwtSecret...),
 	}
@@ -651,10 +651,10 @@ func (h *ExportHandler) downloadExportRequest(w http.ResponseWriter, r *http.Req
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	rateLimitKey := fmt.Sprintf("export-download:%d", req.ID)
+	rateLimitKey := fmt.Sprintf("export-download:%d:user:%d", req.ID, userID)
 	if !h.downloadRateLimiter.Allow(rateLimitKey, time.Now()) {
 		h.auditExportDownloadFailure(r, userID, req, "rate_limited")
-		http.Error(w, "At most three downloads are allowed per minute. Please try again later.", http.StatusTooManyRequests)
+		http.Error(w, "At most five downloads are allowed per minute. Please try again later.", http.StatusTooManyRequests)
 		return
 	}
 	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {

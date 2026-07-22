@@ -350,7 +350,7 @@ Ticket number 不使用單純 auto increment 流水號，而改成較不易碰�
 
 - authenticated access，限 requester、approver 或 `sql_editor.export_review`
 - 過期時間
-- 每分鐘最多 3 次下載限制
+- 每個使用者每分鐘最多 5 次下載限制
 - 每次下載成功與失敗原因都會寫入 ticket activity
 
 ## 範例

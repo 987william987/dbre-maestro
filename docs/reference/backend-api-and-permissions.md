@@ -126,7 +126,7 @@
 | API | Gate | 備註 |
 |---|---|---|
 | `POST /api/exports` | `sql_editor.export` | 從 SQL Editor 建立 export ticket，需填寫導出原因 |
-| `GET /api/exports/{id}/download` | authenticated user | 24 小時內可重複下載；限 requester、approver 或 `sql_editor.export_review`；每個 export 每分鐘最多 3 次 |
+| `GET /api/exports/{id}/download` | authenticated user | 24 小時內可重複下載；限 requester、approver 或 `sql_editor.export_review`；每個使用者對每個 export 每分鐘最多 5 次 |
 | `GET /api/exports/download/{token}` | authenticated user | legacy download route；不再由新 UI 產生 |
 
 ### Scheduled SQL Reports

@@ -53,19 +53,22 @@ func TestExportQueryExecutionContextFromScopesUsesTicketScopes(t *testing.T) {
 	}
 }
 
-func TestRequestRateLimiterAllowsOnlyThreeHitsPerMinute(t *testing.T) {
-	limiter := newRequestRateLimiter(3, time.Minute)
+func TestRequestRateLimiterAllowsOnlyFiveHitsPerMinutePerKey(t *testing.T) {
+	limiter := newRequestRateLimiter(5, time.Minute)
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
-	for i := 0; i < 3; i++ {
-		if !limiter.Allow("token-1", now.Add(time.Duration(i)*time.Second)) {
+	for i := 0; i < 5; i++ {
+		if !limiter.Allow("export-download:1:user:10", now.Add(time.Duration(i)*time.Second)) {
 			t.Fatalf("Allow() denied hit %d, want allowed", i+1)
 		}
 	}
-	if limiter.Allow("token-1", now.Add(30*time.Second)) {
-		t.Fatal("Allow() = true on 4th hit within one minute, want false")
+	if limiter.Allow("export-download:1:user:10", now.Add(30*time.Second)) {
+		t.Fatal("Allow() = true on 6th hit within one minute, want false")
 	}
-	if !limiter.Allow("token-1", now.Add(61*time.Second)) {
+	if !limiter.Allow("export-download:1:user:11", now.Add(30*time.Second)) {
+		t.Fatal("Allow() = false for a different user key, want true")
+	}
+	if !limiter.Allow("export-download:1:user:10", now.Add(61*time.Second)) {
 		t.Fatal("Allow() = false after window elapsed, want true")
 	}
 }

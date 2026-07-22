@@ -204,7 +204,7 @@ SQL Editor 左側資產樹使用：
 下載限制與回饋：
 
 - `GET /api/exports/{id}/download` 為登入後下載，不在 URL 暴露 token
-- 1 分鐘內最多 3 次下載
+- 每個使用者對每個 export 1 分鐘內最多 5 次下載
 - 前端應以頁內錯誤提示或 toast 顯示限制，不應跳轉到獨立錯誤頁
 
 ## 敏感資料
