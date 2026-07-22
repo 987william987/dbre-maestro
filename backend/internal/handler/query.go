@@ -1050,9 +1050,18 @@ func dependenciesFromOrigins(origins []masking.ColumnOrigin) [][]masking.ColumnO
 func buildDisplayColumns(rawColumns []string, origins []masking.ColumnOrigin) []string {
 	displayColumns := make([]string, len(rawColumns))
 	for i, rawColumn := range rawColumns {
-		displayColumns[i] = rawColumn
+		displayColumns[i] = displayColumnLabel(rawColumn)
 	}
 	return displayColumns
+}
+
+func displayColumnLabel(rawColumn string) string {
+	trimmed := strings.TrimSpace(rawColumn)
+	parts := strings.Split(trimmed, ".")
+	if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
+		return strings.TrimSpace(parts[1])
+	}
+	return rawColumn
 }
 
 func (h *QueryHandler) userCanAccessConnection(ctx context.Context, userID, connectionID uint64) (bool, error) {

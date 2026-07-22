@@ -148,8 +148,8 @@ func TestExecuteSQLQueryUsesDatabaseOnPinnedConnection(t *testing.T) {
 	if len(result.Rows) != 1 || len(result.Columns) != 1 {
 		t.Fatalf("unexpected result = %#v", result)
 	}
-	if result.Columns[0] != "t_user.id" {
-		t.Fatalf("display column = %q, want %q", result.Columns[0], "t_user.id")
+	if result.Columns[0] != "id" {
+		t.Fatalf("display column = %q, want %q", result.Columns[0], "id")
 	}
 	if len(result.RawColumns) != 1 || result.RawColumns[0] != "t_user.id" {
 		t.Fatalf("raw columns = %#v, want [t_user.id]", result.RawColumns)
@@ -226,7 +226,7 @@ func TestExecuteSQLQueryRunsMultiStatementsSequentially(t *testing.T) {
 	if len(result.Rows) != 1 || result.Rows[0][0] != "2" {
 		t.Fatalf("unexpected result rows = %#v", result.Rows)
 	}
-	if len(result.Columns) != 1 || result.Columns[0] != "t_user.id" {
+	if len(result.Columns) != 1 || result.Columns[0] != "id" {
 		t.Fatalf("unexpected result columns = %#v", result.Columns)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -536,7 +536,7 @@ func expectNonAllPermissionsUser(mock sqlmock.Sqlmock, userID uint64, now time.T
 		WillReturnRows(sqlmock.NewRows([]string{"has_all_permissions"}).AddRow(false))
 }
 
-func TestBuildDisplayColumnsKeepsDatabaseReturnedLabels(t *testing.T) {
+func TestBuildDisplayColumnsUsesClientVisibleLabels(t *testing.T) {
 	rawColumns := []string{"UID", "積分數量", "t_deposit.account_id"}
 	origins := []struct {
 		database string
@@ -554,7 +554,7 @@ func TestBuildDisplayColumnsKeepsDatabaseReturnedLabels(t *testing.T) {
 		{Database: origins[2].database, Table: origins[2].table, Column: origins[2].column},
 	})
 
-	want := []string{"UID", "積分數量", "t_deposit.account_id"}
+	want := []string{"UID", "積分數量", "account_id"}
 	for i := range want {
 		if display[i] != want[i] {
 			t.Fatalf("display[%d] = %q, want %q", i, display[i], want[i])
