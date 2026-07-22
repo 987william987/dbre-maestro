@@ -14,6 +14,7 @@ export function createExportRequest(payload: {
   database_name?: string
   schema_name?: string
   query_context_token?: string
+  reason: string
 }) {
   return apiClient.post<CreateExportResponse>('/exports', payload)
 }

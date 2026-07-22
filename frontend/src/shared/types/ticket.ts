@@ -150,8 +150,10 @@ export type TicketDetail = {
   scopes: TicketScope[]
   query_access_items: QueryAccessTicketItem[]
   export_request: {
+    id: number
     status: string
     expires_at: string
+    downloaded_at?: string | null
     download_url?: string | null
   } | null
   workflow_participants: TicketWorkflowParticipants

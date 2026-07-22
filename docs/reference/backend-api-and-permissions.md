@@ -125,8 +125,9 @@
 
 | API | Gate | 備註 |
 |---|---|---|
-| `POST /api/exports` | `sql_editor.export` | 從 SQL Editor 建立 export ticket |
-| `GET /api/exports/download/{token}` | token-based | 不走 Bearer gate，但有下載頻率限制 |
+| `POST /api/exports` | `sql_editor.export` | 從 SQL Editor 建立 export ticket，需填寫導出原因 |
+| `GET /api/exports/{id}/download` | authenticated user | 24 小時內可重複下載；限 requester、approver 或 `sql_editor.export_review`；每個 export 每分鐘最多 3 次 |
+| `GET /api/exports/download/{token}` | authenticated user | legacy download route；不再由新 UI 產生 |
 
 ### Scheduled SQL Reports
 
@@ -239,7 +240,7 @@
 - `GET /api/events/stream` 是 SSE stream endpoint，不是一般短請求 API
 - 它與一般 REST 共用同一台 server，但不套用一般 request timeout，且只在該 request 內清除 write deadline
 - 這個設計是為了讓通知與工單狀態更新可穩定長連線，同時保留其他 API 的 timeout 保護
-- `GET /api/exports/download/{token}` 也不套一般 request timeout，且會在該 request 內清除 write deadline；查詢熔斷由 SQL Export Timeout settings 控制
+- `GET /api/exports/{id}/download` 與 legacy `GET /api/exports/download/{token}` 也不套一般 request timeout，且會在該 request 內清除 write deadline；查詢熔斷由 SQL Export Timeout settings 控制
 
 ## Ticket 類型與 workflow 權限
 

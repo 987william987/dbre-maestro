@@ -320,7 +320,9 @@ describe('SQLEditorPage', () => {
     expect(screen.getAllByText('Primary MySQL').length).toBeGreaterThan(0)
     expect(screen.getAllByText('SELECT 1;').length).toBeGreaterThan(0)
     expect(mockedCreateExportRequest).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Confirm and Export' })).toBeDisabled()
 
+    fireEvent.change(screen.getByLabelText('Export Reason'), { target: { value: 'Monthly compliance report' } })
     fireEvent.click(screen.getByRole('button', { name: 'Confirm and Export' }))
 
     await waitFor(() => {
@@ -330,6 +332,7 @@ describe('SQLEditorPage', () => {
         database_name: undefined,
         schema_name: undefined,
         query_context_token: 'query-context-token',
+        reason: 'Monthly compliance report',
       })
     })
   })

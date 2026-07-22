@@ -346,11 +346,12 @@ Ticket number 不使用單純 auto increment 流水號，而改成較不易碰�
 
 ## Export Download
 
-匯出下載目前是透過 `GET /api/exports/download/{token}` 完成，並帶有：
+匯出下載目前是透過 `GET /api/exports/{id}/download` 完成，並帶有：
 
-- token-based access
+- authenticated access，限 requester、approver 或 `sql_editor.export_review`
 - 過期時間
 - 每分鐘最多 3 次下載限制
+- 每次下載成功與失敗原因都會寫入 ticket activity
 
 ## 範例
 

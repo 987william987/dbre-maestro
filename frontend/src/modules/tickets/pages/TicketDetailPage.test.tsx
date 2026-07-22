@@ -396,9 +396,11 @@ describe('TicketDetailPage role visibility', () => {
       sql_content: 'SELECT * FROM users;',
     }, {
       export_request: {
+        id: 123,
         status: 'ready',
         expires_at: '2026-06-12T01:00:00Z',
-        download_url: '/api/exports/download/token-123',
+        downloaded_at: null,
+        download_url: '/api/exports/123/download',
       },
       capabilities: {
         can_review: false,

@@ -201,6 +201,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		DatabaseName   string `json:"database_name"`
 		SchemaName     string `json:"schema_name"`
 		QueryContext   string `json:"query_context_token"`
+		Reason         string `json:"reason"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -208,6 +209,11 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.SQLContent == "" || req.DBConnectionID == 0 {
 		jsonErr(w, http.StatusUnprocessableEntity, "sql_content and db_connection_id are required")
+		return
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "export reason is required")
 		return
 	}
 	conn, err := h.dbConns.GetByID(r.Context(), req.DBConnectionID)
@@ -250,7 +256,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	containsSensitive := analysis.ContainsSensitive
 	title := fmt.Sprintf("SQL Export / %s", conn.Name)
-	description := fmt.Sprintf("由 SQL Editor 建立的導出申請。Sensitive=%t", containsSensitive)
+	description := fmt.Sprintf("導出原因：%s\nSensitive=%t", reason, containsSensitive)
 	ticket, err := h.tickets.CreateWithScopes(r.Context(), &model.Ticket{
 		Title:             title,
 		Description:       &description,
@@ -360,6 +366,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Details: map[string]any{
 			"ticket_type":        ticket.TicketType,
 			"contains_sensitive": containsSensitive,
+			"export_reason":      reason,
 		},
 		IPAddress: clientIP(r),
 	})
@@ -516,7 +523,7 @@ func (h *ExportHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{
 		"id":           id,
 		"status":       string(model.ExportStatusReady),
-		"download_url": fmt.Sprintf("/api/exports/download/%s", req.DownloadToken),
+		"download_url": fmt.Sprintf("/api/exports/%d/download", id),
 		"expires_at":   req.ExpiresAt,
 	})
 }
@@ -568,11 +575,39 @@ func (h *ExportHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GET /exports/download/{token} — authenticated one-time download.
-// Token-not-found, expired, reused, or unauthorized all avoid token enumeration.
+// GET /exports/download/{token} — legacy authenticated download route.
+// Token-not-found, expired, or unauthorized all avoid token enumeration.
 func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
+	userID := middleware.UserIDFromCtx(r.Context())
+	if userID == 0 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	if len(token) != 64 {
+		h.auditExportDownloadFailure(r, userID, nil, "invalid_token")
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	req, err := h.exports.GetByToken(r.Context(), token)
+	if err != nil {
+		h.auditExportDownloadFailure(r, userID, nil, "lookup_failed")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if req == nil {
+		h.auditExportDownloadFailure(r, userID, nil, "not_found")
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	h.downloadExportRequest(w, r, req, userID)
+}
+
+// GET /exports/{id}/download — authenticated repeated download within export TTL.
+func (h *ExportHandler) DownloadByID(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -582,37 +617,74 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, err := h.exports.GetByToken(r.Context(), token)
+	req, err := h.exports.GetByID(r.Context(), id)
 	if err != nil {
+		h.auditExportDownloadFailure(r, userID, nil, "lookup_failed")
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	// 403 for not-found, expired, reused, or not-yet-approved — no token enumeration.
-	if req == nil || time.Now().After(req.ExpiresAt) || req.Status != model.ExportStatusReady || req.DownloadedAt != nil {
+	if req == nil {
+		h.auditExportDownloadFailure(r, userID, nil, "not_found")
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	if req.RequesterID != userID && !middleware.HasPermission(r.Context(), permissionSQLEditorExportReview) {
+	h.downloadExportRequest(w, r, req, userID)
+}
+
+func (h *ExportHandler) downloadExportRequest(w http.ResponseWriter, r *http.Request, req *model.ExportRequest, userID uint64) {
+	if time.Now().After(req.ExpiresAt) {
+		h.auditExportDownloadFailure(r, userID, req, "expired")
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	if !h.downloadRateLimiter.Allow(token, time.Now()) {
+	if req.Status != model.ExportStatusReady {
+		h.auditExportDownloadFailure(r, userID, req, "not_ready")
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if req.RequesterID != userID && (req.ApproverID == nil || *req.ApproverID != userID) && !middleware.HasPermission(r.Context(), permissionSQLEditorExportReview) {
+		h.auditExportDownloadFailure(r, userID, req, "unauthorized")
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	rateLimitKey := fmt.Sprintf("export-download:%d", req.ID)
+	if !h.downloadRateLimiter.Allow(rateLimitKey, time.Now()) {
+		h.auditExportDownloadFailure(r, userID, req, "rate_limited")
 		http.Error(w, "At most three downloads are allowed per minute. Please try again later.", http.StatusTooManyRequests)
 		return
 	}
 	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		h.auditExportDownloadFailure(r, userID, req, "streaming_unsupported")
 		http.Error(w, "download streaming unsupported", http.StatusInternalServerError)
 		return
 	}
 
+	var ticket *model.Ticket
+	var err error
+	if req.TicketID != nil && h.tickets != nil {
+		ticket, err = h.tickets.GetByID(r.Context(), *req.TicketID)
+		if err != nil {
+			h.auditExportDownloadFailure(r, userID, req, "ticket_lookup_failed")
+			http.Error(w, "ticket lookup failed", http.StatusInternalServerError)
+			return
+		}
+		if ticket == nil || ticket.TicketType != model.TicketTypeSQLExport || ticket.Status != model.TicketStatusApproved {
+			h.auditExportDownloadFailure(r, userID, req, "ticket_not_approved")
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	}
+
 	conn, err := h.dbConns.GetByID(r.Context(), req.DBConnectionID)
 	if err != nil || conn == nil {
+		h.auditExportDownloadFailure(r, userID, req, "connection_not_found")
 		http.Error(w, "connection not found", http.StatusInternalServerError)
 		return
 	}
 
 	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
 	if err != nil {
+		h.auditExportDownloadFailure(r, userID, req, "credential_resolution_failed")
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -620,6 +692,7 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 	driver, dsn := pool.BuildDSN(resolvedConn, password)
 	pools, err := pool.Global().GetOrCreate(conn.ID, driver, dsn)
 	if err != nil {
+		h.auditExportDownloadFailure(r, userID, req, "pool_failed")
 		http.Error(w, "pool error", http.StatusInternalServerError)
 		return
 	}
@@ -630,46 +703,38 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 
 	queryCtx, err := h.exportQueryExecutionContext(r.Context(), req, resolvedConn)
 	if err != nil {
+		h.auditExportDownloadFailure(r, userID, req, "query_context_failed")
 		http.Error(w, "query context failed", http.StatusInternalServerError)
 		return
 	}
 
 	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, req.SQLContent, queryCtx, timeoutSettings)
 	if err != nil {
+		h.auditExportDownloadFailure(r, userID, req, "query_failed")
 		http.Error(w, "query failed", http.StatusInternalServerError)
 		return
 	}
 
 	shouldApplyMasking := true
-	if req.TicketID != nil && h.tickets != nil {
-		ticket, err := h.tickets.GetByID(r.Context(), *req.TicketID)
-		if err != nil {
-			http.Error(w, "ticket lookup failed", http.StatusInternalServerError)
-			return
-		}
-		if ticket != nil && ticket.TicketType == model.TicketTypeSQLExport && ticket.Status == model.TicketStatusApproved {
-			shouldApplyMasking = false
-		}
+	if ticket != nil && ticket.TicketType == model.TicketTypeSQLExport && ticket.Status == model.TicketStatusApproved {
+		shouldApplyMasking = false
 	}
 	if shouldApplyMasking {
 		if _, _, err := h.masking.applyResult(r.Context(), resolvedConn, req.RequesterID, result); err != nil {
+			h.auditExportDownloadFailure(r, userID, req, "masking_failed")
 			http.Error(w, "masking failed", http.StatusUnprocessableEntity)
 			return
 		}
 	}
 
-	downloaded, err := h.exports.MarkDownloaded(r.Context(), token)
-	if err != nil {
+	if err := h.exports.MarkDownloaded(r.Context(), req.ID); err != nil {
+		h.auditExportDownloadFailure(r, userID, req, "mark_downloaded_failed")
 		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	if !downloaded {
-		http.Error(w, "download link has already been used", http.StatusGone)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="export-%s.csv"`, token[:8]))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="export-%d.csv"`, req.ID))
 
 	cw := csv.NewWriter(w)
 	_ = cw.Write(result.Columns)
@@ -686,13 +751,55 @@ func (h *ExportHandler) Download(w http.ResponseWriter, r *http.Request) {
 	}
 	cw.Flush()
 
+	resourceType := "export"
 	reqID := req.ID
+	resourceID := &reqID
+	if req.TicketID != nil {
+		resourceType = "ticket"
+		resourceID = req.TicketID
+	}
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
 		ActionType:   "export_download",
-		ResourceType: "export",
-		ResourceID:   &reqID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Details: map[string]any{
+			"export_id": req.ID,
+			"ticket_id": req.TicketID,
+			"rows":      len(result.Rows),
+		},
+		IPAddress: clientIP(r),
+	})
+}
+
+func (h *ExportHandler) auditExportDownloadFailure(r *http.Request, userID uint64, req *model.ExportRequest, reason string) {
+	if h.audit == nil {
+		return
+	}
+	resourceType := "export"
+	var resourceID *uint64
+	details := map[string]any{
+		"reason": reason,
+	}
+	if req != nil {
+		resourceID = &req.ID
+		if req.TicketID != nil {
+			resourceType = "ticket"
+			resourceID = req.TicketID
+		}
+		details["export_id"] = req.ID
+		details["ticket_id"] = req.TicketID
+		details["status"] = req.Status
+		details["expires_at"] = req.ExpiresAt
+	}
+	_ = h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "export_download_failed",
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Details:      details,
 		IPAddress:    clientIP(r),
 	})
 }

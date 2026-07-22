@@ -1228,6 +1228,11 @@ export function TicketDetailPage() {
                       <p className="mt-3 text-[12px] text-muted">
                         Expires: {detail.export_request?.expires_at ? formatDateTime(detail.export_request.expires_at, true) : '—'}
                       </p>
+                      {detail.export_request?.downloaded_at ? (
+                        <p className="mt-1 text-[12px] text-muted">
+                          First downloaded: {formatDateTime(detail.export_request.downloaded_at, true)}
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

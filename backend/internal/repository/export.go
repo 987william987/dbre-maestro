@@ -32,9 +32,9 @@ func (r *ExportRepo) Create(ctx context.Context, req *model.ExportRequest, statu
 	expiresAt := timeutil.NowUTC().Add(24 * time.Hour)
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO export_requests
-         (ticket_id, requester_id, download_token, sql_content, db_connection_id, status, expires_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.TicketID, req.RequesterID, token, req.SQLContent, req.DBConnectionID, string(status), expiresAt, timeutil.NowUTC(),
+         (ticket_id, requester_id, approver_id, download_token, sql_content, db_connection_id, status, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.TicketID, req.RequesterID, req.ApproverID, token, req.SQLContent, req.DBConnectionID, string(status), expiresAt, timeutil.NowUTC(),
 	)
 	if err != nil {
 		return 0, "", fmt.Errorf("create export_request: %w", err)
@@ -98,15 +98,28 @@ func (r *ExportRepo) UpdateStatus(ctx context.Context, id uint64, status model.E
 	return err
 }
 
-// MarkDownloaded consumes the download token by setting downloaded_at once.
-func (r *ExportRepo) MarkDownloaded(ctx context.Context, token string) (bool, error) {
+// MarkDownloaded records the first successful download time. Repeated downloads
+// within the export TTL remain allowed and keep the original timestamp.
+func (r *ExportRepo) MarkDownloaded(ctx context.Context, id uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE export_requests SET downloaded_at = COALESCE(downloaded_at, ?) WHERE id = ?`,
+		timeutil.NowUTC(), id,
+	)
+	return err
+}
+
+// MarkDownloadedByToken is retained for legacy token download links.
+func (r *ExportRepo) MarkDownloadedByToken(ctx context.Context, token string) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE export_requests SET downloaded_at = ? WHERE download_token = ? AND downloaded_at IS NULL`,
+		`UPDATE export_requests SET downloaded_at = COALESCE(downloaded_at, ?) WHERE download_token = ?`,
 		timeutil.NowUTC(), token,
 	)
 	if err != nil {
-		return false, err
+		return err
 	}
 	rowsAffected, _ := res.RowsAffected()
-	return rowsAffected > 0, nil
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }

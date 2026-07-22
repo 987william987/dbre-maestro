@@ -9,7 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-func TestExportRepoMarkDownloadedConsumesTokenOnce(t *testing.T) {
+func TestExportRepoMarkDownloadedRecordsFirstDownloadByID(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -17,24 +17,19 @@ func TestExportRepoMarkDownloadedConsumesTokenOnce(t *testing.T) {
 	defer db.Close()
 
 	repo := NewExportRepo(sqlx.NewDb(db, "sqlmock"))
-	token := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE export_requests SET downloaded_at = ? WHERE download_token = ? AND downloaded_at IS NULL`)).
-		WithArgs(sqlmock.AnyArg(), token).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE export_requests SET downloaded_at = COALESCE(downloaded_at, ?) WHERE id = ?`)).
+		WithArgs(sqlmock.AnyArg(), uint64(42)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	downloaded, err := repo.MarkDownloaded(context.Background(), token)
-	if err != nil {
+	if err := repo.MarkDownloaded(context.Background(), 42); err != nil {
 		t.Fatalf("MarkDownloaded() error = %v", err)
-	}
-	if !downloaded {
-		t.Fatal("MarkDownloaded() should report first token consumption")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("mock expectations not met: %v", err)
 	}
 }
 
-func TestExportRepoMarkDownloadedRejectsUsedToken(t *testing.T) {
+func TestExportRepoMarkDownloadedByTokenAllowsRepeatedDownloads(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -43,16 +38,12 @@ func TestExportRepoMarkDownloadedRejectsUsedToken(t *testing.T) {
 
 	repo := NewExportRepo(sqlx.NewDb(db, "sqlmock"))
 	token := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE export_requests SET downloaded_at = ? WHERE download_token = ? AND downloaded_at IS NULL`)).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE export_requests SET downloaded_at = COALESCE(downloaded_at, ?) WHERE download_token = ?`)).
 		WithArgs(sqlmock.AnyArg(), token).
-		WillReturnResult(sqlmock.NewResult(0, 0))
+		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	downloaded, err := repo.MarkDownloaded(context.Background(), token)
-	if err != nil {
-		t.Fatalf("MarkDownloaded() error = %v", err)
-	}
-	if downloaded {
-		t.Fatal("MarkDownloaded() should reject an already-used token")
+	if err := repo.MarkDownloadedByToken(context.Background(), token); err != nil {
+		t.Fatalf("MarkDownloadedByToken() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("mock expectations not met: %v", err)
