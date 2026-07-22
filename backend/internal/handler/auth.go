@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image/png"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -1247,10 +1248,21 @@ func (e errStr) Error() string { return string(e) }
 
 func clientIP(r *http.Request) string {
 	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
+		return normalizeClientIP(ip)
 	}
 	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		return strings.SplitN(ip, ",", 2)[0]
+		return normalizeClientIP(strings.SplitN(ip, ",", 2)[0])
 	}
-	return r.RemoteAddr
+	return normalizeClientIP(r.RemoteAddr)
+}
+
+func normalizeClientIP(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		return strings.Trim(host, "[]")
+	}
+	return strings.Trim(value, "[]")
 }

@@ -126,7 +126,7 @@ func NewQueryHandler(
 		notifRepo:     notifRepo,
 		broker:        broker,
 		lark:          lark,
-		notifications: NewNotificationRouter(notifRepo, audit, broker, lark),
+		notifications: NewNotificationRouter(notifRepo, audit, users, broker, lark),
 		appBaseURL:    strings.TrimRight(appBaseURL, "/"),
 		jwtSecret:     append([]byte(nil), jwtSecret...),
 	}
@@ -313,18 +313,21 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auditDetails := map[string]any{
+		"sql":         truncate(req.SQL, 500),
+		"row_count":   len(result.Rows),
+		"duration_ms": durationMs,
+	}
+	addAuditConnectionDetails(auditDetails, conn)
+	addAuditQueryContextDetails(auditDetails, queryCtx)
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
 		ActionType:   "query_execute",
 		ResourceType: "db_connection",
 		ResourceID:   &req.DBConnectionID,
-		Details: map[string]any{
-			"sql":         truncate(req.SQL, 500),
-			"row_count":   len(result.Rows),
-			"duration_ms": durationMs,
-		},
-		IPAddress: clientIP(r),
+		Details:      auditDetails,
+		IPAddress:    clientIP(r),
 	})
 
 	if h.artifacts != nil {
@@ -1229,18 +1232,21 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 	result := redisResultToQueryResult(val)
 
 	connID := conn.ID
+	auditDetails := map[string]any{
+		"sql":         truncate(cmdLine, 500),
+		"row_count":   len(result.Rows),
+		"duration_ms": durationMs,
+	}
+	addAuditConnectionDetails(auditDetails, conn)
+	auditDetails["redis_db_index"] = dbIndex
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
 		ActionType:   "query_execute",
 		ResourceType: "db_connection",
 		ResourceID:   &connID,
-		Details: map[string]any{
-			"sql":         truncate(cmdLine, 500),
-			"row_count":   len(result.Rows),
-			"duration_ms": durationMs,
-		},
-		IPAddress: clientIP(r),
+		Details:      auditDetails,
+		IPAddress:    clientIP(r),
 	})
 
 	if h.artifacts != nil {
@@ -1272,6 +1278,12 @@ func (h *QueryHandler) auditBlockedQuery(r *http.Request, userID uint64, connID 
 	}
 	for key, value := range extra {
 		details[key] = value
+	}
+	if h.dbConns != nil {
+		conn, err := h.dbConns.GetByID(r.Context(), connID)
+		if err == nil && conn != nil {
+			addAuditConnectionDetails(details, conn)
+		}
 	}
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,

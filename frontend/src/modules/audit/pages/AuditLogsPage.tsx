@@ -28,29 +28,66 @@ const PAGE_SIZE = 20
 const ACTION_OPTIONS = [
   { value: '', label: 'All Actions' },
   { value: 'login', label: 'Login' },
+  { value: 'login_failed', label: 'Login Failed' },
   { value: 'logout', label: 'Logout' },
-  { value: 'setting_change', label: 'Setting Change' },
+  { value: 'mfa_enable', label: 'Enable MFA' },
+  { value: 'mfa_failed', label: 'MFA Failed' },
+  { value: 'refresh_token_reuse_detected', label: 'Refresh Token Reuse Detected' },
+  { value: 'session_revoke', label: 'Revoke Session' },
+  { value: 'session_revoke_all', label: 'Revoke All Sessions' },
+  { value: 'auth_rate_limited', label: 'Auth Rate Limited' },
+  { value: 'auth_group_security_denied', label: 'Auth Group Security Denied' },
+  { value: 'user_security_denied', label: 'User Security Denied' },
   { value: 'user_create', label: 'Create User' },
   { value: 'user_update', label: 'Update User' },
   { value: 'user_delete', label: 'Delete User' },
+  { value: 'user_session_revoke', label: 'Revoke User Session' },
+  { value: 'user_session_revoke_all', label: 'Revoke All User Sessions' },
+  { value: 'user_mfa_reset', label: 'Reset User MFA' },
+  { value: 'user_mfa_reset_break_glass', label: 'Break Glass MFA Reset' },
   { value: 'user_membership_add', label: 'Add Group Membership' },
   { value: 'user_membership_remove', label: 'Remove Group Membership' },
   { value: 'user_permission_add', label: 'Add User Permission' },
+  { value: 'setting_change', label: 'Setting Change' },
+  { value: 'settings_update', label: 'Update Settings' },
+  { value: 'workflow_rules_update', label: 'Update Workflow Rules' },
   { value: 'ticket_submit', label: 'Submit Ticket' },
   { value: 'ticket_approve', label: 'Approve Ticket' },
+  { value: 'ticket_auto_approve', label: 'Auto Approve Ticket' },
   { value: 'ticket_reject', label: 'Reject Ticket' },
+  { value: 'ticket_withdraw', label: 'Withdraw Ticket' },
   { value: 'ticket_execute_start', label: 'Start Execution' },
   { value: 'ticket_execute_complete', label: 'Execution Complete' },
   { value: 'ticket_execute_failed', label: 'Execution Failed' },
   { value: 'ticket_schedule', label: 'Schedule Execution' },
   { value: 'ticket_stop', label: 'Stop Ticket' },
+  { value: 'ticket_revoke', label: 'Revoke Ticket Access' },
+  { value: 'ticket_forbidden_access', label: 'Forbidden Ticket Access' },
+  { value: 'workflow_resolution_failed', label: 'Workflow Resolution Failed' },
+  { value: 'workflow_resolution_retry', label: 'Retry Workflow Resolution' },
+  { value: 'workflow_resolution_retry_failed', label: 'Workflow Resolution Retry Failed' },
+  { value: 'workflow_auto_execute_start', label: 'Workflow Auto Execute Start' },
+  { value: 'workflow_auto_execute_complete', label: 'Workflow Auto Execute Complete' },
+  { value: 'workflow_auto_execute_failed', label: 'Workflow Auto Execute Failed' },
   { value: 'query_execute', label: 'Execute Query' },
+  { value: 'query_blocked', label: 'Query Blocked' },
   { value: 'export_create', label: 'Create Export' },
   { value: 'export_approve', label: 'Approve Export' },
   { value: 'export_reject', label: 'Reject Export' },
   { value: 'export_download', label: 'Download Export' },
+  { value: 'export_download_failed', label: 'Download Export Failed' },
   { value: 'audit_export', label: 'Export Audit Log' },
+  { value: 'notification_delivery', label: 'Notification Delivery' },
   { value: 'notification_failure', label: 'Notification Failure' },
+  { value: 'query_access_rule_create', label: 'Create Query Access Rule' },
+  { value: 'query_access_rule_update', label: 'Update Query Access Rule' },
+  { value: 'query_access_rule_revoke', label: 'Revoke Query Access Rule' },
+  { value: 'scheduled_sql_report_create', label: 'Create Scheduled SQL Report' },
+  { value: 'scheduled_sql_report_update', label: 'Update Scheduled SQL Report' },
+  { value: 'scheduled_sql_report_delete', label: 'Delete Scheduled SQL Report' },
+  { value: 'scheduled_sql_report_run', label: 'Run Scheduled SQL Report' },
+  { value: 'scheduled_sql_report_run_failed', label: 'Scheduled SQL Report Run Failed' },
+  { value: 'scheduled_sql_report_delivery_failed', label: 'Scheduled SQL Report Delivery Failed' },
 ] as const
 
 const RESOURCE_OPTIONS = [
@@ -60,6 +97,7 @@ const RESOURCE_OPTIONS = [
   { value: 'user', label: 'User' },
   { value: 'export', label: 'Export' },
   { value: 'audit_log', label: 'Audit Log' },
+  { value: 'query_access_rule', label: 'Query Access Rule' },
 ] as const
 
 export function AuditLogsPage() {
@@ -332,7 +370,18 @@ export function AuditLogsPage() {
 
               <section className="rounded-xl border border-border bg-panel shadow-soft">
                 <div className="border-b border-border/80 px-4 py-3">
-                  <p className="text-[13px] font-semibold text-ink">Full Details</p>
+                  <p className="text-[13px] font-semibold text-ink">Summary</p>
+                </div>
+                <div className="grid gap-2 px-4 py-4 sm:grid-cols-2">
+                  {buildDetailSummary(selectedLog).map((item) => (
+                    <InfoBox key={item.label} label={item.label} value={item.value} />
+                  ))}
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-border bg-panel shadow-soft">
+                <div className="border-b border-border/80 px-4 py-3">
+                  <p className="text-[13px] font-semibold text-ink">Raw Details</p>
                 </div>
                 <div className="px-4 py-4">
                   <pre className="overflow-x-auto rounded-lg bg-panel-soft px-3 py-3 text-[12px] text-muted">
@@ -391,7 +440,7 @@ function InfoBox({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-border bg-panel-soft px-3 py-3">
       <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">{label}</p>
-      <p className="mt-1 text-[13px] text-ink">{value || '—'}</p>
+      <p className="mt-1 whitespace-pre-wrap break-words text-[13px] text-ink">{value || '—'}</p>
     </div>
   )
 }
@@ -449,11 +498,23 @@ function resolveResourceFilter(selectedResourceType: string, resourceKeyword: st
 
 function formatResource(log: AuditLog) {
   const label = formatResourceType(log.resource_type)
-  const detailsRecord = isRecord(log.details) ? log.details : null
+  const detailsRecord = parseAuditDetails(log.details)
   const detailName = typeof detailsRecord?.name === 'string' && detailsRecord.name.trim() ? detailsRecord.name.trim() : ''
+  const ticketNo = stringDetail(detailsRecord, 'ticket_no') || stringDetail(detailsRecord, 'resource_ref')
+  const connectionName = stringDetail(detailsRecord, 'connection_name')
+  const exportID = stringDetail(detailsRecord, 'export_id')
 
   if (detailName) {
     return `${label} · ${detailName}`
+  }
+  if (ticketNo) {
+    return `${label} · ${ticketNo}`
+  }
+  if (exportID) {
+    return `${label} · Export #${exportID}`
+  }
+  if (connectionName) {
+    return `${label} · ${connectionName}`
   }
   if (label === 'Unspecified Resource' && log.resource_id) {
     return `Unspecified Resource · ${log.resource_id}`
@@ -467,6 +528,203 @@ function formatIPAddress(ipAddress?: string | null) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseAuditDetails(value: unknown): Record<string, unknown> | null {
+  if (isRecord(value)) {
+    return value
+  }
+  if (typeof value !== 'string') {
+    return null
+  }
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(trimmed)
+    return isRecord(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function buildDetailSummary(log: AuditLog) {
+  const details = parseAuditDetails(log.details) ?? {}
+  const usedKeys = new Set<string>()
+  const items = [
+    { label: 'Action', value: formatActionType(log.action_type) },
+    { label: 'Resource', value: formatResource(log) },
+    ...buildStandardDetailSummary(details, usedKeys),
+    ...buildGenericDetailSummary(details, usedKeys),
+  ].filter((item) => item.value)
+  if (items.length > 0) {
+    return items
+  }
+  return [{ label: 'Details', value: formatUnknownDetail(log.details) }]
+}
+
+function buildStandardDetailSummary(details: Record<string, unknown>, usedKeys: Set<string>) {
+  const definitions: Array<{ label: string; keys: string[]; format?: (details: Record<string, unknown>) => string }> = [
+    { label: 'Export', keys: ['export_id', 'status'], format: formatExport },
+    { label: 'Ticket', keys: ['ticket_no', 'resource_ref', 'ticket_id'] },
+    { label: 'Title', keys: ['ticket_title', 'title', 'name'] },
+    { label: 'Type', keys: ['ticket_type', 'type', 'notification_type'] },
+    { label: 'Connection', keys: ['connection_name', 'connection_id', 'db_connection_id'] },
+    { label: 'DB Type', keys: ['db_type'] },
+    { label: 'Database', keys: ['database_name', 'default_database_name', 'database_pattern'] },
+    { label: 'Schema', keys: ['schema_name'] },
+    { label: 'Table', keys: ['table_name', 'table_pattern'] },
+    { label: 'Column', keys: ['column_name', 'column_pattern'] },
+    { label: 'Redis DB', keys: ['redis_db_index'] },
+    { label: 'Actor ID', keys: ['actor_id'] },
+    { label: 'Submitter', keys: ['submitter_name', 'submitter_id'] },
+    { label: 'Requester', keys: ['requester_name', 'requester_id'] },
+    { label: 'Approver', keys: ['approver_name', 'approver_id'] },
+    { label: 'Reviewer', keys: ['reviewer_name', 'reviewer_id'] },
+    { label: 'Executor', keys: ['executor_name', 'executor_id'] },
+    { label: 'Target User', keys: ['target_username', 'target_user_id', 'user_id', 'username'] },
+    { label: 'Auth Group', keys: ['auth_group', 'auth_group_name', 'group_key', 'group_name'] },
+    { label: 'Permission', keys: ['permission', 'permission_key'] },
+    { label: 'Subject', keys: ['subject_name', 'subject_type', 'subject_id'], format: formatSubject },
+    { label: 'Recipients', keys: ['delivered_recipients_names', 'delivered_recipients_ids', 'intended_recipients_names', 'intended_recipients_ids'], format: formatRecipients },
+    { label: 'Workflow Rule', keys: ['workflow_rule_name', 'workflow_rule_id'] },
+    { label: 'Execution Mode', keys: ['execution_mode'] },
+    { label: 'Status', keys: ['status', 'lark_status'] },
+    { label: 'Reason', keys: ['reason', 'export_reason', 'error_code', 'error_message'] },
+    { label: 'Error', keys: ['error', 'err', 'lark_error'] },
+    { label: 'Sensitive', keys: ['contains_sensitive'] },
+    { label: 'Rows', keys: ['rows', 'row_count', 'rows_affected'] },
+    { label: 'Duration', keys: ['duration_ms'], format: formatDuration },
+    { label: 'Attempts', keys: ['attempts', 'lark_attempts'] },
+    { label: 'Channel', keys: ['channel', 'notification_channel'] },
+    { label: 'SQL', keys: ['sql', 'sql_content', 'sql_stmt'] },
+  ]
+
+  return definitions
+    .map((definition) => {
+      const value = definition.format ? definition.format(details) : firstStringDetail(details, definition.keys)
+      if (value) {
+        definition.keys.forEach((key) => usedKeys.add(key))
+      }
+      return { label: definition.label, value }
+    })
+    .filter((item) => item.value)
+}
+
+function formatSubject(details: Record<string, unknown>) {
+  const name = stringDetail(details, 'subject_name')
+  const type = stringDetail(details, 'subject_type')
+  const id = stringDetail(details, 'subject_id')
+  if (name && type) {
+    return `${name} (${type})`
+  }
+  return name || id
+}
+
+function formatExport(details: Record<string, unknown>) {
+  const id = stringDetail(details, 'export_id')
+  if (!id) {
+    return ''
+  }
+  const status = stringDetail(details, 'status')
+  return status ? `Export #${id} (${status})` : `Export #${id}`
+}
+
+function formatRecipients(details: Record<string, unknown>) {
+  const names = stringArrayDetail(details, 'delivered_recipients_names')
+  if (names.length > 0) {
+    return names.join(', ')
+  }
+  const ids = stringArrayDetail(details, 'delivered_recipients_ids')
+  if (ids.length > 0) {
+    return ids.join(', ')
+  }
+  return ''
+}
+
+function formatDuration(details: Record<string, unknown>) {
+  const value = details.duration_ms
+  if (typeof value === 'number') {
+    return `${value} ms`
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return `${value.trim()} ms`
+  }
+  return ''
+}
+
+function firstStringDetail(details: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = stringDetail(details, key)
+    if (value) {
+      return value
+    }
+  }
+  return ''
+}
+
+function stringDetail(details: Record<string, unknown> | null, key: string) {
+  if (!details) {
+    return ''
+  }
+  const value = details[key]
+  if (value === null || value === undefined) {
+    return ''
+  }
+  if (typeof value === 'string') {
+    return value.trim()
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+  return ''
+}
+
+function stringArrayDetail(details: Record<string, unknown>, key: string) {
+  const value = details[key]
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.map((item) => String(item)).filter(Boolean)
+}
+
+function buildGenericDetailSummary(details: Record<string, unknown>, usedKeys: Set<string>) {
+  return Object.entries(details)
+    .filter(([key, value]) => !usedKeys.has(key) && value !== null && value !== undefined && value !== '')
+    .slice(0, 24)
+    .map(([key, value]) => ({
+      label: formatDetailKey(key),
+      value: formatDetailValue(value),
+    }))
+}
+
+function formatDetailKey(key: string) {
+  return key
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function formatDetailValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map((item) => formatDetailValue(item)).join(', ')
+  }
+  if (isRecord(value)) {
+    return JSON.stringify(value, null, 2)
+  }
+  return String(value)
+}
+
+function formatUnknownDetail(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return '—'
+  }
+  if (typeof value === 'string') {
+    return value
+  }
+  return JSON.stringify(value, null, 2)
 }
 
 function toRFC3339(value: string) {

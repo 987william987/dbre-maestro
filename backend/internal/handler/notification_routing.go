@@ -12,6 +12,7 @@ import (
 type NotificationRouter struct {
 	notifs *repository.NotificationRepo
 	audit  *repository.AuditRepo
+	users  *repository.UserRepo
 	broker *realtime.Broker
 	lark   *notification.Dispatcher
 }
@@ -29,8 +30,8 @@ type NotificationRoute struct {
 	TicketNo     string
 }
 
-func NewNotificationRouter(notifs *repository.NotificationRepo, audit *repository.AuditRepo, broker *realtime.Broker, lark *notification.Dispatcher) *NotificationRouter {
-	return &NotificationRouter{notifs: notifs, audit: audit, broker: broker, lark: lark}
+func NewNotificationRouter(notifs *repository.NotificationRepo, audit *repository.AuditRepo, users *repository.UserRepo, broker *realtime.Broker, lark *notification.Dispatcher) *NotificationRouter {
+	return &NotificationRouter{notifs: notifs, audit: audit, users: users, broker: broker, lark: lark}
 }
 
 func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) []uint64 {
@@ -73,13 +74,12 @@ func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) 
 				ActionType:   "notification_failure",
 				ResourceType: route.ResourceType,
 				ResourceID:   &route.ResourceID,
-				Details: map[string]any{
-					"type":       route.NotifType,
-					"title":      route.Title,
-					"recipients": recipients,
-					"err":        larkError,
-					"attempts":   larkAttempts,
-				},
+				Details: r.notificationAuditDetails(ctx, route, recipients, map[string]any{
+					"type":     route.NotifType,
+					"title":    route.Title,
+					"err":      larkError,
+					"attempts": larkAttempts,
+				}),
 			})
 		} else if result.Attempts == 0 {
 			larkStatus = "skipped"
@@ -105,11 +105,9 @@ func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) 
 		ActionType:   "notification_delivery",
 		ResourceType: route.ResourceType,
 		ResourceID:   &route.ResourceID,
-		Details: map[string]any{
+		Details: r.notificationAuditDetails(ctx, route, recipients, map[string]any{
 			"type":                 route.NotifType,
 			"title":                route.Title,
-			"intended_recipients":  route.RecipientIDs,
-			"delivered_recipients": recipients,
 			"in_app_created_users": inAppCreated,
 			"in_app_failed_users":  inAppFailed,
 			"lark_status":          larkStatus,
@@ -118,7 +116,7 @@ func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) 
 			"lark_error":           larkError,
 			"actor_excluded":       route.ActorID != nil && !route.NotifyActor,
 			"notification_channel": "in_app,lark",
-		},
+		}),
 	})
 	return recipients
 }
@@ -138,6 +136,25 @@ func (r *NotificationRouter) log(ctx context.Context, entry repository.AuditEntr
 		return
 	}
 	r.audit.Log(ctx, entry)
+}
+
+func (r *NotificationRouter) notificationAuditDetails(ctx context.Context, route NotificationRoute, delivered []uint64, extra map[string]any) map[string]any {
+	details := map[string]any{
+		"resource_type": route.ResourceType,
+		"resource_id":   route.ResourceID,
+	}
+	if route.ResourceRef != "" {
+		details["resource_ref"] = route.ResourceRef
+	}
+	if route.TicketNo != "" {
+		details["ticket_no"] = route.TicketNo
+	}
+	addAuditUserListDetails(ctx, details, r.users, "intended_recipients", route.RecipientIDs)
+	addAuditUserListDetails(ctx, details, r.users, "delivered_recipients", delivered)
+	for key, value := range extra {
+		details[key] = value
+	}
+	return details
 }
 
 func (r *NotificationRouter) recordDelivery(ctx context.Context, route NotificationRoute, userID uint64, channel string, status string, attempts int, errMsg string) {

@@ -70,7 +70,7 @@ func NewExportHandler(
 		notifRepo:           notifRepo,
 		broker:              broker,
 		lark:                lark,
-		notifications:       NewNotificationRouter(notifRepo, audit, broker, lark),
+		notifications:       NewNotificationRouter(notifRepo, audit, users, broker, lark),
 		downloadRateLimiter: newRequestRateLimiter(5, time.Minute),
 		appBaseURL:          strings.TrimRight(appBaseURL, "/"),
 		jwtSecret:           append([]byte(nil), jwtSecret...),
@@ -510,6 +510,7 @@ func (h *ExportHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "export_approve",
 		ResourceType: "export",
 		ResourceID:   &id,
+		Details:      h.exportDownloadAuditDetails(r.Context(), req, nil, nil, queryExecutionContext{}),
 		IPAddress:    clientIP(r),
 	})
 
@@ -562,6 +563,7 @@ func (h *ExportHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "export_reject",
 		ResourceType: "export",
 		ResourceID:   &id,
+		Details:      h.exportDownloadAuditDetails(r.Context(), req, nil, nil, queryExecutionContext{}),
 		IPAddress:    clientIP(r),
 	})
 
@@ -762,18 +764,16 @@ func (h *ExportHandler) downloadExportRequest(w http.ResponseWriter, r *http.Req
 		resourceType = "ticket"
 		resourceID = req.TicketID
 	}
+	details := h.exportDownloadAuditDetails(r.Context(), req, ticket, conn, queryCtx)
+	details["rows"] = len(result.Rows)
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
 		ActionType:   "export_download",
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
-		Details: map[string]any{
-			"export_id": req.ID,
-			"ticket_id": req.TicketID,
-			"rows":      len(result.Rows),
-		},
-		IPAddress: clientIP(r),
+		Details:      details,
+		IPAddress:    clientIP(r),
 	})
 }
 
@@ -792,10 +792,11 @@ func (h *ExportHandler) auditExportDownloadFailure(r *http.Request, userID uint6
 			resourceType = "ticket"
 			resourceID = req.TicketID
 		}
-		details["export_id"] = req.ID
-		details["ticket_id"] = req.TicketID
 		details["status"] = req.Status
 		details["expires_at"] = req.ExpiresAt
+		for key, value := range h.exportDownloadAuditDetails(r.Context(), req, nil, nil, queryExecutionContext{}) {
+			details[key] = value
+		}
 	}
 	_ = h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
@@ -806,6 +807,53 @@ func (h *ExportHandler) auditExportDownloadFailure(r *http.Request, userID uint6
 		Details:      details,
 		IPAddress:    clientIP(r),
 	})
+}
+
+func (h *ExportHandler) exportDownloadAuditDetails(ctx context.Context, req *model.ExportRequest, ticket *model.Ticket, conn *model.DBConnection, queryCtx queryExecutionContext) map[string]any {
+	details := map[string]any{}
+	if req == nil {
+		return details
+	}
+	details["export_id"] = req.ID
+	details["ticket_id"] = req.TicketID
+	details["requester_id"] = req.RequesterID
+	details["approver_id"] = req.ApproverID
+	if h.users != nil {
+		if requester, err := h.users.GetByID(ctx, req.RequesterID); err == nil && requester != nil && strings.TrimSpace(requester.Username) != "" {
+			details["requester_name"] = strings.TrimSpace(requester.Username)
+		}
+		if req.ApproverID != nil {
+			if approver, err := h.users.GetByID(ctx, *req.ApproverID); err == nil && approver != nil && strings.TrimSpace(approver.Username) != "" {
+				details["approver_name"] = strings.TrimSpace(approver.Username)
+			}
+		}
+	}
+	details["sql"] = truncate(req.SQLContent, 500)
+	details["connection_id"] = req.DBConnectionID
+
+	if ticket == nil && req.TicketID != nil && h.tickets != nil {
+		loaded, err := h.tickets.GetByID(ctx, *req.TicketID)
+		if err == nil {
+			ticket = loaded
+		}
+	}
+	addAuditTicketDetails(details, ticket)
+
+	if conn == nil && h.dbConns != nil {
+		loaded, err := h.dbConns.GetByID(ctx, req.DBConnectionID)
+		if err == nil {
+			conn = loaded
+		}
+	}
+	addAuditConnectionDetails(details, conn)
+	addAuditQueryContextDetails(details, queryCtx)
+	if _, ok := details["database_name"]; !ok && ticket != nil && ticket.DatabaseName != nil {
+		details["database_name"] = strings.TrimSpace(*ticket.DatabaseName)
+	}
+	if _, ok := details["schema_name"]; !ok && ticket != nil && ticket.SchemaName != nil {
+		details["schema_name"] = strings.TrimSpace(*ticket.SchemaName)
+	}
+	return details
 }
 
 func (h *ExportHandler) loadSQLExportTimeoutSettings(ctx context.Context) sqlEditorTimeoutSettings {

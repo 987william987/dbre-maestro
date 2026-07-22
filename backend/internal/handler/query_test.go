@@ -431,7 +431,7 @@ func TestQueryHandlerExecuteAuditsQueryAccessPolicyBlock(t *testing.T) {
 			"granted_via", "source_ticket_id", "expires_at", "revoked_at", "revoked_by", "created_by", "updated_by", "created_at", "updated_at",
 		}))
 	mock.ExpectExec(`INSERT INTO audit_logs \(actor_id, actor_name, action_type, resource_type, resource_id, details, ip_address, created_at\)`).
-		WithArgs(sqlmock.AnyArg(), "pedro", "query_blocked", "db_connection", sqlmock.AnyArg(), auditDetailsReason("query_access_policy"), "10.0.0.9:12345", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "pedro", "query_blocked", "db_connection", sqlmock.AnyArg(), auditDetailsReason("query_access_policy"), "10.0.0.9", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/query/execute", bytes.NewBufferString(`{

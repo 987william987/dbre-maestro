@@ -60,7 +60,8 @@ describe('AuditLogsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View' }))
 
     await waitFor(() => {
-      expect(screen.getByText('Full Details')).toBeInTheDocument()
+      expect(screen.getByText('Raw Details')).toBeInTheDocument()
+      expect(screen.getByText('Summary')).toBeInTheDocument()
       expect(screen.getByText('Timestamp')).toBeInTheDocument()
       expect(screen.getByText('Source IP')).toBeInTheDocument()
     })
