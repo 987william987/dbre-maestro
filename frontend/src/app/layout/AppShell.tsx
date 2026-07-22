@@ -178,7 +178,7 @@ const PAGE_HELP = [
       'If query permission is missing, use the quick request action to create an access ticket from the current connection, database, and table context.',
       'Quick access requests only cover the current context. For multiple databases or tables, submit a dedicated ticket from the ticket workflow.',
       'Temporary sensitive-data access is also generated from the current context and enters the approval workflow automatically.',
-      'Successful executions are recorded in history and audit logs when the operation reaches the backend.',
+      'Successful executions are recorded in history and audit logs when the operation reaches the backend. History shows only your own latest 20 query records.',
     ],
   },
   {

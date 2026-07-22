@@ -54,6 +54,8 @@
    - History
    - Saved queries
 
+   `History` 只顯示目前登入使用者自己的最近 20 筆查詢紀錄。其他使用者的查詢紀錄不會出現在你的 SQL Editor history 中。
+
 6. 若要看執行計畫，點擊 `Explain`。
 
    系統會把當前 statement 包成 `EXPLAIN ...;` 後送出。若原本已是 `EXPLAIN`，就直接沿用。
@@ -72,6 +74,7 @@
 
 - `Run Query` 後，結果區顯示 `row_count` 與 `duration`
 - `Explain` 後，結果區出現執行計畫資料
+- `History` 最多顯示你自己的最近 20 筆查詢紀錄
 - `Saved queries` 可看到新收藏
 - 工單送出後，可在 `/tickets` 看到對應工單
 
