@@ -1094,7 +1094,7 @@ export function TicketDetailPage() {
             {shouldShowActionPanel ? (
               <div className="px-4 pb-4">
                 <p className="text-[12px] font-semibold text-faint">Actions</p>
-                <div className="mt-3">
+                <div className="mt-3 space-y-4">
                   {(canReview || canWithdraw) && ticket.status === 'pending_review' ? (
                     <div className="p-0">
                       <div className="flex flex-col gap-2">
