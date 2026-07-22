@@ -707,7 +707,7 @@ function formatDetailKey(key: string) {
     .join(' ')
 }
 
-function formatDetailValue(value: unknown) {
+function formatDetailValue(value: unknown): string {
   if (Array.isArray(value)) {
     return value.map((item) => formatDetailValue(item)).join(', ')
   }
