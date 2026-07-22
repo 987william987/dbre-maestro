@@ -921,6 +921,69 @@ describe('SQLEditorPage', () => {
     })
   })
 
+  it('套用 History 查詢時保留工作區標題並同步顯示 database context', async () => {
+    mockedListMetadata.mockReset()
+    mockedListMetadata.mockImplementation(async (_connectionId, params) => {
+      if (!params?.database) {
+        return {
+          db_type: 'mysql',
+          level: 'database',
+          items: [{
+            kind: 'database',
+            name: 'maestro',
+            database: 'maestro',
+            schema: 'maestro',
+          }],
+        }
+      }
+      return {
+        db_type: 'mysql',
+        level: 'table',
+        database: params.database,
+        items: [{
+          kind: 'table',
+          name: 'tickets',
+          database: params.database,
+          schema: params.database,
+        }],
+      }
+    })
+    mockedListQueryHistory.mockResolvedValueOnce({
+      history: [{
+        id: 9,
+        db_connection_id: 1,
+        db_connection_name: 'Primary MySQL',
+        database_name: 'maestro',
+        schema_name: null,
+        redis_db_index: null,
+        sql_content: 'SELECT * FROM tickets;',
+        duration_ms: 123,
+        created_at: '2026-07-22T12:50:20Z',
+      }],
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
+    fireEvent.click(screen.getByText('History'))
+
+    expect(await screen.findByText('SELECT * FROM tickets;')).toBeInTheDocument()
+    expect(screen.getByText(/Primary MySQL \/ maestro \/ 123 ms/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('SELECT * FROM tickets;'))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Close Query 1')).toBeInTheDocument()
+      expect(mockedListMetadata).toHaveBeenCalledWith(1, { database: 'maestro' })
+    })
+  })
+
   it('查詢結果表頭顯示 display columns，但保留 raw_columns 給其他用途', async () => {
     mockedExecuteQuery.mockResolvedValue({
       columns: ['id', 'user_id', 'account_id'],

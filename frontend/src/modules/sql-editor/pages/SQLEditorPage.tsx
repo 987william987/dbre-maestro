@@ -386,6 +386,21 @@ function formatSensitiveAccessExpiry(minutes: number) {
   return formatDateTime(expiresAt.toISOString(), true)
 }
 
+function formatHistoryContext(entry: QueryHistoryEntry) {
+  const parts = [entry.db_connection_name]
+  if (entry.redis_db_index !== undefined && entry.redis_db_index !== null) {
+    parts.push(`DB ${entry.redis_db_index}`)
+  } else {
+    if (entry.database_name?.trim()) {
+      parts.push(entry.database_name.trim())
+    }
+    if (entry.schema_name?.trim()) {
+      parts.push(entry.schema_name.trim())
+    }
+  }
+  return parts.join(' / ')
+}
+
 function createTab(seed = 1): EditorTab {
   return {
     id: `tab-${Date.now()}-${seed}`,
@@ -821,6 +836,94 @@ async function buildConnectionRootNode(connection: DBConnection): Promise<AssetT
     item,
     children: [],
   }))
+  return rootNode
+}
+
+async function buildConnectionRootNodeForContext(connection: DBConnection, database: string, schema: string): Promise<AssetTreeNode> {
+  const rootNode = await buildConnectionRootNode(connection)
+  if (!database) {
+    return rootNode
+  }
+
+  const databaseIndex = rootNode.children.findIndex((node) => node.kind === 'database' && node.label === database)
+  if (databaseIndex === -1) {
+    return rootNode
+  }
+
+  const databaseNode = rootNode.children[databaseIndex]
+  databaseNode.expanded = true
+  databaseNode.loading = true
+
+  const databaseResponse = await listMetadata(connection.id, { database })
+  if (connection.db_type !== 'postgres') {
+    databaseNode.children = databaseResponse.items.map((item) => ({
+      id: `table-${connection.id}-${database}-${item.schema}-${item.name}`,
+      kind: 'table' as const,
+      connectionId: connection.id,
+      label: item.name,
+      database,
+      schema: item.schema,
+      active: false,
+      selectable: true,
+      expanded: false,
+      loaded: true,
+      loading: false,
+      item,
+      children: [],
+    }))
+    databaseNode.loaded = true
+    databaseNode.loading = false
+    return rootNode
+  }
+
+  databaseNode.children = databaseResponse.items.map((item) => ({
+    id: `schema-${connection.id}-${database}-${item.name}`,
+    kind: 'schema' as const,
+    connectionId: connection.id,
+    label: item.name,
+    database,
+    schema: item.name,
+    active: false,
+    selectable: true,
+    expanded: item.name === schema,
+    loaded: false,
+    loading: false,
+    item,
+    children: [],
+  }))
+  databaseNode.loaded = true
+  databaseNode.loading = false
+
+  if (!schema) {
+    return rootNode
+  }
+
+  const schemaIndex = databaseNode.children.findIndex((node) => node.kind === 'schema' && node.label === schema)
+  if (schemaIndex === -1) {
+    return rootNode
+  }
+
+  const schemaNode = databaseNode.children[schemaIndex]
+  schemaNode.expanded = true
+  schemaNode.loading = true
+  const tableResponse = await listMetadata(connection.id, { database, schema })
+  schemaNode.children = tableResponse.items.map((item) => ({
+    id: `table-${connection.id}-${database}-${item.schema}-${item.name}`,
+    kind: 'table' as const,
+    connectionId: connection.id,
+    label: item.name,
+    database,
+    schema: item.schema,
+    active: false,
+    selectable: true,
+    expanded: false,
+    loaded: true,
+    loading: false,
+    item,
+    children: [],
+  }))
+  schemaNode.loaded = true
+  schemaNode.loading = false
   return rootNode
 }
 
@@ -1916,34 +2019,61 @@ export function SQLEditorPage() {
     pushToast('Saved query added.', 'success')
   }
 
-  const applySavedQuery = useCallback((entry: { connectionId: number; sql: string; label: string; database?: string | null; schema?: string | null; redisDbIndex?: number | null }) => {
+  const applySavedQuery = useCallback((entry: { connectionId: number; sql: string; label: string; database?: string | null; schema?: string | null; redisDbIndex?: number | null; preserveTitle?: boolean }) => {
     if (!activeTab) {
       return
     }
 
+    const tabID = activeTab.id
+    const connection = accessibleConnections.find((item) => item.id === entry.connectionId) ?? null
+    const nextDatabase = entry.redisDbIndex !== undefined && entry.redisDbIndex !== null ? String(entry.redisDbIndex) : entry.database ?? ''
+    const nextSchema = entry.redisDbIndex !== undefined && entry.redisDbIndex !== null ? '' : entry.schema ?? ''
+    const loadingRootNode = connection
+      ? {
+        ...createConnectionNode(connection, connection.id),
+        expanded: true,
+        loading: true,
+      }
+      : null
+
     setActiveTabId(activeTab.id)
     updateActiveTab({
       connectionId: entry.connectionId,
-      database: entry.database ?? '',
-      schema: entry.schema ?? '',
+      database: nextDatabase,
+      schema: nextSchema,
       selectedTable: null,
       sql: entry.sql,
-      title: entry.label,
+      ...(entry.preserveTitle ? {} : { title: entry.label }),
       result: null,
       error: '',
       columns: [],
       definition: null,
       objectMetaTab: 'columns',
       resultView: 'result',
+      explorerSearch: '',
+      searchTreeNodes: [],
+      metadataError: connection ? '' : 'Selected query connection is no longer available.',
+      ...(loadingRootNode ? { explorerNodes: [loadingRootNode] } : {}),
     })
-    if (entry.redisDbIndex !== undefined && entry.redisDbIndex !== null) {
-      updateActiveTab({
-        database: String(entry.redisDbIndex),
-        schema: '',
-        selectedTable: null,
-      })
+
+    if (!connection) {
+      return
     }
-  }, [activeTab, updateActiveTab])
+
+    void buildConnectionRootNodeForContext(connection, nextDatabase, nextSchema)
+      .then((rootNode) => {
+        updateTabByID(tabID, {
+          explorerNodes: syncAssetTreeActiveStates([rootNode], connection.id, nextDatabase, nextSchema, null),
+          metadataError: '',
+        })
+      })
+      .catch((error) => {
+        updateTabByID(tabID, {
+          explorerNodes: [{ ...createConnectionNode(connection, connection.id), expanded: true, loading: false, loaded: true }],
+          metadataError: formatMetadataError(error),
+        })
+      })
+  }, [accessibleConnections, activeTab, updateActiveTab, updateTabByID])
 
   const isFavorited = !!(activeTab && savedQueries.some((item) =>
     item.db_connection_id === activeTab.connectionId &&
@@ -2683,12 +2813,13 @@ export function SQLEditorPage() {
                               database: entry.database_name,
                               schema: entry.schema_name,
                               redisDbIndex: entry.redis_db_index,
+                              preserveTitle: true,
                             })}
                             className="block w-full px-4 py-3 text-left transition hover:bg-slate-50/70"
                           >
                             <p className="truncate text-[12px] font-semibold text-ink">{entry.sql_content}</p>
                             <p className="mt-1 text-[11px] text-muted">
-                              {entry.db_connection_name} / {entry.duration_ms} ms / {formatDateTime(entry.created_at, true)}
+                              {formatHistoryContext(entry)} / {entry.duration_ms} ms / {formatDateTime(entry.created_at, true)}
                             </p>
                           </button>
                         ))}
