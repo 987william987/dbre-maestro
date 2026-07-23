@@ -253,6 +253,30 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.queryByText('執行流程')).not.toBeInTheDocument()
   })
 
+  it('工單詳情 SQL 內容會以格式化後的形式顯示', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      sql_content: 'select id,name from users where id < 10 order by id',
+    }))
+
+    renderPage()
+
+    const sqlLabel = await screen.findByText('SQL Content')
+    const sqlBlock = sqlLabel.parentElement?.querySelector('pre')
+    expect(sqlBlock?.textContent).toContain('SELECT\n  id,')
+    expect(sqlBlock?.textContent).toContain('FROM\n  users')
+    expect(sqlBlock?.textContent).toContain('ORDER BY\n  id')
+  })
+
   it('非 admin 使用者不顯示 workflow resolution debug trace', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',

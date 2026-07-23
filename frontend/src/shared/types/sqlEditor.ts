@@ -58,6 +58,13 @@ export type MetadataResponse = {
   items: MetadataItem[]
 }
 
+export type MetadataSearchIndexResponse = {
+  db_type: string
+  items: MetadataItem[]
+  limit: number
+  truncated: boolean
+}
+
 export type MetadataColumn = {
   name: string
   data_type: string

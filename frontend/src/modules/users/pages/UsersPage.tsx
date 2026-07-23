@@ -233,6 +233,7 @@ function minutesUntil(value?: string | null) {
 
 export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode }) {
   const { user: currentUser } = useAuth()
+  const canWrite = currentUser?.permissions.includes('users.write') ?? false
   const { pushToast } = useToast()
   const navigate = useNavigate()
   const [viewMode, setViewMode] = useState<ViewMode>(initialView)
@@ -402,6 +403,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   const currentUserCanManageProtectedAccess = canManageProtectedAccess(currentUser)
   const selectedUserSecurityLocked = selectedUserIsProtected && !currentUserCanManageProtectedAccess
   const selectedAuthGroupSecurityLocked = selectedAuthGroupIsProtected && !currentUserCanManageProtectedAccess
+  const userDrawerReadOnly = !canWrite || selectedUserSecurityLocked
+  const authGroupDrawerReadOnly = !canWrite || selectedAuthGroupSecurityLocked
   const protectedAuthGroupNames = useMemo(() => new Set(authGroups.filter((group) => group.protected === true).map((group) => group.name)), [authGroups])
   const authGroupOptions = authGroups.map((group) => group.name)
 
@@ -592,7 +595,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
 
   async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!drawerState) {
+    if (!drawerState || !canWrite) {
       return
     }
 
@@ -634,7 +637,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
 
   async function handleSaveAuthGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!drawerState) {
+    if (!drawerState || !canWrite) {
       return
     }
 
@@ -674,7 +677,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   }
 
   async function handleConfirmSubmit() {
-    if (!confirmState || !drawerState) {
+    if (!confirmState || !drawerState || !canWrite) {
       return
     }
 
@@ -817,6 +820,9 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
 
   async function handleCreateQueryAccessRule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!canWrite) {
+      return
+    }
     if (
       queryAccessRuleDraft.subjectID === '' ||
       queryAccessRuleDraft.connectionID === '' ||
@@ -855,6 +861,9 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   }
 
   function handleEditQueryAccessRule(rule: QueryAccessRule) {
+    if (!canWrite) {
+      return
+    }
     setEditingQueryAccessRuleID(rule.id)
     setQueryAccessRuleDraft({
       subjectType: rule.subject_type,
@@ -874,6 +883,9 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   }
 
   async function handleRevokeQueryAccessRule(ruleID: number) {
+    if (!canWrite) {
+      return
+    }
     setSavingQueryAccessRule(true)
     setError('')
     try {
@@ -1023,24 +1035,26 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
             },
           ]}
         />
-        <div className="flex flex-wrap justify-end gap-2 pb-2">
-          <button
-            type="button"
-            onClick={openCreateUserDrawer}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
-          >
-            <UserPlus className="h-4 w-4" />
-            Create User
-          </button>
-          <button
-            type="button"
-            onClick={openCreateAuthGroupDrawer}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
-          >
-            <Shield className="h-4 w-4" />
-            Create Auth Group
-          </button>
-        </div>
+        {canWrite ? (
+          <div className="flex flex-wrap justify-end gap-2 pb-2">
+            <button
+              type="button"
+              onClick={openCreateUserDrawer}
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
+            >
+              <UserPlus className="h-4 w-4" />
+              Create User
+            </button>
+            <button
+              type="button"
+              onClick={openCreateAuthGroupDrawer}
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+            >
+              <Shield className="h-4 w-4" />
+              Create Auth Group
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {loading ? (
@@ -1100,7 +1114,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                             onClick={() => void openEditUserDrawer(user.id)}
                             className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
                           >
-                            Manage
+                            {canWrite ? 'Manage' : 'View'}
                           </button>
                         </DataTableCell>
                       </DataTableRow>
@@ -1154,7 +1168,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                             onClick={() => void openEditAuthGroupDrawer(group.name as AuthGroup)}
                             className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-md border border-border bg-panel-soft px-3 text-[12px] font-semibold text-ink transition hover:bg-page"
                           >
-                            Manage
+                            {canWrite ? 'Manage' : 'View'}
                           </button>
                         </DataTableCell>
                       </DataTableRow>
@@ -1203,6 +1217,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
             </DataTableSurface>
           ) : (
             <section className="grid gap-3">
+              {canWrite ? (
               <form className="rounded-xl border border-border bg-panel p-4 shadow-soft" onSubmit={handleCreateQueryAccessRule}>
                 <div className="mb-4 flex items-center gap-2">
                   <KeyRound className="h-4 w-4 text-accent" />
@@ -1346,6 +1361,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                 </div>
                 {queryAccessMetadataLoading ? <p className="mt-3 text-[11px] text-muted">Loading metadata options...</p> : null}
               </form>
+              ) : null}
 
               <DataTableSurface>
                 <DataTableScroll>
@@ -1359,7 +1375,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         <DataTableHeaderCell>Source</DataTableHeaderCell>
                         <DataTableHeaderCell>Expires</DataTableHeaderCell>
                         <DataTableHeaderCell>Status</DataTableHeaderCell>
-                        <DataTableHeaderCell>Action</DataTableHeaderCell>
+                        {canWrite ? <DataTableHeaderCell>Action</DataTableHeaderCell> : null}
                       </tr>
                     </DataTableHead>
                     <DataTableBody>
@@ -1384,6 +1400,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                             <DataTableCell>
                               <Tag label={active ? 'active' : rule.revoked_at ? 'revoked' : 'expired'} tone={active ? 'success' : 'default'} />
                             </DataTableCell>
+                            {canWrite ? (
                             <DataTableCell>
                               <div className="flex flex-wrap items-center gap-2">
                                 <button
@@ -1404,6 +1421,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                               </button>
                               </div>
                             </DataTableCell>
+                            ) : null}
                           </DataTableRow>
                         )
                       })}
@@ -1462,7 +1480,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           aria-label="Username"
                           value={userDraft.username}
                           onChange={(event) => setUserDraft((current) => ({ ...current, username: event.target.value }))}
-                          disabled={saving || selectedUserSecurityLocked}
+                          disabled={saving || userDrawerReadOnly}
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
@@ -1472,7 +1490,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           aria-label="Email"
                           value={userDraft.email}
                           onChange={(event) => setUserDraft((current) => ({ ...current, email: event.target.value }))}
-                          disabled={saving || selectedUserSecurityLocked}
+                          disabled={saving || userDrawerReadOnly}
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
@@ -1496,7 +1514,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           aria-label="Lark Open ID"
                           value={userDraft.larkRecipient}
                           onChange={(event) => setUserDraft((current) => ({ ...current, larkRecipient: event.target.value }))}
-                          disabled={saving || selectedUserSecurityLocked}
+                          disabled={saving || userDrawerReadOnly}
                           placeholder="Enter an open_id, for example ou_xxxxxxxxxxxxx"
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
@@ -1508,7 +1526,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           type="password"
                           value={userDraft.password}
                           onChange={(event) => setUserDraft((current) => ({ ...current, password: event.target.value }))}
-                          disabled={saving || selectedUserSecurityLocked}
+                          disabled={saving || userDrawerReadOnly}
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                         />
                       </label>
@@ -1539,7 +1557,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                               <ActionTag
                                 key={group}
                                 label={authGroupLabelMap.get(group) ?? group}
-                                disabled={saving || selectedUserSecurityLocked || (!currentUserCanManageProtectedAccess && protectedAuthGroupNames.has(group))}
+                                disabled={saving || userDrawerReadOnly || (!currentUserCanManageProtectedAccess && protectedAuthGroupNames.has(group))}
                                 onRemove={() => setUserDraft((current) => ({
                                   ...current,
                                   authGroups: current.authGroups.filter((item) => item !== group),
@@ -1554,7 +1572,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           ariaLabel="User auth group membership selection"
                           value={pendingUserAuthGroup}
                           onChange={setPendingUserAuthGroup}
-                          disabled={saving || selectedUserSecurityLocked}
+                          disabled={saving || userDrawerReadOnly}
                           options={[
                             { value: '', label: 'Select auth group' },
                             ...authGroupOptions
@@ -1579,7 +1597,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                             }))
                             setPendingUserAuthGroup('')
                           }}
-                          disabled={saving || selectedUserSecurityLocked || !pendingUserAuthGroup}
+                          disabled={saving || userDrawerReadOnly || !pendingUserAuthGroup}
                           className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-panel-soft px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                         >
                           Add to Group
@@ -1596,7 +1614,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         groupedPermissions={groupPermissions(userDraft.directPermissions)}
                         emptyMessage="No direct permissions assigned yet."
                         removable
-                        disabled={saving || selectedUserSecurityLocked}
+                        disabled={saving || userDrawerReadOnly}
                         onRemove={(permissionKey) => setUserDraft((current) => ({
                           ...current,
                           directPermissions: current.directPermissions.filter((item) => item !== permissionKey),
@@ -1609,7 +1627,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         search={userPermissionSearch}
                         onSearchChange={setUserPermissionSearch}
                         permissions={availableUserPermissions}
-                        disabled={saving || selectedUserSecurityLocked}
+                        disabled={saving || userDrawerReadOnly}
                         emptyMessage="No matches found, or all direct permissions are already assigned."
                         onAdd={(permissionKey) => setUserDraft((current) => ({
                           ...current,
@@ -1629,7 +1647,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         resolveConnection={(connectionId) => connections.find((item) => item.id === connectionId)}
                         emptyMessage="No direct DB scope assigned yet."
                         removable
-                        disabled={saving || selectedUserSecurityLocked}
+                        disabled={saving || userDrawerReadOnly}
                         onRemove={(connectionId) => setUserDraft((current) => ({
                           ...current,
                           directDBConnectionIDs: current.directDBConnectionIDs.filter((item) => item !== connectionId),
@@ -1643,7 +1661,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         onSearchChange={setUserDBScopeSearch}
                         connections={availableUserConnections}
                         emptyMessage="No matches found, or all direct DB scope entries are already assigned."
-                        disabled={saving || selectedUserSecurityLocked}
+                        disabled={saving || userDrawerReadOnly}
                         onAdd={(connectionId) => setUserDraft((current) => ({
                           ...current,
                           directDBConnectionIDs: [...current.directDBConnectionIDs, connectionId],
@@ -1679,7 +1697,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           <button
                             type="button"
                             onClick={() => void refreshSelectedUserSessions(drawerState.userId)}
-                            disabled={sessionsLoading || sessionsActing !== null}
+                            disabled={!canWrite || sessionsLoading || sessionsActing !== null}
                             className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:opacity-50"
                           >
                             <RefreshCw className={`h-3.5 w-3.5 ${sessionsLoading ? 'animate-spin' : ''}`} />
@@ -1688,7 +1706,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           <button
                             type="button"
                             onClick={() => void handleRevokeUserSessions()}
-                            disabled={sessionsLoading || sessionsActing !== null || selectedUserSessions.every((session) => session.revoked_at != null)}
+                            disabled={!canWrite || sessionsLoading || sessionsActing !== null || selectedUserSessions.every((session) => session.revoked_at != null)}
                             className="inline-flex h-9 items-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -1736,7 +1754,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                                         <button
                                           type="button"
                                           onClick={() => void handleRevokeUserSession(session.id)}
-                                          disabled={sessionsActing !== null || revoked}
+                                          disabled={!canWrite || sessionsActing !== null || revoked}
                                           className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-white px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:opacity-50"
                                         >
                                           <Trash2 className="h-3.5 w-3.5" />
@@ -1761,7 +1779,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     </CardSection>
                   ) : null}
 
-                  {drawerState.mode === 'edit-user' && !selectedUserSecurityLocked ? (
+                  {drawerState.mode === 'edit-user' && canWrite && !selectedUserSecurityLocked ? (
                     <CardSection title="Account Controls" icon={<Shield className="h-4 w-4 text-accent" />}>
                       <div className="grid gap-3">
                         <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-panel-soft px-3 py-3">
@@ -1772,7 +1790,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           <button
                             type="button"
                             onClick={() => void handleResetUserMFA()}
-                            disabled={saving || mfaResetting}
+                            disabled={saving || !canWrite || mfaResetting}
                             className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                           >
                             {mfaResetting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -1787,7 +1805,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           <button
                             type="button"
                             onClick={() => setUserDraft((current) => ({ ...current, isActive: !current.isActive, pendingDelete: false }))}
-                            disabled={saving}
+                            disabled={saving || !canWrite}
                             className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-[13px] font-semibold transition disabled:opacity-50 ${
                               userDraft.isActive
                                 ? 'border border-amber-300 bg-amber-100 text-amber-800 hover:bg-amber-200'
@@ -1805,7 +1823,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           <button
                             type="button"
                             onClick={() => setUserDraft((current) => ({ ...current, pendingDelete: !current.pendingDelete }))}
-                            disabled={saving}
+                            disabled={saving || !canWrite}
                             className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-[13px] font-semibold transition ${
                               userDraft.pendingDelete
                                 ? 'border border-border bg-white text-ink hover:bg-page'
@@ -1819,6 +1837,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     </CardSection>
                   ) : null}
 
+                  {canWrite ? (
                   <div className="flex justify-end">
                     <button
                       type="submit"
@@ -1835,6 +1854,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       {drawerState.mode === 'create-user' ? 'Confirm Create' : userDraft.pendingDelete ? 'Confirm Delete' : 'Save Changes'}
                     </button>
                   </div>
+                  ) : null}
 
                   {drawerError ? <InlineAlert>{drawerError}</InlineAlert> : null}
                 </form>
@@ -1848,7 +1868,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           aria-label="Name"
                           value={authGroupDraft.name}
                           onChange={(event) => setAuthGroupDraft((current) => ({ ...current, name: event.target.value }))}
-                          disabled={saving || selectedAuthGroupSecurityLocked}
+                          disabled={saving || authGroupDrawerReadOnly}
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
@@ -1858,7 +1878,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           aria-label="Description"
                           value={authGroupDraft.description}
                           onChange={(event) => setAuthGroupDraft((current) => ({ ...current, description: event.target.value }))}
-                          disabled={saving || selectedAuthGroupSecurityLocked}
+                          disabled={saving || authGroupDrawerReadOnly}
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
@@ -1880,7 +1900,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                               <ActionTag
                                 key={userID}
                                 label={user?.username ?? `User #${userID}`}
-                                disabled={saving || (user?.protected === true && !currentUserCanManageProtectedAccess) || selectedAuthGroupSecurityLocked}
+                                disabled={saving || authGroupDrawerReadOnly || (user?.protected === true && !currentUserCanManageProtectedAccess)}
                                 onRemove={() => setAuthGroupDraft((current) => ({
                                   ...current,
                                   userIDs: current.userIDs.filter((id) => id !== userID),
@@ -1896,7 +1916,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         ariaLabel="Auth Group user selection"
                         value={pendingAuthGroupUserID}
                         onChange={setPendingAuthGroupUserID}
-                        disabled={saving || selectedAuthGroupSecurityLocked}
+                        disabled={saving || authGroupDrawerReadOnly}
                         options={[
                           { value: '', label: 'Select user' },
                           ...users
@@ -1922,7 +1942,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           }))
                           setPendingAuthGroupUserID('')
                         }}
-                        disabled={saving || selectedAuthGroupSecurityLocked || !pendingAuthGroupUserID}
+                        disabled={saving || authGroupDrawerReadOnly || !pendingAuthGroupUserID}
                         className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-panel-soft px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                       >
                         Add User
@@ -1937,7 +1957,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       groupedPermissions={groupPermissions(authGroupDraft.permissions)}
                       emptyMessage="No auth group permissions yet."
                       removable
-                      disabled={saving || selectedAuthGroupSecurityLocked}
+                      disabled={saving || authGroupDrawerReadOnly}
                       onRemove={(permissionKey) => setAuthGroupDraft((current) => ({
                         ...current,
                         permissions: current.permissions.filter((item) => item !== permissionKey),
@@ -1950,7 +1970,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       search={authGroupPermissionSearch}
                       onSearchChange={setAuthGroupPermissionSearch}
                       permissions={availableAuthGroupPermissions}
-                      disabled={saving || selectedAuthGroupSecurityLocked}
+                      disabled={saving || authGroupDrawerReadOnly}
                       emptyMessage="No matches found, or all permissions are already assigned."
                       onAdd={(permissionKey) => setAuthGroupDraft((current) => ({
                         ...current,
@@ -1968,7 +1988,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       resolveConnection={(connectionId) => connections.find((item) => item.id === connectionId)}
                       emptyMessage="No auth group DB scope yet."
                       removable
-                      disabled={saving || selectedAuthGroupSecurityLocked}
+                      disabled={saving || authGroupDrawerReadOnly}
                       onRemove={(connectionId) => setAuthGroupDraft((current) => ({
                         ...current,
                         dbConnectionIDs: current.dbConnectionIDs.filter((item) => item !== connectionId),
@@ -1982,7 +2002,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       onSearchChange={setAuthGroupDBScopeSearch}
                       connections={availableAuthGroupConnections}
                       emptyMessage="No matches found, or all DB scope entries are already assigned."
-                      disabled={saving || selectedAuthGroupSecurityLocked}
+                      disabled={saving || authGroupDrawerReadOnly}
                       onAdd={(connectionId) => setAuthGroupDraft((current) => ({
                         ...current,
                         dbConnectionIDs: [...current.dbConnectionIDs, connectionId],
@@ -1991,7 +2011,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     />
                   </CardSection>
 
-                  {drawerState.mode === 'edit-auth-group' && !selectedAuthGroupIsProtected ? (
+                  {drawerState.mode === 'edit-auth-group' && canWrite && !selectedAuthGroupIsProtected ? (
                     <CardSection title="Account Controls" icon={<Shield className="h-4 w-4 text-accent" />}>
                       <div className="grid gap-3">
                         <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/20 bg-red-50 px-3 py-3">
@@ -2002,7 +2022,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           <button
                             type="button"
                             onClick={() => setAuthGroupDraft((current) => ({ ...current, pendingDelete: !current.pendingDelete }))}
-                            disabled={saving}
+                            disabled={saving || !canWrite}
                             className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-[13px] font-semibold transition ${
                               authGroupDraft.pendingDelete
                                 ? 'border border-border bg-white text-ink hover:bg-page'
@@ -2016,16 +2036,18 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     </CardSection>
                   ) : null}
 
+                  {canWrite ? (
                   <div className="flex justify-end">
                     <button
                       type="submit"
-                      disabled={saving || selectedAuthGroupSecurityLocked || !authGroupDraft.name.trim()}
+                      disabled={saving || authGroupDrawerReadOnly || !authGroupDraft.name.trim()}
                       className="inline-flex h-10 min-w-[180px] items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:opacity-50"
                     >
                       {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                       {drawerState.mode === 'create-auth-group' ? 'Create Auth Group' : authGroupDraft.pendingDelete ? 'Confirm Delete' : 'Save Auth Group'}
                     </button>
                   </div>
+                  ) : null}
 
                   {drawerError ? <InlineAlert>{drawerError}</InlineAlert> : null}
                 </form>

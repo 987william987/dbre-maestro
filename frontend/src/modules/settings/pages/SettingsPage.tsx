@@ -4,6 +4,7 @@ import { Plus, Save, Trash2 } from 'lucide-react'
 import { listAuthGroups } from '@/modules/auth-groups/api'
 import { getSettings, listSettingsDBConnections, patchSettings, previewWorkflowRules } from '@/modules/settings/api'
 import { ApiError } from '@/shared/api/client'
+import { useAuth } from '@/shared/auth/AuthContext'
 import type { AuthGroupSummary } from '@/shared/types/authGroup'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { ApprovalPolicy, PlatformSettings, WorkflowRule, WorkflowRulePreview } from '@/shared/types/settings'
@@ -66,7 +67,9 @@ const WORKFLOW_REVIEW_PERMISSIONS: Record<WorkflowRule['ticket_type'], string[]>
 }
 
 export function SettingsPage() {
+  const { user } = useAuth()
   const { pushToast } = useToast()
+  const canWrite = user?.permissions.includes('settings.write') ?? false
   const [settings, setSettings] = useState<PlatformSettings | null>(null)
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [connections, setConnections] = useState<Array<Pick<DBConnection, 'id' | 'name' | 'db_type' | 'host' | 'port'>>>([])
@@ -143,6 +146,9 @@ export function SettingsPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!canWrite) {
+      return
+    }
     if (!form) {
       return
     }
@@ -215,6 +221,7 @@ export function SettingsPage() {
         <LoadingBlock message="Loading platform settings..." className="min-h-[320px] rounded-xl border-border bg-panel" />
       ) : (
         <form onSubmit={handleSubmit} className="grid gap-3">
+          <fieldset disabled={!canWrite || saving} className="grid gap-3 disabled:opacity-100">
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Lark Notifications</p>
@@ -457,11 +464,13 @@ export function SettingsPage() {
                   authGroups={authGroups}
                   preview={workflowPreviews[index]}
                   isProduction={isProduction}
+                  canWrite={canWrite}
                   onChange={(patch) => updateWorkflowRule(index, patch)}
                   onRemove={() => removeWorkflowRule(index)}
                 />
               ))}
             </div>
+            {canWrite ? (
             <div className="flex justify-end border-t border-border/80 px-4 py-3">
               <button
                 type="button"
@@ -472,8 +481,11 @@ export function SettingsPage() {
                 Add Rule
               </button>
             </div>
+            ) : null}
           </section>
+          </fieldset>
 
+          {canWrite ? (
           <div className="flex justify-end">
             <button
               type="submit"
@@ -484,6 +496,7 @@ export function SettingsPage() {
               {saving ? 'Saving...' : 'Save Settings'}
             </button>
           </div>
+          ) : null}
         </form>
       )}
     </div>
@@ -497,6 +510,7 @@ function WorkflowRuleEditor({
   authGroups,
   preview,
   isProduction,
+  canWrite,
   onChange,
   onRemove,
 }: {
@@ -506,6 +520,7 @@ function WorkflowRuleEditor({
   authGroups: AuthGroupSummary[]
   preview?: WorkflowRulePreview
   isProduction: boolean
+  canWrite: boolean
   onChange: (patch: Partial<WorkflowRule>) => void
   onRemove: () => void
 }) {
@@ -575,6 +590,7 @@ function WorkflowRuleEditor({
           onChange={(value) => onChange({ priority: parsePositiveInt(value, 100) })}
         />
         <div className="flex items-end justify-end">
+          {canWrite ? (
           <button
             type="button"
             onClick={onRemove}
@@ -583,6 +599,7 @@ function WorkflowRuleEditor({
           >
             <Trash2 className="h-4 w-4" />
           </button>
+          ) : null}
         </div>
       </div>
 

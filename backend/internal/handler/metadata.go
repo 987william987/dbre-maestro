@@ -63,6 +63,13 @@ type metadataResponse struct {
 	Items    []metadataItem `json:"items"`
 }
 
+type metadataSearchIndexResponse struct {
+	DBType    string         `json:"db_type"`
+	Items     []metadataItem `json:"items"`
+	Limit     int            `json:"limit"`
+	Truncated bool           `json:"truncated"`
+}
+
 type columnInfo struct {
 	Name       string `json:"name"`
 	DataType   string `json:"data_type"`
@@ -100,6 +107,7 @@ type postgresDefinitionIndex struct {
 
 const metadataTemporaryErrorMessage = "metadata is temporarily unavailable, please try again later"
 const postgresReservedDatabaseRDSAdmin = "rdsadmin"
+const metadataSearchIndexLimit = 50000
 
 func shouldSkipPostgresMetadataDatabase(name string) bool {
 	return strings.EqualFold(strings.TrimSpace(name), postgresReservedDatabaseRDSAdmin)
@@ -175,6 +183,50 @@ func (h *MetadataHandler) Tables(w http.ResponseWriter, r *http.Request) {
 	response, err := h.loadMetadata(ctx, resolvedConn, password, selectedDatabase, selectedSchema)
 	if err != nil {
 		logMetadataQueryError("tables", resolvedConn, selectedDatabase, selectedSchema, "", err)
+		jsonErr(w, http.StatusInternalServerError, metadataTemporaryErrorMessage)
+		return
+	}
+
+	jsonOK(w, response)
+}
+
+// GET /db-connections/{id}/metadata/search-index
+// Returns a bounded database/schema/table index for SQL Editor object search.
+func (h *MetadataHandler) SearchIndex(w http.ResponseWriter, r *http.Request) {
+	connID, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	ok, err := h.checkMetadataAccess(r, connID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "db scope check failed")
+		return
+	}
+	if !ok {
+		jsonErr(w, http.StatusForbidden, "access to this connection is not allowed")
+		return
+	}
+
+	conn, err := h.dbConns.GetByID(r.Context(), connID)
+	if err != nil || conn == nil {
+		jsonErr(w, http.StatusNotFound, "connection not found")
+		return
+	}
+
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	response, err := h.loadSearchIndex(ctx, resolvedConn, password, metadataSearchIndexLimit)
+	if err != nil {
+		logMetadataQueryError("search_index", resolvedConn, "", "", "", err)
 		jsonErr(w, http.StatusInternalServerError, metadataTemporaryErrorMessage)
 		return
 	}
@@ -319,6 +371,261 @@ func (h *MetadataHandler) loadMetadata(
 	default:
 		return h.loadMySQLMetadata(ctx, conn, password, selectedDatabase)
 	}
+}
+
+func (h *MetadataHandler) loadSearchIndex(
+	ctx context.Context,
+	conn *model.DBConnection,
+	password string,
+	limit int,
+) (*metadataSearchIndexResponse, error) {
+	if limit <= 0 {
+		limit = metadataSearchIndexLimit
+	}
+
+	switch conn.DBType {
+	case "postgres", "postgresql":
+		return h.loadPostgresSearchIndex(ctx, conn, password, limit)
+	case "redis":
+		items := buildRedisMetadataItems()
+		if len(items) > limit {
+			return &metadataSearchIndexResponse{DBType: "redis", Items: items[:limit], Limit: limit, Truncated: true}, nil
+		}
+		return &metadataSearchIndexResponse{DBType: "redis", Items: items, Limit: limit}, nil
+	default:
+		return h.loadMySQLSearchIndex(ctx, conn, password, limit)
+	}
+}
+
+func (h *MetadataHandler) loadMySQLSearchIndex(
+	ctx context.Context,
+	conn *model.DBConnection,
+	password string,
+	limit int,
+) (*metadataSearchIndexResponse, error) {
+	queryDB, cleanup, err := h.openQueryDB(conn, password, "")
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	schemaRows, err := queryDB.QueryContext(ctx,
+		`SELECT SCHEMA_NAME
+		 FROM information_schema.SCHEMATA
+		 WHERE SCHEMA_NAME NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys')
+		 ORDER BY SCHEMA_NAME`)
+	if err != nil {
+		return nil, err
+	}
+	defer schemaRows.Close()
+
+	items := make([]metadataItem, 0)
+	seenDatabases := make(map[string]bool)
+	truncated := false
+	for schemaRows.Next() {
+		var database string
+		if err := schemaRows.Scan(&database); err != nil {
+			return nil, err
+		}
+		if len(items) >= limit {
+			truncated = true
+			break
+		}
+		items = append(items, metadataItem{Kind: "database", Name: database, Schema: database})
+		seenDatabases[database] = true
+	}
+	if err := schemaRows.Err(); err != nil {
+		return nil, err
+	}
+	if truncated {
+		return &metadataSearchIndexResponse{DBType: "mysql", Items: items, Limit: limit, Truncated: truncated}, nil
+	}
+
+	rows, err := queryDB.QueryContext(ctx,
+		`SELECT
+			TABLE_SCHEMA,
+			TABLE_NAME,
+			IFNULL(ENGINE, '') AS ENGINE,
+			IFNULL(TABLE_ROWS, 0) AS TABLE_ROWS,
+			IFNULL(DATA_LENGTH, 0) AS DATA_LENGTH,
+			IFNULL(INDEX_LENGTH, 0) AS INDEX_LENGTH,
+			IFNULL(TABLE_COMMENT, '') AS TABLE_COMMENT
+		FROM information_schema.TABLES
+		WHERE TABLE_TYPE = 'BASE TABLE'
+		  AND TABLE_SCHEMA NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys')
+		ORDER BY TABLE_SCHEMA, TABLE_NAME
+		LIMIT ?`,
+		limit+1,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var table metadataItem
+		if err := rows.Scan(&table.Schema, &table.Name, &table.Engine, &table.RowCount, &table.DataSize, &table.IndexSize, &table.Comment); err != nil {
+			return nil, err
+		}
+		if len(items) >= limit {
+			truncated = true
+			break
+		}
+		if !seenDatabases[table.Schema] {
+			items = append(items, metadataItem{Kind: "database", Name: table.Schema, Schema: table.Schema})
+			seenDatabases[table.Schema] = true
+		}
+		if len(items) >= limit {
+			truncated = true
+			break
+		}
+		table.Kind = "table"
+		table.Database = table.Schema
+		items = append(items, table)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &metadataSearchIndexResponse{DBType: "mysql", Items: items, Limit: limit, Truncated: truncated}, nil
+}
+
+func (h *MetadataHandler) loadPostgresSearchIndex(
+	ctx context.Context,
+	conn *model.DBConnection,
+	password string,
+	limit int,
+) (*metadataSearchIndexResponse, error) {
+	baseDB, cleanup, err := h.openQueryDB(conn, password, connectionDatabaseName(conn))
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	dbRows, err := baseDB.QueryContext(ctx,
+		`SELECT datname
+		 FROM pg_database
+		 WHERE datistemplate = false
+		   AND datallowconn = true
+		 ORDER BY datname`)
+	if err != nil {
+		return nil, err
+	}
+	defer dbRows.Close()
+
+	databases := make([]string, 0)
+	for dbRows.Next() {
+		var name string
+		if err := dbRows.Scan(&name); err != nil {
+			return nil, err
+		}
+		if shouldSkipPostgresMetadataDatabase(name) {
+			continue
+		}
+		databases = append(databases, name)
+	}
+	if err := dbRows.Err(); err != nil {
+		return nil, err
+	}
+
+	items := make([]metadataItem, 0)
+	truncated := false
+	for _, database := range databases {
+		if len(items) >= limit {
+			truncated = true
+			break
+		}
+		items = append(items, metadataItem{Kind: "database", Name: database})
+
+		queryDB, cleanup, err := h.openQueryDB(conn, password, database)
+		if err != nil {
+			return nil, err
+		}
+
+		schemaRows, err := queryDB.QueryContext(ctx,
+			`SELECT schema_name
+			 FROM information_schema.schemata
+			 WHERE schema_name NOT IN ('information_schema', 'pg_catalog')
+			 ORDER BY CASE WHEN schema_name = 'public' THEN 0 ELSE 1 END, schema_name`)
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+		seenSchemas := make(map[string]bool)
+		for schemaRows.Next() {
+			var schema string
+			if err := schemaRows.Scan(&schema); err != nil {
+				schemaRows.Close()
+				cleanup()
+				return nil, err
+			}
+			if len(items) >= limit {
+				truncated = true
+				break
+			}
+			items = append(items, metadataItem{Kind: "schema", Name: schema, Database: database, Schema: schema})
+			seenSchemas[schema] = true
+		}
+		if err := schemaRows.Err(); err != nil {
+			schemaRows.Close()
+			cleanup()
+			return nil, err
+		}
+		schemaRows.Close()
+		if truncated {
+			cleanup()
+			break
+		}
+
+		rows, err := queryDB.QueryContext(ctx,
+			`SELECT
+				n.nspname AS table_schema,
+				c.relname AS table_name
+			 FROM pg_class c
+			 JOIN pg_namespace n ON n.oid = c.relnamespace
+			 WHERE n.nspname NOT IN ('information_schema', 'pg_catalog')
+			   AND c.relkind IN ('r', 'p')
+			 ORDER BY n.nspname, c.relname`)
+		if err != nil {
+			cleanup()
+			return nil, err
+		}
+
+		for rows.Next() {
+			var schema string
+			var table string
+			if err := rows.Scan(&schema, &table); err != nil {
+				rows.Close()
+				cleanup()
+				return nil, err
+			}
+			if !seenSchemas[schema] {
+				if len(items) >= limit {
+					truncated = true
+					break
+				}
+				items = append(items, metadataItem{Kind: "schema", Name: schema, Database: database, Schema: schema})
+				seenSchemas[schema] = true
+			}
+			if len(items) >= limit {
+				truncated = true
+				break
+			}
+			items = append(items, metadataItem{Kind: "table", Name: table, Database: database, Schema: schema})
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			cleanup()
+			return nil, err
+		}
+		rows.Close()
+		cleanup()
+		if truncated {
+			break
+		}
+	}
+
+	return &metadataSearchIndexResponse{DBType: "postgres", Items: items, Limit: limit, Truncated: truncated}, nil
 }
 
 func (h *MetadataHandler) loadMySQLMetadata(

@@ -40,6 +40,26 @@ type mysqlSchemaInfo struct {
 	collation string
 }
 
+type mysqlShadowCloneTable struct {
+	database string
+	table    string
+	required bool
+}
+
+type mysqlTableExistenceExpectation string
+
+const (
+	mysqlTableMustExist    mysqlTableExistenceExpectation = "must_exist"
+	mysqlTableMustNotExist mysqlTableExistenceExpectation = "must_not_exist"
+)
+
+type mysqlDDLTableExistenceCheck struct {
+	database    string
+	table       string
+	expectation mysqlTableExistenceExpectation
+	optional    bool
+}
+
 func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64, sqlContent string, databaseName *string) []ticketReviewItem {
 	return h.runTicketSQLReviewWithType(ctx, dbConnID, model.TicketTypeDDL, sqlContent, databaseName)
 }
@@ -182,10 +202,11 @@ func (h *TicketHandler) runMySQLDDLShadowValidation(
 	var tableShadowDB string
 	var tableCleanup func()
 	tableShadowPrepared := false
+	tableShadowCloneTables, tableShadowCloneErr := mysqlDDLShadowCloneTablesForStatements(statements, nullableStringValue(databaseName))
 
 	for _, stmt := range statements {
 		statementKind := string(stmt.Kind)
-		target, rewriteSQL, prepErr, execErr := h.prepareMySQLShadowValidation(ctx, readonlyDB, metaDB, stmt, nullableStringValue(databaseName), &tableShadowDB, &tableCleanup, &tableShadowPrepared)
+		target, rewriteSQL, prepErr, execErr := h.prepareMySQLShadowValidation(ctx, readonlyDB, metaDB, stmt, nullableStringValue(databaseName), tableShadowCloneTables, tableShadowCloneErr, &tableShadowDB, &tableCleanup, &tableShadowPrepared)
 		if prepErr != nil {
 			items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodMySQLShadow, stringPtr(validationStagePrepare), statementKind, target.objectType, 0, []string{sanitizeMySQLShadowValidationError(prepErr)}))
 			continue
@@ -215,6 +236,8 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 	metaDB *sqlx.DB,
 	stmt sqlparse.ParsedStatement,
 	selectedDatabase string,
+	tableShadowCloneTables []mysqlShadowCloneTable,
+	tableShadowCloneErr error,
 	tableShadowDB *string,
 	tableCleanup *func(),
 	tableShadowPrepared *bool,
@@ -230,8 +253,14 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 		if selectedDatabase == "" {
 			return target, "", fmt.Errorf("database_name is required for table validation"), nil
 		}
+		if tableShadowCloneErr != nil {
+			return target, "", tableShadowCloneErr, nil
+		}
+		if err := validateMySQLDDLTableExistence(ctx, readonlyDB, stmt, selectedDatabase); err != nil {
+			return target, rewrittenSQL, nil, err
+		}
 		if !*tableShadowPrepared {
-			shadowName, cleanup, err := cloneMySQLDatabaseToShadow(ctx, readonlyDB, metaDB, selectedDatabase)
+			shadowName, cleanup, err := cloneMySQLDatabaseTablesToShadow(ctx, readonlyDB, metaDB, selectedDatabase, tableShadowCloneTables)
 			if err != nil {
 				return target, "", err, nil
 			}
@@ -297,6 +326,22 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 }
 
 func cloneMySQLDatabaseToShadow(ctx context.Context, readonlyDB *sql.DB, metaDB *sqlx.DB, sourceDatabase string) (string, func(), error) {
+	tables, err := listMySQLBaseTables(ctx, readonlyDB, sourceDatabase)
+	if err != nil {
+		return "", nil, err
+	}
+	cloneTables := make([]mysqlShadowCloneTable, 0, len(tables))
+	for _, tableName := range tables {
+		cloneTables = append(cloneTables, mysqlShadowCloneTable{
+			database: sourceDatabase,
+			table:    tableName,
+			required: true,
+		})
+	}
+	return cloneMySQLDatabaseTablesToShadow(ctx, readonlyDB, metaDB, sourceDatabase, cloneTables)
+}
+
+func cloneMySQLDatabaseTablesToShadow(ctx context.Context, readonlyDB *sql.DB, metaDB *sqlx.DB, sourceDatabase string, tables []mysqlShadowCloneTable) (string, func(), error) {
 	schemaInfo, err := loadMySQLSchemaInfo(ctx, readonlyDB, sourceDatabase)
 	if err != nil {
 		return "", nil, err
@@ -310,14 +355,26 @@ func cloneMySQLDatabaseToShadow(ctx context.Context, readonlyDB *sql.DB, metaDB 
 		_, _ = metaDB.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+quoteMySQLIdentifier(shadowName))
 	}
 
-	tables, err := listMySQLBaseTables(ctx, readonlyDB, sourceDatabase)
-	if err != nil {
-		cleanup()
-		return "", nil, err
-	}
-	for _, tableName := range tables {
-		createTableSQL, err := loadMySQLCreateTableSQL(ctx, readonlyDB, sourceDatabase, tableName)
+	seen := make(map[string]bool, len(tables))
+	for _, table := range tables {
+		tableDatabase := strings.TrimSpace(table.database)
+		if tableDatabase == "" {
+			tableDatabase = sourceDatabase
+		}
+		tableName := strings.TrimSpace(table.table)
+		if tableName == "" {
+			continue
+		}
+		key := tableDatabase + "." + tableName
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		createTableSQL, err := loadMySQLCreateTableSQL(ctx, readonlyDB, tableDatabase, tableName)
 		if err != nil {
+			if !table.required && isMySQLMissingTableError(err) {
+				continue
+			}
 			cleanup()
 			return "", nil, err
 		}
@@ -327,6 +384,260 @@ func cloneMySQLDatabaseToShadow(ctx context.Context, readonlyDB *sql.DB, metaDB 
 		}
 	}
 	return shadowName, cleanup, nil
+}
+
+func mysqlDDLShadowCloneTables(stmt sqlparse.ParsedStatement, selectedDatabase string) ([]mysqlShadowCloneTable, error) {
+	switch ddl := stmt.AST.(type) {
+	case *tidbast.CreateTableStmt:
+		if ddl.Table == nil {
+			return nil, fmt.Errorf("CREATE TABLE target is empty")
+		}
+		items := make([]mysqlShadowCloneTable, 0, 1)
+		if ddl.ReferTable != nil {
+			items = append(items, mysqlShadowCloneTableForName(ddl.ReferTable, selectedDatabase, true))
+		}
+		items = append(items, mysqlCreateTableReferenceClones(ddl, selectedDatabase)...)
+		return items, nil
+	case *tidbast.AlterTableStmt:
+		if ddl.Table == nil {
+			return nil, fmt.Errorf("ALTER TABLE target is empty")
+		}
+		items := []mysqlShadowCloneTable{mysqlShadowCloneTableForName(ddl.Table, selectedDatabase, true)}
+		items = append(items, mysqlAlterTableReferenceClones(ddl, selectedDatabase)...)
+		return items, nil
+	case *tidbast.DropTableStmt:
+		items := make([]mysqlShadowCloneTable, 0, len(ddl.Tables))
+		for _, table := range ddl.Tables {
+			if table == nil {
+				continue
+			}
+			items = append(items, mysqlShadowCloneTableForName(table, selectedDatabase, !ddl.IfExists))
+		}
+		return items, nil
+	case *tidbast.TruncateTableStmt:
+		if ddl.Table == nil {
+			return nil, fmt.Errorf("TRUNCATE TABLE target is empty")
+		}
+		return []mysqlShadowCloneTable{mysqlShadowCloneTableForName(ddl.Table, selectedDatabase, true)}, nil
+	case *tidbast.RenameTableStmt:
+		items := make([]mysqlShadowCloneTable, 0, len(ddl.TableToTables)*2)
+		for _, tablePair := range ddl.TableToTables {
+			if tablePair == nil {
+				continue
+			}
+			if tablePair.OldTable != nil {
+				items = append(items, mysqlShadowCloneTableForName(tablePair.OldTable, selectedDatabase, true))
+			}
+			if tablePair.NewTable != nil {
+				items = append(items, mysqlShadowCloneTableForName(tablePair.NewTable, selectedDatabase, false))
+			}
+		}
+		return items, nil
+	default:
+		return nil, nil
+	}
+}
+
+func mysqlDDLShadowCloneTablesForStatements(statements []sqlparse.ParsedStatement, selectedDatabase string) ([]mysqlShadowCloneTable, error) {
+	items := make([]mysqlShadowCloneTable, 0)
+	for _, stmt := range statements {
+		nextItems, err := mysqlDDLShadowCloneTables(stmt, selectedDatabase)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, nextItems...)
+	}
+	return items, nil
+}
+
+func mysqlDDLTableExistenceChecks(stmt sqlparse.ParsedStatement, selectedDatabase string) ([]mysqlDDLTableExistenceCheck, error) {
+	switch ddl := stmt.AST.(type) {
+	case *tidbast.CreateTableStmt:
+		if ddl.Table == nil {
+			return nil, fmt.Errorf("CREATE TABLE target is empty")
+		}
+		items := []mysqlDDLTableExistenceCheck{
+			mysqlTableExistenceCheckForName(ddl.Table, selectedDatabase, mysqlTableMustNotExist, ddl.IfNotExists),
+		}
+		if ddl.ReferTable != nil {
+			items = append(items, mysqlTableExistenceCheckForName(ddl.ReferTable, selectedDatabase, mysqlTableMustExist, false))
+		}
+		items = append(items, mysqlCreateTableReferenceExistenceChecks(ddl, selectedDatabase)...)
+		return items, nil
+	case *tidbast.AlterTableStmt:
+		if ddl.Table == nil {
+			return nil, fmt.Errorf("ALTER TABLE target is empty")
+		}
+		items := []mysqlDDLTableExistenceCheck{
+			mysqlTableExistenceCheckForName(ddl.Table, selectedDatabase, mysqlTableMustExist, false),
+		}
+		items = append(items, mysqlAlterTableReferenceExistenceChecks(ddl, selectedDatabase)...)
+		return items, nil
+	case *tidbast.DropTableStmt:
+		items := make([]mysqlDDLTableExistenceCheck, 0, len(ddl.Tables))
+		for _, table := range ddl.Tables {
+			if table == nil {
+				continue
+			}
+			items = append(items, mysqlTableExistenceCheckForName(table, selectedDatabase, mysqlTableMustExist, ddl.IfExists))
+		}
+		return items, nil
+	case *tidbast.TruncateTableStmt:
+		if ddl.Table == nil {
+			return nil, fmt.Errorf("TRUNCATE TABLE target is empty")
+		}
+		return []mysqlDDLTableExistenceCheck{
+			mysqlTableExistenceCheckForName(ddl.Table, selectedDatabase, mysqlTableMustExist, false),
+		}, nil
+	case *tidbast.RenameTableStmt:
+		items := make([]mysqlDDLTableExistenceCheck, 0, len(ddl.TableToTables)*2)
+		for _, tablePair := range ddl.TableToTables {
+			if tablePair == nil {
+				continue
+			}
+			if tablePair.OldTable != nil {
+				items = append(items, mysqlTableExistenceCheckForName(tablePair.OldTable, selectedDatabase, mysqlTableMustExist, false))
+			}
+			if tablePair.NewTable != nil {
+				items = append(items, mysqlTableExistenceCheckForName(tablePair.NewTable, selectedDatabase, mysqlTableMustNotExist, false))
+			}
+		}
+		return items, nil
+	default:
+		return nil, nil
+	}
+}
+
+func validateMySQLDDLTableExistence(ctx context.Context, db *sql.DB, stmt sqlparse.ParsedStatement, selectedDatabase string) error {
+	checks, err := mysqlDDLTableExistenceChecks(stmt, selectedDatabase)
+	if err != nil {
+		return err
+	}
+	for _, check := range checks {
+		if strings.TrimSpace(check.database) == "" || strings.TrimSpace(check.table) == "" {
+			return fmt.Errorf("table name is empty")
+		}
+		exists, err := mysqlTableExists(ctx, db, check.database, check.table)
+		if err != nil {
+			return fmt.Errorf("check table exists failed: %w", err)
+		}
+		switch check.expectation {
+		case mysqlTableMustExist:
+			if !exists && !check.optional {
+				return fmt.Errorf("table %q does not exist", check.table)
+			}
+		case mysqlTableMustNotExist:
+			if exists && !check.optional {
+				return fmt.Errorf("table %q already exists", check.table)
+			}
+		}
+	}
+	return nil
+}
+
+func mysqlTableExistenceCheckForName(table *tidbast.TableName, selectedDatabase string, expectation mysqlTableExistenceExpectation, optional bool) mysqlDDLTableExistenceCheck {
+	databaseName := table.Schema.O
+	if strings.TrimSpace(databaseName) == "" {
+		databaseName = selectedDatabase
+	}
+	return mysqlDDLTableExistenceCheck{
+		database:    databaseName,
+		table:       table.Name.O,
+		expectation: expectation,
+		optional:    optional,
+	}
+}
+
+func mysqlShadowCloneTableForName(table *tidbast.TableName, selectedDatabase string, required bool) mysqlShadowCloneTable {
+	databaseName := table.Schema.O
+	if strings.TrimSpace(databaseName) == "" {
+		databaseName = selectedDatabase
+	}
+	return mysqlShadowCloneTable{
+		database: databaseName,
+		table:    table.Name.O,
+		required: required,
+	}
+}
+
+func mysqlCreateTableReferenceExistenceChecks(ddl *tidbast.CreateTableStmt, selectedDatabase string) []mysqlDDLTableExistenceCheck {
+	items := make([]mysqlDDLTableExistenceCheck, 0)
+	for _, clone := range mysqlCreateTableReferenceClones(ddl, selectedDatabase) {
+		items = append(items, mysqlDDLTableExistenceCheck{
+			database:    clone.database,
+			table:       clone.table,
+			expectation: mysqlTableMustExist,
+		})
+	}
+	return items
+}
+
+func mysqlAlterTableReferenceExistenceChecks(ddl *tidbast.AlterTableStmt, selectedDatabase string) []mysqlDDLTableExistenceCheck {
+	items := make([]mysqlDDLTableExistenceCheck, 0)
+	for _, clone := range mysqlAlterTableReferenceClones(ddl, selectedDatabase) {
+		items = append(items, mysqlDDLTableExistenceCheck{
+			database:    clone.database,
+			table:       clone.table,
+			expectation: mysqlTableMustExist,
+		})
+	}
+	return items
+}
+
+func mysqlCreateTableReferenceClones(ddl *tidbast.CreateTableStmt, selectedDatabase string) []mysqlShadowCloneTable {
+	items := make([]mysqlShadowCloneTable, 0)
+	for _, column := range ddl.Cols {
+		if column == nil {
+			continue
+		}
+		for _, option := range column.Options {
+			if option != nil && option.Refer != nil && option.Refer.Table != nil {
+				items = append(items, mysqlShadowCloneTableForName(option.Refer.Table, selectedDatabase, true))
+			}
+		}
+	}
+	for _, constraint := range ddl.Constraints {
+		if constraint != nil && constraint.Refer != nil && constraint.Refer.Table != nil {
+			items = append(items, mysqlShadowCloneTableForName(constraint.Refer.Table, selectedDatabase, true))
+		}
+	}
+	return items
+}
+
+func mysqlAlterTableReferenceClones(ddl *tidbast.AlterTableStmt, selectedDatabase string) []mysqlShadowCloneTable {
+	items := make([]mysqlShadowCloneTable, 0)
+	for _, spec := range ddl.Specs {
+		if spec == nil {
+			continue
+		}
+		for _, column := range spec.NewColumns {
+			if column == nil {
+				continue
+			}
+			for _, option := range column.Options {
+				if option != nil && option.Refer != nil && option.Refer.Table != nil {
+					items = append(items, mysqlShadowCloneTableForName(option.Refer.Table, selectedDatabase, true))
+				}
+			}
+		}
+		if spec.Constraint != nil && spec.Constraint.Refer != nil && spec.Constraint.Refer.Table != nil {
+			items = append(items, mysqlShadowCloneTableForName(spec.Constraint.Refer.Table, selectedDatabase, true))
+		}
+		for _, constraint := range spec.NewConstraints {
+			if constraint != nil && constraint.Refer != nil && constraint.Refer.Table != nil {
+				items = append(items, mysqlShadowCloneTableForName(constraint.Refer.Table, selectedDatabase, true))
+			}
+		}
+	}
+	return items
+}
+
+func isMySQLMissingTableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "error 1146") || strings.Contains(message, "doesn't exist")
 }
 
 func sanitizeMySQLShadowValidationError(err error) string {
@@ -529,6 +840,22 @@ func mysqlDatabaseExists(ctx context.Context, db *sql.DB, databaseName string) (
 		 FROM information_schema.SCHEMATA
 		 WHERE SCHEMA_NAME = ?`,
 		databaseName,
+	).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func mysqlTableExists(ctx context.Context, db *sql.DB, databaseName, tableName string) (bool, error) {
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*)
+		 FROM information_schema.TABLES
+		 WHERE TABLE_SCHEMA = ?
+		   AND TABLE_NAME = ?
+		   AND TABLE_TYPE = 'BASE TABLE'`,
+		databaseName,
+		tableName,
 	).Scan(&count); err != nil {
 		return false, err
 	}

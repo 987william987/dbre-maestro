@@ -581,6 +581,9 @@ export function MaskingRulesPage() {
   }
 
   async function handleDelete() {
+    if (!canWrite) {
+      return
+    }
     if (!pendingDelete) {
       return
     }
@@ -610,14 +613,6 @@ export function MaskingRulesPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      {!canWrite ? (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="rounded-lg border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
-            This account only has `masking_rules.read`. You can view rules but cannot modify them.
-          </div>
-        </div>
-      ) : null}
-
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
           <SectionCard
@@ -639,7 +634,7 @@ export function MaskingRulesPage() {
               <EmptyState message="No global masking rules yet." />
             ) : (
               <CompactTable
-                headers={['Pattern', 'Match', 'Mode', 'Config', 'Created', 'Status', 'Actions']}
+                headers={canWrite ? ['Pattern', 'Match', 'Mode', 'Config', 'Created', 'Status', 'Actions'] : ['Pattern', 'Match', 'Mode', 'Config', 'Created', 'Status']}
                 rows={pagedRules.map((rule) => ({
                   key: `rule-${rule.id}`,
                   cells: [
@@ -659,13 +654,15 @@ export function MaskingRulesPage() {
                       />
                       <span className="text-[12px] text-muted">{rule.enabled ? 'Enabled' : 'Disabled'}</span>
                     </div>,
-                    <ActionCell
-                      key="actions"
-                      canWrite={canWrite}
-                      onEdit={() => openRuleDrawer({ mode: 'edit', rule })}
-                      onDelete={() => setPendingDelete({ kind: 'rule', id: rule.id })}
-                      deleting={deletingKey === `rule:${rule.id}`}
-                    />,
+                    ...(canWrite ? [
+                      <ActionCell
+                        key="actions"
+                        canWrite={canWrite}
+                        onEdit={() => openRuleDrawer({ mode: 'edit', rule })}
+                        onDelete={() => setPendingDelete({ kind: 'rule', id: rule.id })}
+                        deleting={deletingKey === `rule:${rule.id}`}
+                      />,
+                    ] : []),
                   ],
                 }))}
               />
@@ -698,7 +695,7 @@ export function MaskingRulesPage() {
               <EmptyState message="No whitelist entries yet." />
             ) : (
               <CompactTable
-                headers={['Connection', 'Target', 'Created', 'Status', 'Actions']}
+                headers={canWrite ? ['Connection', 'Target', 'Created', 'Status', 'Actions'] : ['Connection', 'Target', 'Created', 'Status']}
                 rows={pagedWhitelist.map((entry) => ({
                   key: `whitelist-${entry.id}`,
                   cells: [
@@ -714,13 +711,15 @@ export function MaskingRulesPage() {
                       />
                       <span className="text-[12px] text-muted">{entry.enabled ? 'Enabled' : 'Disabled'}</span>
                     </div>,
-                    <ActionCell
-                      key="actions"
-                      canWrite={canWrite}
-                      onEdit={() => openWhitelistDrawer({ mode: 'edit', entry })}
-                      onDelete={() => setPendingDelete({ kind: 'whitelist', id: entry.id })}
-                      deleting={deletingKey === `whitelist:${entry.id}`}
-                    />,
+                    ...(canWrite ? [
+                      <ActionCell
+                        key="actions"
+                        canWrite={canWrite}
+                        onEdit={() => openWhitelistDrawer({ mode: 'edit', entry })}
+                        onDelete={() => setPendingDelete({ kind: 'whitelist', id: entry.id })}
+                        deleting={deletingKey === `whitelist:${entry.id}`}
+                      />,
+                    ] : []),
                   ],
                 }))}
               />
@@ -753,7 +752,7 @@ export function MaskingRulesPage() {
               <EmptyState message="No Redis sensitive key prefixes yet." />
             ) : (
               <CompactTable
-                headers={['Connection', 'DB', 'Prefix', 'Reason', 'Created', 'Status', 'Actions']}
+                headers={canWrite ? ['Connection', 'DB', 'Prefix', 'Reason', 'Created', 'Status', 'Actions'] : ['Connection', 'DB', 'Prefix', 'Reason', 'Created', 'Status']}
                 rows={pagedRedisPrefixes.map((prefix) => ({
                   key: `redis-prefix-${prefix.id}`,
                   cells: [
@@ -771,13 +770,15 @@ export function MaskingRulesPage() {
                       />
                       <span className="text-[12px] text-muted">{prefix.is_active ? 'Enabled' : 'Disabled'}</span>
                     </div>,
-                    <ActionCell
-                      key="actions"
-                      canWrite={canWrite}
-                      onEdit={() => openRedisPrefixDrawer({ mode: 'edit', prefix })}
-                      onDelete={() => setPendingDelete({ kind: 'redisPrefix', id: prefix.id })}
-                      deleting={deletingKey === `redisPrefix:${prefix.id}`}
-                    />,
+                    ...(canWrite ? [
+                      <ActionCell
+                        key="actions"
+                        canWrite={canWrite}
+                        onEdit={() => openRedisPrefixDrawer({ mode: 'edit', prefix })}
+                        onDelete={() => setPendingDelete({ kind: 'redisPrefix', id: prefix.id })}
+                        deleting={deletingKey === `redisPrefix:${prefix.id}`}
+                      />,
+                    ] : []),
                   ],
                 }))}
               />

@@ -158,6 +158,8 @@ SQL Editor 走 `query` pool profile。預設值：
 | `POST /api/query/saved-queries` | 新增收藏 |
 | `DELETE /api/query/saved-queries/{id}` | 刪除收藏 |
 
+`GET /api/query/history` 只回傳目前登入使用者自己的最近 20 筆查詢紀錄；不會列出其他使用者的 SQL Editor history。
+
 ## Metadata Explorer
 
 SQL Editor 左側資產樹使用：

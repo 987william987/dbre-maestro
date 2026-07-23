@@ -64,6 +64,7 @@ export function DropdownSelect({
     },
     [options, value],
   )
+  const displayAsPlaceholder = !selectedOption || selectedOption.value === '' || selectedOption.value === 'all'
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -97,15 +98,15 @@ export function DropdownSelect({
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
         className={cn(
-          'flex w-full items-center justify-between border border-border bg-white text-left text-ink transition disabled:cursor-not-allowed disabled:opacity-60',
+          'flex w-full items-center justify-between rounded-lg border border-border bg-white text-left transition disabled:cursor-not-allowed disabled:opacity-60',
           size === 'md'
-            ? 'h-9 rounded-lg px-4 text-[12px] font-medium shadow-soft'
-            : 'h-9 rounded-md px-3 text-[12px] font-medium shadow-soft',
+            ? 'h-9 px-3 text-[12px] font-medium'
+            : 'h-9 px-3 text-[12px] font-medium',
           open ? 'border-slate-300' : 'hover:border-slate-300',
           triggerClassName,
         )}
       >
-        <span className="truncate pr-3">{selectedOption?.label ?? placeholder ?? 'Select'}</span>
+        <span className={cn('truncate pr-3', displayAsPlaceholder ? 'text-muted' : 'text-ink')}>{selectedOption?.label ?? placeholder ?? 'Select'}</span>
         <ChevronDown className={cn('h-4 w-4 shrink-0 text-faint transition-transform', open && 'rotate-180')} />
       </button>
 

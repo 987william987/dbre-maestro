@@ -7,7 +7,6 @@ import { Prec } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import { format as formatSQL, type SqlLanguage } from 'sql-formatter'
 import {
-  Check,
   Database,
   Download,
   Filter,
@@ -18,6 +17,7 @@ import {
   Layers3,
   Play,
   Plus,
+  RefreshCw,
   Star,
   StarOff,
   Table2,
@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { formatDateTime } from '@/shared/lib/format'
+import { useDebouncedValue } from '@/shared/lib/useDebouncedValue'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataColumn, MetadataDefinition, MetadataItem, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
@@ -51,9 +52,14 @@ import {
   listMetadata,
   listMetadataColumns,
   listMetadataDefinition,
+  listMetadataSearchIndex,
   listQueryHistory,
   listSavedQueries,
 } from '@/modules/sql-editor/api'
+import {
+  getSQLEditorWorkspaceSnapshot,
+  saveSQLEditorWorkspaceSnapshot,
+} from '@/modules/sql-editor/workspaceMemory'
 
 type EditorTab = {
   id: string
@@ -67,6 +73,10 @@ type EditorTab = {
   searchTreeNodes: AssetTreeNode[]
   explorerSearch: string
   searchingAssets: boolean
+  searchIndexStatus: 'idle' | 'loading' | 'ready' | 'error' | 'stale'
+  searchIndexItems: MetadataItem[]
+  searchIndexTruncated: boolean
+  searchIndexError: string
   assetPickerOpen: boolean
   assetPickerSearch: string
   resultView: 'result' | 'vertical' | 'object-meta' | 'history' | 'saved'
@@ -128,10 +138,17 @@ type SensitiveAccessDurationDialogState = {
   error: string
 }
 
+type SQLEditorWorkspaceDraft = {
+  tabs: EditorTab[]
+  activeTabId: string
+  editorHeights: Record<string, string>
+}
+
 const DEFAULT_SQL = 'SELECT 1;'
 const HISTORY_LIMIT = 20
 const SAVED_QUERY_LIMIT = 10
 const MAX_EDITOR_TABS = 10
+const SEARCH_INDEX_MIN_KEYWORD_LENGTH = 3
 const EDITOR_BASE_VISIBLE_LINES = 12
 const EDITOR_MAX_HEIGHT = 840
 type QueryConstraints = {
@@ -149,8 +166,8 @@ const DEFAULT_QUERY_CONSTRAINTS = {
   mysql_max_execution_time_ms: 25000,
   postgres_statement_timeout_ms: 25000,
 } satisfies QueryConstraints
-const EDITOR_LINE_HEIGHT = 24
-const EDITOR_VERTICAL_PADDING = 24
+const EDITOR_LINE_HEIGHT = 18.2
+const EDITOR_VERTICAL_PADDING = 8
 const EDITOR_MIN_HEIGHT = EDITOR_VERTICAL_PADDING + EDITOR_BASE_VISIBLE_LINES * EDITOR_LINE_HEIGHT
 const RESULT_PAGE_SIZE = 50
 const METADATA_ERROR_MESSAGE = 'Metadata is temporarily unavailable. Please try again later.'
@@ -169,6 +186,15 @@ const SQL_EDITOR_BASIC_SETUP = {
   lineNumbers: true,
   foldGutter: false,
   highlightActiveLine: false,
+}
+
+function shouldAutofillTableQuery(sqlText: string) {
+  const trimmed = sqlText.trim()
+  return trimmed === '' || trimmed === DEFAULT_SQL
+}
+
+function buildTableSelectSQL(tableName: string) {
+  return `SELECT * FROM ${tableName};`
 }
 
 type SQLFormatProfile = {
@@ -386,6 +412,21 @@ function formatSensitiveAccessExpiry(minutes: number) {
   return formatDateTime(expiresAt.toISOString(), true)
 }
 
+function formatHistoryContext(entry: QueryHistoryEntry) {
+  const parts = [entry.db_connection_name]
+  if (entry.redis_db_index !== undefined && entry.redis_db_index !== null) {
+    parts.push(`DB ${entry.redis_db_index}`)
+  } else {
+    if (entry.database_name?.trim()) {
+      parts.push(entry.database_name.trim())
+    }
+    if (entry.schema_name?.trim()) {
+      parts.push(entry.schema_name.trim())
+    }
+  }
+  return parts.join(' / ')
+}
+
 function createTab(seed = 1): EditorTab {
   return {
     id: `tab-${Date.now()}-${seed}`,
@@ -399,6 +440,10 @@ function createTab(seed = 1): EditorTab {
     searchTreeNodes: [],
     explorerSearch: '',
     searchingAssets: false,
+    searchIndexStatus: 'idle',
+    searchIndexItems: [],
+    searchIndexTruncated: false,
+    searchIndexError: '',
     assetPickerOpen: false,
     assetPickerSearch: '',
     resultView: 'result',
@@ -420,6 +465,57 @@ function createTab(seed = 1): EditorTab {
     result: null,
     error: '',
     lastRunAt: null,
+  }
+}
+
+function sanitizeAssetTreeForWorkspaceMemory(nodes: AssetTreeNode[]): AssetTreeNode[] {
+  return nodes.map((node) => ({
+    ...node,
+    loading: false,
+    children: sanitizeAssetTreeForWorkspaceMemory(node.children),
+  }))
+}
+
+function sanitizeTabForWorkspaceMemory(tab: EditorTab): EditorTab {
+  return {
+    ...tab,
+    metadataError: '',
+    explorerNodes: sanitizeAssetTreeForWorkspaceMemory(tab.explorerNodes),
+    searchTreeNodes: sanitizeAssetTreeForWorkspaceMemory(tab.searchTreeNodes),
+    searchingAssets: false,
+    searchIndexStatus: tab.searchIndexStatus === 'ready' ? 'ready' : 'idle',
+    searchIndexError: '',
+    assetPickerOpen: false,
+    resultView: tab.resultView === 'vertical' ? 'result' : tab.resultView,
+    columns: [],
+    definition: null,
+    columnsLoading: false,
+    definitionLoading: false,
+    columnFilterOpen: false,
+    visibleColumnIndexes: null,
+    executedSQL: null,
+    executedConnectionId: null,
+    executedDatabase: '',
+    executedSchema: '',
+    result: null,
+    error: '',
+    lastRunAt: null,
+  }
+}
+
+function workspaceDraftFromSnapshot(ownerKey: string): SQLEditorWorkspaceDraft | null {
+  const snapshot = getSQLEditorWorkspaceSnapshot<EditorTab>(ownerKey)
+  if (!snapshot || snapshot.tabs.length === 0) {
+    return null
+  }
+  const tabs = snapshot.tabs.map(sanitizeTabForWorkspaceMemory)
+  const activeTabId = tabs.some((tab) => tab.id === snapshot.activeTabId)
+    ? snapshot.activeTabId
+    : tabs[0].id
+  return {
+    tabs,
+    activeTabId,
+    editorHeights: { ...snapshot.editorHeights },
   }
 }
 
@@ -659,14 +755,29 @@ function matchesAssetKeyword(node: {
   )
 }
 
-async function buildSearchNodes(connection: DBConnection, keyword: string): Promise<AssetTreeNode[]> {
+function matchesMetadataItemKeyword(item: MetadataItem, keyword: string) {
+  return matchesAssetKeyword({
+    label: item.name,
+    database: item.database,
+    schema: item.schema,
+  }, keyword)
+}
+
+function buildSearchTreeFromIndex(
+  connection: DBConnection,
+  items: MetadataItem[],
+  keyword: string,
+  selectedDatabase: string,
+  selectedSchema: string,
+  selectedTable: MetadataItem | null,
+): AssetTreeNode[] {
   const rootNode = createConnectionNode(connection, connection.id)
   rootNode.expanded = true
   rootNode.loaded = true
 
   if (connection.db_type === 'redis') {
-    const response = await listMetadata(connection.id)
-    rootNode.children = response.items
+    rootNode.children = items
+      .filter((item) => item.kind === 'redis_db')
       .map((item) => ({
         id: `redis-db-${connection.id}-${item.name}`,
         kind: 'redis_db' as const,
@@ -683,101 +794,114 @@ async function buildSearchNodes(connection: DBConnection, keyword: string): Prom
         children: [],
       }))
       .filter((node) => matchesAssetKeyword(node, keyword))
-
-    return rootNode.children.length > 0 || matchesAssetKeyword(rootNode, keyword) ? [rootNode] : []
+    return syncAssetTreeActiveStates([rootNode], connection.id, selectedDatabase, selectedSchema, selectedTable)
   }
 
-  const databaseResponse = await listMetadata(connection.id)
-  const databaseNodes = await Promise.all(databaseResponse.items.map(async (databaseItem) => {
-    const databaseNode: AssetTreeNode = {
-      id: `database-${connection.id}-${databaseItem.name}`,
+  const databaseNodes = new Map<string, AssetTreeNode>()
+  const schemaNodes = new Map<string, AssetTreeNode>()
+  const ensureDatabaseNode = (database: string, item?: MetadataItem) => {
+    const key = database
+    const existing = databaseNodes.get(key)
+    if (existing) {
+      return existing
+    }
+    const node: AssetTreeNode = {
+      id: `database-${connection.id}-${database}`,
       kind: 'database',
       connectionId: connection.id,
-      label: databaseItem.name,
-      database: databaseItem.name,
-      schema: databaseItem.schema,
+      label: database,
+      database,
+      schema: item?.schema,
       active: false,
       selectable: true,
       expanded: true,
       loaded: true,
       loading: false,
-      item: databaseItem,
+      item,
       children: [],
     }
-
-    if (connection.db_type === 'postgres') {
-      const schemaResponse = await listMetadata(connection.id, { database: databaseItem.name })
-      const schemaNodes = await Promise.all(schemaResponse.items.map(async (schemaItem) => {
-        const schemaNode: AssetTreeNode = {
-          id: `schema-${connection.id}-${databaseItem.name}-${schemaItem.name}`,
-          kind: 'schema',
-          connectionId: connection.id,
-          label: schemaItem.name,
-          database: databaseItem.name,
-          schema: schemaItem.name,
-          active: false,
-          selectable: true,
-          expanded: true,
-          loaded: true,
-          loading: false,
-          item: schemaItem,
-          children: [],
-        }
-
-        const tableResponse = await listMetadata(connection.id, {
-          database: databaseItem.name,
-          schema: schemaItem.name,
-        })
-
-        schemaNode.children = tableResponse.items
-          .map((tableItem) => ({
-            id: `table-${connection.id}-${databaseItem.name}-${tableItem.schema}-${tableItem.name}`,
-            kind: 'table' as const,
-            connectionId: connection.id,
-            label: tableItem.name,
-            database: databaseItem.name,
-            schema: tableItem.schema,
-            active: false,
-            selectable: true,
-            expanded: false,
-            loaded: true,
-            loading: false,
-            item: tableItem,
-            children: [],
-          }))
-          .filter((node) => matchesAssetKeyword(node, keyword))
-
-        return matchesAssetKeyword(schemaNode, keyword) || schemaNode.children.length > 0 ? schemaNode : null
-      }))
-
-      databaseNode.children = schemaNodes.filter((node): node is AssetTreeNode => node !== null)
-      return matchesAssetKeyword(databaseNode, keyword) || databaseNode.children.length > 0 ? databaseNode : null
+    databaseNodes.set(key, node)
+    return node
+  }
+  const ensureSchemaNode = (database: string, schema: string, item?: MetadataItem) => {
+    const key = `${database}\u0000${schema}`
+    const existing = schemaNodes.get(key)
+    if (existing) {
+      return existing
     }
+    const databaseNode = ensureDatabaseNode(database)
+    const node: AssetTreeNode = {
+      id: `schema-${connection.id}-${database}-${schema}`,
+      kind: 'schema',
+      connectionId: connection.id,
+      label: schema,
+      database,
+      schema,
+      active: false,
+      selectable: true,
+      expanded: true,
+      loaded: true,
+      loading: false,
+      item,
+      children: [],
+    }
+    schemaNodes.set(key, node)
+    databaseNode.children.push(node)
+    return node
+  }
 
-    const tableResponse = await listMetadata(connection.id, { database: databaseItem.name })
-    databaseNode.children = tableResponse.items
-      .map((tableItem) => ({
-        id: `table-${connection.id}-${databaseItem.name}-${tableItem.schema}-${tableItem.name}`,
-        kind: 'table' as const,
-        connectionId: connection.id,
-        label: tableItem.name,
-        database: databaseItem.name,
-        schema: tableItem.schema,
-        active: false,
-        selectable: true,
-        expanded: false,
-        loaded: true,
-        loading: false,
-        item: tableItem,
-        children: [],
-      }))
-      .filter((node) => matchesAssetKeyword(node, keyword))
+  for (const item of items) {
+    const matched = matchesMetadataItemKeyword(item, keyword)
+    if (item.kind === 'database') {
+      if (matched) {
+        ensureDatabaseNode(item.name, item)
+      }
+      continue
+    }
+    if (item.kind === 'schema') {
+      const database = item.database || ''
+      if (database && matched) {
+        ensureSchemaNode(database, item.schema || item.name, item)
+      }
+      continue
+    }
+    if (item.kind !== 'table' || !matched) {
+      continue
+    }
+    const database = item.database || item.schema || ''
+    const schema = item.schema || database
+    if (!database) {
+      continue
+    }
+    const tableNode: AssetTreeNode = {
+      id: `table-${connection.id}-${database}-${schema}-${item.name}`,
+      kind: 'table',
+      connectionId: connection.id,
+      label: item.name,
+      database,
+      schema,
+      active: false,
+      selectable: true,
+      expanded: false,
+      loaded: true,
+      loading: false,
+      item,
+      children: [],
+    }
+    if (connection.db_type === 'postgres') {
+      ensureSchemaNode(database, schema).children.push(tableNode)
+    } else {
+      ensureDatabaseNode(database).children.push(tableNode)
+    }
+  }
 
-    return matchesAssetKeyword(databaseNode, keyword) || databaseNode.children.length > 0 ? databaseNode : null
-  }))
-
-  rootNode.children = databaseNodes.filter((node): node is AssetTreeNode => node !== null)
-  return rootNode.children.length > 0 || matchesAssetKeyword(rootNode, keyword) ? [rootNode] : []
+  rootNode.children = [...databaseNodes.values()].filter((node) => {
+    if (node.children.length > 0) {
+      return true
+    }
+    return matchesAssetKeyword(node, keyword)
+  })
+  return syncAssetTreeActiveStates([rootNode], connection.id, selectedDatabase, selectedSchema, selectedTable)
 }
 
 async function buildConnectionRootNode(connection: DBConnection): Promise<AssetTreeNode> {
@@ -821,6 +945,94 @@ async function buildConnectionRootNode(connection: DBConnection): Promise<AssetT
     item,
     children: [],
   }))
+  return rootNode
+}
+
+async function buildConnectionRootNodeForContext(connection: DBConnection, database: string, schema: string): Promise<AssetTreeNode> {
+  const rootNode = await buildConnectionRootNode(connection)
+  if (!database) {
+    return rootNode
+  }
+
+  const databaseIndex = rootNode.children.findIndex((node) => node.kind === 'database' && node.label === database)
+  if (databaseIndex === -1) {
+    return rootNode
+  }
+
+  const databaseNode = rootNode.children[databaseIndex]
+  databaseNode.expanded = true
+  databaseNode.loading = true
+
+  const databaseResponse = await listMetadata(connection.id, { database })
+  if (connection.db_type !== 'postgres') {
+    databaseNode.children = databaseResponse.items.map((item) => ({
+      id: `table-${connection.id}-${database}-${item.schema}-${item.name}`,
+      kind: 'table' as const,
+      connectionId: connection.id,
+      label: item.name,
+      database,
+      schema: item.schema,
+      active: false,
+      selectable: true,
+      expanded: false,
+      loaded: true,
+      loading: false,
+      item,
+      children: [],
+    }))
+    databaseNode.loaded = true
+    databaseNode.loading = false
+    return rootNode
+  }
+
+  databaseNode.children = databaseResponse.items.map((item) => ({
+    id: `schema-${connection.id}-${database}-${item.name}`,
+    kind: 'schema' as const,
+    connectionId: connection.id,
+    label: item.name,
+    database,
+    schema: item.name,
+    active: false,
+    selectable: true,
+    expanded: item.name === schema,
+    loaded: false,
+    loading: false,
+    item,
+    children: [],
+  }))
+  databaseNode.loaded = true
+  databaseNode.loading = false
+
+  if (!schema) {
+    return rootNode
+  }
+
+  const schemaIndex = databaseNode.children.findIndex((node) => node.kind === 'schema' && node.label === schema)
+  if (schemaIndex === -1) {
+    return rootNode
+  }
+
+  const schemaNode = databaseNode.children[schemaIndex]
+  schemaNode.expanded = true
+  schemaNode.loading = true
+  const tableResponse = await listMetadata(connection.id, { database, schema })
+  schemaNode.children = tableResponse.items.map((item) => ({
+    id: `table-${connection.id}-${database}-${item.schema}-${item.name}`,
+    kind: 'table' as const,
+    connectionId: connection.id,
+    label: item.name,
+    database,
+    schema: item.schema,
+    active: false,
+    selectable: true,
+    expanded: false,
+    loaded: true,
+    loading: false,
+    item,
+    children: [],
+  }))
+  schemaNode.loaded = true
+  schemaNode.loading = false
   return rootNode
 }
 
@@ -934,13 +1146,13 @@ function AssetTree({
         <button
           type="button"
           onClick={handleNodeClick}
-          className={`group flex min-w-max items-center rounded-md border border-transparent pr-2 text-[12px] ${
-            node.active ? 'bg-panel-soft text-ink' : 'text-muted hover:border-border/70 hover:bg-panel-soft'
+          className={`group flex min-w-max items-center rounded-md border border-transparent pr-2 text-[12px] leading-5 ${
+            node.active ? 'bg-panel-soft text-ink' : 'text-muted hover:bg-panel-soft hover:text-ink'
           }`}
           style={{ paddingLeft }}
         >
-          <span className="flex items-center gap-2 py-1.5 text-left">
-            <span className="flex h-4 w-4 items-center justify-center text-muted">{iconForNode(node)}</span>
+          <span className="flex h-7 items-center gap-2 text-left">
+            <span className="flex h-4 w-4 items-center justify-center text-faint group-hover:text-muted">{iconForNode(node)}</span>
             <span className="whitespace-nowrap font-medium">{node.label}</span>
             {node.loading ? <span className="whitespace-nowrap text-[10px] font-semibold text-faint">Loading…</span> : null}
           </span>
@@ -957,23 +1169,32 @@ export function SQLEditorPage() {
   const editorContainerRef = useRef<HTMLDivElement | null>(null)
   const formatProfileRef = useRef<SQLFormatProfile | null>(null)
   const formatProfileIDRef = useRef(0)
-  const initialTabRef = useRef<EditorTab | null>(null)
-  if (!initialTabRef.current) {
-    initialTabRef.current = createTab()
-  }
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, accessToken } = useAuth()
   const { pushToast } = useToast()
+  const workspaceOwnerKey = user && accessToken ? `${user.id}:${accessToken}` : ''
+  const initialWorkspaceRef = useRef<SQLEditorWorkspaceDraft | null>(null)
+  if (!initialWorkspaceRef.current) {
+    initialWorkspaceRef.current = workspaceDraftFromSnapshot(workspaceOwnerKey) ?? {
+      tabs: [createTab()],
+      activeTabId: '',
+      editorHeights: {},
+    }
+    if (!initialWorkspaceRef.current.activeTabId) {
+      initialWorkspaceRef.current.activeTabId = initialWorkspaceRef.current.tabs[0].id
+    }
+  }
   const hasSensitiveOverride = Boolean(user?.permissions.includes('global.sensitive'))
   const canQuery = Boolean(user?.permissions.includes('sql_editor.query'))
   const canExport = Boolean(user?.permissions.includes('sql_editor.export'))
   const canApplySensitiveAccess = Boolean(user?.permissions.includes('sql_editor.sensitive_apply'))
+  const canApplyTicket = Boolean(user?.permissions.includes('tickets.apply'))
   const accessibleConnectionIDs = user?.dbConnectionIds ?? []
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [connectionsLoading, setConnectionsLoading] = useState(true)
   const [connectionsError, setConnectionsError] = useState('')
-  const [tabs, setTabs] = useState<EditorTab[]>(() => [initialTabRef.current!])
-  const [activeTabId, setActiveTabId] = useState<string>(() => initialTabRef.current!.id)
+  const [tabs, setTabs] = useState<EditorTab[]>(() => initialWorkspaceRef.current!.tabs)
+  const [activeTabId, setActiveTabId] = useState<string>(() => initialWorkspaceRef.current!.activeTabId)
   const [history, setHistory] = useState<QueryHistoryEntry[]>([])
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
   const [queryConstraints, setQueryConstraints] = useState(DEFAULT_QUERY_CONSTRAINTS)
@@ -984,8 +1205,42 @@ export function SQLEditorPage() {
   const [requestConfirmState, setRequestConfirmState] = useState<QueryRequestConfirmState | null>(null)
   const [exportReason, setExportReason] = useState('')
   const [sensitiveAccessDurationDialog, setSensitiveAccessDurationDialog] = useState<SensitiveAccessDurationDialogState | null>(null)
-  const [editorHeights, setEditorHeights] = useState<Record<string, string>>({})
+  const [editorHeights, setEditorHeights] = useState<Record<string, string>>(() => initialWorkspaceRef.current!.editorHeights)
   const [queryAccessAttentionKeys, setQueryAccessAttentionKeys] = useState<Record<string, number>>({})
+  const workspaceOwnerKeyRef = useRef(workspaceOwnerKey)
+
+  useEffect(() => {
+    if (!workspaceOwnerKey) {
+      return
+    }
+    if (workspaceOwnerKeyRef.current !== workspaceOwnerKey) {
+      workspaceOwnerKeyRef.current = workspaceOwnerKey
+      const nextDraft = workspaceDraftFromSnapshot(workspaceOwnerKey) ?? {
+        tabs: [createTab()],
+        activeTabId: '',
+        editorHeights: {},
+      }
+      const nextActiveTabId = nextDraft.activeTabId || nextDraft.tabs[0].id
+      setTabs(nextDraft.tabs)
+      setActiveTabId(nextActiveTabId)
+      setEditorHeights(nextDraft.editorHeights)
+      setRunningTabIDs([])
+      setExportingTabIDs([])
+      setSensitiveAccessTabIDs([])
+      setSavedQueryToDelete(null)
+      setRequestConfirmState(null)
+      setExportReason('')
+      setSensitiveAccessDurationDialog(null)
+      setQueryAccessAttentionKeys({})
+      return
+    }
+    saveSQLEditorWorkspaceSnapshot({
+      ownerKey: workspaceOwnerKey,
+      tabs: tabs.map(sanitizeTabForWorkspaceMemory),
+      activeTabId,
+      editorHeights,
+    })
+  }, [activeTabId, editorHeights, tabs, workspaceOwnerKey])
 
   useEffect(() => {
     let active = true
@@ -1056,6 +1311,13 @@ export function SQLEditorPage() {
 
   useEffect(() => {
     let active = true
+    if (!canQuery) {
+      setHistory([])
+      setSavedQueries([])
+      return () => {
+        active = false
+      }
+    }
 
     async function loadHistory() {
       try {
@@ -1089,7 +1351,7 @@ export function SQLEditorPage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [canQuery, pushToast])
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null,
@@ -1114,6 +1376,10 @@ export function SQLEditorPage() {
   const activeSearchTreeNodes = activeTab?.searchTreeNodes ?? []
   const activeExplorerSearch = activeTab?.explorerSearch ?? ''
   const activeSearchingAssets = activeTab?.searchingAssets ?? false
+  const activeSearchIndexStatus = activeTab?.searchIndexStatus ?? 'idle'
+  const activeSearchIndexError = activeTab?.searchIndexError ?? ''
+  const activeSearchIndexTruncated = activeTab?.searchIndexTruncated ?? false
+  const debouncedExplorerSearch = useDebouncedValue(activeExplorerSearch, 350)
   const activeAssetPickerOpen = activeTab?.assetPickerOpen ?? false
   const activeAssetPickerSearch = activeTab?.assetPickerSearch ?? ''
   const activeResultView = activeTab?.resultView ?? 'result'
@@ -1195,6 +1461,13 @@ export function SQLEditorPage() {
     : false
 
   useEffect(() => {
+    if (connectionsLoading) {
+      return
+    }
+    if (accessibleConnectionIDs.length > 0 && connections.length === 0) {
+      return
+    }
+
     if (accessibleConnections.length === 0) {
       setTabs((currentTabs) => {
         let changed = false
@@ -1222,7 +1495,7 @@ export function SQLEditorPage() {
       })
       return changed ? nextTabs : currentTabs
     })
-  }, [accessibleConnections])
+  }, [accessibleConnectionIDs.length, accessibleConnections, connections.length, connectionsLoading])
 
   useEffect(() => {
     if (!activeConnection) {
@@ -1248,42 +1521,36 @@ export function SQLEditorPage() {
   }, [activeConnection, activeTab?.id])
 
   useEffect(() => {
-    const keyword = activeExplorerSearch.trim()
+    const keyword = debouncedExplorerSearch.trim()
     if (!keyword || !activeConnection) {
       if (activeTab?.searchTreeNodes.length || activeTab?.searchingAssets) {
         updateActiveTab({ searchTreeNodes: [], searchingAssets: false })
       }
       return
     }
-
-    let active = true
-    const tabID = activeTab?.id
-    updateActiveTab({ searchingAssets: true })
-
-    void buildSearchNodes(activeConnection, keyword)
-      .then((nodes) => {
-        if (!active || !tabID) {
-          return
-        }
-        updateTabByID(tabID, { searchTreeNodes: nodes })
-      })
-      .catch((error) => {
-        if (!active || !tabID) {
-          return
-        }
-        updateTabByID(tabID, { metadataError: formatMetadataError(error) })
-        updateTabByID(tabID, { searchTreeNodes: [] })
-      })
-      .finally(() => {
-        if (active && tabID) {
-          updateTabByID(tabID, { searchingAssets: false })
-        }
-      })
-
-    return () => {
-      active = false
+    if (keyword.length < SEARCH_INDEX_MIN_KEYWORD_LENGTH) {
+      if (activeTab?.searchTreeNodes.length || activeTab?.searchingAssets) {
+        updateActiveTab({ searchTreeNodes: [], searchingAssets: false })
+      }
+      return
     }
-  }, [activeConnection, activeExplorerSearch, activeTab?.id])
+    if (activeTab?.searchIndexStatus !== 'ready') {
+      if (activeTab?.searchTreeNodes.length || !activeTab?.searchingAssets) {
+        updateActiveTab({ searchTreeNodes: [], searchingAssets: activeTab?.searchIndexStatus === 'loading' })
+      }
+      return
+    }
+
+    const nodes = buildSearchTreeFromIndex(
+      activeConnection,
+      activeTab.searchIndexItems,
+      keyword,
+      activeDatabase,
+      activeSchema,
+      activeSelectedTable,
+    )
+    updateActiveTab({ searchTreeNodes: nodes, searchingAssets: false })
+  }, [activeConnection, activeDatabase, activeSchema, activeSelectedTable, activeTab?.id, activeTab?.searchIndexItems, activeTab?.searchIndexStatus, activeTab?.searchTreeNodes.length, activeTab?.searchingAssets, debouncedExplorerSearch])
 
   useEffect(() => {
     if (!activeExplorerSearch.trim()) {
@@ -1294,6 +1561,13 @@ export function SQLEditorPage() {
       syncAssetTreeActiveStates(current, activeTab?.connectionId ?? null, activeDatabase, activeSchema, activeSelectedTable),
     )
   }, [activeDatabase, activeExplorerSearch, activeSchema, activeSelectedTable, activeTab?.connectionId])
+
+  useEffect(() => {
+    if (!activeTab || !activeConnection || activeTab.searchIndexStatus !== 'idle') {
+      return
+    }
+    loadSearchIndexForTab(activeTab.id, activeConnection)
+  }, [activeConnection, activeTab?.id, activeTab?.searchIndexStatus])
 
   useEffect(() => {
     updateActiveTabExplorerNodes((current) =>
@@ -1403,6 +1677,32 @@ export function SQLEditorPage() {
         : tab
     )))
   }, [activeTab])
+
+  function loadSearchIndexForTab(tabID: string, connection: DBConnection) {
+    updateTabByID(tabID, {
+      searchIndexStatus: 'loading',
+      searchIndexError: '',
+      searchIndexTruncated: false,
+    })
+
+    void listMetadataSearchIndex(connection.id)
+      .then((response) => {
+        updateTabByID(tabID, {
+          searchIndexStatus: 'ready',
+          searchIndexItems: response.items,
+          searchIndexTruncated: response.truncated,
+          searchIndexError: '',
+        })
+      })
+      .catch((error) => {
+        updateTabByID(tabID, {
+          searchIndexStatus: 'error',
+          searchIndexItems: [],
+          searchIndexTruncated: false,
+          searchIndexError: error instanceof ApiError ? error.message : 'Object search index is temporarily unavailable.',
+        })
+      })
+  }
 
   async function loadNodeChildren(node: AssetTreeNode) {
     const connection = connections.find((item) => item.id === node.connectionId)
@@ -1541,7 +1841,28 @@ export function SQLEditorPage() {
     }
     const nextTab = createTab(getNextTabSeed(tabs))
     setTabs((current) => [...current, nextTab])
+    setEditorHeights((current) => ({
+      ...current,
+      [nextTab.id]: `${measureEditorHeight(editorContainerRef.current, nextTab.sql)}px`,
+    }))
     setActiveTabId(nextTab.id)
+  }
+
+  function handleSelectTab(tab: EditorTab) {
+    if (tab.id === activeTabId) {
+      return
+    }
+    setEditorHeights((current) => {
+      const nextValue = `${measureEditorHeight(editorContainerRef.current, tab.sql)}px`
+      if (current[tab.id] === nextValue) {
+        return current
+      }
+      return {
+        ...current,
+        [tab.id]: nextValue,
+      }
+    })
+    setActiveTabId(tab.id)
   }
 
   function handleCloseTab(id: string) {
@@ -1624,6 +1945,9 @@ export function SQLEditorPage() {
   }
 
   function openQueryAccessTicket() {
+    if (!canApplyTicket) {
+      return
+    }
     if (!activeTab?.connectionId) {
       pushToast('Select a database connection first.', 'info')
       return
@@ -1760,6 +2084,9 @@ export function SQLEditorPage() {
   }
 
   function openSensitiveAccessConfirm() {
+    if (!canApplySensitiveAccess) {
+      return
+    }
     if (activeConnection?.db_type !== 'mysql') {
       pushToast('Sensitive Access currently supports MySQL only.', 'info', { placement: 'center' })
       return
@@ -1831,12 +2158,13 @@ export function SQLEditorPage() {
       return
     }
 
+    const reason = exportReason.trim()
+    if (!reason) {
+      pushToast(kind === 'export' ? 'Enter an export reason before submitting.' : 'Enter an access reason before submitting.', 'info', { placement: 'center' })
+      return
+    }
+
     if (kind === 'export') {
-      const reason = exportReason.trim()
-      if (!reason) {
-        pushToast('Enter an export reason before submitting.', 'info', { placement: 'center' })
-        return
-      }
       setExportingTabIDs((current) => (current.includes(tabID) ? current : [...current, tabID]))
       try {
         const response = await createExportRequest({
@@ -1867,9 +2195,11 @@ export function SQLEditorPage() {
         schema_name: contextSchema || undefined,
         approved_duration_minutes: sensitiveAccessDuration,
         query_context_token: queryContextToken,
+        reason,
       })
       pushToast(`Sensitive Access ticket ${response.ticket_no} created.`, 'success', { placement: 'center' })
       setRequestConfirmState(null)
+      setExportReason('')
     } catch (error) {
       pushToast(error instanceof ApiError ? error.message : 'Failed to create Sensitive Access ticket.', 'error')
     } finally {
@@ -1878,7 +2208,7 @@ export function SQLEditorPage() {
   }
 
   async function handleSaveQuery() {
-    if (!activeTab?.connectionId || !activeTab.sql.trim()) {
+    if (!canQuery || !activeTab?.connectionId || !activeTab.sql.trim()) {
       return
     }
 
@@ -1916,34 +2246,61 @@ export function SQLEditorPage() {
     pushToast('Saved query added.', 'success')
   }
 
-  const applySavedQuery = useCallback((entry: { connectionId: number; sql: string; label: string; database?: string | null; schema?: string | null; redisDbIndex?: number | null }) => {
+  const applySavedQuery = useCallback((entry: { connectionId: number; sql: string; label: string; database?: string | null; schema?: string | null; redisDbIndex?: number | null; preserveTitle?: boolean }) => {
     if (!activeTab) {
       return
     }
 
+    const tabID = activeTab.id
+    const connection = accessibleConnections.find((item) => item.id === entry.connectionId) ?? null
+    const nextDatabase = entry.redisDbIndex !== undefined && entry.redisDbIndex !== null ? String(entry.redisDbIndex) : entry.database ?? ''
+    const nextSchema = entry.redisDbIndex !== undefined && entry.redisDbIndex !== null ? '' : entry.schema ?? ''
+    const loadingRootNode = connection
+      ? {
+        ...createConnectionNode(connection, connection.id),
+        expanded: true,
+        loading: true,
+      }
+      : null
+
     setActiveTabId(activeTab.id)
     updateActiveTab({
       connectionId: entry.connectionId,
-      database: entry.database ?? '',
-      schema: entry.schema ?? '',
+      database: nextDatabase,
+      schema: nextSchema,
       selectedTable: null,
       sql: entry.sql,
-      title: entry.label,
+      ...(entry.preserveTitle ? {} : { title: entry.label }),
       result: null,
       error: '',
       columns: [],
       definition: null,
       objectMetaTab: 'columns',
       resultView: 'result',
+      explorerSearch: '',
+      searchTreeNodes: [],
+      metadataError: connection ? '' : 'Selected query connection is no longer available.',
+      ...(loadingRootNode ? { explorerNodes: [loadingRootNode] } : {}),
     })
-    if (entry.redisDbIndex !== undefined && entry.redisDbIndex !== null) {
-      updateActiveTab({
-        database: String(entry.redisDbIndex),
-        schema: '',
-        selectedTable: null,
-      })
+
+    if (!connection) {
+      return
     }
-  }, [activeTab, updateActiveTab])
+
+    void buildConnectionRootNodeForContext(connection, nextDatabase, nextSchema)
+      .then((rootNode) => {
+        updateTabByID(tabID, {
+          explorerNodes: syncAssetTreeActiveStates([rootNode], connection.id, nextDatabase, nextSchema, null),
+          metadataError: '',
+        })
+      })
+      .catch((error) => {
+        updateTabByID(tabID, {
+          explorerNodes: [{ ...createConnectionNode(connection, connection.id), expanded: true, loading: false, loaded: true }],
+          metadataError: formatMetadataError(error),
+        })
+      })
+  }, [accessibleConnections, activeTab, updateActiveTab, updateTabByID])
 
   const isFavorited = !!(activeTab && savedQueries.some((item) =>
     item.db_connection_id === activeTab.connectionId &&
@@ -2056,6 +2413,20 @@ export function SQLEditorPage() {
   }), [activeResultPage, activeResultView, activeSelectedTable, activeTab?.result, detailHint, history.length, savedQueries.length, totalResultPages])
 
   function handleSelectNode(node: AssetTreeNode) {
+    if (activeExplorerSearch.trim() && activeConnection && node.kind !== 'connection' && node.kind !== 'redis_db') {
+      const nextDatabase = node.database || (node.kind === 'database' ? node.label : activeDatabase)
+      const nextSchema = node.kind === 'schema' || node.kind === 'table' ? node.schema || '' : ''
+      void buildConnectionRootNodeForContext(activeConnection, nextDatabase, nextSchema)
+        .then((rootNode) => {
+          updateActiveTabExplorerNodes(() =>
+            syncAssetTreeActiveStates([rootNode], activeConnection.id, nextDatabase, nextSchema, node.kind === 'table' ? node.item ?? null : null),
+          )
+        })
+        .catch((error) => {
+          updateActiveTab({ metadataError: formatMetadataError(error) })
+        })
+    }
+
     if (node.kind === 'connection') {
       if (activeTab?.connectionId !== node.connectionId) {
         updateActiveTab({
@@ -2098,12 +2469,16 @@ export function SQLEditorPage() {
     }
 
     if (node.kind === 'table') {
+      const tableItem = node.item ?? null
       updateActiveTab({
         database: node.database || activeDatabase,
         schema: node.schema || '',
-        selectedTable: node.item ?? null,
+        selectedTable: tableItem,
         objectMetaTab: 'columns',
         resultView: 'object-meta',
+        ...(tableItem && activeTab && shouldAutofillTableQuery(activeTab.sql)
+          ? { sql: buildTableSelectSQL(tableItem.name), selectedSQL: '' }
+          : {}),
       })
       return
     }
@@ -2142,7 +2517,15 @@ export function SQLEditorPage() {
       metadataError: '',
       explorerNodes: [loadingRootNode],
       searchTreeNodes: [],
+      searchIndexStatus: 'idle',
+      searchIndexItems: [],
+      searchIndexTruncated: false,
+      searchIndexError: '',
     })
+
+    if (tabID) {
+      loadSearchIndexForTab(tabID, connection)
+    }
 
     void buildConnectionRootNode(connection)
       .then((rootNode) => {
@@ -2163,6 +2546,58 @@ export function SQLEditorPage() {
           metadataError: formatMetadataError(error),
         })
       })
+  }
+
+  function handleReloadAssets() {
+    if (!activeTab || !activeConnection || activeSearchIndexStatus === 'loading' || activeExplorerRootLoading) {
+      return
+    }
+    const tabID = activeTab.id
+    const loadingRootNode = {
+      ...createConnectionNode(activeConnection, activeConnection.id),
+      expanded: true,
+      loading: true,
+    }
+    updateActiveTab({
+      metadataError: '',
+      explorerNodes: [loadingRootNode],
+      searchTreeNodes: [],
+      searchIndexStatus: 'idle',
+      searchIndexItems: [],
+      searchIndexTruncated: false,
+      searchIndexError: '',
+    })
+    loadSearchIndexForTab(tabID, activeConnection)
+    void buildConnectionRootNode(activeConnection)
+      .then((rootNode) => {
+        updateTabByID(tabID, {
+          explorerNodes: syncAssetTreeActiveStates([rootNode], activeConnection.id, activeDatabase, activeSchema, activeSelectedTable),
+          metadataError: '',
+        })
+      })
+      .catch((error) => {
+        updateTabByID(tabID, {
+          explorerNodes: [{ ...loadingRootNode, loading: false, loaded: true }],
+          metadataError: formatMetadataError(error),
+        })
+      })
+  }
+
+  async function handleReloadConnections() {
+    if (!canQuery || connectionsLoading) {
+      return
+    }
+
+    setConnectionsLoading(true)
+    setConnectionsError('')
+    try {
+      const response = await listQueryConnections()
+      setConnections(response.connections)
+    } catch (error) {
+      setConnectionsError(error instanceof ApiError ? error.message : 'Failed to load database connections.')
+    } finally {
+      setConnectionsLoading(false)
+    }
   }
 
   async function handleToggleNode(node: AssetTreeNode) {
@@ -2285,6 +2720,9 @@ export function SQLEditorPage() {
   }, [activeTab?.id, activeTab?.sql])
 
   async function handleDeleteSavedQuery(entry: SavedQuery) {
+    if (!canQuery) {
+      return
+    }
     try {
       await deleteSavedQuery(entry.id)
       setSavedQueries((current) => current.filter((item) => item.id !== entry.id))
@@ -2318,7 +2756,7 @@ export function SQLEditorPage() {
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setActiveTabId(tab.id)}
+                onClick={() => handleSelectTab(tab)}
                 className={cn(
                   'inline-flex items-center gap-2 border-b-2 px-0.5 py-3 text-[13px] font-medium transition-colors',
                   tab.id === activeTabId
@@ -2355,46 +2793,61 @@ export function SQLEditorPage() {
 
         <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
           <section className="flex min-h-0 flex-col border-r border-border/80 bg-panel">
-            <div className="px-4 pt-2 pb-2">
+            <div className="border-b border-border/70 px-3 py-2">
               <div className="relative">
                 <button
                   type="button"
                   aria-label="Asset Selector"
                   onClick={() => updateActiveTab({ assetPickerOpen: !activeAssetPickerOpen })}
-                  className="flex w-full items-center gap-2 text-left text-[12px] text-ink transition"
+                  className="group flex min-h-10 w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-[12px] text-ink transition hover:bg-panel-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
                 >
                   <FolderTree className="h-4 w-4 shrink-0 text-muted" />
-                  <div className="min-w-0 flex-1 overflow-x-auto">
+                  <div className="min-w-0 flex-1">
                     {activeConnection ? (
-                      <>
-                        <p className="whitespace-nowrap text-[12px] font-semibold leading-5 text-ink" title={activeConnection.name}>{activeConnection.name}</p>
-                        <p className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-faint">
+                      <div className="min-w-0">
+                        <p className="truncate text-[12px] font-semibold leading-5 text-ink" title={activeConnection.name}>{activeConnection.name}</p>
+                        <p className="text-[10px] font-medium uppercase leading-4 tracking-[0.12em] text-faint">
                           {formatConnectionBadge(activeConnection)}
                         </p>
-                      </>
+                      </div>
                     ) : (
-                      <p className="text-[13px] font-semibold text-ink">Select assets</p>
+                      <span className="text-[13px] font-semibold text-ink">Select assets</span>
                     )}
                   </div>
                 </button>
 
               {activeAssetPickerOpen ? (
-                <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-lg border border-border bg-white p-2 shadow-soft">
-                  <SearchInput
-                    aria-label="Asset Picker Search"
-                    value={activeAssetPickerSearch}
-                    onChange={(event) => updateActiveTab({ assetPickerSearch: event.target.value })}
-                    placeholder="Select assets"
-                  />
-                  <div className="mt-2 max-h-[440px] overflow-auto">
+                <div className="absolute -left-3 -right-3 top-[calc(100%+8px)] z-20 rounded-lg border border-border bg-white p-3 shadow-soft">
+                  <div className="flex items-center rounded-lg border border-border bg-white px-2 transition focus-within:border-slate-400">
+                    <div className="min-w-0 flex-1">
+                      <SearchInput
+                        aria-label="Asset Picker Search"
+                        value={activeAssetPickerSearch}
+                        onChange={(event) => updateActiveTab({ assetPickerSearch: event.target.value })}
+                        placeholder="Search assets"
+                        wrapperClassName="h-8 rounded-none border-0 bg-transparent px-0 shadow-none focus-within:border-transparent"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Reload DB instances"
+                      title="Reload DB instances"
+                      onClick={() => void handleReloadConnections()}
+                      disabled={!canQuery || connectionsLoading}
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted transition hover:bg-panel-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${connectionsLoading ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                  <div className="mt-3 max-h-[440px] overflow-auto">
                     {filteredConnections.length === 0 ? (
-                      <p className="px-2 py-2 text-[12px] text-muted">No matching assets.</p>
+                      <p className="px-1 py-2 text-[12px] text-muted">No matching assets.</p>
                     ) : (
-                      <div className="min-w-max">
+                      <div>
                         {groupedAssetPickerConnections.map((group) => (
                           <div key={group.dbType} className="border-t border-border first:border-t-0">
-                            <p className="px-3 pb-1 pt-3 text-[12px] font-semibold text-muted first:pt-2">{group.label}</p>
-                            <div className="grid gap-0.5 pb-2">
+                            <p className="px-2 pb-1 pt-3 text-[12px] font-semibold text-muted first:pt-1">{group.label}</p>
+                            <div className="grid gap-1 pb-2">
                               {group.connections.map((connection) => {
                                 const selected = activeConnection?.id === connection.id
                                 return (
@@ -2402,14 +2855,13 @@ export function SQLEditorPage() {
                                     key={connection.id}
                                     type="button"
                                     onClick={() => handleSelectConnection(connection)}
-                                    className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-[12px] ${
+                                    className={`flex w-full items-center rounded-md px-2.5 py-2 text-left text-[12px] ${
                                       selected
-                                        ? 'bg-panel-soft text-ink ring-1 ring-border-strong'
+                                        ? 'bg-panel-soft text-ink ring-1 ring-border'
                                         : 'text-ink hover:bg-panel-soft'
                                     }`}
                                   >
-                                    <span className="whitespace-nowrap font-medium leading-5" title={connection.name}>{connection.name}</span>
-                                    {selected ? <Check className="h-3.5 w-3.5 shrink-0 text-ink" /> : null}
+                                    <span className="min-w-0 flex-1 break-words font-medium leading-5" title={connection.name}>{connection.name}</span>
                                   </button>
                                 )
                               })}
@@ -2424,21 +2876,44 @@ export function SQLEditorPage() {
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col px-4 pt-1 pb-3">
+            <div className="flex min-h-0 flex-1 flex-col px-3 pt-3 pb-3">
               {activeTab?.metadataError ? <InlineAlert className="mb-2" tone="info">{activeTab.metadataError}</InlineAlert> : null}
-              <SearchInput
-                aria-label="Explorer Search"
-                value={activeExplorerSearch}
-                onChange={(event) => updateActiveTab({ explorerSearch: event.target.value })}
-                placeholder="Search objects"
-              />
-              <div className="mt-1 min-h-0 flex-1 overflow-auto">
+              <div className="flex items-center rounded-lg border border-border bg-white px-2 transition focus-within:border-slate-400">
+                <div className="min-w-0 flex-1">
+                  <SearchInput
+                    aria-label="Explorer Search"
+                    value={activeExplorerSearch}
+                    onChange={(event) => updateActiveTab({ explorerSearch: event.target.value })}
+                    placeholder="Search objects"
+                    wrapperClassName="h-8 rounded-none border-0 bg-transparent px-0 shadow-none focus-within:border-transparent"
+                  />
+                </div>
+                <button
+                  type="button"
+                  aria-label="Reload assets"
+                  title="Reload assets"
+                  onClick={handleReloadAssets}
+                  disabled={!activeConnection || activeSearchIndexStatus === 'loading' || activeExplorerRootLoading}
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted transition hover:bg-panel-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${activeSearchIndexStatus === 'loading' || activeExplorerRootLoading ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+              <div className="mt-2 min-h-0 flex-1 overflow-auto">
                 {connectionsLoading ? (
                   <p className="px-1 py-1 text-[12px] text-muted">Loading connections...</p>
-                ) : activeSearchingAssets || activeExplorerRootLoading ? (
-                  <p className="px-1 py-1 text-[12px] text-muted">Searching assets...</p>
+                ) : activeExplorerRootLoading ? (
+                  <p className="px-1 py-1 text-[12px] text-muted">Loading assets...</p>
+                ) : activeExplorerSearch.trim() && activeExplorerSearch.trim().length < SEARCH_INDEX_MIN_KEYWORD_LENGTH ? (
+                  <p className="px-1 py-1 text-[12px] text-muted">Enter at least 3 characters to search objects.</p>
+                ) : activeExplorerSearch.trim() && (activeSearchingAssets || activeSearchIndexStatus === 'loading') ? (
+                  <p className="px-1 py-1 text-[12px] text-muted">Loading...</p>
+                ) : activeExplorerSearch.trim() && activeSearchIndexStatus === 'error' ? (
+                  <p className="px-1 py-1 text-[12px] text-muted">{activeSearchIndexError || 'Object search is temporarily unavailable.'}</p>
+                ) : activeExplorerSearch.trim() && activeSearchIndexTruncated ? (
+                  <p className="px-1 py-1 text-[12px] text-muted">Metadata too large, narrow search by expanding database.</p>
                 ) : !activeConnection || activeExplorerNodes.length === 0 ? (
-                  <p className="px-1 py-1 text-[12px] text-muted">Select a DB connection to browse objects and run read-only queries.</p>
+                  <p className="px-1 py-1 text-[12px] text-muted">Select a connection to browse objects.</p>
                 ) : renderedExplorerNodes.length === 0 ? (
                   <p className="px-1 py-1 text-[12px] text-muted">No matching assets.</p>
                 ) : (
@@ -2570,7 +3045,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={() => void handleSaveQuery()}
-                      disabled={!activeTab.connectionId || !activeTab.sql.trim() || isFavorited}
+                      disabled={!canQuery || !activeTab.connectionId || !activeTab.sql.trim() || isFavorited}
                       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isFavorited ? <StarOff className="h-4 w-4" /> : <Star className="h-4 w-4" />}
@@ -2584,6 +3059,7 @@ export function SQLEditorPage() {
                     >
                       {activeTabCreatingSensitiveAccess ? 'Submitting...' : 'Sensitive Access'}
                     </button>
+                    {canApplyTicket ? (
                     <AttentionPulse activeKey={activeQueryAccessAttentionKey} disabled={!activeTab.connectionId}>
                       <button
                         type="button"
@@ -2594,6 +3070,7 @@ export function SQLEditorPage() {
                         Query Access
                       </button>
                     </AttentionPulse>
+                    ) : null}
                     <div className="relative">
                       <button
                         type="button"
@@ -2683,12 +3160,13 @@ export function SQLEditorPage() {
                               database: entry.database_name,
                               schema: entry.schema_name,
                               redisDbIndex: entry.redis_db_index,
+                              preserveTitle: true,
                             })}
                             className="block w-full px-4 py-3 text-left transition hover:bg-slate-50/70"
                           >
                             <p className="truncate text-[12px] font-semibold text-ink">{entry.sql_content}</p>
                             <p className="mt-1 text-[11px] text-muted">
-                              {entry.db_connection_name} / {entry.duration_ms} ms / {formatDateTime(entry.created_at, true)}
+                              {formatHistoryContext(entry)} / {entry.duration_ms} ms / {formatDateTime(entry.created_at, true)}
                             </p>
                           </button>
                         ))}
@@ -2721,14 +3199,16 @@ export function SQLEditorPage() {
                               </div>
                               <p className="mt-1 truncate text-[11px] text-muted">{entry.sql_content}</p>
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => setSavedQueryToDelete(entry)}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-white text-muted transition hover:bg-page hover:text-danger"
-                              aria-label={`Delete saved query ${entry.label}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            {canQuery ? (
+                              <button
+                                type="button"
+                                onClick={() => setSavedQueryToDelete(entry)}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-white text-muted transition hover:bg-page hover:text-danger"
+                                aria-label={`Delete saved query ${entry.label}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            ) : null}
                           </div>
                         ))}
                       </div>
@@ -3032,24 +3512,22 @@ export function SQLEditorPage() {
                 ) : null}
               </div>
             </div>
-            {requestConfirmState.kind === 'export' ? (
-              <div className="space-y-2">
-                <label
-                  htmlFor="export-reason"
-                  className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint"
-                >
-                  Export Reason
-                </label>
-                <textarea
-                  id="export-reason"
-                  value={exportReason}
-                  onChange={(event) => setExportReason(event.target.value)}
-                  rows={3}
-                  className="w-full resize-y rounded-control border border-border bg-panel px-3 py-2 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                  placeholder="Explain why this data export is needed."
-                />
-              </div>
-            ) : null}
+            <div className="space-y-2">
+              <label
+                htmlFor="request-reason"
+                className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint"
+              >
+                {requestConfirmState.kind === 'export' ? 'Export Reason' : 'Access Reason'}
+              </label>
+              <textarea
+                id="request-reason"
+                value={exportReason}
+                onChange={(event) => setExportReason(event.target.value)}
+                rows={3}
+                className="w-full resize-y rounded-control border border-border bg-panel px-3 py-2 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                placeholder={requestConfirmState.kind === 'export' ? 'Explain why this data export is needed.' : 'Explain why unmasked sensitive data access is needed.'}
+              />
+            </div>
             <div className="rounded-xl border border-border bg-slate-950 p-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">SQL To Submit</p>
               <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-all font-mono text-[12px] leading-5 text-slate-100">
@@ -3061,7 +3539,7 @@ export function SQLEditorPage() {
         confirmLabel={requestConfirmState?.kind === 'sensitive-access' ? 'Confirm and Submit' : 'Confirm and Export'}
         cancelLabel="Cancel"
         loading={requestConfirmLoading}
-        confirmDisabled={requestConfirmState?.kind === 'export' && exportReason.trim() === ''}
+        confirmDisabled={requestConfirmState !== null && exportReason.trim() === ''}
         panelClassName="max-w-3xl"
         onCancel={() => {
           setRequestConfirmState(null)

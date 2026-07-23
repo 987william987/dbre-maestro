@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '@/shared/ui/ToastContext'
 import { SQLEditorPage } from '@/modules/sql-editor/pages/SQLEditorPage'
+import { clearSQLEditorWorkspaceSnapshot, getSQLEditorWorkspaceSnapshot } from '@/modules/sql-editor/workspaceMemory'
 import { ApiError } from '@/shared/api/client'
 
 vi.mock('@uiw/react-codemirror', () => ({
@@ -49,6 +50,7 @@ vi.mock('@/modules/sql-editor/api', () => ({
   getQueryConstraints: vi.fn(),
   executeQuery: vi.fn(),
   listMetadata: vi.fn(),
+  listMetadataSearchIndex: vi.fn(),
   listMetadataColumns: vi.fn(),
   listMetadataDefinition: vi.fn(),
   listQueryHistory: vi.fn(),
@@ -63,13 +65,14 @@ vi.mock('@/modules/exports/api', () => ({
 }))
 
 import { createExportRequest } from '@/modules/exports/api'
-import { createSavedQuery, createSensitiveAccessTicket, deleteSavedQuery, executeQuery, getQueryConstraints, listMetadata, listMetadataColumns, listMetadataDefinition, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
+import { createSavedQuery, createSensitiveAccessTicket, deleteSavedQuery, executeQuery, getQueryConstraints, listMetadata, listMetadataColumns, listMetadataDefinition, listMetadataSearchIndex, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 
 const mockedListQueryConnections = vi.mocked(listQueryConnections)
 const mockedGetQueryConstraints = vi.mocked(getQueryConstraints)
 const mockedExecuteQuery = vi.mocked(executeQuery)
 const mockedListMetadata = vi.mocked(listMetadata)
+const mockedListMetadataSearchIndex = vi.mocked(listMetadataSearchIndex)
 const mockedListMetadataColumns = vi.mocked(listMetadataColumns)
 const mockedListMetadataDefinition = vi.mocked(listMetadataDefinition)
 const mockedListQueryHistory = vi.mocked(listQueryHistory)
@@ -85,6 +88,7 @@ describe('SQLEditorPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     vi.clearAllMocks()
+    clearSQLEditorWorkspaceSnapshot()
     storage.clear()
     mockedUseAuth.mockReturnValue({
       user: {
@@ -92,7 +96,7 @@ describe('SQLEditorPage', () => {
         username: 'admin',
         authGroups: ['admin'],
         authGroupDetails: [],
-        permissions: ['sql_editor.read', 'sql_editor.query', 'sql_editor.export', 'sql_editor.sensitive_apply'],
+        permissions: ['sql_editor.read', 'sql_editor.query', 'sql_editor.export', 'sql_editor.sensitive_apply', 'tickets.apply'],
         dbConnectionIds: [1],
         protected: false,
         isActive: true,
@@ -166,6 +170,25 @@ describe('SQLEditorPage', () => {
         },
       ],
     })
+    mockedListMetadataSearchIndex.mockResolvedValue({
+      db_type: 'mysql',
+      limit: 50000,
+      truncated: false,
+      items: [
+        { kind: 'database', name: 'maestro', schema: 'maestro' },
+        {
+          kind: 'table',
+          database: 'maestro',
+          schema: 'maestro',
+          name: 'tickets',
+          engine: 'InnoDB',
+          row_count: 12,
+          data_size_bytes: 1024,
+          index_size_bytes: 512,
+          comment: '',
+        },
+      ],
+    })
 
     mockedListMetadataColumns.mockResolvedValue({
       schema: 'maestro',
@@ -208,7 +231,81 @@ describe('SQLEditorPage', () => {
     mockedDeleteSavedQuery.mockResolvedValue(undefined)
   })
 
-  it('重新掛載後會重置成單一預設 tab 與 SELECT 1;', async () => {
+  it('read-only 模式不載入需要 query 權限的資料', async () => {
+    mockedUseAuth.mockReturnValue({
+      user: {
+        id: 8,
+        username: 'readonly',
+        authGroups: ['readonly'],
+        authGroupDetails: [],
+        permissions: ['sql_editor.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      status: 'authenticated',
+      isAuthenticated: true,
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
+    expect(mockedListQueryConnections).not.toHaveBeenCalled()
+    expect(mockedGetQueryConstraints).not.toHaveBeenCalled()
+    expect(mockedListQueryHistory).not.toHaveBeenCalled()
+    expect(mockedListSavedQueries).not.toHaveBeenCalled()
+  })
+
+  it('同一個瀏覽器執行環境內重新掛載會保留 workspace 草稿，但不保留查詢結果', async () => {
+    mockedListMetadata.mockImplementation(async (_connectionID, params) => {
+      if (params?.database) {
+        return {
+          db_type: 'mysql',
+          level: 'table',
+          database: params.database,
+          items: [
+            {
+              kind: 'table',
+              database: params.database,
+              schema: params.database,
+              name: 'tickets',
+              engine: 'InnoDB',
+              row_count: 12,
+              data_size_bytes: 1024,
+              index_size_bytes: 512,
+              comment: '',
+            },
+          ],
+        }
+      }
+
+      return {
+        db_type: 'mysql',
+        level: 'database',
+        items: [
+          { kind: 'database', name: 'maestro' },
+        ],
+      }
+    })
+    mockedExecuteQuery.mockResolvedValue({
+      columns: ['id', 'title'],
+      raw_columns: ['id', 'title'],
+      sensitive_column_indexes: [],
+      rows: [['1', 'Test ticket']],
+      row_count: 1,
+      duration_ms: 18,
+    })
+
     const { unmount } = render(
       <MemoryRouter>
         <ToastProvider>
@@ -219,14 +316,25 @@ describe('SQLEditorPage', () => {
 
     expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     expect(screen.queryByText('Run read-only queries, browse metadata, and keep query history and saved queries in one workspace. Create export requests directly from the result panel.')).not.toBeInTheDocument()
-    expect(screen.getByText('Select a DB connection to browse objects and run read-only queries.')).toBeInTheDocument()
+    expect(screen.getByText('Select a connection to browse objects.')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('CodeMirror'), {
       target: { value: 'SELECT * FROM tickets;' },
     })
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(await screen.findByText('maestro'))
+    expect(await screen.findByText('tickets')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Run Query'))
+    expect(await screen.findByText('Test ticket')).toBeInTheDocument()
+
     fireEvent.click(screen.getByRole('button', { name: 'New Tab' }))
 
     expect(screen.getAllByText(/Query \d+/)).toHaveLength(2)
+    await waitFor(() => {
+      const snapshot = getSQLEditorWorkspaceSnapshot<unknown>('7:token')
+      expect(JSON.stringify(snapshot)).toContain('tickets')
+    })
 
     unmount()
 
@@ -239,8 +347,13 @@ describe('SQLEditorPage', () => {
     )
 
     expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
-    expect(screen.getAllByText(/Query \d+/)).toHaveLength(1)
-    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT 1;')
+    expect(screen.getAllByText(/Query \d+/)).toHaveLength(2)
+    fireEvent.click(screen.getByText('Query 1'))
+    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT * FROM tickets;')
+    expect(await screen.findByText('maestro')).toBeInTheDocument()
+    expect(screen.getByText('tickets')).toBeInTheDocument()
+    expect(screen.queryByText('Test ticket')).not.toBeInTheDocument()
+    expect(screen.getByText('No query has been executed yet.')).toBeInTheDocument()
   })
 
   it('依照目前選取的連線類型顯示 SQL Editor timeout', async () => {
@@ -402,6 +515,10 @@ describe('SQLEditorPage', () => {
     expect(mockedCreateSensitiveAccessTicket).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Confirm and Submit' }))
+    expect(mockedCreateSensitiveAccessTicket).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Access Reason'), { target: { value: 'Need to verify customer identity.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and Submit' }))
 
     await waitFor(() => {
       expect(mockedCreateSensitiveAccessTicket).toHaveBeenCalledWith({
@@ -411,6 +528,7 @@ describe('SQLEditorPage', () => {
         schema_name: undefined,
         approved_duration_minutes: 120,
         query_context_token: 'sensitive-query-context-token',
+        reason: 'Need to verify customer identity.',
       })
     })
   })
@@ -874,11 +992,64 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByText('tickets'))
 
     expect(screen.getByRole('button', { name: 'Object Meta' })).toBeInTheDocument()
+    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT * FROM tickets;')
     expect(await screen.findByText('id')).toBeInTheDocument()
     expect(screen.getByText('bigint unsigned')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Definition' }))
     expect(await screen.findByText(/CREATE TABLE `tickets`/)).toBeInTheDocument()
+  })
+
+  it('點擊資料表時不會覆蓋使用者已輸入的 SQL', async () => {
+    mockedListMetadata.mockReset()
+    mockedListMetadata
+      .mockResolvedValueOnce({
+        db_type: 'mysql',
+        level: 'database',
+        items: [
+          { kind: 'database', name: 'maestro' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        db_type: 'mysql',
+        level: 'table',
+        database: 'maestro',
+        items: [
+          {
+            kind: 'table',
+            database: 'maestro',
+            schema: 'maestro',
+            name: 'tickets',
+            engine: 'InnoDB',
+            row_count: 12,
+            data_size_bytes: 1024,
+            index_size_bytes: 512,
+            comment: '',
+          },
+        ],
+      })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('CodeMirror'), {
+      target: { value: 'SELECT id FROM users;' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+
+    expect(await screen.findByText('maestro')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('maestro'))
+    expect(await screen.findByText('tickets')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('tickets'))
+
+    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT id FROM users;')
   })
 
   it('可儲存常用 SQL、開啟 Saved 清單並刪除', async () => {
@@ -918,6 +1089,69 @@ describe('SQLEditorPage', () => {
     await waitFor(() => {
       expect(mockedDeleteSavedQuery).toHaveBeenCalledWith(1)
       expect(screen.queryByLabelText('Delete saved query Query 1')).not.toBeInTheDocument()
+    })
+  })
+
+  it('套用 History 查詢時保留工作區標題並同步顯示 database context', async () => {
+    mockedListMetadata.mockReset()
+    mockedListMetadata.mockImplementation(async (_connectionId, params) => {
+      if (!params?.database) {
+        return {
+          db_type: 'mysql',
+          level: 'database',
+          items: [{
+            kind: 'database',
+            name: 'maestro',
+            database: 'maestro',
+            schema: 'maestro',
+          }],
+        }
+      }
+      return {
+        db_type: 'mysql',
+        level: 'table',
+        database: params.database,
+        items: [{
+          kind: 'table',
+          name: 'tickets',
+          database: params.database,
+          schema: params.database,
+        }],
+      }
+    })
+    mockedListQueryHistory.mockResolvedValueOnce({
+      history: [{
+        id: 9,
+        db_connection_id: 1,
+        db_connection_name: 'Primary MySQL',
+        database_name: 'maestro',
+        schema_name: null,
+        redis_db_index: null,
+        sql_content: 'SELECT * FROM tickets;',
+        duration_ms: 123,
+        created_at: '2026-07-22T12:50:20Z',
+      }],
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
+    fireEvent.click(screen.getByText('History'))
+
+    expect(await screen.findByText('SELECT * FROM tickets;')).toBeInTheDocument()
+    expect(screen.getByText(/Primary MySQL \/ maestro \/ 123 ms/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('SELECT * FROM tickets;'))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Close Query 1')).toBeInTheDocument()
+      expect(mockedListMetadata).toHaveBeenCalledWith(1, { database: 'maestro' })
     })
   })
 
@@ -1383,8 +1617,10 @@ describe('SQLEditorPage', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Object Meta' })).toBeInTheDocument()
+      expect(mockedListMetadataColumns).toHaveBeenCalled()
+      expect(mockedListMetadataDefinition).toHaveBeenCalled()
     })
-    expect(mockedListMetadata).toHaveBeenCalledTimes(metadataCallCount)
+    expect(mockedListMetadata.mock.calls.length).toBeGreaterThan(metadataCallCount)
     expect(screen.queryByText('Searching assets...')).not.toBeInTheDocument()
   })
 

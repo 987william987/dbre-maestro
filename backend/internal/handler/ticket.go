@@ -264,7 +264,7 @@ func NewTicketHandler(
 		notifRepo:          notifRepo,
 		broker:             broker,
 		lark:               lark,
-		notifications:      NewNotificationRouter(notifRepo, audit, broker, lark),
+		notifications:      NewNotificationRouter(notifRepo, audit, users, broker, lark),
 		forbiddenLimiter:   newRequestRateLimiter(20, time.Minute),
 		appBaseURL:         strings.TrimRight(appBaseURL, "/"),
 	}
@@ -911,6 +911,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "ticket_submit",
 		ResourceType: "ticket",
 		ResourceID:   &created.ID,
+		Details:      h.ticketAuditDetails(r.Context(), created, nil),
 		IPAddress:    clientIP(r),
 	})
 
@@ -951,10 +952,11 @@ func (h *TicketHandler) applyWorkflowAfterCreate(ctx context.Context, ticket *mo
 		}
 		h.audit.Log(ctx, repository.AuditEntry{
 			ActorID:      actorID,
+			ActorName:    h.auditActorName(ctx, actorID, ""),
 			ActionType:   "workflow_resolution_failed",
 			ResourceType: "ticket",
 			ResourceID:   &ticket.ID,
-			Details:      workflowAuditDetails(ticket, resolution),
+			Details:      h.workflowAuditDetails(ctx, ticket, resolution),
 			IPAddress:    ipAddress,
 		})
 		h.dispatchTicketNotification(ctx, ticket, ticketEventNeedsAdmin, actorID, comment)
@@ -977,10 +979,11 @@ func (h *TicketHandler) applyWorkflowAfterCreate(ctx context.Context, ticket *mo
 		}
 		h.audit.Log(ctx, repository.AuditEntry{
 			ActorID:      actorID,
+			ActorName:    h.auditActorName(ctx, actorID, ""),
 			ActionType:   "ticket_auto_approve",
 			ResourceType: "ticket",
 			ResourceID:   &ticket.ID,
-			Details:      workflowAuditDetails(ticket, resolution),
+			Details:      h.workflowAuditDetails(ctx, ticket, resolution),
 			IPAddress:    ipAddress,
 		})
 		return h.finishNoApprovalWorkflow(ctx, ticket, actorID, resolution)
@@ -1022,17 +1025,64 @@ func (h *TicketHandler) finishNoApprovalWorkflow(ctx context.Context, ticket *mo
 	return ticket, nil
 }
 
-func workflowAuditDetails(ticket *model.Ticket, resolution *model.WorkflowResolution) map[string]any {
-	details := map[string]any{
-		"ticket_type": string(ticket.TicketType),
-		"status":      string(ticket.Status),
+func (h *TicketHandler) ticketAuditDetails(ctx context.Context, ticket *model.Ticket, extra map[string]any) map[string]any {
+	details := map[string]any{}
+	addAuditTicketDetails(details, ticket)
+	if ticket == nil {
+		return details
+	}
+	details["status"] = string(ticket.Status)
+	details["submitter_id"] = ticket.SubmitterID
+	if submitterName, err := h.lookupUsername(ctx, ticket.SubmitterID); err == nil && submitterName != "" {
+		details["submitter_name"] = submitterName
+	}
+	if strings.TrimSpace(ticket.SQLContent) != "" {
+		details["sql"] = truncate(ticket.SQLContent, 500)
 	}
 	if ticket.DBConnectionID != nil {
 		details["db_connection_id"] = *ticket.DBConnectionID
+		if h.dbConns != nil {
+			conn, err := h.dbConns.GetByID(ctx, *ticket.DBConnectionID)
+			if err == nil && conn != nil {
+				addAuditConnectionDetails(details, conn)
+			}
+		}
 	}
 	if ticket.ContainsSensitive != nil {
 		details["contains_sensitive"] = *ticket.ContainsSensitive
 	}
+	for key, value := range extra {
+		details[key] = value
+	}
+	return details
+}
+
+func (h *TicketHandler) workflowAuditDetails(ctx context.Context, ticket *model.Ticket, resolution *model.WorkflowResolution) map[string]any {
+	details := h.ticketAuditDetails(ctx, ticket, nil)
+	addWorkflowResolutionAuditDetails(details, resolution)
+	return details
+}
+
+func workflowAuditDetails(ticket *model.Ticket, resolution *model.WorkflowResolution) map[string]any {
+	details := map[string]any{}
+	addAuditTicketDetails(details, ticket)
+	if ticket != nil {
+		details["status"] = string(ticket.Status)
+		if strings.TrimSpace(ticket.SQLContent) != "" {
+			details["sql"] = truncate(ticket.SQLContent, 500)
+		}
+		if ticket.DBConnectionID != nil {
+			details["db_connection_id"] = *ticket.DBConnectionID
+		}
+		if ticket.ContainsSensitive != nil {
+			details["contains_sensitive"] = *ticket.ContainsSensitive
+		}
+	}
+	addWorkflowResolutionAuditDetails(details, resolution)
+	return details
+}
+
+func addWorkflowResolutionAuditDetails(details map[string]any, resolution *model.WorkflowResolution) {
 	if resolution != nil {
 		if resolution.RuleID != nil {
 			details["workflow_rule_id"] = *resolution.RuleID
@@ -1050,7 +1100,6 @@ func workflowAuditDetails(ticket *model.Ticket, resolution *model.WorkflowResolu
 		details["error_code"] = resolution.ErrorCode
 		details["error_message"] = resolution.ErrorMessage
 	}
-	return details
 }
 
 // GET /tickets
@@ -1548,7 +1597,7 @@ func (h *TicketHandler) RetryWorkflowResolution(w http.ResponseWriter, r *http.R
 			ActionType:   "workflow_resolution_retry_failed",
 			ResourceType: "ticket",
 			ResourceID:   &id,
-			Details:      workflowAuditDetails(ticket, resolution),
+			Details:      h.workflowAuditDetails(r.Context(), ticket, resolution),
 			IPAddress:    clientIP(r),
 		})
 		h.dispatchTicketNotification(r.Context(), ticket, ticketEventNeedsAdmin, &actorID, "Workflow Rule 仍無法解析，工單維持需管理員處理狀態。")
@@ -1580,7 +1629,7 @@ func (h *TicketHandler) RetryWorkflowResolution(w http.ResponseWriter, r *http.R
 		ActionType:   "workflow_resolution_retry",
 		ResourceType: "ticket",
 		ResourceID:   &id,
-		Details:      workflowAuditDetails(updated, resolution),
+		Details:      h.workflowAuditDetails(r.Context(), updated, resolution),
 		IPAddress:    clientIP(r),
 	})
 	if target == model.TicketStatusApproved {
@@ -1723,6 +1772,9 @@ func (h *TicketHandler) buildTicketResponse(ctx context.Context, ticket *model.T
 }
 
 func (h *TicketHandler) lookupUsername(ctx context.Context, userID uint64) (string, error) {
+	if h.users == nil {
+		return strconv.FormatUint(userID, 10), nil
+	}
 	user, err := h.users.GetByID(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("load user %d: %w", userID, err)
@@ -1731,6 +1783,20 @@ func (h *TicketHandler) lookupUsername(ctx context.Context, userID uint64) (stri
 		return strconv.FormatUint(userID, 10), nil
 	}
 	return user.Username, nil
+}
+
+func (h *TicketHandler) auditActorName(ctx context.Context, actorID *uint64, fallback string) string {
+	if strings.TrimSpace(fallback) != "" {
+		return strings.TrimSpace(fallback)
+	}
+	if actorID == nil || h.users == nil {
+		return ""
+	}
+	name, err := h.lookupUsername(ctx, *actorID)
+	if err != nil {
+		return ""
+	}
+	return name
 }
 
 func (h *TicketHandler) lookupUsernamesByIDs(ctx context.Context, userIDs []uint64) ([]string, error) {
@@ -1819,9 +1885,9 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var auditDetails any
+	auditDetails := h.ticketAuditDetails(r.Context(), ticket, nil)
 	if req.Comment != nil && *req.Comment != "" {
-		auditDetails = map[string]string{"comment": *req.Comment}
+		auditDetails["comment"] = *req.Comment
 	}
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
@@ -1937,9 +2003,10 @@ func (h *TicketHandler) startWorkflowAutoExecution(ctx context.Context, ticket *
 	if resolution.RuleID != nil {
 		details["workflow_rule_id"] = *resolution.RuleID
 	}
+	details = h.ticketAuditDetails(ctx, ticket, details)
 	h.audit.Log(ctx, repository.AuditEntry{
 		ActorID:      actorID,
-		ActorName:    middleware.UsernameFromCtx(ctx),
+		ActorName:    h.auditActorName(ctx, actorID, middleware.UsernameFromCtx(ctx)),
 		ActionType:   "workflow_auto_execute_start",
 		ResourceType: "ticket",
 		ResourceID:   &ticket.ID,
@@ -2365,6 +2432,7 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64, op
 			details["workflow_rule_id"] = *opts.WorkflowRuleID
 		}
 	}
+	details = h.ticketAuditDetails(ctx, ticket, details)
 	auditActorID := &executorID
 	notificationActorID := &executorID
 	if opts.Automated {
@@ -2424,6 +2492,7 @@ func (h *TicketHandler) finishTicketExecutionStartFailure(ctx context.Context, t
 		actorName = "workflow automation"
 		notificationActorID = &opts.ReviewerID
 	}
+	details = h.ticketAuditDetails(ctx, ticket, details)
 	h.finishTicket(ctx, ticket.ID, status, message)
 	h.audit.Log(ctx, repository.AuditEntry{
 		ActorID:      actorID,

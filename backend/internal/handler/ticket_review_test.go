@@ -59,6 +59,211 @@ func TestRewriteMySQLDDLForShadowSupportsRenameTable(t *testing.T) {
 	}
 }
 
+func TestMySQLDDLShadowCloneTablesUsesStatementScope(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want []mysqlShadowCloneTable
+	}{
+		{
+			name: "drop table clones only target table",
+			sql:  "DROP TABLE william",
+			want: []mysqlShadowCloneTable{{database: "app", table: "william", required: true}},
+		},
+		{
+			name: "drop table if exists allows missing target",
+			sql:  "DROP TABLE IF EXISTS william",
+			want: []mysqlShadowCloneTable{{database: "app", table: "william", required: false}},
+		},
+		{
+			name: "alter table with foreign key clones target and referenced table",
+			sql:  "ALTER TABLE orders ADD CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)",
+			want: []mysqlShadowCloneTable{
+				{database: "app", table: "orders", required: true},
+				{database: "app", table: "users", required: true},
+			},
+		},
+		{
+			name: "create table like clones referenced table only",
+			sql:  "CREATE TABLE new_orders LIKE orders",
+			want: []mysqlShadowCloneTable{{database: "app", table: "orders", required: true}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, tt.sql)
+			if err != nil {
+				t.Fatalf("parse SQL: %v", err)
+			}
+			got, err := mysqlDDLShadowCloneTables(parsed.Statements[0], "app")
+			if err != nil {
+				t.Fatalf("mysqlDDLShadowCloneTables() error = %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("len(got) = %d, want %d; got = %#v", len(got), len(tt.want), got)
+			}
+			for index := range tt.want {
+				if got[index] != tt.want[index] {
+					t.Fatalf("got[%d] = %#v, want %#v", index, got[index], tt.want[index])
+				}
+			}
+		})
+	}
+}
+
+func TestMySQLDDLShadowCloneTablesForStatementsUsesBatchScope(t *testing.T) {
+	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "ALTER TABLE orders ADD COLUMN memo VARCHAR(255); DROP TABLE old_orders")
+	if err != nil {
+		t.Fatalf("parse SQL: %v", err)
+	}
+
+	got, err := mysqlDDLShadowCloneTablesForStatements(parsed.Statements, "app")
+	if err != nil {
+		t.Fatalf("mysqlDDLShadowCloneTablesForStatements() error = %v", err)
+	}
+
+	want := []mysqlShadowCloneTable{
+		{database: "app", table: "orders", required: true},
+		{database: "app", table: "old_orders", required: true},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len(got) = %d, want %d; got = %#v", len(got), len(want), got)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("got[%d] = %#v, want %#v", index, got[index], want[index])
+		}
+	}
+}
+
+func TestMySQLDDLTableExistenceChecks(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want []mysqlDDLTableExistenceCheck
+	}{
+		{
+			name: "create table target must not exist",
+			sql:  "CREATE TABLE william (id BIGINT PRIMARY KEY)",
+			want: []mysqlDDLTableExistenceCheck{{database: "app", table: "william", expectation: mysqlTableMustNotExist}},
+		},
+		{
+			name: "create table if not exists target is optional",
+			sql:  "CREATE TABLE IF NOT EXISTS william (id BIGINT PRIMARY KEY)",
+			want: []mysqlDDLTableExistenceCheck{{database: "app", table: "william", expectation: mysqlTableMustNotExist, optional: true}},
+		},
+		{
+			name: "alter table target must exist",
+			sql:  "ALTER TABLE william ADD COLUMN memo VARCHAR(255)",
+			want: []mysqlDDLTableExistenceCheck{{database: "app", table: "william", expectation: mysqlTableMustExist}},
+		},
+		{
+			name: "drop table target must exist",
+			sql:  "DROP TABLE william",
+			want: []mysqlDDLTableExistenceCheck{{database: "app", table: "william", expectation: mysqlTableMustExist}},
+		},
+		{
+			name: "drop table if exists target is optional",
+			sql:  "DROP TABLE IF EXISTS william",
+			want: []mysqlDDLTableExistenceCheck{{database: "app", table: "william", expectation: mysqlTableMustExist, optional: true}},
+		},
+		{
+			name: "create table like checks target and dependency",
+			sql:  "CREATE TABLE new_orders LIKE orders",
+			want: []mysqlDDLTableExistenceCheck{
+				{database: "app", table: "new_orders", expectation: mysqlTableMustNotExist},
+				{database: "app", table: "orders", expectation: mysqlTableMustExist},
+			},
+		},
+		{
+			name: "rename table checks old and new target",
+			sql:  "RENAME TABLE orders TO archived_orders",
+			want: []mysqlDDLTableExistenceCheck{
+				{database: "app", table: "orders", expectation: mysqlTableMustExist},
+				{database: "app", table: "archived_orders", expectation: mysqlTableMustNotExist},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, tt.sql)
+			if err != nil {
+				t.Fatalf("parse SQL: %v", err)
+			}
+			got, err := mysqlDDLTableExistenceChecks(parsed.Statements[0], "app")
+			if err != nil {
+				t.Fatalf("mysqlDDLTableExistenceChecks() error = %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("len(got) = %d, want %d; got = %#v", len(got), len(tt.want), got)
+			}
+			for index := range tt.want {
+				if got[index] != tt.want[index] {
+					t.Fatalf("got[%d] = %#v, want %#v", index, got[index], tt.want[index])
+				}
+			}
+		})
+	}
+}
+
+func TestValidateMySQLDDLTableExistence(t *testing.T) {
+	tests := []struct {
+		name    string
+		sql     string
+		count   int
+		wantErr string
+	}{
+		{
+			name:    "create table rejects existing target",
+			sql:     "CREATE TABLE william (id BIGINT PRIMARY KEY)",
+			count:   1,
+			wantErr: `table "william" already exists`,
+		},
+		{
+			name:    "drop table rejects missing target",
+			sql:     "DROP TABLE william",
+			count:   0,
+			wantErr: `table "william" does not exist`,
+		},
+		{
+			name:  "drop table if exists allows missing target",
+			sql:   "DROP TABLE IF EXISTS william",
+			count: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New: %v", err)
+			}
+			defer db.Close()
+			mock.ExpectQuery(`FROM information_schema\.TABLES`).
+				WithArgs("app", "william").
+				WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(tt.count))
+
+			parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, tt.sql)
+			if err != nil {
+				t.Fatalf("parse SQL: %v", err)
+			}
+			err = validateMySQLDDLTableExistence(context.Background(), db, parsed.Statements[0], "app")
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateMySQLDDLTableExistence() error = %v", err)
+				}
+			} else if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("validateMySQLDDLTableExistence() error = %v, want %q", err, tt.wantErr)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet expectations: %v", err)
+			}
+		})
+	}
+}
+
 func TestInferReviewObjectTypeReturnsTableForDML(t *testing.T) {
 	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "INSERT INTO sys_menu (id) SELECT id FROM sys_menu WHERE id = 1")
 	if err != nil {

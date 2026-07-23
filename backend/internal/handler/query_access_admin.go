@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/middleware"
@@ -16,11 +17,12 @@ type QueryAccessAdminHandler struct {
 	queryAccess *repository.QueryAccessRepo
 	users       *repository.UserRepo
 	auths       *repository.AuthGroupRepo
+	dbConns     *repository.DBConnectionRepo
 	audit       *repository.AuditRepo
 }
 
-func NewQueryAccessAdminHandler(queryAccess *repository.QueryAccessRepo, users *repository.UserRepo, auths *repository.AuthGroupRepo, audit *repository.AuditRepo) *QueryAccessAdminHandler {
-	return &QueryAccessAdminHandler{queryAccess: queryAccess, users: users, auths: auths, audit: audit}
+func NewQueryAccessAdminHandler(queryAccess *repository.QueryAccessRepo, users *repository.UserRepo, auths *repository.AuthGroupRepo, dbConns *repository.DBConnectionRepo, audit *repository.AuditRepo) *QueryAccessAdminHandler {
+	return &QueryAccessAdminHandler{queryAccess: queryAccess, users: users, auths: auths, dbConns: dbConns, audit: audit}
 }
 
 func (h *QueryAccessAdminHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -78,22 +80,15 @@ func (h *QueryAccessAdminHandler) Create(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusInternalServerError, "create query access rule failed")
 		return
 	}
+	details := h.queryAccessRuleAuditDetails(r.Context(), *rule, expiresAt)
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &actorID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
 		ActionType:   "query_access_rule_create",
 		ResourceType: "query_access_rule",
 		ResourceID:   &rule.ID,
-		Details: map[string]any{
-			"subject_type":     rule.SubjectType,
-			"subject_id":       rule.SubjectID,
-			"effect":           rule.Effect,
-			"connection_id":    rule.ConnectionID,
-			"database_pattern": rule.DatabasePattern,
-			"table_pattern":    rule.TablePattern,
-			"expires_at":       expiresAt,
-		},
-		IPAddress: clientIP(r),
+		Details:      details,
+		IPAddress:    clientIP(r),
 	})
 	jsonCreated(w, rule)
 }
@@ -155,6 +150,8 @@ func (h *QueryAccessAdminHandler) Update(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusInternalServerError, "update query access rule failed")
 		return
 	}
+	oldDetails := h.queryAccessRuleAuditDetails(r.Context(), *oldRule, time.Time{})
+	newDetails := h.queryAccessRuleAuditDetails(r.Context(), *rule, expiresAt)
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &actorID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
@@ -163,24 +160,8 @@ func (h *QueryAccessAdminHandler) Update(w http.ResponseWriter, r *http.Request)
 		ResourceID:   &rule.ID,
 		Details: map[string]any{
 			"replaced_rule_id": id,
-			"old": map[string]any{
-				"subject_type":     oldRule.SubjectType,
-				"subject_id":       oldRule.SubjectID,
-				"effect":           oldRule.Effect,
-				"connection_id":    oldRule.ConnectionID,
-				"database_pattern": oldRule.DatabasePattern,
-				"table_pattern":    oldRule.TablePattern,
-				"expires_at":       oldRule.ExpiresAt,
-			},
-			"new": map[string]any{
-				"subject_type":     rule.SubjectType,
-				"subject_id":       rule.SubjectID,
-				"effect":           rule.Effect,
-				"connection_id":    rule.ConnectionID,
-				"database_pattern": rule.DatabasePattern,
-				"table_pattern":    rule.TablePattern,
-				"expires_at":       expiresAt,
-			},
+			"old":              oldDetails,
+			"new":              newDetails,
 		},
 		IPAddress: clientIP(r),
 	})
@@ -212,6 +193,62 @@ func (h *QueryAccessAdminHandler) Revoke(w http.ResponseWriter, r *http.Request)
 		IPAddress:    clientIP(r),
 	})
 	jsonOK(w, map[string]any{"ok": true})
+}
+
+func (h *QueryAccessAdminHandler) queryAccessRuleAuditDetails(ctx context.Context, rule model.QueryAccessRule, expiresAt time.Time) map[string]any {
+	details := map[string]any{
+		"subject_type":     rule.SubjectType,
+		"subject_id":       rule.SubjectID,
+		"effect":           rule.Effect,
+		"connection_id":    rule.ConnectionID,
+		"database_pattern": rule.DatabasePattern,
+		"table_pattern":    rule.TablePattern,
+	}
+	if !expiresAt.IsZero() {
+		details["expires_at"] = expiresAt
+	} else if rule.ExpiresAt != nil {
+		details["expires_at"] = rule.ExpiresAt
+	}
+	if name := h.queryAccessSubjectName(ctx, rule.SubjectType, rule.SubjectID); name != "" {
+		details["subject_name"] = name
+	}
+	if h.dbConns != nil {
+		conn, err := h.dbConns.GetByID(ctx, rule.ConnectionID)
+		if err == nil && conn != nil {
+			addAuditConnectionDetails(details, conn)
+		}
+	}
+	return details
+}
+
+func (h *QueryAccessAdminHandler) queryAccessSubjectName(ctx context.Context, subjectType model.QueryAccessSubjectType, subjectID uint64) string {
+	switch subjectType {
+	case model.QueryAccessSubjectTypeUser:
+		if h.users == nil {
+			return ""
+		}
+		user, err := h.users.GetByID(ctx, subjectID)
+		if err == nil && user != nil {
+			return user.Username
+		}
+	case model.QueryAccessSubjectTypeAuthGroup:
+		if h.auths == nil {
+			return ""
+		}
+		groups, err := h.auths.List(ctx)
+		if err != nil {
+			return ""
+		}
+		for _, group := range groups {
+			if group.ID == subjectID {
+				if strings.TrimSpace(group.Name) != "" {
+					return group.Name
+				}
+				return group.GroupKey
+			}
+		}
+	}
+	return ""
 }
 
 func (h *QueryAccessAdminHandler) validateSubjectDBScope(ctx context.Context, subjectType model.QueryAccessSubjectType, subjectID, connectionID uint64) error {

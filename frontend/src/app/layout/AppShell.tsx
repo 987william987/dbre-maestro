@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -129,6 +129,30 @@ const NAV_GROUPS = [
   },
 ]
 
+const READ_ONLY_HEADER_NOTICE_ROUTES = [
+  { match: (pathname: string) => pathname === '/tickets', read: ['tickets.read'], write: ['tickets.apply', 'tickets.review', 'tickets.execute', 'sql_editor.export_review', 'sql_editor.sensitive_review'] },
+  { match: (pathname: string) => pathname.startsWith('/tickets/') && pathname !== '/tickets/new', read: ['tickets.read'], write: ['tickets.apply', 'tickets.review', 'tickets.execute', 'sql_editor.export_review', 'sql_editor.sensitive_review'] },
+  { match: (pathname: string) => pathname === '/sql-editor', read: ['sql_editor.read'], write: ['sql_editor.query', 'sql_editor.export', 'sql_editor.sensitive_apply'] },
+  { match: (pathname: string) => pathname === '/scheduled-sql-reports', read: ['scheduled_sql_reports.read'], write: ['scheduled_sql_reports.write'] },
+  { match: (pathname: string) => pathname.startsWith('/users'), read: ['users.read'], write: ['users.write'] },
+  { match: (pathname: string) => pathname === '/db-connections', read: ['db_connections.read'], write: ['db_connections.write'] },
+  { match: (pathname: string) => pathname === '/masking-rules', read: ['masking_rules.read'], write: ['masking_rules.write'] },
+  { match: (pathname: string) => pathname.startsWith('/sql-review-rules'), read: ['sql_review.read'], write: ['sql_review.write'] },
+  { match: (pathname: string) => pathname === '/audit-logs', read: ['audit_logs.read'], write: ['audit_logs.write'] },
+  { match: (pathname: string) => pathname === '/settings', read: ['settings.read'], write: ['settings.write'] },
+] as const
+
+function getReadOnlyHeaderNotice(pathname: string, permissions: string[]) {
+  const route = READ_ONLY_HEADER_NOTICE_ROUTES.find((item) => item.match(pathname))
+  if (!route) {
+    return null
+  }
+  if (route.read.some((permission) => permissions.includes(permission)) && !route.write.some((permission) => permissions.includes(permission))) {
+    return { label: 'Read-only mode' }
+  }
+  return null
+}
+
 const SIDEBAR_COLLAPSE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 12 9 7v10Z' fill='%2318171b'/%3E%3Cpath d='m21 12-6-5v10Z' fill='%23c7c7cc'/%3E%3C/svg%3E") 12 12, pointer`
 const SIDEBAR_EXPAND_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 12 9 7v10Z' fill='%23c7c7cc'/%3E%3Cpath d='m21 12-6-5v10Z' fill='%2318171b'/%3E%3C/svg%3E") 12 12, pointer`
 
@@ -178,7 +202,7 @@ const PAGE_HELP = [
       'If query permission is missing, use the quick request action to create an access ticket from the current connection, database, and table context.',
       'Quick access requests only cover the current context. For multiple databases or tables, submit a dedicated ticket from the ticket workflow.',
       'Temporary sensitive-data access is also generated from the current context and enters the approval workflow automatically.',
-      'Successful executions are recorded in history and audit logs when the operation reaches the backend.',
+      'Successful executions are recorded in history and audit logs when the operation reaches the backend. History shows only your own latest 20 query records.',
     ],
   },
   {
@@ -515,6 +539,9 @@ export function AppShell() {
     }
     return items
   }, [activeNavChild, activeNavItem])
+  const headerNotice = useMemo(() => {
+    return getReadOnlyHeaderNotice(location.pathname, user.permissions)
+  }, [location.pathname, user.permissions])
 
   useEffect(() => {
     setExpandedNavKeys((current) => {
@@ -899,7 +926,7 @@ export function AppShell() {
             </div>
           </div>
 
-          <div className="hidden h-14 items-center px-4 sm:px-6 lg:flex">
+          <div className="hidden h-14 items-center justify-between gap-4 px-4 sm:px-6 lg:flex">
             <div className="flex min-w-0 items-center gap-3 text-[14px]">
               <div className="flex min-w-0 items-center gap-3 overflow-x-auto">
                 {breadcrumbItems.map((item, index) => (
@@ -962,6 +989,12 @@ export function AppShell() {
                 </button>
               ) : null}
             </div>
+            {headerNotice ? (
+              <div className="inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-[12px] font-medium text-amber-800">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {headerNotice.label}
+              </div>
+            ) : null}
           </div>
 
           <nav className="flex gap-1.5 overflow-x-auto px-4 pb-3 pt-2 lg:hidden">

@@ -13,6 +13,11 @@ vi.mock('@/modules/db-connections/api', () => ({
   deleteDBConnection: vi.fn(),
   patchDBConnection: vi.fn(),
 }))
+vi.mock('@/shared/auth/AuthContext', () => ({
+  useAuth: () => ({
+    user: { permissions: ['db_connections.read', 'db_connections.write'] },
+  }),
+}))
 
 import { createDBConnection, deleteDBConnection, getDBConnectionBindings, listDBConnections, patchDBConnection, testDBConnection } from '@/modules/db-connections/api'
 

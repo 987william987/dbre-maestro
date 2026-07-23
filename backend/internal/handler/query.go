@@ -126,7 +126,7 @@ func NewQueryHandler(
 		notifRepo:     notifRepo,
 		broker:        broker,
 		lark:          lark,
-		notifications: NewNotificationRouter(notifRepo, audit, broker, lark),
+		notifications: NewNotificationRouter(notifRepo, audit, users, broker, lark),
 		appBaseURL:    strings.TrimRight(appBaseURL, "/"),
 		jwtSecret:     append([]byte(nil), jwtSecret...),
 	}
@@ -313,18 +313,21 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auditDetails := map[string]any{
+		"sql":         truncate(req.SQL, 500),
+		"row_count":   len(result.Rows),
+		"duration_ms": durationMs,
+	}
+	addAuditConnectionDetails(auditDetails, conn)
+	addAuditQueryContextDetails(auditDetails, queryCtx)
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
 		ActionType:   "query_execute",
 		ResourceType: "db_connection",
 		ResourceID:   &req.DBConnectionID,
-		Details: map[string]any{
-			"sql":         truncate(req.SQL, 500),
-			"row_count":   len(result.Rows),
-			"duration_ms": durationMs,
-		},
-		IPAddress: clientIP(r),
+		Details:      auditDetails,
+		IPAddress:    clientIP(r),
 	})
 
 	if h.artifacts != nil {
@@ -363,6 +366,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		SchemaName              string `json:"schema_name"`
 		ApprovedDurationMinutes int    `json:"approved_duration_minutes"`
 		QueryContext            string `json:"query_context_token"`
+		Reason                  string `json:"reason"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -370,6 +374,11 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 	}
 	if req.DBConnectionID == 0 || strings.TrimSpace(req.SQLContent) == "" {
 		jsonErr(w, http.StatusUnprocessableEntity, "db_connection_id and sql_content are required")
+		return
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "reason is required")
 		return
 	}
 	approvedDurationMinutes, err := normalizeSensitiveAccessDurationMinutes(req.ApprovedDurationMinutes)
@@ -409,7 +418,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		jsonErr(w, http.StatusUnprocessableEntity, "query does not contain sensitive columns")
 		return
 	}
-	description := fmt.Sprintf("由 SQL Editor 建立的臨時敏感查詢申請。Duration=%d minutes", approvedDurationMinutes)
+	description := fmt.Sprintf("申請原因：%s\nDuration=%d minutes\nSensitive=true", reason, approvedDurationMinutes)
 	ticket, err := h.tickets.CreateWithScopes(r.Context(), &model.Ticket{
 		Title:                   fmt.Sprintf("Sensitive Query Access / %s", conn.Name),
 		Description:             &description,
@@ -1229,18 +1238,21 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 	result := redisResultToQueryResult(val)
 
 	connID := conn.ID
+	auditDetails := map[string]any{
+		"sql":         truncate(cmdLine, 500),
+		"row_count":   len(result.Rows),
+		"duration_ms": durationMs,
+	}
+	addAuditConnectionDetails(auditDetails, conn)
+	auditDetails["redis_db_index"] = dbIndex
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
 		ActionType:   "query_execute",
 		ResourceType: "db_connection",
 		ResourceID:   &connID,
-		Details: map[string]any{
-			"sql":         truncate(cmdLine, 500),
-			"row_count":   len(result.Rows),
-			"duration_ms": durationMs,
-		},
-		IPAddress: clientIP(r),
+		Details:      auditDetails,
+		IPAddress:    clientIP(r),
 	})
 
 	if h.artifacts != nil {
@@ -1272,6 +1284,12 @@ func (h *QueryHandler) auditBlockedQuery(r *http.Request, userID uint64, connID 
 	}
 	for key, value := range extra {
 		details[key] = value
+	}
+	if h.dbConns != nil {
+		conn, err := h.dbConns.GetByID(r.Context(), connID)
+		if err == nil && conn != nil {
+			addAuditConnectionDetails(details, conn)
+		}
 	}
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
