@@ -30,11 +30,41 @@ func TestCheckTicketStatementKinds(t *testing.T) {
 
 	t.Run("dml accepts dml only", func(t *testing.T) {
 		err := CheckTicketStatementKinds(model.TicketTypeDML, []sqlparse.ParsedStatement{
-			{Seq: 1, Kind: sqlparse.StatementKindUpdate},
-			{Seq: 2, Kind: sqlparse.StatementKindDelete},
+			{Seq: 1, Kind: sqlparse.StatementKindSet},
+			{Seq: 2, Kind: sqlparse.StatementKindUpdate},
+			{Seq: 3, Kind: sqlparse.StatementKindDelete},
 		})
 		if err != nil {
 			t.Fatalf("expected nil, got %v", err)
+		}
+	})
+
+	t.Run("dml accepts set with insert", func(t *testing.T) {
+		err := CheckTicketStatementKinds(model.TicketTypeDML, []sqlparse.ParsedStatement{
+			{Seq: 1, Kind: sqlparse.StatementKindSet},
+			{Seq: 2, Kind: sqlparse.StatementKindInsert},
+		})
+		if err != nil {
+			t.Fatalf("expected nil, got %v", err)
+		}
+	})
+
+	t.Run("dml rejects set without mutation", func(t *testing.T) {
+		err := CheckTicketStatementKinds(model.TicketTypeDML, []sqlparse.ParsedStatement{
+			{Seq: 1, Kind: sqlparse.StatementKindSet},
+		})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("ddl rejects set", func(t *testing.T) {
+		err := CheckTicketStatementKinds(model.TicketTypeDDL, []sqlparse.ParsedStatement{
+			{Seq: 1, Kind: sqlparse.StatementKindSet},
+			{Seq: 2, Kind: sqlparse.StatementKindAlter},
+		})
+		if err == nil {
+			t.Fatal("expected error, got nil")
 		}
 	})
 
