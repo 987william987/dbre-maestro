@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Check, ChevronDown, Download, Loader2, Minus, Play, Plus, ShieldCheck, ShieldX, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, Download, Loader2, Minus, Play, Plus, RotateCcw, ShieldCheck, ShieldX, X } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { format as formatSQL } from 'sql-formatter'
 import { cn } from '@/lib/utils'
@@ -805,6 +805,12 @@ export function TicketDetailPage() {
     (ticket?.status === 'pending_execution' && (canExecute || canReject)) ||
     ((ticket?.ticket_type === 'sensitive_query_access' || ticket?.ticket_type === 'query_access') && ticket?.status === 'approved' && canRevoke)
   const canViewWorkflowTrace = isAdminUser(user) && ticket?.status === 'needs_admin_attention'
+  const canReapplyTicket = Boolean(
+    ticket &&
+    ticket.status === 'failed' &&
+    (ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml' || ticket.ticket_type === 'redis_command') &&
+    user.permissions.includes('tickets.apply'),
+  )
 
   async function reloadTicket(options?: { background?: boolean }) {
     if (!id) {
@@ -886,6 +892,24 @@ export function TicketDetailPage() {
     }
   }
 
+  function handleReapplyTicket() {
+    if (!ticket || !canReapplyTicket) {
+      return
+    }
+    navigate('/tickets/new', {
+      state: {
+        reapplyTicket: {
+          title: ticket.title,
+          description: ticket.description ?? '',
+          ticketType: ticket.ticket_type,
+          dbConnectionId: ticket.db_connection_id ?? null,
+          databaseName: ticket.database_name ?? '',
+          sqlContent: ticket.sql_content,
+        },
+      },
+    })
+  }
+
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -910,13 +934,25 @@ export function TicketDetailPage() {
           </div>
           {ticket ? <p className="mt-1 truncate font-mono text-[12px] font-semibold text-accent">{ticket.ticket_no}</p> : null}
         </div>
-        <Link
-          to="/tickets"
-          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to list
-        </Link>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {canReapplyTicket ? (
+            <button
+              type="button"
+              onClick={handleReapplyTicket}
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-slate-800"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Resubmit
+            </button>
+          ) : null}
+          <Link
+            to="/tickets"
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to list
+          </Link>
+        </div>
       </div>
 
       {error ? <InlineAlert>{error}</InlineAlert> : null}

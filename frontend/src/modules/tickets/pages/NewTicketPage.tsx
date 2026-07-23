@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, FileText, Loader2, Minus, Plus, ScrollText, Trash2, Wand2, XCircle } from 'lucide-react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { format as formatSQL } from 'sql-formatter'
 import { ApiError } from '@/shared/api/client'
 import { DataTable, DataTableBody, DataTableCell, DataTableHead, DataTableHeaderCell, DataTableRow } from '@/shared/ui/DataTable'
@@ -83,6 +83,28 @@ const QUERY_ACCESS_DURATION_OPTIONS = [
   { value: String(365 * 24 * 60), label: '1 year' },
   { value: String(3 * 365 * 24 * 60), label: '3 years' },
 ]
+
+type ReapplyTicketState = {
+  reapplyTicket?: {
+    title?: string
+    description?: string | null
+    ticketType?: TicketType
+    dbConnectionId?: number | null
+    databaseName?: string | null
+    sqlContent?: string
+  }
+}
+
+function getReapplyTicketState(value: unknown): ReapplyTicketState['reapplyTicket'] | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  const draft = (value as ReapplyTicketState).reapplyTicket
+  if (!draft || typeof draft !== 'object' || Array.isArray(draft)) {
+    return null
+  }
+  return draft
+}
 const MAX_QUERY_ACCESS_DURATION_MINUTES = 3 * 365 * 24 * 60
 
 function createQueryAccessRuleDraft(overrides: Partial<QueryAccessRuleDraft> = {}): QueryAccessRuleDraft {
@@ -161,17 +183,19 @@ function parseQueryAccessDuration(rawValue: string) {
 
 export function NewTicketPage() {
   const [searchParams] = useSearchParams()
+  const location = useLocation()
   const navigate = useNavigate()
+  const reapplyDraft = getReapplyTicketState(location.state)
   const prefilledTicketType = parseTicketType(searchParams.get('ticket_type'))
   const prefilledConnectionId = searchParams.get('db_connection_id')?.trim() ?? ''
   const prefilledDatabaseName = searchParams.get('database_name')?.trim() ?? ''
   const prefilledTableName = searchParams.get('table_name')?.trim() ?? ''
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [ticketType, setTicketType] = useState<TicketType>(prefilledTicketType ?? 'ddl')
-  const [dbConnectionId, setDbConnectionId] = useState(prefilledConnectionId)
-  const [databaseName, setDatabaseName] = useState('')
-  const [sqlContent, setSqlContent] = useState('')
+  const [title, setTitle] = useState(reapplyDraft?.title ?? '')
+  const [description, setDescription] = useState(reapplyDraft?.description ?? '')
+  const [ticketType, setTicketType] = useState<TicketType>(reapplyDraft?.ticketType ?? prefilledTicketType ?? 'ddl')
+  const [dbConnectionId, setDbConnectionId] = useState(reapplyDraft?.dbConnectionId != null ? String(reapplyDraft.dbConnectionId) : prefilledConnectionId)
+  const [databaseName, setDatabaseName] = useState(reapplyDraft?.databaseName?.trim() ?? prefilledDatabaseName)
+  const [sqlContent, setSqlContent] = useState(reapplyDraft?.sqlContent ?? '')
   const [reviewResults, setReviewResults] = useState<TicketReviewResult[]>([])
   const [reviewPassed, setReviewPassed] = useState(false)
   const [expandedReviewResultSQLs, setExpandedReviewResultSQLs] = useState<Set<string>>(() => new Set())
@@ -305,6 +329,10 @@ export function NewTicketPage() {
         if (!requiresDatabaseSelection) {
           return
         }
+        const currentDatabase = databaseName.trim()
+        if (currentDatabase !== '' && nextDatabases.includes(currentDatabase)) {
+          return
+        }
         const defaultDatabase = (selectedConnection?.database_name ?? '').trim()
         if (defaultDatabase !== '' && nextDatabases.includes(defaultDatabase)) {
           setDatabaseName(defaultDatabase)
@@ -332,6 +360,7 @@ export function NewTicketPage() {
     }
   }, [
     dbConnectionId,
+    databaseName,
     isQueryAccessTicket,
     prefilledDatabaseName,
     requiresDatabaseSelection,

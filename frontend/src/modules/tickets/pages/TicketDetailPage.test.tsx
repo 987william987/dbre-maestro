@@ -90,6 +90,7 @@ function renderPage() {
     <MemoryRouter initialEntries={['/tickets/12']}>
       <Routes>
         <Route path="/tickets" element={<div>tickets page</div>} />
+        <Route path="/tickets/new" element={<div>new ticket page</div>} />
         <Route path="/tickets/:id" element={<TicketDetailPage />} />
       </Routes>
     </MemoryRouter>,
@@ -251,6 +252,29 @@ describe('TicketDetailPage role visibility', () => {
     await waitFor(() => expect(screen.getByText('SQL Content')).toBeInTheDocument())
     expect(screen.queryByText('審核操作')).not.toBeInTheDocument()
     expect(screen.queryByText('執行流程')).not.toBeInTheDocument()
+  })
+
+  it('failed 一般工單可一鍵重提到新建工單頁', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      status: 'failed',
+      ticket_type: 'dml',
+      sql_content: 'UPDATE users SET flagged = 1 WHERE id < 10;',
+    }))
+
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Resubmit' }))
+    expect(screen.getByText('new ticket page')).toBeInTheDocument()
   })
 
   it('工單詳情 SQL 內容會以格式化後的形式顯示', async () => {

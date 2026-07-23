@@ -126,6 +126,34 @@ describe('NewTicketPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Target Database' })).toHaveTextContent('orders'))
   })
 
+  it('prefills fields from a failed ticket reapply draft', async () => {
+    render(
+      <MemoryRouter initialEntries={[{
+        pathname: '/tickets/new',
+        state: {
+          reapplyTicket: {
+            title: 'Retry data patch',
+            description: 'Original execution failed',
+            ticketType: 'dml',
+            dbConnectionId: 1,
+            databaseName: 'orders_archive',
+            sqlContent: 'UPDATE users SET flagged = 1 WHERE id < 10;',
+          },
+        },
+      }]}>
+        <NewTicketPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByDisplayValue('Retry data patch')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Original execution failed')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('UPDATE users SET flagged = 1 WHERE id < 10;')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Ticket Type' })).toHaveTextContent('DML')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Target Instance' })).toHaveTextContent('orders-primary'))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Target Database' })).toHaveTextContent('orders_archive'))
+    expect(screen.getByRole('button', { name: 'Submit Ticket' })).toBeDisabled()
+  })
+
   it('shows Redis instances for query access tickets', async () => {
     render(
       <MemoryRouter initialEntries={['/tickets/new?ticket_type=query_access']}>
