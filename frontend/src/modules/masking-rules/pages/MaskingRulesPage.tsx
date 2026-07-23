@@ -610,14 +610,6 @@ export function MaskingRulesPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      {!canWrite ? (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="rounded-lg border border-border bg-white px-3 py-2 text-[12px] text-muted shadow-soft">
-            This account only has `masking_rules.read`. You can view rules but cannot modify them.
-          </div>
-        </div>
-      ) : null}
-
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
           <SectionCard

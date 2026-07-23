@@ -262,7 +262,6 @@ export function SQLReviewRulesPage() {
         onChange={setOffset}
       />
 
-      {!canWrite ? <InlineAlert>This page is in read-only mode. `sql_review.write` is required to update rules.</InlineAlert> : null}
       {error ? <InlineAlert>{error}</InlineAlert> : null}
     </div>
   )

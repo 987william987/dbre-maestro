@@ -1,8 +1,8 @@
-import { AlertCircle, CheckCircle2, Info } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle2, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 type InlineAlertProps = {
-  tone?: 'error' | 'success' | 'info'
+  tone?: 'error' | 'success' | 'info' | 'warning'
   children: React.ReactNode
   className?: string
 }
@@ -19,6 +19,10 @@ const toneStyles = {
   info: {
     wrapper: 'border-border bg-panel-soft text-muted',
     icon: Info,
+  },
+  warning: {
+    wrapper: 'border-amber-200 bg-amber-50 text-amber-800',
+    icon: AlertTriangle,
   },
 } as const
 

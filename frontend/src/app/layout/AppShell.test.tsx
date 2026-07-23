@@ -45,8 +45,13 @@ function renderShell(initialEntry = '/tickets') {
             <Route path="/users/groups" element={<div>auth groups page</div>} />
             <Route path="/users/resources" element={<div>resources page</div>} />
             <Route path="/users/query-access" element={<div>query access page</div>} />
+            <Route path="/db-connections" element={<div>db connections page</div>} />
             <Route path="/db-metadata/inventory" element={<div>inventory page</div>} />
             <Route path="/db-metadata/objects" element={<div>objects page</div>} />
+            <Route path="/masking-rules" element={<div>masking rules page</div>} />
+            <Route path="/sql-review-rules/mysql" element={<div>sql review page</div>} />
+            <Route path="/audit-logs" element={<div>audit logs page</div>} />
+            <Route path="/settings" element={<div>settings page</div>} />
           </Route>
         </Routes>
       </ToastProvider>
@@ -327,6 +332,67 @@ describe('AppShell notifications', () => {
     expect(screen.getByRole('button', { name: /Users/i })).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getAllByText('Governance').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Auth Groups').length).toBeGreaterThan(0)
+  })
+
+  it.each([
+    { path: '/users', read: 'users.read', label: 'Users' },
+    { path: '/users/groups', read: 'users.read', label: 'Auth Groups' },
+    { path: '/db-connections', read: 'db_connections.read', label: 'DB Connections' },
+    { path: '/masking-rules', read: 'masking_rules.read', label: 'Masking Rules' },
+    { path: '/sql-review-rules/mysql', read: 'sql_review.read', label: 'SQL Review' },
+    { path: '/audit-logs', read: 'audit_logs.read', label: 'Audit Logs' },
+    { path: '/settings', read: 'settings.read', label: 'Settings' },
+  ])('Governance $label 只有讀取權限時在標題列顯示唯讀提示', async ({ path, read, label }) => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'reviewer',
+        authGroups: ['reviewer'],
+        authGroupDetails: [],
+        permissions: [read],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell(path)
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    expect(screen.getAllByText(label).length).toBeGreaterThan(0)
+    expect(screen.getByText('Read-only mode')).toBeInTheDocument()
+  })
+
+  it('Governance 有寫入權限時不顯示唯讀提示', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'dba',
+        authGroups: ['dba'],
+        authGroupDetails: [],
+        permissions: ['sql_review.read', 'sql_review.write'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/sql-review-rules/mysql')
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    expect(screen.queryByText('Read-only mode')).not.toBeInTheDocument()
   })
 
   it('users resources 路由會展開 Users 導航並顯示 Resources', async () => {
