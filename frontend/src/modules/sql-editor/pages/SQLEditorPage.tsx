@@ -18,6 +18,7 @@ import {
   Layers3,
   Play,
   Plus,
+  RefreshCw,
   Star,
   StarOff,
   Table2,
@@ -29,6 +30,7 @@ import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { formatDateTime } from '@/shared/lib/format'
+import { useDebouncedValue } from '@/shared/lib/useDebouncedValue'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataColumn, MetadataDefinition, MetadataItem, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
@@ -51,6 +53,7 @@ import {
   listMetadata,
   listMetadataColumns,
   listMetadataDefinition,
+  listMetadataSearchIndex,
   listQueryHistory,
   listSavedQueries,
 } from '@/modules/sql-editor/api'
@@ -71,6 +74,10 @@ type EditorTab = {
   searchTreeNodes: AssetTreeNode[]
   explorerSearch: string
   searchingAssets: boolean
+  searchIndexStatus: 'idle' | 'loading' | 'ready' | 'error' | 'stale'
+  searchIndexItems: MetadataItem[]
+  searchIndexTruncated: boolean
+  searchIndexError: string
   assetPickerOpen: boolean
   assetPickerSearch: string
   resultView: 'result' | 'vertical' | 'object-meta' | 'history' | 'saved'
@@ -142,6 +149,7 @@ const DEFAULT_SQL = 'SELECT 1;'
 const HISTORY_LIMIT = 20
 const SAVED_QUERY_LIMIT = 10
 const MAX_EDITOR_TABS = 10
+const SEARCH_INDEX_MIN_KEYWORD_LENGTH = 3
 const EDITOR_BASE_VISIBLE_LINES = 12
 const EDITOR_MAX_HEIGHT = 840
 type QueryConstraints = {
@@ -424,6 +432,10 @@ function createTab(seed = 1): EditorTab {
     searchTreeNodes: [],
     explorerSearch: '',
     searchingAssets: false,
+    searchIndexStatus: 'idle',
+    searchIndexItems: [],
+    searchIndexTruncated: false,
+    searchIndexError: '',
     assetPickerOpen: false,
     assetPickerSearch: '',
     resultView: 'result',
@@ -463,6 +475,8 @@ function sanitizeTabForWorkspaceMemory(tab: EditorTab): EditorTab {
     explorerNodes: sanitizeAssetTreeForWorkspaceMemory(tab.explorerNodes),
     searchTreeNodes: sanitizeAssetTreeForWorkspaceMemory(tab.searchTreeNodes),
     searchingAssets: false,
+    searchIndexStatus: tab.searchIndexStatus === 'ready' ? 'ready' : 'idle',
+    searchIndexError: '',
     assetPickerOpen: false,
     resultView: tab.resultView === 'vertical' ? 'result' : tab.resultView,
     columns: [],
@@ -733,14 +747,29 @@ function matchesAssetKeyword(node: {
   )
 }
 
-async function buildSearchNodes(connection: DBConnection, keyword: string): Promise<AssetTreeNode[]> {
+function matchesMetadataItemKeyword(item: MetadataItem, keyword: string) {
+  return matchesAssetKeyword({
+    label: item.name,
+    database: item.database,
+    schema: item.schema,
+  }, keyword)
+}
+
+function buildSearchTreeFromIndex(
+  connection: DBConnection,
+  items: MetadataItem[],
+  keyword: string,
+  selectedDatabase: string,
+  selectedSchema: string,
+  selectedTable: MetadataItem | null,
+): AssetTreeNode[] {
   const rootNode = createConnectionNode(connection, connection.id)
   rootNode.expanded = true
   rootNode.loaded = true
 
   if (connection.db_type === 'redis') {
-    const response = await listMetadata(connection.id)
-    rootNode.children = response.items
+    rootNode.children = items
+      .filter((item) => item.kind === 'redis_db')
       .map((item) => ({
         id: `redis-db-${connection.id}-${item.name}`,
         kind: 'redis_db' as const,
@@ -757,101 +786,114 @@ async function buildSearchNodes(connection: DBConnection, keyword: string): Prom
         children: [],
       }))
       .filter((node) => matchesAssetKeyword(node, keyword))
-
-    return rootNode.children.length > 0 || matchesAssetKeyword(rootNode, keyword) ? [rootNode] : []
+    return syncAssetTreeActiveStates([rootNode], connection.id, selectedDatabase, selectedSchema, selectedTable)
   }
 
-  const databaseResponse = await listMetadata(connection.id)
-  const databaseNodes = await Promise.all(databaseResponse.items.map(async (databaseItem) => {
-    const databaseNode: AssetTreeNode = {
-      id: `database-${connection.id}-${databaseItem.name}`,
+  const databaseNodes = new Map<string, AssetTreeNode>()
+  const schemaNodes = new Map<string, AssetTreeNode>()
+  const ensureDatabaseNode = (database: string, item?: MetadataItem) => {
+    const key = database
+    const existing = databaseNodes.get(key)
+    if (existing) {
+      return existing
+    }
+    const node: AssetTreeNode = {
+      id: `database-${connection.id}-${database}`,
       kind: 'database',
       connectionId: connection.id,
-      label: databaseItem.name,
-      database: databaseItem.name,
-      schema: databaseItem.schema,
+      label: database,
+      database,
+      schema: item?.schema,
       active: false,
       selectable: true,
       expanded: true,
       loaded: true,
       loading: false,
-      item: databaseItem,
+      item,
       children: [],
     }
-
-    if (connection.db_type === 'postgres') {
-      const schemaResponse = await listMetadata(connection.id, { database: databaseItem.name })
-      const schemaNodes = await Promise.all(schemaResponse.items.map(async (schemaItem) => {
-        const schemaNode: AssetTreeNode = {
-          id: `schema-${connection.id}-${databaseItem.name}-${schemaItem.name}`,
-          kind: 'schema',
-          connectionId: connection.id,
-          label: schemaItem.name,
-          database: databaseItem.name,
-          schema: schemaItem.name,
-          active: false,
-          selectable: true,
-          expanded: true,
-          loaded: true,
-          loading: false,
-          item: schemaItem,
-          children: [],
-        }
-
-        const tableResponse = await listMetadata(connection.id, {
-          database: databaseItem.name,
-          schema: schemaItem.name,
-        })
-
-        schemaNode.children = tableResponse.items
-          .map((tableItem) => ({
-            id: `table-${connection.id}-${databaseItem.name}-${tableItem.schema}-${tableItem.name}`,
-            kind: 'table' as const,
-            connectionId: connection.id,
-            label: tableItem.name,
-            database: databaseItem.name,
-            schema: tableItem.schema,
-            active: false,
-            selectable: true,
-            expanded: false,
-            loaded: true,
-            loading: false,
-            item: tableItem,
-            children: [],
-          }))
-          .filter((node) => matchesAssetKeyword(node, keyword))
-
-        return matchesAssetKeyword(schemaNode, keyword) || schemaNode.children.length > 0 ? schemaNode : null
-      }))
-
-      databaseNode.children = schemaNodes.filter((node): node is AssetTreeNode => node !== null)
-      return matchesAssetKeyword(databaseNode, keyword) || databaseNode.children.length > 0 ? databaseNode : null
+    databaseNodes.set(key, node)
+    return node
+  }
+  const ensureSchemaNode = (database: string, schema: string, item?: MetadataItem) => {
+    const key = `${database}\u0000${schema}`
+    const existing = schemaNodes.get(key)
+    if (existing) {
+      return existing
     }
+    const databaseNode = ensureDatabaseNode(database)
+    const node: AssetTreeNode = {
+      id: `schema-${connection.id}-${database}-${schema}`,
+      kind: 'schema',
+      connectionId: connection.id,
+      label: schema,
+      database,
+      schema,
+      active: false,
+      selectable: true,
+      expanded: true,
+      loaded: true,
+      loading: false,
+      item,
+      children: [],
+    }
+    schemaNodes.set(key, node)
+    databaseNode.children.push(node)
+    return node
+  }
 
-    const tableResponse = await listMetadata(connection.id, { database: databaseItem.name })
-    databaseNode.children = tableResponse.items
-      .map((tableItem) => ({
-        id: `table-${connection.id}-${databaseItem.name}-${tableItem.schema}-${tableItem.name}`,
-        kind: 'table' as const,
-        connectionId: connection.id,
-        label: tableItem.name,
-        database: databaseItem.name,
-        schema: tableItem.schema,
-        active: false,
-        selectable: true,
-        expanded: false,
-        loaded: true,
-        loading: false,
-        item: tableItem,
-        children: [],
-      }))
-      .filter((node) => matchesAssetKeyword(node, keyword))
+  for (const item of items) {
+    const matched = matchesMetadataItemKeyword(item, keyword)
+    if (item.kind === 'database') {
+      if (matched) {
+        ensureDatabaseNode(item.name, item)
+      }
+      continue
+    }
+    if (item.kind === 'schema') {
+      const database = item.database || ''
+      if (database && matched) {
+        ensureSchemaNode(database, item.schema || item.name, item)
+      }
+      continue
+    }
+    if (item.kind !== 'table' || !matched) {
+      continue
+    }
+    const database = item.database || item.schema || ''
+    const schema = item.schema || database
+    if (!database) {
+      continue
+    }
+    const tableNode: AssetTreeNode = {
+      id: `table-${connection.id}-${database}-${schema}-${item.name}`,
+      kind: 'table',
+      connectionId: connection.id,
+      label: item.name,
+      database,
+      schema,
+      active: false,
+      selectable: true,
+      expanded: false,
+      loaded: true,
+      loading: false,
+      item,
+      children: [],
+    }
+    if (connection.db_type === 'postgres') {
+      ensureSchemaNode(database, schema).children.push(tableNode)
+    } else {
+      ensureDatabaseNode(database).children.push(tableNode)
+    }
+  }
 
-    return matchesAssetKeyword(databaseNode, keyword) || databaseNode.children.length > 0 ? databaseNode : null
-  }))
-
-  rootNode.children = databaseNodes.filter((node): node is AssetTreeNode => node !== null)
-  return rootNode.children.length > 0 || matchesAssetKeyword(rootNode, keyword) ? [rootNode] : []
+  rootNode.children = [...databaseNodes.values()].filter((node) => {
+    if (node.children.length > 0) {
+      return true
+    }
+    return matchesAssetKeyword(node, keyword)
+  })
+  return syncAssetTreeActiveStates([rootNode], connection.id, selectedDatabase, selectedSchema, selectedTable)
 }
 
 async function buildConnectionRootNode(connection: DBConnection): Promise<AssetTreeNode> {
@@ -1318,6 +1360,10 @@ export function SQLEditorPage() {
   const activeSearchTreeNodes = activeTab?.searchTreeNodes ?? []
   const activeExplorerSearch = activeTab?.explorerSearch ?? ''
   const activeSearchingAssets = activeTab?.searchingAssets ?? false
+  const activeSearchIndexStatus = activeTab?.searchIndexStatus ?? 'idle'
+  const activeSearchIndexError = activeTab?.searchIndexError ?? ''
+  const activeSearchIndexTruncated = activeTab?.searchIndexTruncated ?? false
+  const debouncedExplorerSearch = useDebouncedValue(activeExplorerSearch, 350)
   const activeAssetPickerOpen = activeTab?.assetPickerOpen ?? false
   const activeAssetPickerSearch = activeTab?.assetPickerSearch ?? ''
   const activeResultView = activeTab?.resultView ?? 'result'
@@ -1459,42 +1505,36 @@ export function SQLEditorPage() {
   }, [activeConnection, activeTab?.id])
 
   useEffect(() => {
-    const keyword = activeExplorerSearch.trim()
+    const keyword = debouncedExplorerSearch.trim()
     if (!keyword || !activeConnection) {
       if (activeTab?.searchTreeNodes.length || activeTab?.searchingAssets) {
         updateActiveTab({ searchTreeNodes: [], searchingAssets: false })
       }
       return
     }
-
-    let active = true
-    const tabID = activeTab?.id
-    updateActiveTab({ searchingAssets: true })
-
-    void buildSearchNodes(activeConnection, keyword)
-      .then((nodes) => {
-        if (!active || !tabID) {
-          return
-        }
-        updateTabByID(tabID, { searchTreeNodes: nodes })
-      })
-      .catch((error) => {
-        if (!active || !tabID) {
-          return
-        }
-        updateTabByID(tabID, { metadataError: formatMetadataError(error) })
-        updateTabByID(tabID, { searchTreeNodes: [] })
-      })
-      .finally(() => {
-        if (active && tabID) {
-          updateTabByID(tabID, { searchingAssets: false })
-        }
-      })
-
-    return () => {
-      active = false
+    if (keyword.length < SEARCH_INDEX_MIN_KEYWORD_LENGTH) {
+      if (activeTab?.searchTreeNodes.length || activeTab?.searchingAssets) {
+        updateActiveTab({ searchTreeNodes: [], searchingAssets: false })
+      }
+      return
     }
-  }, [activeConnection, activeExplorerSearch, activeTab?.id])
+    if (activeTab?.searchIndexStatus !== 'ready') {
+      if (activeTab?.searchTreeNodes.length || !activeTab?.searchingAssets) {
+        updateActiveTab({ searchTreeNodes: [], searchingAssets: activeTab?.searchIndexStatus === 'loading' })
+      }
+      return
+    }
+
+    const nodes = buildSearchTreeFromIndex(
+      activeConnection,
+      activeTab.searchIndexItems,
+      keyword,
+      activeDatabase,
+      activeSchema,
+      activeSelectedTable,
+    )
+    updateActiveTab({ searchTreeNodes: nodes, searchingAssets: false })
+  }, [activeConnection, activeDatabase, activeSchema, activeSelectedTable, activeTab?.id, activeTab?.searchIndexItems, activeTab?.searchIndexStatus, activeTab?.searchTreeNodes.length, activeTab?.searchingAssets, debouncedExplorerSearch])
 
   useEffect(() => {
     if (!activeExplorerSearch.trim()) {
@@ -1505,6 +1545,13 @@ export function SQLEditorPage() {
       syncAssetTreeActiveStates(current, activeTab?.connectionId ?? null, activeDatabase, activeSchema, activeSelectedTable),
     )
   }, [activeDatabase, activeExplorerSearch, activeSchema, activeSelectedTable, activeTab?.connectionId])
+
+  useEffect(() => {
+    if (!activeTab || !activeConnection || activeTab.searchIndexStatus !== 'idle') {
+      return
+    }
+    loadSearchIndexForTab(activeTab.id, activeConnection)
+  }, [activeConnection, activeTab?.id, activeTab?.searchIndexStatus])
 
   useEffect(() => {
     updateActiveTabExplorerNodes((current) =>
@@ -1614,6 +1661,32 @@ export function SQLEditorPage() {
         : tab
     )))
   }, [activeTab])
+
+  function loadSearchIndexForTab(tabID: string, connection: DBConnection) {
+    updateTabByID(tabID, {
+      searchIndexStatus: 'loading',
+      searchIndexError: '',
+      searchIndexTruncated: false,
+    })
+
+    void listMetadataSearchIndex(connection.id)
+      .then((response) => {
+        updateTabByID(tabID, {
+          searchIndexStatus: 'ready',
+          searchIndexItems: response.items,
+          searchIndexTruncated: response.truncated,
+          searchIndexError: '',
+        })
+      })
+      .catch((error) => {
+        updateTabByID(tabID, {
+          searchIndexStatus: 'error',
+          searchIndexItems: [],
+          searchIndexTruncated: false,
+          searchIndexError: error instanceof ApiError ? error.message : 'Object search index is temporarily unavailable.',
+        })
+      })
+  }
 
   async function loadNodeChildren(node: AssetTreeNode) {
     const connection = connections.find((item) => item.id === node.connectionId)
@@ -2318,6 +2391,20 @@ export function SQLEditorPage() {
   }), [activeResultPage, activeResultView, activeSelectedTable, activeTab?.result, detailHint, history.length, savedQueries.length, totalResultPages])
 
   function handleSelectNode(node: AssetTreeNode) {
+    if (activeExplorerSearch.trim() && activeConnection && node.kind !== 'connection' && node.kind !== 'redis_db') {
+      const nextDatabase = node.database || (node.kind === 'database' ? node.label : activeDatabase)
+      const nextSchema = node.kind === 'schema' || node.kind === 'table' ? node.schema || '' : ''
+      void buildConnectionRootNodeForContext(activeConnection, nextDatabase, nextSchema)
+        .then((rootNode) => {
+          updateActiveTabExplorerNodes(() =>
+            syncAssetTreeActiveStates([rootNode], activeConnection.id, nextDatabase, nextSchema, node.kind === 'table' ? node.item ?? null : null),
+          )
+        })
+        .catch((error) => {
+          updateActiveTab({ metadataError: formatMetadataError(error) })
+        })
+    }
+
     if (node.kind === 'connection') {
       if (activeTab?.connectionId !== node.connectionId) {
         updateActiveTab({
@@ -2404,7 +2491,15 @@ export function SQLEditorPage() {
       metadataError: '',
       explorerNodes: [loadingRootNode],
       searchTreeNodes: [],
+      searchIndexStatus: 'idle',
+      searchIndexItems: [],
+      searchIndexTruncated: false,
+      searchIndexError: '',
     })
+
+    if (tabID) {
+      loadSearchIndexForTab(tabID, connection)
+    }
 
     void buildConnectionRootNode(connection)
       .then((rootNode) => {
@@ -2420,6 +2515,41 @@ export function SQLEditorPage() {
         if (!tabID) {
           return
         }
+        updateTabByID(tabID, {
+          explorerNodes: [{ ...loadingRootNode, loading: false, loaded: true }],
+          metadataError: formatMetadataError(error),
+        })
+      })
+  }
+
+  function handleReloadAssets() {
+    if (!activeTab || !activeConnection || activeSearchIndexStatus === 'loading' || activeExplorerRootLoading) {
+      return
+    }
+    const tabID = activeTab.id
+    const loadingRootNode = {
+      ...createConnectionNode(activeConnection, activeConnection.id),
+      expanded: true,
+      loading: true,
+    }
+    updateActiveTab({
+      metadataError: '',
+      explorerNodes: [loadingRootNode],
+      searchTreeNodes: [],
+      searchIndexStatus: 'idle',
+      searchIndexItems: [],
+      searchIndexTruncated: false,
+      searchIndexError: '',
+    })
+    loadSearchIndexForTab(tabID, activeConnection)
+    void buildConnectionRootNode(activeConnection)
+      .then((rootNode) => {
+        updateTabByID(tabID, {
+          explorerNodes: syncAssetTreeActiveStates([rootNode], activeConnection.id, activeDatabase, activeSchema, activeSelectedTable),
+          metadataError: '',
+        })
+      })
+      .catch((error) => {
         updateTabByID(tabID, {
           explorerNodes: [{ ...loadingRootNode, loading: false, loaded: true }],
           metadataError: formatMetadataError(error),
@@ -2688,17 +2818,39 @@ export function SQLEditorPage() {
 
             <div className="flex min-h-0 flex-1 flex-col px-4 pt-1 pb-3">
               {activeTab?.metadataError ? <InlineAlert className="mb-2" tone="info">{activeTab.metadataError}</InlineAlert> : null}
-              <SearchInput
-                aria-label="Explorer Search"
-                value={activeExplorerSearch}
-                onChange={(event) => updateActiveTab({ explorerSearch: event.target.value })}
-                placeholder="Search objects"
-              />
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <SearchInput
+                    aria-label="Explorer Search"
+                    value={activeExplorerSearch}
+                    onChange={(event) => updateActiveTab({ explorerSearch: event.target.value })}
+                    placeholder="Search objects"
+                  />
+                </div>
+                <button
+                  type="button"
+                  aria-label="Reload assets"
+                  title="Reload assets"
+                  onClick={handleReloadAssets}
+                  disabled={!activeConnection || activeSearchIndexStatus === 'loading' || activeExplorerRootLoading}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border text-muted transition hover:bg-panel-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${activeSearchIndexStatus === 'loading' || activeExplorerRootLoading ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
               <div className="mt-1 min-h-0 flex-1 overflow-auto">
                 {connectionsLoading ? (
                   <p className="px-1 py-1 text-[12px] text-muted">Loading connections...</p>
-                ) : activeSearchingAssets || activeExplorerRootLoading ? (
-                  <p className="px-1 py-1 text-[12px] text-muted">Searching assets...</p>
+                ) : activeExplorerRootLoading ? (
+                  <p className="px-1 py-1 text-[12px] text-muted">Loading assets...</p>
+                ) : activeExplorerSearch.trim() && activeExplorerSearch.trim().length < SEARCH_INDEX_MIN_KEYWORD_LENGTH ? (
+                  <p className="px-1 py-1 text-[12px] text-muted">Enter at least 3 characters to search objects.</p>
+                ) : activeExplorerSearch.trim() && (activeSearchingAssets || activeSearchIndexStatus === 'loading') ? (
+                  <p className="px-1 py-1 text-[12px] text-muted">Loading...</p>
+                ) : activeExplorerSearch.trim() && activeSearchIndexStatus === 'error' ? (
+                  <p className="px-1 py-1 text-[12px] text-muted">{activeSearchIndexError || 'Object search is temporarily unavailable.'}</p>
+                ) : activeExplorerSearch.trim() && activeSearchIndexTruncated ? (
+                  <p className="px-1 py-1 text-[12px] text-muted">Metadata too large, narrow search by expanding database.</p>
                 ) : !activeConnection || activeExplorerNodes.length === 0 ? (
                   <p className="px-1 py-1 text-[12px] text-muted">Select a DB connection to browse objects and run read-only queries.</p>
                 ) : renderedExplorerNodes.length === 0 ? (

@@ -50,6 +50,7 @@ vi.mock('@/modules/sql-editor/api', () => ({
   getQueryConstraints: vi.fn(),
   executeQuery: vi.fn(),
   listMetadata: vi.fn(),
+  listMetadataSearchIndex: vi.fn(),
   listMetadataColumns: vi.fn(),
   listMetadataDefinition: vi.fn(),
   listQueryHistory: vi.fn(),
@@ -64,13 +65,14 @@ vi.mock('@/modules/exports/api', () => ({
 }))
 
 import { createExportRequest } from '@/modules/exports/api'
-import { createSavedQuery, createSensitiveAccessTicket, deleteSavedQuery, executeQuery, getQueryConstraints, listMetadata, listMetadataColumns, listMetadataDefinition, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
+import { createSavedQuery, createSensitiveAccessTicket, deleteSavedQuery, executeQuery, getQueryConstraints, listMetadata, listMetadataColumns, listMetadataDefinition, listMetadataSearchIndex, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 
 const mockedListQueryConnections = vi.mocked(listQueryConnections)
 const mockedGetQueryConstraints = vi.mocked(getQueryConstraints)
 const mockedExecuteQuery = vi.mocked(executeQuery)
 const mockedListMetadata = vi.mocked(listMetadata)
+const mockedListMetadataSearchIndex = vi.mocked(listMetadataSearchIndex)
 const mockedListMetadataColumns = vi.mocked(listMetadataColumns)
 const mockedListMetadataDefinition = vi.mocked(listMetadataDefinition)
 const mockedListQueryHistory = vi.mocked(listQueryHistory)
@@ -155,6 +157,25 @@ describe('SQLEditorPage', () => {
       level: 'table',
       database: 'maestro',
       items: [
+        {
+          kind: 'table',
+          database: 'maestro',
+          schema: 'maestro',
+          name: 'tickets',
+          engine: 'InnoDB',
+          row_count: 12,
+          data_size_bytes: 1024,
+          index_size_bytes: 512,
+          comment: '',
+        },
+      ],
+    })
+    mockedListMetadataSearchIndex.mockResolvedValue({
+      db_type: 'mysql',
+      limit: 50000,
+      truncated: false,
+      items: [
+        { kind: 'database', name: 'maestro', schema: 'maestro' },
         {
           kind: 'table',
           database: 'maestro',
@@ -1508,8 +1529,10 @@ describe('SQLEditorPage', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Object Meta' })).toBeInTheDocument()
+      expect(mockedListMetadataColumns).toHaveBeenCalled()
+      expect(mockedListMetadataDefinition).toHaveBeenCalled()
     })
-    expect(mockedListMetadata).toHaveBeenCalledTimes(metadataCallCount)
+    expect(mockedListMetadata.mock.calls.length).toBeGreaterThan(metadataCallCount)
     expect(screen.queryByText('Searching assets...')).not.toBeInTheDocument()
   })
 

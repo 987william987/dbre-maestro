@@ -481,6 +481,7 @@ func main() {
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSQLEditorQuery).Get("/", metadataH.Tables)
+			r.With(requireSQLEditorQuery).Get("/search-index", metadataH.SearchIndex)
 			r.With(requireSQLEditorQuery).Get("/{schema}/{table}/columns", metadataH.Columns)
 			r.With(requireSQLEditorQuery).Get("/{schema}/{table}/definition", metadataH.Definition)
 		})

@@ -1,6 +1,6 @@
 import { apiClient } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
-import type { MetadataColumn, MetadataDefinition, MetadataResponse, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
+import type { MetadataColumn, MetadataDefinition, MetadataResponse, MetadataSearchIndexResponse, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
 
 type QueryPayload = {
   db_connection_id: number
@@ -116,6 +116,17 @@ export async function listMetadata(connectionId: number, params?: MetadataParams
   return {
     ...response,
     items: Array.isArray(response.items) ? response.items : [],
+  }
+}
+
+export async function listMetadataSearchIndex(connectionId: number) {
+  const response = await apiClient.get<MetadataSearchIndexResponse>(`/db-connections/${connectionId}/metadata/search-index`)
+
+  return {
+    ...response,
+    items: Array.isArray(response.items) ? response.items : [],
+    limit: typeof response.limit === 'number' ? response.limit : 50000,
+    truncated: Boolean(response.truncated),
   }
 }
 
