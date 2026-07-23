@@ -16,6 +16,11 @@ vi.mock('@/modules/users/api', () => ({
 vi.mock('@/modules/auth-groups/api', () => ({
   listAuthGroups: vi.fn(),
 }))
+vi.mock('@/shared/auth/AuthContext', () => ({
+  useAuth: () => ({
+    user: { permissions: ['settings.read', 'settings.write'] },
+  }),
+}))
 
 import { getSettings, listSettingsDBConnections } from '@/modules/settings/api'
 import { listAuthGroups } from '@/modules/auth-groups/api'

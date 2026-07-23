@@ -41,6 +41,7 @@ function renderShell(initialEntry = '/tickets') {
             <Route path="/tickets/new" element={<div>new ticket page</div>} />
             <Route path="/tickets/:id" element={<div>ticket detail page</div>} />
             <Route path="/sql-editor" element={<div>sql editor page</div>} />
+            <Route path="/scheduled-sql-reports" element={<div>scheduled reports page</div>} />
             <Route path="/users" element={<div>users page</div>} />
             <Route path="/users/groups" element={<div>auth groups page</div>} />
             <Route path="/users/resources" element={<div>resources page</div>} />
@@ -335,6 +336,10 @@ describe('AppShell notifications', () => {
   })
 
   it.each([
+    { path: '/tickets', read: 'tickets.read', label: 'Tickets' },
+    { path: '/tickets/TK-1', read: 'tickets.read', label: 'Tickets' },
+    { path: '/sql-editor', read: 'sql_editor.read', label: 'SQL Editor' },
+    { path: '/scheduled-sql-reports', read: 'scheduled_sql_reports.read', label: 'Scheduled Reports' },
     { path: '/users', read: 'users.read', label: 'Users' },
     { path: '/users/groups', read: 'users.read', label: 'Auth Groups' },
     { path: '/db-connections', read: 'db_connections.read', label: 'DB Connections' },
@@ -342,7 +347,7 @@ describe('AppShell notifications', () => {
     { path: '/sql-review-rules/mysql', read: 'sql_review.read', label: 'SQL Review' },
     { path: '/audit-logs', read: 'audit_logs.read', label: 'Audit Logs' },
     { path: '/settings', read: 'settings.read', label: 'Settings' },
-  ])('Governance $label 只有讀取權限時在標題列顯示唯讀提示', async ({ path, read, label }) => {
+  ])('$label 只有讀取權限時在標題列顯示唯讀提示', async ({ path, read, label }) => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
       isAuthenticated: true,

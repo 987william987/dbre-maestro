@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { CalendarClock, Check, Pencil, Plus, Trash2, X } from 'lucide-react'
 import { ApiError } from '@/shared/api/client'
+import { useAuth } from '@/shared/auth/AuthContext'
 import { formatDateTime } from '@/shared/lib/format'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
@@ -49,6 +50,8 @@ const EMPTY_DRAFT: ReportDraft = {
 }
 
 export function ScheduledSQLReportsPage() {
+  const { user } = useAuth()
+  const canWrite = user?.permissions.includes('scheduled_sql_reports.write') ?? false
   const [reports, setReports] = useState<ScheduledSQLReport[]>([])
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [recipients, setRecipients] = useState<ScheduledReportRecipient[]>([])
@@ -123,7 +126,7 @@ export function ScheduledSQLReportsPage() {
   }, [])
 
   useEffect(() => {
-    if (draft.dbConnectionID === '') {
+    if (!canWrite || draft.dbConnectionID === '') {
       setDatabaseOptions([])
       setSchemaOptions([])
       return
@@ -160,10 +163,10 @@ export function ScheduledSQLReportsPage() {
     return () => {
       active = false
     }
-  }, [draft.dbConnectionID])
+  }, [canWrite, draft.dbConnectionID])
 
   useEffect(() => {
-    if (!isPostgresConnection || draft.dbConnectionID === '' || draft.databaseName === '') {
+    if (!canWrite || !isPostgresConnection || draft.dbConnectionID === '' || draft.databaseName === '') {
       setSchemaOptions([])
       return
     }
@@ -198,7 +201,7 @@ export function ScheduledSQLReportsPage() {
     return () => {
       active = false
     }
-  }, [draft.databaseName, draft.dbConnectionID, isPostgresConnection])
+  }, [canWrite, draft.databaseName, draft.dbConnectionID, isPostgresConnection])
 
   async function selectReport(report: ScheduledSQLReport) {
     setSelectedReportID(report.id)
@@ -223,6 +226,9 @@ export function ScheduledSQLReportsPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!canWrite) {
+      return
+    }
     setSaving(true)
     setError('')
     setNotice('')
@@ -254,6 +260,9 @@ export function ScheduledSQLReportsPage() {
   }
 
   async function handleDelete(report: ScheduledSQLReport) {
+    if (!canWrite) {
+      return
+    }
     if (!window.confirm(`Delete scheduled SQL report "${report.name}"?`)) {
       return
     }
@@ -291,13 +300,14 @@ export function ScheduledSQLReportsPage() {
 
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_420px]">
         <form onSubmit={handleSubmit} className="rounded-lg border border-border bg-panel p-4 shadow-soft">
+          <fieldset disabled={!canWrite || saving} className="disabled:opacity-100">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-[16px] font-semibold text-ink">{selectedReport ? 'Edit Report' : 'Create Report'}</h3>
+              <h3 className="text-[16px] font-semibold text-ink">{selectedReport ? (canWrite ? 'Edit Report' : 'View Report') : 'Create Report'}</h3>
               <p className="mt-1 text-[12px] text-muted">Only SELECT, WITH, and SHOW are accepted. Sensitive columns are rejected during save.</p>
             </div>
             <div className="flex shrink-0 items-center gap-3">
-              {selectedReport ? (
+              {selectedReport && canWrite ? (
                 <button type="button" onClick={startCreate} className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft hover:bg-slate-800">
                   <Plus className="h-4 w-4" />
                   New Report
@@ -383,6 +393,7 @@ export function ScheduledSQLReportsPage() {
             <textarea value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} className={`${inputClassName} min-h-[76px] py-3`} />
           </Field>
 
+          {canWrite ? (
           <div className="mt-4 flex items-center justify-end gap-2">
             {selectedReport ? (
               <button type="button" onClick={startCreate} className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-bold text-ink shadow-soft hover:border-slate-300">
@@ -395,6 +406,8 @@ export function ScheduledSQLReportsPage() {
               {saving ? 'Saving...' : 'Save Report'}
             </button>
           </div>
+          ) : null}
+          </fieldset>
         </form>
 
         <aside className="grid gap-3">
@@ -410,8 +423,13 @@ export function ScheduledSQLReportsPage() {
                   <p className="mt-1 truncate text-[12px] text-muted">{report.cron_expression} / {report.timezone}</p>
                   <p className="mt-1 text-[12px] text-muted">Next: {report.next_run_at ? formatDateTime(report.next_run_at) : '-'}</p>
                   <div className="mt-2 flex gap-2">
-                    <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-muted"><Pencil className="h-3.5 w-3.5" /> Edit</span>
-                    <span onClick={(event) => { event.stopPropagation(); void handleDelete(report) }} className="inline-flex items-center gap-1 text-[12px] font-semibold text-danger"><Trash2 className="h-3.5 w-3.5" /> Delete</span>
+                    <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-muted">
+                      {canWrite ? <Pencil className="h-3.5 w-3.5" /> : null}
+                      {canWrite ? 'Edit' : 'View'}
+                    </span>
+                    {canWrite ? (
+                      <span onClick={(event) => { event.stopPropagation(); void handleDelete(report) }} className="inline-flex items-center gap-1 text-[12px] font-semibold text-danger"><Trash2 className="h-3.5 w-3.5" /> Delete</span>
+                    ) : null}
                   </div>
                 </button>
               ))}

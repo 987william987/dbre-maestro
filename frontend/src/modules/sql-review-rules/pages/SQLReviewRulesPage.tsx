@@ -94,6 +94,9 @@ export function SQLReviewRulesPage() {
   }
 
   async function handleSave(rule: SQLReviewRule) {
+    if (!canWrite) {
+      return
+    }
     const draft = drafts[rule.rule_name]
     if (!draft) {
       return
@@ -177,7 +180,7 @@ export function SQLReviewRulesPage() {
                   <DataTableHeaderCell>Description</DataTableHeaderCell>
                   <DataTableHeaderCell>Enabled</DataTableHeaderCell>
                   <DataTableHeaderCell>Threshold</DataTableHeaderCell>
-                  <DataTableHeaderCell>Action</DataTableHeaderCell>
+                  {canWrite ? <DataTableHeaderCell>Action</DataTableHeaderCell> : null}
                 </tr>
               </DataTableHead>
               <DataTableBody>
@@ -233,6 +236,7 @@ export function SQLReviewRulesPage() {
                           />
                         )}
                       </DataTableCell>
+                      {canWrite ? (
                       <DataTableCell>
                         <button
                           type="button"
@@ -244,6 +248,7 @@ export function SQLReviewRulesPage() {
                           Save
                         </button>
                       </DataTableCell>
+                      ) : null}
                     </DataTableRow>
                   )
                 })}

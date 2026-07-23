@@ -96,7 +96,7 @@ describe('SQLEditorPage', () => {
         username: 'admin',
         authGroups: ['admin'],
         authGroupDetails: [],
-        permissions: ['sql_editor.read', 'sql_editor.query', 'sql_editor.export', 'sql_editor.sensitive_apply'],
+        permissions: ['sql_editor.read', 'sql_editor.query', 'sql_editor.export', 'sql_editor.sensitive_apply', 'tickets.apply'],
         dbConnectionIds: [1],
         protected: false,
         isActive: true,
@@ -229,6 +229,41 @@ describe('SQLEditorPage', () => {
       updated_at: '2026-06-11T00:00:00Z',
     })
     mockedDeleteSavedQuery.mockResolvedValue(undefined)
+  })
+
+  it('read-only 模式不載入需要 query 權限的資料', async () => {
+    mockedUseAuth.mockReturnValue({
+      user: {
+        id: 8,
+        username: 'readonly',
+        authGroups: ['readonly'],
+        authGroupDetails: [],
+        permissions: ['sql_editor.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      status: 'authenticated',
+      isAuthenticated: true,
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
+    expect(mockedListQueryConnections).not.toHaveBeenCalled()
+    expect(mockedGetQueryConstraints).not.toHaveBeenCalled()
+    expect(mockedListQueryHistory).not.toHaveBeenCalled()
+    expect(mockedListSavedQueries).not.toHaveBeenCalled()
   })
 
   it('同一個瀏覽器執行環境內重新掛載會保留 workspace 草稿，但不保留查詢結果', async () => {

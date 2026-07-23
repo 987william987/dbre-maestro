@@ -1188,6 +1188,7 @@ export function SQLEditorPage() {
   const canQuery = Boolean(user?.permissions.includes('sql_editor.query'))
   const canExport = Boolean(user?.permissions.includes('sql_editor.export'))
   const canApplySensitiveAccess = Boolean(user?.permissions.includes('sql_editor.sensitive_apply'))
+  const canApplyTicket = Boolean(user?.permissions.includes('tickets.apply'))
   const accessibleConnectionIDs = user?.dbConnectionIds ?? []
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [connectionsLoading, setConnectionsLoading] = useState(true)
@@ -1310,6 +1311,13 @@ export function SQLEditorPage() {
 
   useEffect(() => {
     let active = true
+    if (!canQuery) {
+      setHistory([])
+      setSavedQueries([])
+      return () => {
+        active = false
+      }
+    }
 
     async function loadHistory() {
       try {
@@ -1343,7 +1351,7 @@ export function SQLEditorPage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [canQuery, pushToast])
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null,
@@ -1937,6 +1945,9 @@ export function SQLEditorPage() {
   }
 
   function openQueryAccessTicket() {
+    if (!canApplyTicket) {
+      return
+    }
     if (!activeTab?.connectionId) {
       pushToast('Select a database connection first.', 'info')
       return
@@ -2073,6 +2084,9 @@ export function SQLEditorPage() {
   }
 
   function openSensitiveAccessConfirm() {
+    if (!canApplySensitiveAccess) {
+      return
+    }
     if (activeConnection?.db_type !== 'mysql') {
       pushToast('Sensitive Access currently supports MySQL only.', 'info', { placement: 'center' })
       return
@@ -2194,7 +2208,7 @@ export function SQLEditorPage() {
   }
 
   async function handleSaveQuery() {
-    if (!activeTab?.connectionId || !activeTab.sql.trim()) {
+    if (!canQuery || !activeTab?.connectionId || !activeTab.sql.trim()) {
       return
     }
 
@@ -2706,6 +2720,9 @@ export function SQLEditorPage() {
   }, [activeTab?.id, activeTab?.sql])
 
   async function handleDeleteSavedQuery(entry: SavedQuery) {
+    if (!canQuery) {
+      return
+    }
     try {
       await deleteSavedQuery(entry.id)
       setSavedQueries((current) => current.filter((item) => item.id !== entry.id))
@@ -3028,7 +3045,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={() => void handleSaveQuery()}
-                      disabled={!activeTab.connectionId || !activeTab.sql.trim() || isFavorited}
+                      disabled={!canQuery || !activeTab.connectionId || !activeTab.sql.trim() || isFavorited}
                       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isFavorited ? <StarOff className="h-4 w-4" /> : <Star className="h-4 w-4" />}
@@ -3042,6 +3059,7 @@ export function SQLEditorPage() {
                     >
                       {activeTabCreatingSensitiveAccess ? 'Submitting...' : 'Sensitive Access'}
                     </button>
+                    {canApplyTicket ? (
                     <AttentionPulse activeKey={activeQueryAccessAttentionKey} disabled={!activeTab.connectionId}>
                       <button
                         type="button"
@@ -3052,6 +3070,7 @@ export function SQLEditorPage() {
                         Query Access
                       </button>
                     </AttentionPulse>
+                    ) : null}
                     <div className="relative">
                       <button
                         type="button"
@@ -3180,14 +3199,16 @@ export function SQLEditorPage() {
                               </div>
                               <p className="mt-1 truncate text-[11px] text-muted">{entry.sql_content}</p>
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => setSavedQueryToDelete(entry)}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-white text-muted transition hover:bg-page hover:text-danger"
-                              aria-label={`Delete saved query ${entry.label}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            {canQuery ? (
+                              <button
+                                type="button"
+                                onClick={() => setSavedQueryToDelete(entry)}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-white text-muted transition hover:bg-page hover:text-danger"
+                                aria-label={`Delete saved query ${entry.label}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            ) : null}
                           </div>
                         ))}
                       </div>

@@ -130,12 +130,16 @@ const NAV_GROUPS = [
 ]
 
 const READ_ONLY_HEADER_NOTICE_ROUTES = [
-  { match: (pathname: string) => pathname.startsWith('/users'), read: 'users.read', write: 'users.write' },
-  { match: (pathname: string) => pathname === '/db-connections', read: 'db_connections.read', write: 'db_connections.write' },
-  { match: (pathname: string) => pathname === '/masking-rules', read: 'masking_rules.read', write: 'masking_rules.write' },
-  { match: (pathname: string) => pathname.startsWith('/sql-review-rules'), read: 'sql_review.read', write: 'sql_review.write' },
-  { match: (pathname: string) => pathname === '/audit-logs', read: 'audit_logs.read', write: 'audit_logs.write' },
-  { match: (pathname: string) => pathname === '/settings', read: 'settings.read', write: 'settings.write' },
+  { match: (pathname: string) => pathname === '/tickets', read: ['tickets.read'], write: ['tickets.apply', 'tickets.review', 'tickets.execute', 'sql_editor.export_review', 'sql_editor.sensitive_review'] },
+  { match: (pathname: string) => pathname.startsWith('/tickets/') && pathname !== '/tickets/new', read: ['tickets.read'], write: ['tickets.apply', 'tickets.review', 'tickets.execute', 'sql_editor.export_review', 'sql_editor.sensitive_review'] },
+  { match: (pathname: string) => pathname === '/sql-editor', read: ['sql_editor.read'], write: ['sql_editor.query', 'sql_editor.export', 'sql_editor.sensitive_apply'] },
+  { match: (pathname: string) => pathname === '/scheduled-sql-reports', read: ['scheduled_sql_reports.read'], write: ['scheduled_sql_reports.write'] },
+  { match: (pathname: string) => pathname.startsWith('/users'), read: ['users.read'], write: ['users.write'] },
+  { match: (pathname: string) => pathname === '/db-connections', read: ['db_connections.read'], write: ['db_connections.write'] },
+  { match: (pathname: string) => pathname === '/masking-rules', read: ['masking_rules.read'], write: ['masking_rules.write'] },
+  { match: (pathname: string) => pathname.startsWith('/sql-review-rules'), read: ['sql_review.read'], write: ['sql_review.write'] },
+  { match: (pathname: string) => pathname === '/audit-logs', read: ['audit_logs.read'], write: ['audit_logs.write'] },
+  { match: (pathname: string) => pathname === '/settings', read: ['settings.read'], write: ['settings.write'] },
 ] as const
 
 function getReadOnlyHeaderNotice(pathname: string, permissions: string[]) {
@@ -143,7 +147,7 @@ function getReadOnlyHeaderNotice(pathname: string, permissions: string[]) {
   if (!route) {
     return null
   }
-  if (permissions.includes(route.read) && !permissions.includes(route.write)) {
+  if (route.read.some((permission) => permissions.includes(permission)) && !route.write.some((permission) => permissions.includes(permission))) {
     return { label: 'Read-only mode' }
   }
   return null

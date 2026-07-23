@@ -5,6 +5,7 @@ import { Loader2, Pencil, Plus, ServerCog, Trash2, X } from 'lucide-react'
 import { createDBConnection, deleteDBConnection, getDBConnectionBindings, listDBConnections, patchDBConnection, testDBConnection } from '@/modules/db-connections/api'
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
+import { useAuth } from '@/shared/auth/AuthContext'
 import { formatDateTime } from '@/shared/lib/format'
 import type { DBConnection, DBConnectionBindings } from '@/shared/types/dbConnection'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
@@ -79,7 +80,9 @@ const DB_TYPE_OPTIONS = [
 const PAGE_SIZE = 20
 
 export function DBConnectionsPage() {
+  const { user } = useAuth()
   const { pushToast } = useToast()
+  const canWrite = user?.permissions.includes('db_connections.write') ?? false
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -104,6 +107,7 @@ export function DBConnectionsPage() {
   }, [])
 
   const activeSSLMode = SSL_MODE_OPTIONS.find((option) => option.value === form.sslMode)
+  const drawerReadOnly = !canWrite
   async function loadConnections() {
     setLoading(true)
     setError('')
@@ -174,6 +178,9 @@ export function DBConnectionsPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!canWrite) {
+      return
+    }
     if (!drawerState) {
       return
     }
@@ -204,6 +211,9 @@ export function DBConnectionsPage() {
   }
 
   async function handleTest(id: number) {
+    if (!canWrite) {
+      return
+    }
     setTestingId(id)
     setError('')
     const targetConnection = connections.find((connection) => connection.id === id)
@@ -234,6 +244,9 @@ export function DBConnectionsPage() {
   }
 
   async function handleDelete(id: number) {
+    if (!canWrite) {
+      return
+    }
     setDeletingId(id)
     setError('')
     try {
@@ -319,6 +332,7 @@ export function DBConnectionsPage() {
           }}
           placeholder="Endpoint"
         />
+        {canWrite ? (
         <div className="flex justify-end">
           <button
             type="button"
@@ -329,6 +343,7 @@ export function DBConnectionsPage() {
             New Connection
           </button>
         </div>
+        ) : null}
       </div>
 
       <DataTableSurface>
@@ -389,32 +404,36 @@ export function DBConnectionsPage() {
                           <DataTableCell className={`whitespace-nowrap ${isFailed ? 'text-danger/80' : ''}`}>{formatDateTime(connection.updated_at)}</DataTableCell>
                           <DataTableCell>
                             <div className="flex flex-nowrap items-center gap-1 whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => void handleTest(connection.id)}
-                                disabled={testingId === connection.id}
-                                className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2 text-[11px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
-                              >
-                                {testingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                                Test
-                              </button>
+                              {canWrite ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleTest(connection.id)}
+                                  disabled={testingId === connection.id}
+                                  className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2 text-[11px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
+                                >
+                                  {testingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                                  Test
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 onClick={() => openEditDrawer(connection)}
                                 className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2 text-[11px] font-semibold text-ink transition hover:bg-page"
                               >
-                                <Pencil className="h-3 w-3" />
-                                Edit
+                                {canWrite ? <Pencil className="h-3 w-3" /> : null}
+                                {canWrite ? 'Edit' : 'View'}
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => setPendingDeleteId(connection.id)}
-                                disabled={deletingId === connection.id}
-                                className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2 text-[11px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
-                              >
-                                {deletingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-                                Delete
-                              </button>
+                              {canWrite ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setPendingDeleteId(connection.id)}
+                                  disabled={deletingId === connection.id}
+                                  className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2 text-[11px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
+                                >
+                                  {deletingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                                  Delete
+                                </button>
+                              ) : null}
                             </div>
                           </DataTableCell>
                         </DataTableRow>
@@ -448,7 +467,7 @@ export function DBConnectionsPage() {
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Connection Detail</p>
                 <h3 id="db-connections-drawer-title" className="mt-1 text-[22px] font-bold tracking-[-0.03em] text-ink">
-                  {drawerState.mode === 'create' ? 'New Connection' : selectedConnection?.name ?? 'Edit Connection'}
+                  {drawerState.mode === 'create' ? 'New Connection' : selectedConnection?.name ?? (canWrite ? 'Edit Connection' : 'View Connection')}
                 </h3>
               </div>
               <button
@@ -474,7 +493,7 @@ export function DBConnectionsPage() {
                           value={form.name}
                           onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                          disabled={submitting}
+                          disabled={submitting || drawerReadOnly}
                         />
                       </label>
 
@@ -493,7 +512,7 @@ export function DBConnectionsPage() {
                                 readwritePort: current.readwritePort === DEFAULT_PORT_BY_DB_TYPE[current.dbType] || current.readwritePort === '' ? DEFAULT_PORT_BY_DB_TYPE[nextType] : current.readwritePort,
                               }))
                             }}
-                            disabled={submitting}
+                            disabled={submitting || drawerReadOnly}
                             options={DB_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
                           />
                         </label>
@@ -503,7 +522,7 @@ export function DBConnectionsPage() {
                             ariaLabel="SSL Mode"
                             value={form.sslMode}
                             onChange={(value) => setForm((current) => ({ ...current, sslMode: normalizeSSLMode(value) }))}
-                            disabled={submitting}
+                            disabled={submitting || drawerReadOnly}
                             options={SSL_MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
                           />
                         </label>
@@ -516,7 +535,7 @@ export function DBConnectionsPage() {
                             value={form.readonlyHost}
                             onChange={(event) => setForm((current) => ({ ...current, readonlyHost: event.target.value }))}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                            disabled={submitting}
+                            disabled={submitting || drawerReadOnly}
                           />
                         </label>
                         <label className="grid gap-1.5 text-[12px] font-medium text-muted">
@@ -525,7 +544,7 @@ export function DBConnectionsPage() {
                             value={form.readonlyPort}
                             onChange={(event) => setForm((current) => ({ ...current, readonlyPort: event.target.value }))}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                            disabled={submitting}
+                            disabled={submitting || drawerReadOnly}
                           />
                         </label>
                       </div>
@@ -537,7 +556,7 @@ export function DBConnectionsPage() {
                             value={form.readwriteHost}
                             onChange={(event) => setForm((current) => ({ ...current, readwriteHost: event.target.value }))}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                            disabled={submitting}
+                            disabled={submitting || drawerReadOnly}
                           />
                         </label>
                         <label className="grid gap-1.5 text-[12px] font-medium text-muted">
@@ -546,7 +565,7 @@ export function DBConnectionsPage() {
                             value={form.readwritePort}
                             onChange={(event) => setForm((current) => ({ ...current, readwritePort: event.target.value }))}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                            disabled={submitting}
+                            disabled={submitting || drawerReadOnly}
                           />
                         </label>
                       </div>
@@ -558,7 +577,7 @@ export function DBConnectionsPage() {
                             value={form.readonlyUsername}
                             onChange={(event) => setForm((current) => ({ ...current, readonlyUsername: event.target.value }))}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                            disabled={submitting}
+                            disabled={submitting || drawerReadOnly}
                           />
                         </label>
                         <label className="grid gap-1.5 text-[12px] font-medium text-muted">
@@ -569,7 +588,7 @@ export function DBConnectionsPage() {
                             onChange={(event) => setForm((current) => ({ ...current, readonlyPassword: event.target.value }))}
                             placeholder={drawerState.mode === 'edit' ? 'Required when readonly endpoint changes' : ''}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                            disabled={submitting}
+                            disabled={submitting || drawerReadOnly}
                           />
                         </label>
                       </div>
@@ -581,7 +600,7 @@ export function DBConnectionsPage() {
                             value={form.readwriteUsername}
                             onChange={(event) => setForm((current) => ({ ...current, readwriteUsername: event.target.value }))}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                            disabled={submitting}
+                            disabled={submitting || drawerReadOnly}
                           />
                         </label>
                         <label className="grid gap-1.5 text-[12px] font-medium text-muted">
@@ -592,7 +611,7 @@ export function DBConnectionsPage() {
                             onChange={(event) => setForm((current) => ({ ...current, readwritePassword: event.target.value }))}
                             placeholder={drawerState.mode === 'edit' ? 'Required when readwrite endpoint changes' : ''}
                             className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                            disabled={submitting}
+                            disabled={submitting || drawerReadOnly}
                           />
                         </label>
                       </div>
@@ -609,14 +628,16 @@ export function DBConnectionsPage() {
 
                       {endpointPasswordError ? <InlineAlert>{endpointPasswordError}</InlineAlert> : null}
 
-                      <button
-                        type="submit"
-                        disabled={submitting || !isFormSubmittable(form, drawerState.mode === 'edit') || Boolean(endpointPasswordError)}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : drawerState.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-                        {drawerState.mode === 'create' ? 'Create Connection' : 'Save Changes'}
-                      </button>
+                      {canWrite ? (
+                        <button
+                          type="submit"
+                          disabled={submitting || !isFormSubmittable(form, drawerState.mode === 'edit') || Boolean(endpointPasswordError)}
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : drawerState.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                          {drawerState.mode === 'create' ? 'Create Connection' : 'Save Changes'}
+                        </button>
+                      ) : null}
                     </form>
                   </CardSection>
                   {drawerState.mode === 'edit' ? (
