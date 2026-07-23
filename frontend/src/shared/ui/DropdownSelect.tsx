@@ -161,14 +161,14 @@ export function DropdownSelect({
           )}
         >
           {showSearch ? (
-            <div className="relative mb-2">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+            <div className="relative mb-2 flex h-9 items-center rounded-lg border border-border bg-panel-soft transition focus-within:border-slate-300 focus-within:bg-white">
+              <Search className="pointer-events-none absolute left-3 h-3.5 w-3.5 text-faint" />
               <input
                 ref={searchInputRef}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 aria-label={`${ariaLabel} search`}
-                className="h-9 w-full rounded-lg border border-border bg-panel-soft pl-8 pr-3 text-[12px] font-medium text-ink outline-none transition placeholder:text-muted focus:border-accent focus:bg-white focus:ring-2 focus:ring-accent/20"
+                className="h-full w-full rounded-lg border-0 bg-transparent pl-8 pr-3 text-[12px] font-medium text-ink outline-none placeholder:text-muted"
                 placeholder="Search..."
               />
             </div>
