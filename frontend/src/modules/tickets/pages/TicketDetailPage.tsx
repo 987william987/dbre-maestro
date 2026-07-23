@@ -1,6 +1,7 @@
 import { startTransition, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Check, ChevronDown, Download, Loader2, Minus, Play, Plus, ShieldCheck, ShieldX, X } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { format as formatSQL } from 'sql-formatter'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
@@ -233,6 +234,20 @@ function formatTicketTypeLabel(ticketType: string) {
       return 'Sensitive Access'
     default:
       return ticketType
+  }
+}
+
+function formatTicketSQLForDisplay(sql: string, ticketType: Ticket['ticket_type']) {
+  if (ticketType === 'redis_command' || sql.trim() === '') {
+    return sql
+  }
+  try {
+    return formatSQL(sql, {
+      language: 'sql',
+      keywordCase: 'upper',
+    }).trimEnd()
+  } catch {
+    return sql
   }
 }
 
@@ -771,7 +786,12 @@ export function TicketDetailPage() {
   const canRetryWorkflow = detail?.capabilities?.can_retry_workflow_resolution ?? false
   const exportDownloadURL = detail?.export_request?.download_url ?? null
   const statementResults = detail ? buildStatementResults(detail) : []
-  const expandableStatementKeys = statementResults
+  const displaySQLContent = ticket ? formatTicketSQLForDisplay(ticket.sql_content, ticket.ticket_type) : ''
+  const displayStatementResults = statementResults.map((row) => ({
+    ...row,
+    sql: formatTicketSQLForDisplay(row.sql, ticket?.ticket_type ?? 'dml'),
+  }))
+  const expandableStatementKeys = displayStatementResults
     .filter((row) => isExpandableSql(row.sql))
     .map(statementResultKey)
   const allStatementSQLsExpanded = expandableStatementKeys.length > 0 &&
@@ -984,7 +1004,7 @@ export function TicketDetailPage() {
               <div className="px-4 pb-4">
                 <p className="text-[12px] font-semibold text-faint">SQL Content</p>
                 <pre className="mt-2 overflow-x-auto rounded-xl border border-border bg-panel-soft p-4 font-mono text-[13px] leading-7 text-ink">
-                  <code>{ticket.sql_content}</code>
+                  <code>{displaySQLContent}</code>
                 </pre>
               </div>
             ) : (
@@ -1007,7 +1027,7 @@ export function TicketDetailPage() {
                     <colgroup>
                       <col className="w-[28px]" />
                       <col className="w-[36px]" />
-                      <col className="w-[470px]" />
+                      <col className="w-[600px]" />
                       <col className="w-[160px]" />
                       <col className="w-[140px]" />
                       <col className="w-[180px]" />
@@ -1022,7 +1042,7 @@ export function TicketDetailPage() {
                         <DataTableHeaderCell className="pl-2 pr-1" aria-label="Expand SQL" />
                         <DataTableHeaderCell className="pl-1 pr-2">ID</DataTableHeaderCell>
                         <DataTableHeaderCell className="pl-1 pr-2">SQL</DataTableHeaderCell>
-                        <DataTableHeaderCell>Scan / Impact Rows</DataTableHeaderCell>
+                        <DataTableHeaderCell>Scan Rows</DataTableHeaderCell>
                         <DataTableHeaderCell>Review Status</DataTableHeaderCell>
                         <DataTableHeaderCell>Review Message</DataTableHeaderCell>
                         <DataTableHeaderCell>Rows Affected</DataTableHeaderCell>
@@ -1033,7 +1053,7 @@ export function TicketDetailPage() {
                       </tr>
                     </DataTableHead>
                     <DataTableBody>
-                      {statementResults.map((row) => {
+                      {displayStatementResults.map((row) => {
                         const rowKey = statementResultKey(row)
                         const rowExpanded = expandedStatementSQLs.has(rowKey)
                         const rowExpandable = isExpandableSql(row.sql)
@@ -1055,13 +1075,16 @@ export function TicketDetailPage() {
                             <DataTableCell className="pl-1 pr-2 align-middle leading-6">
                               {row.seq}
                             </DataTableCell>
-                            <DataTableCell className="min-w-0 pl-1 pr-2 align-middle">
-                              <ExpandableSql
-                                value={row.sql}
-                                expanded={rowExpanded}
-                                onExpandedChange={(expanded) => setStatementSQLExpanded(rowKey, expanded)}
-                                showToggle={false}
-                              />
+                            <DataTableCell className="w-[600px] max-w-[600px] min-w-0 overflow-hidden pl-1 pr-2 align-middle">
+                              <div className="w-[590px] max-w-full overflow-hidden">
+                                <ExpandableSql
+                                  value={row.sql}
+                                  expanded={rowExpanded}
+                                  onExpandedChange={(expanded) => setStatementSQLExpanded(rowKey, expanded)}
+                                  showToggle={false}
+                                  expandedMaxHeight={false}
+                                />
+                              </div>
                             </DataTableCell>
                             <DataTableCell className="break-words align-middle leading-6">{row.scanRows ?? '—'}</DataTableCell>
                             <DataTableCell className="break-words align-middle leading-6">{row.reviewStatus ?? '—'}</DataTableCell>

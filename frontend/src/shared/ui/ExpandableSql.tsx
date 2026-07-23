@@ -7,6 +7,7 @@ type ExpandableSqlProps = {
   expanded?: boolean
   onExpandedChange?: (expanded: boolean) => void
   showToggle?: boolean
+  expandedMaxHeight?: boolean
 }
 
 type ExpandableTextProps = {
@@ -18,7 +19,7 @@ export function isExpandableSql(value: string) {
   return value.length > 120 || value.includes('\n')
 }
 
-export function ExpandableSql({ value, label = 'SQL', expanded: controlledExpanded, onExpandedChange, showToggle = true }: ExpandableSqlProps) {
+export function ExpandableSql({ value, label = 'SQL', expanded: controlledExpanded, onExpandedChange, showToggle = true, expandedMaxHeight = true }: ExpandableSqlProps) {
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(false)
   const expanded = controlledExpanded ?? uncontrolledExpanded
   const shouldCollapse = value.length > 120 || value.includes('\n')
@@ -36,7 +37,7 @@ export function ExpandableSql({ value, label = 'SQL', expanded: controlledExpand
       <pre className={`m-0 block w-full min-w-0 max-w-full font-mono text-[12px] leading-6 text-ink ${
         shouldCollapse && !expanded
           ? 'truncate whitespace-nowrap'
-          : 'max-h-80 overflow-auto whitespace-pre-wrap break-all'
+          : `${expandedMaxHeight ? 'max-h-80 overflow-auto' : 'overflow-visible'} whitespace-pre-wrap break-all`
       }`}>
         {value}
       </pre>
