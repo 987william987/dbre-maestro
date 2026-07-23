@@ -126,6 +126,42 @@ describe('NewTicketPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Target Database' })).toHaveTextContent('orders'))
   })
 
+  it('filters long database dropdowns by typing into the combined search field', async () => {
+    mockedListTicketDatabases.mockResolvedValueOnce({
+      databases: [
+        { name: 'bot' },
+        { name: 'bot-key-manage' },
+        { name: 'dev_edgex_assets_server' },
+        { name: 'dev_edgex_cms' },
+        { name: 'billing' },
+        { name: 'orders_archive' },
+        { name: 'reporting' },
+        { name: 'warehouse' },
+        { name: 'william' },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <NewTicketPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Ticket Info')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Target Instance' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'orders-primary' }))
+    await waitFor(() => expect(mockedListTicketDatabases).toHaveBeenCalledWith(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Target Database' }))
+    fireEvent.change(await screen.findByLabelText('Target Database search'), { target: { value: 'will' } })
+
+    expect(screen.getByRole('option', { name: 'william' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'warehouse' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('option', { name: 'william' }))
+    expect(screen.getByRole('button', { name: 'Target Database' })).toHaveTextContent('william')
+  })
+
   it('prefills fields from a failed ticket reapply draft', async () => {
     render(
       <MemoryRouter initialEntries={[{

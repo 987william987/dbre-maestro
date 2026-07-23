@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ChevronDown, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export type DropdownOption = {
@@ -18,6 +18,31 @@ function isOptionGroup(item: DropdownSelectItem): item is DropdownOptionGroup {
   return 'options' in item
 }
 
+function optionMatchesQuery(option: DropdownOption, query: string) {
+  const normalizedQuery = query.trim().toLowerCase()
+  if (normalizedQuery === '') {
+    return true
+  }
+  return option.label.toLowerCase().includes(normalizedQuery) || option.value.toLowerCase().includes(normalizedQuery)
+}
+
+function filterDropdownOptions(options: ReadonlyArray<DropdownSelectItem>, query: string): DropdownSelectItem[] {
+  if (query.trim() === '') {
+    return [...options]
+  }
+  return options.flatMap<DropdownSelectItem>((item) => {
+    if (!isOptionGroup(item)) {
+      return optionMatchesQuery(item, query) ? [item] : []
+    }
+    const nextOptions = item.options.filter((option) => optionMatchesQuery(option, query))
+    return nextOptions.length > 0 ? [{ ...item, options: nextOptions }] : []
+  })
+}
+
+function countDropdownOptions(options: ReadonlyArray<DropdownSelectItem>) {
+  return options.reduce((total, item) => total + (isOptionGroup(item) ? item.options.length : 1), 0)
+}
+
 export function DropdownSelect({
   value,
   onChange,
@@ -31,6 +56,7 @@ export function DropdownSelect({
   triggerClassName,
   menuClassName,
   optionClassName,
+  searchable,
 }: {
   value: string
   onChange: (value: string) => void
@@ -44,9 +70,12 @@ export function DropdownSelect({
   triggerClassName?: string
   menuClassName?: string
   optionClassName?: string
+  searchable?: boolean
 }) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
 
   const selectedOption = useMemo(
     () => {
@@ -65,6 +94,9 @@ export function DropdownSelect({
     [options, value],
   )
   const displayAsPlaceholder = !selectedOption || selectedOption.value === '' || selectedOption.value === 'all'
+  const optionCount = useMemo(() => countDropdownOptions(options), [options])
+  const showSearch = searchable ?? optionCount > 8
+  const filteredOptions = useMemo(() => filterDropdownOptions(options, query), [options, query])
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -87,6 +119,16 @@ export function DropdownSelect({
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [])
+
+  useEffect(() => {
+    if (!open) {
+      setQuery('')
+      return
+    }
+    if (showSearch) {
+      window.requestAnimationFrame(() => searchInputRef.current?.focus())
+    }
+  }, [open, showSearch])
 
   return (
     <div ref={containerRef} className={cn('relative', className)}>
@@ -118,8 +160,24 @@ export function DropdownSelect({
             menuClassName,
           )}
         >
+          {showSearch ? (
+            <div className="relative mb-2">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+              <input
+                ref={searchInputRef}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                aria-label={`${ariaLabel} search`}
+                className="h-9 w-full rounded-lg border border-border bg-panel-soft pl-8 pr-3 text-[12px] font-medium text-ink outline-none transition placeholder:text-muted focus:border-accent focus:bg-white focus:ring-2 focus:ring-accent/20"
+                placeholder="Search..."
+              />
+            </div>
+          ) : null}
           <div role="listbox" aria-label={`${ariaLabel} options`} className="grid max-h-[360px] gap-0.5 overflow-y-auto">
-            {options.map((item) => {
+            {filteredOptions.length === 0 ? (
+              <p className="px-3 py-2 text-[12px] font-medium text-muted">No results</p>
+            ) : null}
+            {filteredOptions.map((item) => {
               if (isOptionGroup(item)) {
                 return (
                   <div key={item.label} className="border-t border-border first:border-t-0">
