@@ -159,8 +159,8 @@ const DEFAULT_QUERY_CONSTRAINTS = {
   mysql_max_execution_time_ms: 25000,
   postgres_statement_timeout_ms: 25000,
 } satisfies QueryConstraints
-const EDITOR_LINE_HEIGHT = 24
-const EDITOR_VERTICAL_PADDING = 24
+const EDITOR_LINE_HEIGHT = 18.2
+const EDITOR_VERTICAL_PADDING = 8
 const EDITOR_MIN_HEIGHT = EDITOR_VERTICAL_PADDING + EDITOR_BASE_VISIBLE_LINES * EDITOR_LINE_HEIGHT
 const RESULT_PAGE_SIZE = 50
 const METADATA_ERROR_MESSAGE = 'Metadata is temporarily unavailable. Please try again later.'
@@ -1752,7 +1752,28 @@ export function SQLEditorPage() {
     }
     const nextTab = createTab(getNextTabSeed(tabs))
     setTabs((current) => [...current, nextTab])
+    setEditorHeights((current) => ({
+      ...current,
+      [nextTab.id]: `${measureEditorHeight(editorContainerRef.current, nextTab.sql)}px`,
+    }))
     setActiveTabId(nextTab.id)
+  }
+
+  function handleSelectTab(tab: EditorTab) {
+    if (tab.id === activeTabId) {
+      return
+    }
+    setEditorHeights((current) => {
+      const nextValue = `${measureEditorHeight(editorContainerRef.current, tab.sql)}px`
+      if (current[tab.id] === nextValue) {
+        return current
+      }
+      return {
+        ...current,
+        [tab.id]: nextValue,
+      }
+    })
+    setActiveTabId(tab.id)
   }
 
   function handleCloseTab(id: string) {
@@ -2559,7 +2580,7 @@ export function SQLEditorPage() {
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setActiveTabId(tab.id)}
+                onClick={() => handleSelectTab(tab)}
                 className={cn(
                   'inline-flex items-center gap-2 border-b-2 px-0.5 py-3 text-[13px] font-medium transition-colors',
                   tab.id === activeTabId
