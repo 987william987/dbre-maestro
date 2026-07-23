@@ -11,7 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-const MaxSavedQueriesPerUser = 10
+const MaxSavedQueriesPerUser = 20
 
 type QueryArtifactRepo struct {
 	db *sqlx.DB

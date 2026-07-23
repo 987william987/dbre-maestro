@@ -138,6 +138,17 @@ type SensitiveAccessDurationDialogState = {
   error: string
 }
 
+type SaveQueryDialogState = {
+  tabID: string
+  label: string
+  error: string
+  connectionId: number
+  database: string
+  schema: string
+  redisDbIndex?: number
+  sql: string
+}
+
 type SQLEditorWorkspaceDraft = {
   tabs: EditorTab[]
   activeTabId: string
@@ -146,7 +157,8 @@ type SQLEditorWorkspaceDraft = {
 
 const DEFAULT_SQL = 'SELECT 1;'
 const HISTORY_LIMIT = 20
-const SAVED_QUERY_LIMIT = 10
+const SAVED_QUERY_LIMIT = 20
+const SAVED_QUERY_LABEL_MAX_LENGTH = 255
 const MAX_EDITOR_TABS = 10
 const SEARCH_INDEX_MIN_KEYWORD_LENGTH = 3
 const EDITOR_BASE_VISIBLE_LINES = 12
@@ -1170,9 +1182,9 @@ export function SQLEditorPage() {
   const formatProfileRef = useRef<SQLFormatProfile | null>(null)
   const formatProfileIDRef = useRef(0)
   const navigate = useNavigate()
-  const { user, accessToken } = useAuth()
+  const { user } = useAuth()
   const { pushToast } = useToast()
-  const workspaceOwnerKey = user && accessToken ? `${user.id}:${accessToken}` : ''
+  const workspaceOwnerKey = user ? String(user.id) : ''
   const initialWorkspaceRef = useRef<SQLEditorWorkspaceDraft | null>(null)
   if (!initialWorkspaceRef.current) {
     initialWorkspaceRef.current = workspaceDraftFromSnapshot(workspaceOwnerKey) ?? {
@@ -1202,6 +1214,7 @@ export function SQLEditorPage() {
   const [exportingTabIDs, setExportingTabIDs] = useState<string[]>([])
   const [sensitiveAccessTabIDs, setSensitiveAccessTabIDs] = useState<string[]>([])
   const [savedQueryToDelete, setSavedQueryToDelete] = useState<SavedQuery | null>(null)
+  const [saveQueryDialog, setSaveQueryDialog] = useState<SaveQueryDialogState | null>(null)
   const [requestConfirmState, setRequestConfirmState] = useState<QueryRequestConfirmState | null>(null)
   const [exportReason, setExportReason] = useState('')
   const [sensitiveAccessDurationDialog, setSensitiveAccessDurationDialog] = useState<SensitiveAccessDurationDialogState | null>(null)
@@ -1228,6 +1241,7 @@ export function SQLEditorPage() {
       setExportingTabIDs([])
       setSensitiveAccessTabIDs([])
       setSavedQueryToDelete(null)
+      setSaveQueryDialog(null)
       setRequestConfirmState(null)
       setExportReason('')
       setSensitiveAccessDurationDialog(null)
@@ -2207,38 +2221,94 @@ export function SQLEditorPage() {
     }
   }
 
-  async function handleSaveQuery() {
-    if (!canQuery || !activeTab?.connectionId || !activeTab.sql.trim()) {
+  function findSavedQueryBySignature(params: {
+    connectionId: number
+    sql: string
+    database: string
+    schema: string
+    redisDbIndex?: number
+  }) {
+    return savedQueries.find((item) =>
+      item.db_connection_id === params.connectionId &&
+      item.sql_content === params.sql &&
+      (item.database_name ?? '') === params.database &&
+      (item.schema_name ?? '') === params.schema &&
+      (item.redis_db_index ?? null) === (params.redisDbIndex ?? null),
+    )
+  }
+
+  function openSaveQueryDialog() {
+    const sourceSQL = activeExecutionSQL
+    if (!canQuery || !activeTab?.connectionId || !sourceSQL) {
       return
     }
 
-    const existing = savedQueries.find((item) =>
-      item.db_connection_id === activeTab.connectionId &&
-      item.sql_content === activeTab.sql &&
-      (item.database_name ?? '') === activeDatabase &&
-      (item.schema_name ?? '') === activeSchema &&
-      (item.redis_db_index ?? null) === (activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : null),
-    )
-    if (existing) {
+    const redisDbIndex = activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : undefined
+    if (findSavedQueryBySignature({
+      connectionId: activeTab.connectionId,
+      sql: sourceSQL,
+      database: activeDatabase,
+      schema: activeSchema,
+      redisDbIndex,
+    })) {
       pushToast('This SQL is already in your saved queries.', 'info')
       return
     }
 
     if (savedQueries.length >= SAVED_QUERY_LIMIT) {
-      pushToast('You can save up to 10 queries.', 'error')
+      pushToast('You can save up to 20 queries.', 'error')
+      return
+    }
+
+    setSaveQueryDialog({
+      tabID: activeTab.id,
+      label: '',
+      error: '',
+      connectionId: activeTab.connectionId,
+      database: activeDatabase,
+      schema: activeSchema,
+      redisDbIndex,
+      sql: sourceSQL,
+    })
+  }
+
+  async function handleConfirmSaveQuery() {
+    if (!saveQueryDialog) {
+      return
+    }
+    const label = saveQueryDialog.label.trim()
+    if (!label) {
+      setSaveQueryDialog((current) => current ? { ...current, error: 'Enter a saved query alias.' } : current)
+      return
+    }
+    if (label.length > SAVED_QUERY_LABEL_MAX_LENGTH) {
+      setSaveQueryDialog((current) => current ? { ...current, error: `Alias must be ${SAVED_QUERY_LABEL_MAX_LENGTH} characters or fewer.` } : current)
+      return
+    }
+
+    if (findSavedQueryBySignature({
+      connectionId: saveQueryDialog.connectionId,
+      sql: saveQueryDialog.sql,
+      database: saveQueryDialog.database,
+      schema: saveQueryDialog.schema,
+      redisDbIndex: saveQueryDialog.redisDbIndex,
+    })) {
+      pushToast('This SQL is already in your saved queries.', 'info')
+      setSaveQueryDialog(null)
       return
     }
 
     try {
       const created = await createSavedQuery({
-        label: activeTab.title,
-        db_connection_id: activeTab.connectionId,
-        database: activeDatabase || undefined,
-        schema: activeSchema || undefined,
-        redis_db_index: activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : undefined,
-        sql_content: activeTab.sql,
+        label,
+        db_connection_id: saveQueryDialog.connectionId,
+        database: saveQueryDialog.database || undefined,
+        schema: saveQueryDialog.schema || undefined,
+        redis_db_index: saveQueryDialog.redisDbIndex,
+        sql_content: saveQueryDialog.sql,
       })
       setSavedQueries((current) => [created, ...current].slice(0, SAVED_QUERY_LIMIT))
+      setSaveQueryDialog(null)
     } catch (error) {
       pushToast(error instanceof ApiError ? error.message : 'Failed to save query.', 'error')
       return
@@ -2302,13 +2372,14 @@ export function SQLEditorPage() {
       })
   }, [accessibleConnections, activeTab, updateActiveTab, updateTabByID])
 
-  const isFavorited = !!(activeTab && savedQueries.some((item) =>
-    item.db_connection_id === activeTab.connectionId &&
-    item.sql_content === activeTab.sql &&
-    (item.database_name ?? '') === activeDatabase &&
-    (item.schema_name ?? '') === activeSchema &&
-    (item.redis_db_index ?? null) === (activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : null),
-  ))
+  const activeRedisDbIndex = activeConnection?.db_type === 'redis' && activeDatabase ? Number(activeDatabase) : undefined
+  const isFavorited = !!(activeTab && activeExecutionSQL && findSavedQueryBySignature({
+    connectionId: activeTab.connectionId ?? 0,
+    sql: activeExecutionSQL,
+    database: activeDatabase,
+    schema: activeSchema,
+    redisDbIndex: activeRedisDbIndex,
+  }))
   const sqlCompletionSchema = useMemo(
     () => buildSQLCompletionSchema({
       connection: activeConnection,
@@ -3044,8 +3115,8 @@ export function SQLEditorPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void handleSaveQuery()}
-                      disabled={!canQuery || !activeTab.connectionId || !activeTab.sql.trim() || isFavorited}
+                      onClick={openSaveQueryDialog}
+                      disabled={!canQuery || !activeTab.connectionId || !activeExecutionSQL || isFavorited}
                       className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isFavorited ? <StarOff className="h-4 w-4" /> : <Star className="h-4 w-4" />}
@@ -3550,9 +3621,61 @@ export function SQLEditorPage() {
         }}
       />
       <ConfirmDialog
+        open={saveQueryDialog !== null}
+        title="Save SQL"
+        description={saveQueryDialog ? (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label
+                htmlFor="saved-query-alias"
+                className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint"
+              >
+                Alias
+              </label>
+              <input
+                id="saved-query-alias"
+                value={saveQueryDialog.label}
+                maxLength={SAVED_QUERY_LABEL_MAX_LENGTH}
+                onChange={(event) =>
+                  setSaveQueryDialog((current) => (
+                    current
+                      ? {
+                          ...current,
+                          label: event.target.value,
+                          error: '',
+                        }
+                      : current
+                  ))
+                }
+                className="h-10 w-full rounded-control border border-border bg-panel px-3 text-sm text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                placeholder="Name this saved SQL"
+                autoFocus
+              />
+              {saveQueryDialog.error ? (
+                <p className="text-[12px] font-medium text-danger">{saveQueryDialog.error}</p>
+              ) : null}
+            </div>
+            <div className="rounded-xl border border-border bg-slate-950 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">SQL To Save</p>
+              <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap break-all font-mono text-[12px] leading-5 text-slate-100">
+                {saveQueryDialog.sql}
+              </pre>
+            </div>
+          </div>
+        ) : null}
+        confirmLabel="Save"
+        cancelLabel="Cancel"
+        confirmDisabled={saveQueryDialog !== null && saveQueryDialog.label.trim() === ''}
+        panelClassName="max-w-2xl"
+        onCancel={() => setSaveQueryDialog(null)}
+        onConfirm={() => {
+          void handleConfirmSaveQuery()
+        }}
+      />
+      <ConfirmDialog
         open={savedQueryToDelete !== null}
         title="Delete Saved Query"
-        description={savedQueryToDelete ? `Delete "${savedQueryToDelete.label}"? If you were at the 10-query limit, deleting it will free up a slot.` : ''}
+        description={savedQueryToDelete ? `Delete "${savedQueryToDelete.label}"? If you were at the 20-query limit, deleting it will free up a slot.` : ''}
         confirmLabel="Delete"
         cancelLabel="Cancel"
         tone="danger"

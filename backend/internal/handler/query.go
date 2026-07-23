@@ -614,7 +614,7 @@ func (h *QueryHandler) CreateSavedQuery(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if count >= repository.MaxSavedQueriesPerUser {
-		jsonErr(w, http.StatusConflict, "saved queries limit reached (max 10)")
+		jsonErr(w, http.StatusConflict, "saved queries limit reached (max 20)")
 		return
 	}
 
