@@ -845,7 +845,7 @@ function DateTimeField({
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-label={placeholder}
-        className="inline-flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-border bg-panel-soft px-3 text-left text-[13px] text-ink outline-none transition hover:bg-white focus:border-accent focus:ring-2 focus:ring-accent/20"
+        className="inline-flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-border bg-white px-3 text-left text-[13px] outline-none transition hover:border-slate-300 focus:border-slate-400"
       >
         <span className={value ? 'text-ink' : 'text-muted'}>{value ? formatDateTimeSummary(value) : placeholder}</span>
         <CalendarDays className="h-4 w-4 text-muted" />
