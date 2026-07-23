@@ -858,7 +858,7 @@ export function NewTicketPage() {
                           <DataTableHeaderCell>Stage</DataTableHeaderCell>
                           <DataTableHeaderCell>Kind</DataTableHeaderCell>
                           <DataTableHeaderCell>Object</DataTableHeaderCell>
-                          <DataTableHeaderCell>Scan / Impact Rows</DataTableHeaderCell>
+                          <DataTableHeaderCell>Scan Rows</DataTableHeaderCell>
                           <DataTableHeaderCell>Status</DataTableHeaderCell>
                           <DataTableHeaderCell>Message</DataTableHeaderCell>
                         </tr>
@@ -930,7 +930,7 @@ export function NewTicketPage() {
                           <DataTableHeaderCell>Stage</DataTableHeaderCell>
                           <DataTableHeaderCell>Kind</DataTableHeaderCell>
                           <DataTableHeaderCell>Object</DataTableHeaderCell>
-                          <DataTableHeaderCell>Scan / Impact Rows</DataTableHeaderCell>
+                          <DataTableHeaderCell>Scan Rows</DataTableHeaderCell>
                           <DataTableHeaderCell>Status</DataTableHeaderCell>
                           <DataTableHeaderCell>Message</DataTableHeaderCell>
                         </tr>
