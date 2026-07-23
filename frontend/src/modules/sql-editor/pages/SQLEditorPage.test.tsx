@@ -332,7 +332,7 @@ describe('SQLEditorPage', () => {
 
     expect(screen.getAllByText(/Query \d+/)).toHaveLength(2)
     await waitFor(() => {
-      const snapshot = getSQLEditorWorkspaceSnapshot<unknown>('7:token')
+      const snapshot = getSQLEditorWorkspaceSnapshot<unknown>('7')
       expect(JSON.stringify(snapshot)).toContain('tickets')
     })
 
@@ -354,6 +354,55 @@ describe('SQLEditorPage', () => {
     expect(screen.getByText('tickets')).toBeInTheDocument()
     expect(screen.queryByText('Test ticket')).not.toBeInTheDocument()
     expect(screen.getByText('No query has been executed yet.')).toBeInTheDocument()
+  })
+
+  it('access token 更新時不應清空 SQL Editor workspace', async () => {
+    let accessToken = 'token-before-refresh'
+    mockedUseAuth.mockImplementation(() => ({
+      user: {
+        id: 7,
+        username: 'admin',
+        authGroups: ['admin'],
+        authGroupDetails: [],
+        permissions: ['sql_editor.read', 'sql_editor.query', 'sql_editor.export', 'sql_editor.sensitive_apply', 'tickets.apply'],
+        dbConnectionIds: [1],
+        protected: false,
+        isActive: true,
+      },
+      status: 'authenticated',
+      isAuthenticated: true,
+      accessToken,
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    }))
+
+    const { rerender } = render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('CodeMirror'), {
+      target: { value: 'SELECT * FROM tickets;' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+
+    accessToken = 'token-after-refresh'
+    rerender(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT * FROM tickets;')
+    expect(screen.getAllByText('Primary MySQL').length).toBeGreaterThan(0)
   })
 
   it('依照目前選取的連線類型顯示 SQL Editor timeout', async () => {
@@ -1053,6 +1102,19 @@ describe('SQLEditorPage', () => {
   })
 
   it('可儲存常用 SQL、開啟 Saved 清單並刪除', async () => {
+    mockedCreateSavedQuery.mockResolvedValueOnce({
+      id: 1,
+      label: 'User lookup',
+      db_connection_id: 1,
+      db_connection_name: 'Primary MySQL',
+      database_name: null,
+      schema_name: null,
+      redis_db_index: null,
+      sql_content: 'SELECT 1;',
+      created_at: '2026-06-11T00:00:00Z',
+      updated_at: '2026-06-11T00:00:00Z',
+    })
+
     render(
       <MemoryRouter>
         <ToastProvider>
@@ -1065,10 +1127,15 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
     fireEvent.click(screen.getByText('Save'))
+    expect(await screen.findByText('Save SQL')).toBeInTheDocument()
+    expect(screen.getByText('SQL To Save')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Alias'), { target: { value: 'User lookup' } })
+    const saveButtons = screen.getAllByRole('button', { name: 'Save' })
+    fireEvent.click(saveButtons[saveButtons.length - 1])
 
     await waitFor(() => {
       expect(mockedCreateSavedQuery).toHaveBeenCalledWith({
-        label: 'Query 1',
+        label: 'User lookup',
         db_connection_id: 1,
         database: undefined,
         schema: undefined,
@@ -1077,18 +1144,70 @@ describe('SQLEditorPage', () => {
       })
     })
 
-    fireEvent.click(screen.getByText('Saved'))
-    expect(await screen.findByLabelText('Delete saved query Query 1')).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Saved' })[0])
+    expect(await screen.findByLabelText('Delete saved query User lookup')).toBeInTheDocument()
     expect(screen.getAllByText('SELECT 1;').length).toBeGreaterThan(1)
 
-    fireEvent.click(screen.getByLabelText('Delete saved query Query 1'))
+    fireEvent.click(screen.getByLabelText('Delete saved query User lookup'))
     expect(await screen.findByText('Delete Saved Query')).toBeInTheDocument()
     const deleteButtons = screen.getAllByText('Delete')
     fireEvent.click(deleteButtons[deleteButtons.length - 1])
 
     await waitFor(() => {
       expect(mockedDeleteSavedQuery).toHaveBeenCalledWith(1)
-      expect(screen.queryByLabelText('Delete saved query Query 1')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('Delete saved query User lookup')).not.toBeInTheDocument()
+    })
+  })
+
+  it('反白部分 SQL 時只會將選取片段儲存為常用 SQL', async () => {
+    mockedCreateSavedQuery.mockResolvedValueOnce({
+      id: 2,
+      label: 'Claim list',
+      db_connection_id: 1,
+      db_connection_name: 'Primary MySQL',
+      database_name: null,
+      schema_name: null,
+      redis_db_index: null,
+      sql_content: 'SELECT * FROM act_claim;',
+      created_at: '2026-06-11T00:00:00Z',
+      updated_at: '2026-06-11T00:00:00Z',
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+
+    const editor = screen.getByLabelText('CodeMirror') as HTMLTextAreaElement
+    fireEvent.change(editor, {
+      target: { value: 'SELECT 1;\nSELECT * FROM act_claim;' },
+    })
+    editor.setSelectionRange(10, 34)
+    fireEvent.select(editor)
+
+    fireEvent.click(screen.getByText('Save'))
+    expect(await screen.findByText('Save SQL')).toBeInTheDocument()
+    expect(screen.getByText('SELECT * FROM act_claim;')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Alias'), { target: { value: 'Claim list' } })
+    const saveButtons = screen.getAllByRole('button', { name: 'Save' })
+    fireEvent.click(saveButtons[saveButtons.length - 1])
+
+    await waitFor(() => {
+      expect(mockedCreateSavedQuery).toHaveBeenCalledWith({
+        label: 'Claim list',
+        db_connection_id: 1,
+        database: undefined,
+        schema: undefined,
+        redis_db_index: undefined,
+        sql_content: 'SELECT * FROM act_claim;',
+      })
     })
   })
 
