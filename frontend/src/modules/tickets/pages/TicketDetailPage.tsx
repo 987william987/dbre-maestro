@@ -1023,11 +1023,11 @@ export function TicketDetailPage() {
                   ) : null}
                 </div>
                 <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-                  <DataTable className="min-w-[1720px] table-fixed">
+                  <DataTable className="w-max min-w-0 table-auto">
                     <colgroup>
                       <col className="w-[28px]" />
                       <col className="w-[36px]" />
-                      <col className="w-[600px]" />
+                      <col className="w-auto" />
                       <col className="w-[160px]" />
                       <col className="w-[140px]" />
                       <col className="w-[180px]" />
@@ -1075,8 +1075,8 @@ export function TicketDetailPage() {
                             <DataTableCell className="pl-1 pr-2 align-middle leading-6">
                               {row.seq}
                             </DataTableCell>
-                            <DataTableCell className="w-[600px] max-w-[600px] min-w-0 overflow-hidden pl-1 pr-2 align-middle">
-                              <div className="w-[590px] max-w-full overflow-hidden">
+                            <DataTableCell className="w-fit max-w-[600px] min-w-0 overflow-hidden pl-1 pr-2 align-middle">
+                              <div className="inline-block w-fit min-w-0 max-w-[590px] overflow-hidden align-middle">
                                 <ExpandableSql
                                   value={row.sql}
                                   expanded={rowExpanded}
