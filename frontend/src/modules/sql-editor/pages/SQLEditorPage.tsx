@@ -7,7 +7,6 @@ import { Prec } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import { format as formatSQL, type SqlLanguage } from 'sql-formatter'
 import {
-  Check,
   Database,
   Download,
   Filter,
@@ -187,6 +186,15 @@ const SQL_EDITOR_BASIC_SETUP = {
   lineNumbers: true,
   foldGutter: false,
   highlightActiveLine: false,
+}
+
+function shouldAutofillTableQuery(sqlText: string) {
+  const trimmed = sqlText.trim()
+  return trimmed === '' || trimmed === DEFAULT_SQL
+}
+
+function buildTableSelectSQL(tableName: string) {
+  return `SELECT * FROM ${tableName};`
 }
 
 type SQLFormatProfile = {
@@ -1138,13 +1146,13 @@ function AssetTree({
         <button
           type="button"
           onClick={handleNodeClick}
-          className={`group flex min-w-max items-center rounded-md border border-transparent pr-2 text-[12px] ${
-            node.active ? 'bg-panel-soft text-ink' : 'text-muted hover:border-border/70 hover:bg-panel-soft'
+          className={`group flex min-w-max items-center rounded-md border border-transparent pr-2 text-[12px] leading-5 ${
+            node.active ? 'bg-panel-soft text-ink' : 'text-muted hover:bg-panel-soft hover:text-ink'
           }`}
           style={{ paddingLeft }}
         >
-          <span className="flex items-center gap-2 py-1.5 text-left">
-            <span className="flex h-4 w-4 items-center justify-center text-muted">{iconForNode(node)}</span>
+          <span className="flex h-7 items-center gap-2 text-left">
+            <span className="flex h-4 w-4 items-center justify-center text-faint group-hover:text-muted">{iconForNode(node)}</span>
             <span className="whitespace-nowrap font-medium">{node.label}</span>
             {node.loading ? <span className="whitespace-nowrap text-[10px] font-semibold text-faint">Loading…</span> : null}
           </span>
@@ -2447,12 +2455,16 @@ export function SQLEditorPage() {
     }
 
     if (node.kind === 'table') {
+      const tableItem = node.item ?? null
       updateActiveTab({
         database: node.database || activeDatabase,
         schema: node.schema || '',
-        selectedTable: node.item ?? null,
+        selectedTable: tableItem,
         objectMetaTab: 'columns',
         resultView: 'object-meta',
+        ...(tableItem && activeTab && shouldAutofillTableQuery(activeTab.sql)
+          ? { sql: buildTableSelectSQL(tableItem.name), selectedSQL: '' }
+          : {}),
       })
       return
     }
@@ -2555,6 +2567,23 @@ export function SQLEditorPage() {
           metadataError: formatMetadataError(error),
         })
       })
+  }
+
+  async function handleReloadConnections() {
+    if (!canQuery || connectionsLoading) {
+      return
+    }
+
+    setConnectionsLoading(true)
+    setConnectionsError('')
+    try {
+      const response = await listQueryConnections()
+      setConnections(response.connections)
+    } catch (error) {
+      setConnectionsError(error instanceof ApiError ? error.message : 'Failed to load database connections.')
+    } finally {
+      setConnectionsLoading(false)
+    }
   }
 
   async function handleToggleNode(node: AssetTreeNode) {
@@ -2747,46 +2776,61 @@ export function SQLEditorPage() {
 
         <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
           <section className="flex min-h-0 flex-col border-r border-border/80 bg-panel">
-            <div className="px-4 pt-2 pb-2">
+            <div className="border-b border-border/70 px-3 py-2">
               <div className="relative">
                 <button
                   type="button"
                   aria-label="Asset Selector"
                   onClick={() => updateActiveTab({ assetPickerOpen: !activeAssetPickerOpen })}
-                  className="flex w-full items-center gap-2 text-left text-[12px] text-ink transition"
+                  className="group flex min-h-10 w-full items-center gap-2 rounded-lg px-1 py-1 text-left text-[12px] text-ink transition hover:bg-panel-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
                 >
                   <FolderTree className="h-4 w-4 shrink-0 text-muted" />
-                  <div className="min-w-0 flex-1 overflow-x-auto">
+                  <div className="min-w-0 flex-1">
                     {activeConnection ? (
-                      <>
-                        <p className="whitespace-nowrap text-[12px] font-semibold leading-5 text-ink" title={activeConnection.name}>{activeConnection.name}</p>
-                        <p className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-faint">
+                      <div className="min-w-0">
+                        <p className="truncate text-[12px] font-semibold leading-5 text-ink" title={activeConnection.name}>{activeConnection.name}</p>
+                        <p className="text-[10px] font-medium uppercase leading-4 tracking-[0.12em] text-faint">
                           {formatConnectionBadge(activeConnection)}
                         </p>
-                      </>
+                      </div>
                     ) : (
-                      <p className="text-[13px] font-semibold text-ink">Select assets</p>
+                      <span className="text-[13px] font-semibold text-ink">Select assets</span>
                     )}
                   </div>
                 </button>
 
               {activeAssetPickerOpen ? (
-                <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-lg border border-border bg-white p-2 shadow-soft">
-                  <SearchInput
-                    aria-label="Asset Picker Search"
-                    value={activeAssetPickerSearch}
-                    onChange={(event) => updateActiveTab({ assetPickerSearch: event.target.value })}
-                    placeholder="Select assets"
-                  />
-                  <div className="mt-2 max-h-[440px] overflow-auto">
+                <div className="absolute -left-3 -right-3 top-[calc(100%+8px)] z-20 rounded-lg border border-border bg-white p-3 shadow-soft">
+                  <div className="flex items-center rounded-lg border border-border bg-white px-2 transition focus-within:border-slate-400">
+                    <div className="min-w-0 flex-1">
+                      <SearchInput
+                        aria-label="Asset Picker Search"
+                        value={activeAssetPickerSearch}
+                        onChange={(event) => updateActiveTab({ assetPickerSearch: event.target.value })}
+                        placeholder="Search assets"
+                        wrapperClassName="h-8 rounded-none border-0 bg-transparent px-0 shadow-none focus-within:border-transparent"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Reload DB instances"
+                      title="Reload DB instances"
+                      onClick={() => void handleReloadConnections()}
+                      disabled={!canQuery || connectionsLoading}
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted transition hover:bg-panel-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${connectionsLoading ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                  <div className="mt-3 max-h-[440px] overflow-auto">
                     {filteredConnections.length === 0 ? (
-                      <p className="px-2 py-2 text-[12px] text-muted">No matching assets.</p>
+                      <p className="px-1 py-2 text-[12px] text-muted">No matching assets.</p>
                     ) : (
-                      <div className="min-w-max">
+                      <div>
                         {groupedAssetPickerConnections.map((group) => (
                           <div key={group.dbType} className="border-t border-border first:border-t-0">
-                            <p className="px-3 pb-1 pt-3 text-[12px] font-semibold text-muted first:pt-2">{group.label}</p>
-                            <div className="grid gap-0.5 pb-2">
+                            <p className="px-2 pb-1 pt-3 text-[12px] font-semibold text-muted first:pt-1">{group.label}</p>
+                            <div className="grid gap-1 pb-2">
                               {group.connections.map((connection) => {
                                 const selected = activeConnection?.id === connection.id
                                 return (
@@ -2794,14 +2838,13 @@ export function SQLEditorPage() {
                                     key={connection.id}
                                     type="button"
                                     onClick={() => handleSelectConnection(connection)}
-                                    className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-[12px] ${
+                                    className={`flex w-full items-center rounded-md px-2.5 py-2 text-left text-[12px] ${
                                       selected
-                                        ? 'bg-panel-soft text-ink ring-1 ring-border-strong'
+                                        ? 'bg-panel-soft text-ink ring-1 ring-border'
                                         : 'text-ink hover:bg-panel-soft'
                                     }`}
                                   >
-                                    <span className="whitespace-nowrap font-medium leading-5" title={connection.name}>{connection.name}</span>
-                                    {selected ? <Check className="h-3.5 w-3.5 shrink-0 text-ink" /> : null}
+                                    <span className="min-w-0 flex-1 break-words font-medium leading-5" title={connection.name}>{connection.name}</span>
                                   </button>
                                 )
                               })}
@@ -2816,15 +2859,16 @@ export function SQLEditorPage() {
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col px-4 pt-1 pb-3">
+            <div className="flex min-h-0 flex-1 flex-col px-3 pt-3 pb-3">
               {activeTab?.metadataError ? <InlineAlert className="mb-2" tone="info">{activeTab.metadataError}</InlineAlert> : null}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center rounded-lg border border-border bg-white px-2 transition focus-within:border-slate-400">
                 <div className="min-w-0 flex-1">
                   <SearchInput
                     aria-label="Explorer Search"
                     value={activeExplorerSearch}
                     onChange={(event) => updateActiveTab({ explorerSearch: event.target.value })}
                     placeholder="Search objects"
+                    wrapperClassName="h-8 rounded-none border-0 bg-transparent px-0 shadow-none focus-within:border-transparent"
                   />
                 </div>
                 <button
@@ -2833,12 +2877,12 @@ export function SQLEditorPage() {
                   title="Reload assets"
                   onClick={handleReloadAssets}
                   disabled={!activeConnection || activeSearchIndexStatus === 'loading' || activeExplorerRootLoading}
-                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border text-muted transition hover:bg-panel-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted transition hover:bg-panel-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${activeSearchIndexStatus === 'loading' || activeExplorerRootLoading ? 'animate-spin' : ''}`} />
                 </button>
               </div>
-              <div className="mt-1 min-h-0 flex-1 overflow-auto">
+              <div className="mt-2 min-h-0 flex-1 overflow-auto">
                 {connectionsLoading ? (
                   <p className="px-1 py-1 text-[12px] text-muted">Loading connections...</p>
                 ) : activeExplorerRootLoading ? (
@@ -2852,7 +2896,7 @@ export function SQLEditorPage() {
                 ) : activeExplorerSearch.trim() && activeSearchIndexTruncated ? (
                   <p className="px-1 py-1 text-[12px] text-muted">Metadata too large, narrow search by expanding database.</p>
                 ) : !activeConnection || activeExplorerNodes.length === 0 ? (
-                  <p className="px-1 py-1 text-[12px] text-muted">Select a DB connection to browse objects and run read-only queries.</p>
+                  <p className="px-1 py-1 text-[12px] text-muted">Select a connection to browse objects.</p>
                 ) : renderedExplorerNodes.length === 0 ? (
                   <p className="px-1 py-1 text-[12px] text-muted">No matching assets.</p>
                 ) : (

@@ -281,7 +281,7 @@ describe('SQLEditorPage', () => {
 
     expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
     expect(screen.queryByText('Run read-only queries, browse metadata, and keep query history and saved queries in one workspace. Create export requests directly from the result panel.')).not.toBeInTheDocument()
-    expect(screen.getByText('Select a DB connection to browse objects and run read-only queries.')).toBeInTheDocument()
+    expect(screen.getByText('Select a connection to browse objects.')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('CodeMirror'), {
       target: { value: 'SELECT * FROM tickets;' },
@@ -957,11 +957,64 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByText('tickets'))
 
     expect(screen.getByRole('button', { name: 'Object Meta' })).toBeInTheDocument()
+    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT * FROM tickets;')
     expect(await screen.findByText('id')).toBeInTheDocument()
     expect(screen.getByText('bigint unsigned')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Definition' }))
     expect(await screen.findByText(/CREATE TABLE `tickets`/)).toBeInTheDocument()
+  })
+
+  it('點擊資料表時不會覆蓋使用者已輸入的 SQL', async () => {
+    mockedListMetadata.mockReset()
+    mockedListMetadata
+      .mockResolvedValueOnce({
+        db_type: 'mysql',
+        level: 'database',
+        items: [
+          { kind: 'database', name: 'maestro' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        db_type: 'mysql',
+        level: 'table',
+        database: 'maestro',
+        items: [
+          {
+            kind: 'table',
+            database: 'maestro',
+            schema: 'maestro',
+            name: 'tickets',
+            engine: 'InnoDB',
+            row_count: 12,
+            data_size_bytes: 1024,
+            index_size_bytes: 512,
+            comment: '',
+          },
+        ],
+      })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('CodeMirror'), {
+      target: { value: 'SELECT id FROM users;' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+
+    expect(await screen.findByText('maestro')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('maestro'))
+    expect(await screen.findByText('tickets')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('tickets'))
+
+    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('SELECT id FROM users;')
   })
 
   it('可儲存常用 SQL、開啟 Saved 清單並刪除', async () => {
