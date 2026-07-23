@@ -58,6 +58,8 @@ func classifyMySQLStatement(stmt tidbast.StmtNode) StatementKind {
 		return StatementKindUpdate
 	case *tidbast.DeleteStmt:
 		return StatementKindDelete
+	case *tidbast.SetStmt:
+		return StatementKindSet
 	case *tidbast.TruncateTableStmt:
 		return StatementKindTruncate
 	}

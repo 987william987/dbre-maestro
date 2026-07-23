@@ -18,6 +18,22 @@ func TestParseMySQLStatements(t *testing.T) {
 	}
 }
 
+func TestParseMySQLSetUserVariableStatement(t *testing.T) {
+	parsed, err := ParseSQL(DialectMySQL, "SET @banner_menu_id := (SELECT id FROM sys_menu LIMIT 1); INSERT INTO sys_menu (id, pid) VALUES (1, @banner_menu_id);")
+	if err != nil {
+		t.Fatalf("ParseSQL() error = %v", err)
+	}
+	if len(parsed.Statements) != 2 {
+		t.Fatalf("len(statements) = %d, want 2", len(parsed.Statements))
+	}
+	if parsed.Statements[0].Kind != StatementKindSet {
+		t.Fatalf("statement 1 kind = %s, want %s", parsed.Statements[0].Kind, StatementKindSet)
+	}
+	if parsed.Statements[1].Kind != StatementKindInsert {
+		t.Fatalf("statement 2 kind = %s, want %s", parsed.Statements[1].Kind, StatementKindInsert)
+	}
+}
+
 func TestParseMySQLRejectsMissingDelimiter(t *testing.T) {
 	_, err := ParseSQL(DialectMySQL, "CREATE TABLE a (id INT) CREATE TABLE b (id INT);")
 	if err == nil {

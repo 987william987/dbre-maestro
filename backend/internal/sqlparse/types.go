@@ -19,6 +19,7 @@ const (
 	StatementKindInsert   StatementKind = "insert"
 	StatementKindUpdate   StatementKind = "update"
 	StatementKindDelete   StatementKind = "delete"
+	StatementKindSet      StatementKind = "set"
 	StatementKindCreate   StatementKind = "create"
 	StatementKindAlter    StatementKind = "alter"
 	StatementKindDrop     StatementKind = "drop"
