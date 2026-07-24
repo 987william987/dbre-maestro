@@ -1174,7 +1174,7 @@ function AssetTree({
     )
   }
 
-  return <div className="min-w-max space-y-0.5 pr-2">{nodes.map((node) => renderNode(node))}</div>
+  return <div translate="no" className="min-w-max space-y-0.5 pr-2">{nodes.map((node) => renderNode(node))}</div>
 }
 
 export function SQLEditorPage() {
@@ -3039,7 +3039,7 @@ export function SQLEditorPage() {
                 </div>
 
               <div className="shrink-0 px-4 pt-2 pb-3">
-                <div ref={editorContainerRef} className="overflow-hidden rounded-xl border border-border bg-panel-soft">
+                <div ref={editorContainerRef} translate="no" className="overflow-hidden rounded-xl border border-border bg-panel-soft">
                   <CodeMirror
                     key={activeTab.id}
                     value={activeTab.sql}
@@ -3212,7 +3212,7 @@ export function SQLEditorPage() {
                   </div>
                 ) : null}
 
-                <div className="mt-3 min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-white">
+                <div translate="no" className="mt-3 min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-white">
                   {activeResultView === 'history' ? (
                     history.length === 0 ? (
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">

@@ -34,7 +34,7 @@ export function ExpandableSql({ value, label = 'SQL', expanded: controlledExpand
 
   return (
     <div className="w-full min-w-0 max-w-full">
-      <pre className={`m-0 block w-full min-w-0 max-w-full font-mono text-[12px] leading-6 text-ink ${
+      <pre translate="no" className={`m-0 block w-full min-w-0 max-w-full font-mono text-[12px] leading-6 text-ink ${
         shouldCollapse && !expanded
           ? 'truncate whitespace-nowrap'
           : `${expandedMaxHeight ? 'max-h-80 overflow-auto' : 'overflow-visible'} whitespace-pre-wrap break-all`
