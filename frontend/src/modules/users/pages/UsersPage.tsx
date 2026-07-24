@@ -75,7 +75,6 @@ const PERMISSION_METADATA: PermissionOption[] = [
 ]
 const PAGE_SIZE = 20
 const SESSION_PAGE_SIZE = 5
-const CUSTOM_SCOPE_VALUE = '__custom__'
 
 const PERMISSION_INDEX = new Map(PERMISSION_METADATA.map((item) => [item.key, item] as const))
 
@@ -166,13 +165,6 @@ const EMPTY_QUERY_ACCESS_RULE_DRAFT: QueryAccessRuleDraft = {
   databasePattern: '*',
   tablePattern: '*',
   durationMinutes: String(24 * 60),
-}
-
-function scopeSelectValue(pattern: string, options: string[]) {
-  if (pattern === '*') {
-    return '*'
-  }
-  return options.includes(pattern) ? pattern : CUSTOM_SCOPE_VALUE
 }
 
 function formatConnectionGroupLabel(dbType: string) {
@@ -920,17 +912,19 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     () => queryAccessRules.slice(queryAccessOffset, queryAccessOffset + PAGE_SIZE),
     [queryAccessOffset, queryAccessRules],
   )
-  const databaseScopeValue = scopeSelectValue(queryAccessRuleDraft.databasePattern, queryAccessDatabases)
-  const tableScopeValue = scopeSelectValue(queryAccessRuleDraft.tablePattern, queryAccessTables)
   const databaseScopeOptions = [
     { value: '*', label: 'All databases (*)' },
+    ...(queryAccessRuleDraft.databasePattern && queryAccessRuleDraft.databasePattern !== '*' && !queryAccessDatabases.includes(queryAccessRuleDraft.databasePattern)
+      ? [{ value: queryAccessRuleDraft.databasePattern, label: queryAccessRuleDraft.databasePattern }]
+      : []),
     ...queryAccessDatabases.map((database) => ({ value: database, label: database })),
-    { value: CUSTOM_SCOPE_VALUE, label: 'Custom...' },
   ]
   const tableScopeOptions = [
     { value: '*', label: 'All tables (*)' },
+    ...(queryAccessRuleDraft.tablePattern && queryAccessRuleDraft.tablePattern !== '*' && !queryAccessTables.includes(queryAccessRuleDraft.tablePattern)
+      ? [{ value: queryAccessRuleDraft.tablePattern, label: queryAccessRuleDraft.tablePattern }]
+      : []),
     ...queryAccessTables.map((table) => ({ value: table, label: table })),
-    { value: CUSTOM_SCOPE_VALUE, label: 'Custom...' },
   ]
   const groupedQueryAccessConnectionOptions = useMemo(() => groupConnectionOptions(connections), [connections])
   const pagedSelectedUserSessions = useMemo(
@@ -1226,7 +1220,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     <p className="text-[12px] text-muted">Create fallback rules for a user or auth group. * means all; other values are exact names, not fuzzy matches.</p>
                   </div>
                 </div>
-                <div className="grid gap-3 xl:grid-cols-[120px_minmax(150px,220px)_100px_120px_auto]">
+                <div className="grid gap-3 xl:grid-cols-[120px_minmax(150px,220px)_100px_120px_minmax(220px,300px)_minmax(220px,1fr)_minmax(220px,1fr)_auto]">
                   <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
                     Subject Type
                     <DropdownSelect
@@ -1278,6 +1272,46 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       options={QUERY_ACCESS_DURATION_OPTIONS}
                     />
                   </label>
+                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    DB Connection
+                    <DropdownSelect
+                      ariaLabel="Query Access DB Connection"
+                      value={queryAccessRuleDraft.connectionID}
+                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, connectionID: value, databasePattern: '*', tablePattern: '*' }))}
+                      disabled={savingQueryAccessRule}
+                      options={[
+                        { value: '', label: 'Not Selected' },
+                        ...groupedQueryAccessConnectionOptions,
+                      ]}
+                      menuClassName="max-h-[360px] overflow-y-auto"
+                    />
+                  </label>
+                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Database
+                    <DropdownSelect
+                      ariaLabel="Query Access Database"
+                      value={queryAccessRuleDraft.databasePattern}
+                      onChange={(value) => setQueryAccessRuleDraft((current) => ({
+                        ...current,
+                        databasePattern: value,
+                        tablePattern: '*',
+                      }))}
+                      disabled={savingQueryAccessRule || queryAccessRuleDraft.connectionID === ''}
+                      options={databaseScopeOptions}
+                      menuClassName="max-h-[320px] overflow-y-auto"
+                    />
+                  </label>
+                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                    Table
+                    <DropdownSelect
+                      ariaLabel="Query Access Table"
+                      value={queryAccessRuleDraft.tablePattern}
+                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, tablePattern: value }))}
+                      disabled={savingQueryAccessRule || queryAccessRuleDraft.connectionID === '' || queryAccessRuleDraft.databasePattern.trim() === ''}
+                      options={tableScopeOptions}
+                      menuClassName="max-h-[320px] overflow-y-auto"
+                    />
+                  </label>
                   <div className="flex items-end gap-2 xl:justify-self-start">
                     {editingQueryAccessRuleID != null ? (
                       <button
@@ -1298,66 +1332,6 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       {editingQueryAccessRuleID == null ? 'Add' : 'Save'}
                     </button>
                   </div>
-                </div>
-                <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(260px,0.9fr)_minmax(260px,1fr)_minmax(260px,1fr)]">
-                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                    DB Connection
-                    <DropdownSelect
-                      ariaLabel="Query Access DB Connection"
-                      value={queryAccessRuleDraft.connectionID}
-                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, connectionID: value, databasePattern: '*', tablePattern: '*' }))}
-                      disabled={savingQueryAccessRule}
-                      options={[
-                        { value: '', label: 'Not Selected' },
-                        ...groupedQueryAccessConnectionOptions,
-                      ]}
-                      menuClassName="max-h-[360px] overflow-y-auto"
-                    />
-                  </label>
-                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                    Database
-                    <DropdownSelect
-                      ariaLabel="Query Access Database"
-                      value={databaseScopeValue}
-                      onChange={(value) => setQueryAccessRuleDraft((current) => ({
-                        ...current,
-                        databasePattern: value === CUSTOM_SCOPE_VALUE ? '' : value,
-                        tablePattern: '*',
-                      }))}
-                      disabled={savingQueryAccessRule || queryAccessRuleDraft.connectionID === ''}
-                      options={databaseScopeOptions}
-                      menuClassName="max-h-[320px] overflow-y-auto"
-                    />
-                    {databaseScopeValue === CUSTOM_SCOPE_VALUE ? (
-                      <input
-                        value={queryAccessRuleDraft.databasePattern}
-                        onChange={(event) => setQueryAccessRuleDraft((current) => ({ ...current, databasePattern: event.target.value, tablePattern: '*' }))}
-                        className="h-9 rounded-lg border border-border bg-panel-soft px-3 text-[13px] font-medium normal-case tracking-normal text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                        placeholder="Exact database name"
-                        disabled={savingQueryAccessRule}
-                      />
-                    ) : null}
-                  </label>
-                  <label className="grid min-w-0 gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
-                    Table
-                    <DropdownSelect
-                      ariaLabel="Query Access Table"
-                      value={tableScopeValue}
-                      onChange={(value) => setQueryAccessRuleDraft((current) => ({ ...current, tablePattern: value === CUSTOM_SCOPE_VALUE ? '' : value }))}
-                      disabled={savingQueryAccessRule || queryAccessRuleDraft.connectionID === '' || queryAccessRuleDraft.databasePattern.trim() === ''}
-                      options={tableScopeOptions}
-                      menuClassName="max-h-[320px] overflow-y-auto"
-                    />
-                    {tableScopeValue === CUSTOM_SCOPE_VALUE ? (
-                      <input
-                        value={queryAccessRuleDraft.tablePattern}
-                        onChange={(event) => setQueryAccessRuleDraft((current) => ({ ...current, tablePattern: event.target.value }))}
-                        className="h-9 rounded-lg border border-border bg-panel-soft px-3 text-[13px] font-medium normal-case tracking-normal text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                        placeholder="Exact table name"
-                        disabled={savingQueryAccessRule}
-                      />
-                    ) : null}
-                  </label>
                 </div>
                 {queryAccessMetadataLoading ? <p className="mt-3 text-[11px] text-muted">Loading metadata options...</p> : null}
               </form>

@@ -131,7 +131,7 @@ export function DropdownSelect({
   }, [open, showSearch])
 
   return (
-    <div ref={containerRef} className={cn('relative', className)}>
+    <div ref={containerRef} className={cn('relative min-w-0 max-w-full', className)}>
       <button
         type="button"
         aria-label={ariaLabel}
@@ -140,7 +140,7 @@ export function DropdownSelect({
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
         className={cn(
-          'flex w-full items-center justify-between rounded-lg border border-border bg-white text-left transition disabled:cursor-not-allowed disabled:opacity-60',
+          'flex min-w-0 w-full max-w-full items-center justify-between overflow-hidden rounded-lg border border-border bg-white text-left transition disabled:cursor-not-allowed disabled:opacity-60',
           size === 'md'
             ? 'h-9 px-3 text-[12px] font-medium'
             : 'h-9 px-3 text-[12px] font-medium',
@@ -148,7 +148,7 @@ export function DropdownSelect({
           triggerClassName,
         )}
       >
-        <span className={cn('truncate pr-3', displayAsPlaceholder ? 'text-muted' : 'text-ink')}>{selectedOption?.label ?? placeholder ?? 'Select'}</span>
+        <span title={selectedOption?.label} className={cn('min-w-0 flex-1 truncate pr-3', displayAsPlaceholder ? 'text-muted' : 'text-ink')}>{selectedOption?.label ?? placeholder ?? 'Select'}</span>
         <ChevronDown className={cn('h-4 w-4 shrink-0 text-faint transition-transform', open && 'rotate-180')} />
       </button>
 
