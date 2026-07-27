@@ -30,6 +30,7 @@ type Config struct {
 	RefreshCookieSecure       bool
 	LarkWebhookURL            string // optional; empty = Lark notifications disabled
 	LarkOAuth                 LarkOAuthConfig
+	OIDCSSO                   OIDCSSOConfig
 	PoolProfiles              map[pool.Profile]pool.ProfileConfig
 	DBConnectionHostPolicy    netguard.Config
 }
@@ -47,6 +48,30 @@ type LarkOAuthConfig struct {
 
 func (c LarkOAuthConfig) Configured() bool {
 	return c.Enabled && c.AppID != "" && c.AppSecret != "" && c.RedirectURL != ""
+}
+
+type OIDCSSOConfig struct {
+	Enabled                bool
+	DisplayName            string
+	IssuerURL              string
+	ClientID               string
+	ClientSecret           string
+	RedirectURL            string
+	Scopes                 []string
+	TrustMFA               bool
+	RequireEnterpriseEmail bool
+	EnterpriseEmailDomains []string
+}
+
+func (c OIDCSSOConfig) Configured() bool {
+	return c.Enabled && c.IssuerURL != "" && c.ClientID != "" && c.ClientSecret != "" && c.RedirectURL != ""
+}
+
+func (c OIDCSSOConfig) ScopesOrDefault() []string {
+	if len(c.Scopes) > 0 {
+		return c.Scopes
+	}
+	return []string{"openid", "profile", "email", "dbre"}
 }
 
 func Load() (*Config, error) {
@@ -110,6 +135,18 @@ func Load() (*Config, error) {
 		Scopes:                 splitCSV(getEnv("LARK_OAUTH_SCOPES", "directory:employee.base.enterprise_email:read")),
 		RequireEnterpriseEmail: truthyEnv(getEnv("LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL", "true")),
 		EnterpriseEmailDomains: splitCSV(getEnv("LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS", "edgex.exchange")),
+	}
+	c.OIDCSSO = OIDCSSOConfig{
+		Enabled:                truthyEnv(os.Getenv("SSO_OIDC_ENABLED")),
+		DisplayName:            strings.TrimSpace(getEnv("SSO_OIDC_DISPLAY_NAME", "Authentik")),
+		IssuerURL:              strings.TrimRight(strings.TrimSpace(os.Getenv("SSO_OIDC_ISSUER_URL")), "/"),
+		ClientID:               strings.TrimSpace(os.Getenv("SSO_OIDC_CLIENT_ID")),
+		ClientSecret:           strings.TrimSpace(os.Getenv("SSO_OIDC_CLIENT_SECRET")),
+		RedirectURL:            strings.TrimSpace(os.Getenv("SSO_OIDC_REDIRECT_URL")),
+		Scopes:                 splitCSV(getEnv("SSO_OIDC_SCOPES", "openid,profile,email,dbre")),
+		TrustMFA:               truthyEnv(os.Getenv("SSO_OIDC_TRUST_MFA")),
+		RequireEnterpriseEmail: truthyEnv(getEnv("SSO_OIDC_REQUIRE_ENTERPRISE_EMAIL", "true")),
+		EnterpriseEmailDomains: splitCSV(getEnv("SSO_OIDC_ENTERPRISE_EMAIL_DOMAINS", "edgex.exchange")),
 	}
 	if raw := os.Getenv("RUN_MIGRATIONS_ON_STARTUP"); raw != "" {
 		runMigrations, err := strconv.ParseBool(raw)

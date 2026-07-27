@@ -19,7 +19,7 @@ export function DataTableScroll({ className, ...props }: HTMLAttributes<HTMLDivE
 }
 
 export function DataTable({ className, ...props }: TableHTMLAttributes<HTMLTableElement>) {
-  return <table className={cn('min-w-full border-collapse', className)} {...props} />
+  return <table translate="no" className={cn('min-w-full border-collapse', className)} {...props} />
 }
 
 export function DataTableHead({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {

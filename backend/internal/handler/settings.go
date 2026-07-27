@@ -32,6 +32,26 @@ func WithSettingsHandlerAppEnv(appEnv string) SettingsHandlerOption {
 	}
 }
 
+func normalizeOIDCScopes(scopes []string) []string {
+	next := make([]string, 0, len(scopes))
+	seen := map[string]struct{}{}
+	for _, scope := range scopes {
+		value := strings.TrimSpace(scope)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		next = append(next, value)
+	}
+	if len(next) == 0 {
+		return []string{"openid", "profile", "email", "dbre"}
+	}
+	return next
+}
+
 func NewSettingsHandler(settings *repository.SettingsRepo, users *repository.UserRepo, auths *repository.AuthGroupRepo, dbConns *repository.DBConnectionRepo, audit *repository.AuditRepo, opts ...SettingsHandlerOption) *SettingsHandler {
 	h := &SettingsHandler{
 		settings: settings,
@@ -278,7 +298,7 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	larkSecretConfigured, larkSecretRequired := resolveLarkSecretState(req.LarkAppID, req.LarkAppSecret, req.LarkAppSecretConfigured, currentSettings.LarkAppSecretConfigured)
+	larkSecretConfigured, larkSecretRequired := resolveSecretState(req.LarkAppID, req.LarkAppSecret, req.LarkAppSecretConfigured, currentSettings.LarkAppSecretConfigured)
 	req.LarkAppSecretConfigured = larkSecretConfigured
 	if larkSecretRequired {
 		jsonErr(w, http.StatusUnprocessableEntity, "lark_app_secret is required when configuring lark for the first time")
@@ -296,6 +316,36 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.LarkOAuthEnabled && req.LarkOAuthRedirectURL == "" {
 		jsonErr(w, http.StatusUnprocessableEntity, "lark_oauth_redirect_url is required when lark oauth login is enabled")
+		return
+	}
+	ssoSecretConfigured, ssoSecretRequired := resolveSecretState(req.SSOOIDCClientID, req.SSOOIDCClientSecret, req.SSOOIDCClientSecretConfigured, currentSettings.SSOOIDCClientSecretConfigured)
+	req.SSOOIDCClientSecretConfigured = ssoSecretConfigured
+	req.SSOOIDCDisplayName = strings.TrimSpace(req.SSOOIDCDisplayName)
+	if req.SSOOIDCDisplayName == "" {
+		req.SSOOIDCDisplayName = "Authentik"
+	}
+	req.SSOOIDCIssuerURL = strings.TrimRight(strings.TrimSpace(req.SSOOIDCIssuerURL), "/")
+	req.SSOOIDCClientID = strings.TrimSpace(req.SSOOIDCClientID)
+	req.SSOOIDCRedirectURL = strings.TrimSpace(req.SSOOIDCRedirectURL)
+	req.SSOOIDCScopes = normalizeOIDCScopes(req.SSOOIDCScopes)
+	if req.SSOOIDCEnabled && req.SSOOIDCIssuerURL == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "sso_oidc_issuer_url is required when sso oidc is enabled")
+		return
+	}
+	if req.SSOOIDCEnabled && req.SSOOIDCClientID == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "sso_oidc_client_id is required when sso oidc is enabled")
+		return
+	}
+	if req.SSOOIDCEnabled && !req.SSOOIDCClientSecretConfigured {
+		jsonErr(w, http.StatusUnprocessableEntity, "sso_oidc_client_secret is required when sso oidc is enabled")
+		return
+	}
+	if req.SSOOIDCEnabled && ssoSecretRequired {
+		jsonErr(w, http.StatusUnprocessableEntity, "sso_oidc_client_secret is required when configuring sso oidc for the first time")
+		return
+	}
+	if req.SSOOIDCEnabled && req.SSOOIDCRedirectURL == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "sso_oidc_redirect_url is required when sso oidc is enabled")
 		return
 	}
 	for _, connectionID := range append([]uint64{}, req.DBMetadataObjectEnabledConnectionIDs...) {
@@ -385,6 +435,14 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			"lark_oauth_enabled":                          req.LarkOAuthEnabled,
 			"lark_oauth_site":                             req.LarkOAuthSite,
 			"lark_oauth_redirect_url_configured":          req.LarkOAuthRedirectURL != "",
+			"sso_oidc_enabled":                            req.SSOOIDCEnabled,
+			"sso_oidc_display_name":                       req.SSOOIDCDisplayName,
+			"sso_oidc_issuer_url_configured":              req.SSOOIDCIssuerURL != "",
+			"sso_oidc_client_id_configured":               req.SSOOIDCClientID != "",
+			"sso_oidc_client_secret_configured":           req.SSOOIDCClientSecretConfigured || req.SSOOIDCClientSecret != "",
+			"sso_oidc_redirect_url_configured":            req.SSOOIDCRedirectURL != "",
+			"sso_oidc_scopes":                             req.SSOOIDCScopes,
+			"sso_oidc_trust_mfa":                          req.SSOOIDCTrustMFA,
 			"sql_editor_app_timeout_seconds":              req.SQLEditorAppTimeoutSeconds,
 			"sql_editor_mysql_max_execution_time_ms":      req.SQLEditorMySQLMaxExecutionTimeMs,
 			"sql_editor_postgres_statement_timeout_ms":    req.SQLEditorPostgresStatementTimeoutMs,
@@ -420,7 +478,7 @@ func (h *SettingsHandler) validateUserExists(r *http.Request, userID uint64) err
 	return nil
 }
 
-func resolveLarkSecretState(appID string, appSecret string, requestConfigured bool, currentConfigured bool) (configured bool, required bool) {
+func resolveSecretState(appID string, appSecret string, requestConfigured bool, currentConfigured bool) (configured bool, required bool) {
 	if strings.TrimSpace(appSecret) != "" {
 		return true, false
 	}

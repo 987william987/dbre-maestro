@@ -20,6 +20,9 @@ import (
 	"github.com/dbre-maestro/maestro/internal/larkoauth"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/notification"
+	"github.com/dbre-maestro/maestro/internal/oidcsso"
+	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"github.com/pquerna/otp"
@@ -34,14 +37,19 @@ type AuthHandler struct {
 	settings             *repository.SettingsRepo
 	mfaChallenges        *repository.MFAChallengeRepo
 	larkLogins           *repository.LarkLoginRepo
+	ssoLogins            *repository.SSOLoginRepo
+	notifications        *NotificationRouter
 	jwtSecret            []byte
 	larkOAuth            config.LarkOAuthConfig
 	larkOAuthClient      larkoauth.Client
+	oidcSSO              config.OIDCSSOConfig
+	oidcClient           oidcsso.Client
 	refreshCookieSecure  bool
 	loginRateLimiter     requestRateLimiter
 	refreshRateLimiter   requestRateLimiter
 	mfaVerifyRateLimiter requestRateLimiter
 	larkLoginRateLimiter requestRateLimiter
+	ssoLoginRateLimiter  requestRateLimiter
 	mfaEnforcement       MFAEnforcement
 }
 
@@ -59,6 +67,9 @@ const (
 	mfaMaxAttempts          = 5
 	larkLoginStateTTL       = 10 * time.Minute
 	larkLoginTicketTTL      = 2 * time.Minute
+	ssoLoginStateTTL        = 10 * time.Minute
+	ssoLoginTicketTTL       = 2 * time.Minute
+	oidcProviderKey         = "oidc"
 )
 
 func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, jwtSecret []byte, options ...any) *AuthHandler {
@@ -67,8 +78,14 @@ func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo
 	var mfaChallenges *repository.MFAChallengeRepo
 	var settings *repository.SettingsRepo
 	var larkLogins *repository.LarkLoginRepo
+	var ssoLogins *repository.SSOLoginRepo
+	var notifRepo *repository.NotificationRepo
+	var broker *realtime.Broker
+	var larkDispatcher *notification.Dispatcher
 	var larkOAuth config.LarkOAuthConfig
 	var larkOAuthClient larkoauth.Client
+	var oidcSSO config.OIDCSSOConfig
+	var oidcClient oidcsso.Client
 	for _, option := range options {
 		switch value := option.(type) {
 		case bool:
@@ -83,10 +100,22 @@ func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo
 			settings = value
 		case *repository.LarkLoginRepo:
 			larkLogins = value
+		case *repository.SSOLoginRepo:
+			ssoLogins = value
+		case *repository.NotificationRepo:
+			notifRepo = value
+		case *realtime.Broker:
+			broker = value
+		case *notification.Dispatcher:
+			larkDispatcher = value
 		case config.LarkOAuthConfig:
 			larkOAuth = value
 		case larkoauth.Client:
 			larkOAuthClient = value
+		case config.OIDCSSOConfig:
+			oidcSSO = value
+		case oidcsso.Client:
+			oidcClient = value
 		}
 	}
 	h := &AuthHandler{
@@ -96,14 +125,19 @@ func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo
 		settings:             settings,
 		mfaChallenges:        mfaChallenges,
 		larkLogins:           larkLogins,
+		ssoLogins:            ssoLogins,
+		notifications:        NewNotificationRouter(notifRepo, audit, users, broker, larkDispatcher),
 		jwtSecret:            jwtSecret,
 		larkOAuth:            larkOAuth,
 		larkOAuthClient:      larkOAuthClient,
+		oidcSSO:              oidcSSO,
+		oidcClient:           oidcClient,
 		refreshCookieSecure:  secure,
 		loginRateLimiter:     newRequestRateLimiter(5, time.Minute),
 		refreshRateLimiter:   newRequestRateLimiter(30, time.Minute),
 		mfaVerifyRateLimiter: newRequestRateLimiter(10, time.Minute),
 		larkLoginRateLimiter: newRequestRateLimiter(20, time.Minute),
+		ssoLoginRateLimiter:  newRequestRateLimiter(20, time.Minute),
 		mfaEnforcement:       enforcement,
 	}
 	return h
@@ -439,7 +473,219 @@ func (h *AuthHandler) ConsumeLarkLoginResult(w http.ResponseWriter, r *http.Requ
 		jsonOK(w, map[string]any{"mfa_required": true, "mfa_token": mfaToken})
 		return
 	}
-	h.completeLoginWithPayload(w, r, user, map[string]string{"return_to": sanitizeReturnTo(state.ReturnTo)})
+	h.completeLoginWithPayloadAndSession(w, r, user, map[string]string{"return_to": sanitizeReturnTo(state.ReturnTo)}, repository.SessionCreateOptions{AuthMethod: "lark", AuthProvider: "lark"})
+}
+
+// GET /auth/sso/providers
+func (h *AuthHandler) ListSSOProviders(w http.ResponseWriter, r *http.Request) {
+	cfg, err := h.resolveOIDCSSOConfig(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "sso config error")
+		return
+	}
+	providers := []map[string]any{}
+	if cfg.Configured() && h.ssoLogins != nil {
+		displayName := strings.TrimSpace(cfg.DisplayName)
+		if displayName == "" {
+			displayName = "SSO"
+		}
+		providers = append(providers, map[string]any{
+			"key":          oidcProviderKey,
+			"display_name": displayName,
+			"start_url":    "/api/auth/sso/start",
+		})
+	}
+	jsonOK(w, map[string]any{"providers": providers})
+}
+
+// GET /auth/sso/start
+func (h *AuthHandler) StartSSOLogin(w http.ResponseWriter, r *http.Request) {
+	if !h.requireSetupCompleted(w, r) {
+		return
+	}
+	cfg, err := h.resolveOIDCSSOConfig(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "sso config error")
+		return
+	}
+	if !cfg.Configured() || h.ssoLogins == nil {
+		jsonErr(w, http.StatusServiceUnavailable, "sso login is not configured")
+		return
+	}
+	if !h.allowAuthAttempt(w, r, h.ssoLoginRateLimiter, "sso_login_start", clientIP(r)) {
+		return
+	}
+	state, err := auth.NewTokenID()
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "token error")
+		return
+	}
+	returnTo := sanitizeReturnTo(r.URL.Query().Get("returnTo"))
+	if err := h.ssoLogins.Create(r.Context(), state, returnTo, time.Now().Add(ssoLoginStateTTL)); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "sso login state error")
+		return
+	}
+	client := h.oidcClient
+	if client == nil {
+		defaultClient := oidcsso.NewHTTPClient()
+		client = defaultClient
+	}
+	redirectURL, err := client.AuthorizeURL(r.Context(), cfg, state)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "sso authorize error")
+		return
+	}
+	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
+// GET /auth/sso/callback
+func (h *AuthHandler) CompleteSSOLogin(w http.ResponseWriter, r *http.Request) {
+	completed, err := h.setupCompleted(r.Context())
+	if err != nil || !completed {
+		http.Redirect(w, r, ssoLoginRedirect("", "setup_required"), http.StatusFound)
+		return
+	}
+	cfg, err := h.resolveOIDCSSOConfig(r.Context())
+	if err != nil || !cfg.Configured() || h.ssoLogins == nil {
+		http.Redirect(w, r, ssoLoginRedirect("", "login_failed"), http.StatusFound)
+		return
+	}
+	now := time.Now()
+	state, ok, err := h.ssoLogins.ClaimState(r.Context(), strings.TrimSpace(r.URL.Query().Get("state")), now)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "sso login state error")
+		return
+	}
+	if !ok || state == nil {
+		http.Redirect(w, r, ssoLoginRedirect("", "login_failed"), http.StatusFound)
+		return
+	}
+	if code := strings.TrimSpace(r.URL.Query().Get("error")); code != "" {
+		errCode := ssoOAuthErrorCode(code)
+		_ = h.ssoLogins.MarkFailed(r.Context(), state.ID, errCode)
+		http.Redirect(w, r, ssoLoginRedirect("", errCode), http.StatusFound)
+		return
+	}
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	if code == "" {
+		_ = h.ssoLogins.MarkFailed(r.Context(), state.ID, "login_failed")
+		http.Redirect(w, r, ssoLoginRedirect("", "login_failed"), http.StatusFound)
+		return
+	}
+	client := h.oidcClient
+	if client == nil {
+		defaultClient := oidcsso.NewHTTPClient()
+		client = defaultClient
+	}
+	identity, err := client.ExchangeCode(r.Context(), cfg, code)
+	if err != nil || strings.TrimSpace(identity.Subject) == "" {
+		_ = h.ssoLogins.MarkFailed(r.Context(), state.ID, "invalid_sso_identity")
+		slog.Warn("sso oidc login failed",
+			"stage", "exchange_code",
+			"err", err,
+			"subject_present", strings.TrimSpace(identity.Subject) != "",
+			"email_domain", emailDomainForLog(identity.Email),
+			"lark_open_id_present", strings.TrimSpace(identity.LarkOpenID) != "",
+		)
+		h.logLoginFailed(r, nil, firstNonEmptyString(identity.Email, identity.Subject), "sso_oidc_failed")
+		http.Redirect(w, r, ssoLoginRedirect("", "login_failed"), http.StatusFound)
+		return
+	}
+	user, err := h.findOrCreateSSOUser(r.Context(), identity)
+	if err != nil {
+		_ = h.ssoLogins.MarkFailed(r.Context(), state.ID, "resolve_user_failed")
+		slog.Warn("sso oidc login failed",
+			"stage", "resolve_user",
+			"err", err,
+			"subject_present", strings.TrimSpace(identity.Subject) != "",
+			"email_domain", emailDomainForLog(identity.Email),
+			"lark_open_id_present", strings.TrimSpace(identity.LarkOpenID) != "",
+		)
+		h.logLoginFailed(r, nil, firstNonEmptyString(identity.Email, identity.Subject), "sso_user_resolve_failed")
+		http.Redirect(w, r, ssoLoginRedirect("", "login_failed"), http.StatusFound)
+		return
+	}
+	if !user.IsActive {
+		h.logLoginFailed(r, &user.ID, user.Username, "disabled_user")
+		http.Redirect(w, r, ssoLoginRedirect("", "user_disabled"), http.StatusFound)
+		return
+	}
+	h.handleSSOLarkRecipient(r.Context(), user, identity)
+	ticket, err := auth.NewTokenID()
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "token error")
+		return
+	}
+	if err := h.ssoLogins.StoreTicket(r.Context(), state.ID, user.ID, ticket, identity, time.Now().Add(ssoLoginTicketTTL)); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "sso login ticket error")
+		return
+	}
+	http.Redirect(w, r, ssoLoginRedirect(ticket, ""), http.StatusFound)
+}
+
+// POST /auth/sso/login/result/consume
+func (h *AuthHandler) ConsumeSSOLoginResult(w http.ResponseWriter, r *http.Request) {
+	if !h.requireSetupCompleted(w, r) {
+		return
+	}
+	if h.ssoLogins == nil {
+		jsonErr(w, http.StatusServiceUnavailable, "sso login is not configured")
+		return
+	}
+	var req struct {
+		Ticket string `json:"ticket"`
+	}
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	state, ok, err := h.ssoLogins.ConsumeTicket(r.Context(), strings.TrimSpace(req.Ticket), time.Now())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "sso login ticket error")
+		return
+	}
+	if !ok || state == nil || state.UserID == nil || *state.UserID == 0 {
+		jsonErr(w, http.StatusUnauthorized, "invalid sso login ticket")
+		return
+	}
+	user, err := h.users.GetByID(r.Context(), *state.UserID)
+	if err != nil || user == nil {
+		jsonErr(w, http.StatusUnauthorized, "invalid sso login ticket")
+		return
+	}
+	if !user.IsActive {
+		jsonErr(w, http.StatusForbidden, "user is disabled")
+		return
+	}
+	cfg, err := h.resolveOIDCSSOConfig(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "sso config error")
+		return
+	}
+	requiresMFA, err := h.requiresMFA(r.Context(), user)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "mfa policy check failed")
+		return
+	}
+	if requiresMFA && !cfg.TrustMFA {
+		if !user.MFAEnabled || len(user.MFASecret) == 0 {
+			h.startMFASetup(w, r, user)
+			return
+		}
+		mfaToken, err := h.newMFAChallenge(r.Context(), r, user, false)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "token error")
+			return
+		}
+		jsonOK(w, map[string]any{"mfa_required": true, "mfa_token": mfaToken})
+		return
+	}
+	options := repository.SessionCreateOptions{AuthMethod: "sso", AuthProvider: oidcProviderKey}
+	if requiresMFA && cfg.TrustMFA {
+		options.MFASatisfied = true
+		options.MFASource = "trusted_oidc_provider"
+	}
+	h.completeLoginWithPayloadAndSession(w, r, user, map[string]string{"return_to": sanitizeReturnTo(state.ReturnTo)}, options)
 }
 
 func (h *AuthHandler) findOrCreateLarkUser(ctx context.Context, identity larkoauth.Identity) (*model.User, error) {
@@ -501,6 +747,185 @@ func (h *AuthHandler) findOrCreateLarkUser(ctx context.Context, identity larkoau
 	return h.users.CreateLarkDeveloper(ctx, h.uniqueLarkUsername(ctx, identity), input)
 }
 
+func (h *AuthHandler) findOrCreateSSOUser(ctx context.Context, identity oidcsso.Identity) (*model.User, error) {
+	input := repository.SSOIdentityInput{
+		Provider:    oidcProviderKey,
+		Subject:     strings.TrimSpace(identity.Subject),
+		Email:       strings.TrimSpace(identity.Email),
+		DisplayName: strings.TrimSpace(identity.Name),
+		LarkOpenID:  strings.TrimSpace(identity.LarkOpenID),
+	}
+	if input.Subject == "" {
+		return nil, fmt.Errorf("sso identity missing subject")
+	}
+	if input.Email == "" {
+		return nil, fmt.Errorf("sso identity missing email")
+	}
+
+	user, err := h.users.GetByExternalIdentity(ctx, input.Provider, input.Subject)
+	if err != nil {
+		return nil, err
+	}
+	if user != nil {
+		return user, nil
+	}
+	if h.oidcSSO.RequireEnterpriseEmail && !larkEnterpriseEmailAllowed(input.Email, h.oidcSSO.EnterpriseEmailDomains) {
+		slog.Warn("sso identity email domain is not allowed",
+			"subject_present", input.Subject != "",
+			"email_domain", emailDomainForLog(input.Email),
+		)
+		return nil, fmt.Errorf("sso identity email domain is not allowed")
+	}
+	if identity.EmailVerifiedClaimPresent && !identity.EmailVerified {
+		slog.Warn("sso identity email is not verified",
+			"subject_present", input.Subject != "",
+			"email_domain", emailDomainForLog(input.Email),
+			"email_verified_claim_present", identity.EmailVerifiedClaimPresent,
+		)
+		return nil, fmt.Errorf("sso identity email is not verified")
+	}
+	if !identity.EmailVerifiedClaimPresent {
+		slog.Warn("sso identity email_verified claim is missing",
+			"subject_present", input.Subject != "",
+			"email_domain", emailDomainForLog(input.Email),
+		)
+	}
+
+	user, err = h.users.GetByEmail(ctx, input.Email)
+	if err != nil {
+		return nil, err
+	}
+	if user != nil {
+		if user.IsProtected {
+			return nil, fmt.Errorf("protected user cannot be auto-bound to sso")
+		}
+		if err := h.users.BindExternalIdentity(ctx, user.ID, input.Provider, input.Subject); err != nil {
+			return nil, err
+		}
+		return h.users.GetByID(ctx, user.ID)
+	}
+
+	passwordSeed, err := auth.NewTokenID()
+	if err != nil {
+		return nil, err
+	}
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(passwordSeed), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	input.PasswordHash = string(passwordHash)
+	return h.users.CreateSSODeveloper(ctx, h.uniqueSSOUsername(ctx, identity), input)
+}
+
+func (h *AuthHandler) handleSSOLarkRecipient(ctx context.Context, user *model.User, identity oidcsso.Identity) {
+	if user == nil {
+		return
+	}
+	larkOpenID := strings.TrimSpace(identity.LarkOpenID)
+	if larkOpenID == "" {
+		slog.Warn("sso identity missing lark_open_id", "user_id", user.ID, "username", user.Username, "email_domain", emailDomainForLog(identity.Email))
+		h.notifyAdminsAboutSSOLarkIssue(ctx, "sso_lark_open_id_missing", "SSO login missing Lark Open ID", fmt.Sprintf("SSO login for %s (%s) did not include lark_open_id. Please check Authentik scope mapping.", user.Username, user.Email), user)
+		return
+	}
+	current := strings.TrimSpace(user.LarkRecipient)
+	if current == "" {
+		updated, err := h.users.UpdateLarkRecipientIfEmpty(ctx, user.ID, larkOpenID)
+		if err != nil {
+			slog.Warn("sso lark recipient auto-bind failed", "user_id", user.ID, "err", err)
+			return
+		}
+		if updated {
+			slog.Info("sso lark recipient auto-bound", "user_id", user.ID, "username", user.Username)
+			h.logAuditContext(ctx, repository.AuditEntry{
+				ActorID:      &user.ID,
+				ActorName:    user.Username,
+				ActionType:   "sso_lark_recipient_bound",
+				ResourceType: "user",
+				ResourceID:   &user.ID,
+				Details: map[string]any{
+					"username": user.Username,
+					"source":   "oidc_claim",
+				},
+			})
+		}
+		return
+	}
+	if current != larkOpenID {
+		slog.Warn("sso lark recipient conflict", "user_id", user.ID, "username", user.Username, "existing_present", current != "", "claim_present", true)
+		h.notifyAdminsAboutSSOLarkIssue(ctx, "sso_lark_recipient_conflict", "SSO Lark Open ID conflict", fmt.Sprintf("SSO login for %s (%s) returned a lark_open_id that differs from the existing DBRE Lark Open ID. DBRE kept the existing value. Please verify the user mapping.", user.Username, user.Email), user)
+	}
+}
+
+func (h *AuthHandler) notifyAdminsAboutSSOLarkIssue(ctx context.Context, notifType, title, body string, user *model.User) {
+	if h.notifications == nil || h.users == nil {
+		return
+	}
+	admins, err := h.users.ListUsersByAuthGroup(ctx, model.AuthGroupAdmin)
+	if err != nil {
+		slog.Warn("load sso alert admins failed", "err", err)
+		return
+	}
+	adminIDs := make([]uint64, 0, len(admins))
+	for _, admin := range admins {
+		if admin.IsActive {
+			adminIDs = append(adminIDs, admin.ID)
+		}
+	}
+	var resourceID uint64
+	if user != nil {
+		resourceID = user.ID
+	}
+	h.notifications.Send(ctx, NotificationRoute{
+		RecipientIDs: adminIDs,
+		NotifyActor:  true,
+		NotifType:    notifType,
+		Title:        title,
+		Body:         body,
+		ResourceType: "user",
+		ResourceID:   resourceID,
+	})
+}
+
+func (h *AuthHandler) uniqueSSOUsername(ctx context.Context, identity oidcsso.Identity) string {
+	base := ssoUsernameBase(identity)
+	for suffix := 1; ; suffix++ {
+		candidate := base
+		if suffix > 1 {
+			candidate = fmt.Sprintf("%s-%d", base, suffix)
+		}
+		existing, err := h.users.GetByUsername(ctx, candidate)
+		if err != nil || existing == nil {
+			return candidate
+		}
+	}
+}
+
+func ssoUsernameBase(identity oidcsso.Identity) string {
+	source := strings.TrimSpace(identity.Email)
+	if at := strings.Index(source, "@"); at > 0 {
+		source = source[:at]
+	}
+	if source == "" {
+		source = strings.TrimSpace(identity.Name)
+	}
+	if source == "" {
+		source = firstNonEmptyString(identity.Subject, "sso-user")
+	}
+	var builder strings.Builder
+	for _, char := range source {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) || char == '-' || char == '_' || char == '.' {
+			builder.WriteRune(char)
+		} else if unicode.IsSpace(char) {
+			builder.WriteRune('-')
+		}
+	}
+	base := strings.Trim(builder.String(), "-_.")
+	if base == "" {
+		return "sso-user"
+	}
+	return strings.ToLower(base)
+}
+
 func larkEnterpriseEmailAllowed(email string, allowedDomains []string) bool {
 	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
 	at := strings.LastIndex(normalizedEmail, "@")
@@ -559,6 +984,56 @@ func (h *AuthHandler) resolveLarkOAuthConfig(ctx context.Context) (config.LarkOA
 		}
 		cfg.AppSecret = strings.TrimSpace(secret)
 	}
+	return cfg, nil
+}
+
+func (h *AuthHandler) resolveOIDCSSOConfig(ctx context.Context) (config.OIDCSSOConfig, error) {
+	cfg := h.oidcSSO
+	if len(cfg.Scopes) == 0 {
+		cfg.Scopes = []string{"openid", "profile", "email", "dbre"}
+	}
+	if strings.TrimSpace(cfg.DisplayName) == "" {
+		cfg.DisplayName = "Authentik"
+	}
+	if h.settings == nil {
+		return cfg, nil
+	}
+	settings, err := h.settings.Get(ctx)
+	if err != nil {
+		return config.OIDCSSOConfig{}, err
+	}
+	settingsConfigured := settings.SSOOIDCEnabled ||
+		strings.TrimSpace(settings.SSOOIDCIssuerURL) != "" ||
+		strings.TrimSpace(settings.SSOOIDCClientID) != "" ||
+		strings.TrimSpace(settings.SSOOIDCRedirectURL) != "" ||
+		settings.SSOOIDCClientSecretConfigured
+	if !settingsConfigured {
+		return cfg, nil
+	}
+	cfg.Enabled = settings.SSOOIDCEnabled
+	if strings.TrimSpace(settings.SSOOIDCDisplayName) != "" {
+		cfg.DisplayName = strings.TrimSpace(settings.SSOOIDCDisplayName)
+	}
+	if strings.TrimSpace(settings.SSOOIDCIssuerURL) != "" {
+		cfg.IssuerURL = strings.TrimRight(strings.TrimSpace(settings.SSOOIDCIssuerURL), "/")
+	}
+	if strings.TrimSpace(settings.SSOOIDCClientID) != "" {
+		cfg.ClientID = strings.TrimSpace(settings.SSOOIDCClientID)
+	}
+	if strings.TrimSpace(cfg.ClientSecret) == "" {
+		secret, err := h.settings.GetSSOOIDCClientSecret(ctx)
+		if err != nil {
+			return config.OIDCSSOConfig{}, err
+		}
+		cfg.ClientSecret = strings.TrimSpace(secret)
+	}
+	if strings.TrimSpace(settings.SSOOIDCRedirectURL) != "" {
+		cfg.RedirectURL = strings.TrimSpace(settings.SSOOIDCRedirectURL)
+	}
+	if len(settings.SSOOIDCScopes) > 0 {
+		cfg.Scopes = settings.SSOOIDCScopes
+	}
+	cfg.TrustMFA = settings.SSOOIDCTrustMFA
 	return cfg, nil
 }
 
@@ -637,6 +1112,26 @@ func larkLoginOAuthErrorCode(value string) string {
 	return "login_failed"
 }
 
+func ssoLoginRedirect(ticket string, errorCode string) string {
+	values := url.Values{}
+	if strings.TrimSpace(ticket) != "" {
+		values.Set("sso_ticket", strings.TrimSpace(ticket))
+	} else if strings.TrimSpace(errorCode) != "" {
+		values.Set("sso_error", strings.TrimSpace(errorCode))
+	}
+	if encoded := values.Encode(); encoded != "" {
+		return "/login?" + encoded
+	}
+	return "/login"
+}
+
+func ssoOAuthErrorCode(value string) string {
+	if strings.TrimSpace(value) == "access_denied" {
+		return "access_denied"
+	}
+	return "login_failed"
+}
+
 func firstNonEmptyString(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -651,6 +1146,10 @@ func (h *AuthHandler) completeLogin(w http.ResponseWriter, r *http.Request, user
 }
 
 func (h *AuthHandler) completeLoginWithPayload(w http.ResponseWriter, r *http.Request, user *model.User, extra map[string]string) {
+	h.completeLoginWithPayloadAndSession(w, r, user, extra, repository.SessionCreateOptions{AuthMethod: "password"})
+}
+
+func (h *AuthHandler) completeLoginWithPayloadAndSession(w http.ResponseWriter, r *http.Request, user *model.User, extra map[string]string, sessionOptions repository.SessionCreateOptions) {
 	rawRefresh, hashRefresh, err := auth.NewRefreshToken()
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "token error")
@@ -658,8 +1157,8 @@ func (h *AuthHandler) completeLoginWithPayload(w http.ResponseWriter, r *http.Re
 	}
 
 	expiresAt := time.Now().Add(auth.RefreshTokenTTL)
-	session, err := h.sessions.Create(r.Context(), user.ID, hashRefresh,
-		r.Header.Get("User-Agent"), clientIP(r), expiresAt)
+	session, err := h.sessions.CreateWithOptions(r.Context(), user.ID, hashRefresh,
+		r.Header.Get("User-Agent"), clientIP(r), expiresAt, sessionOptions)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "session error")
 		return
@@ -829,7 +1328,11 @@ func (h *AuthHandler) VerifyMFA(w http.ResponseWriter, r *http.Request) {
 			ResourceType: "auth",
 		})
 	}
-	h.completeLogin(w, r, user)
+	h.completeLoginWithPayloadAndSession(w, r, user, nil, repository.SessionCreateOptions{
+		AuthMethod:   "password",
+		MFASatisfied: true,
+		MFASource:    "platform_totp",
+	})
 }
 
 func validMFAChallenge(challenge *model.MFAChallenge, claims *auth.MFAChallengeClaims) bool {
@@ -906,7 +1409,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "mfa policy check failed")
 		return
 	}
-	if requiresMFA && (!user.MFAEnabled || len(user.MFASecret) == 0) {
+	if requiresMFA && (!user.MFAEnabled || len(user.MFASecret) == 0) && !(session.MFASatisfied && session.MFASource == "trusted_oidc_provider") {
 		h.sessions.RevokeAllForUser(r.Context(), user.ID)
 		jsonErr(w, http.StatusUnauthorized, "mfa required")
 		return
@@ -919,8 +1422,13 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expiresAt := time.Now().Add(auth.RefreshTokenTTL)
-	newSession, err := h.sessions.Create(r.Context(), user.ID, hashRefresh,
-		r.Header.Get("User-Agent"), clientIP(r), expiresAt)
+	newSession, err := h.sessions.CreateWithOptions(r.Context(), user.ID, hashRefresh,
+		r.Header.Get("User-Agent"), clientIP(r), expiresAt, repository.SessionCreateOptions{
+			AuthMethod:   session.AuthMethod,
+			AuthProvider: session.AuthProvider,
+			MFASatisfied: session.MFASatisfied,
+			MFASource:    session.MFASource,
+		})
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "session error")
 		return
@@ -1206,6 +1714,13 @@ func (h *AuthHandler) logAudit(r *http.Request, entry repository.AuditEntry) {
 		entry.IPAddress = clientIP(r)
 	}
 	_ = h.audit.Log(r.Context(), entry)
+}
+
+func (h *AuthHandler) logAuditContext(ctx context.Context, entry repository.AuditEntry) {
+	if h.audit == nil {
+		return
+	}
+	_ = h.audit.Log(ctx, entry)
 }
 
 func (h *AuthHandler) logLoginFailed(r *http.Request, actorID *uint64, username string, reason string) {

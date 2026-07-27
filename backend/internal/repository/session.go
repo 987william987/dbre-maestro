@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/model"
@@ -16,11 +17,22 @@ type SessionRepo struct {
 	db *sqlx.DB
 }
 
+type SessionCreateOptions struct {
+	AuthMethod   string
+	AuthProvider string
+	MFASatisfied bool
+	MFASource    string
+}
+
 func NewSessionRepo(db *sqlx.DB) *SessionRepo {
 	return &SessionRepo{db: db}
 }
 
 func (r *SessionRepo) Create(ctx context.Context, userID uint64, tokenHash, userAgent, ipAddress string, expiresAt time.Time) (*model.Session, error) {
+	return r.CreateWithOptions(ctx, userID, tokenHash, userAgent, ipAddress, expiresAt, SessionCreateOptions{AuthMethod: "password"})
+}
+
+func (r *SessionRepo) CreateWithOptions(ctx context.Context, userID uint64, tokenHash, userAgent, ipAddress string, expiresAt time.Time, options SessionCreateOptions) (*model.Session, error) {
 	var ua, ip *string
 	if userAgent != "" {
 		ua = &userAgent
@@ -28,10 +40,14 @@ func (r *SessionRepo) Create(ctx context.Context, userID uint64, tokenHash, user
 	if ipAddress != "" {
 		ip = &ipAddress
 	}
+	authMethod := strings.TrimSpace(options.AuthMethod)
+	if authMethod == "" {
+		authMethod = "password"
+	}
 
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		userID, tokenHash, ua, ip, expiresAt.UTC(), timeutil.NowUTC(),
+		`INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, auth_method, auth_provider, mfa_satisfied, mfa_source, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		userID, tokenHash, ua, ip, authMethod, strings.TrimSpace(options.AuthProvider), options.MFASatisfied, strings.TrimSpace(options.MFASource), expiresAt.UTC(), timeutil.NowUTC(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)

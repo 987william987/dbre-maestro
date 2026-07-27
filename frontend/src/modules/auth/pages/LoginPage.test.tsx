@@ -13,6 +13,8 @@ const mockedUseAuth = vi.mocked(useAuth)
 
 describe('LoginPage', () => {
   beforeEach(() => {
+    vi.unstubAllGlobals()
+    mockedUseAuth.mockReset()
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ setup_completed: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -168,5 +170,82 @@ describe('LoginPage', () => {
     expect(await screen.findByText('Set up MFA')).toBeInTheDocument()
     expect(screen.getByText('JBSWY3DPEHPK3PXP')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('000000')).toBeInTheDocument()
+  })
+
+  it('OIDC SSO 啟用時顯示登入按鈕並導向 provider start URL', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/auth/sso/providers') {
+        return new Response(JSON.stringify({ providers: [{ display_name: 'Authentik', start_url: '/api/auth/sso/start' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ setup_completed: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+    const originalLocation = window.location
+    const assign = vi.fn()
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...originalLocation, assign },
+    })
+
+    mockedUseAuth.mockReturnValue({
+      status: 'anonymous',
+      isAuthenticated: false,
+      user: null,
+      accessToken: null,
+      login: vi.fn(),
+      consumeSSOLogin: vi.fn(),
+      verifyMFA: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/login', state: { from: { pathname: '/tickets' } } }]}>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+
+    const ssoButton = await screen.findByRole('button', { name: 'Sign in with Authentik' })
+    fireEvent.click(ssoButton)
+
+    expect(assign).toHaveBeenCalledWith('/api/auth/sso/start?returnTo=%2Ftickets')
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: originalLocation,
+    })
+  })
+
+  it('OIDC SSO callback ticket consume 成功後導向回傳路由', async () => {
+    const consumeSSOLogin = vi.fn().mockResolvedValue({ status: 'authenticated', returnTo: '/tickets' })
+
+    mockedUseAuth.mockReturnValue({
+      status: 'anonymous',
+      isAuthenticated: false,
+      user: null,
+      accessToken: null,
+      login: vi.fn(),
+      consumeSSOLogin,
+      verifyMFA: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/login?sso_ticket=ticket-123']}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/tickets" element={<div>tickets page</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(consumeSSOLogin).toHaveBeenCalledWith('ticket-123'))
+    await waitFor(() => expect(screen.getByText('tickets page')).toBeInTheDocument())
   })
 })

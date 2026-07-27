@@ -8,8 +8,8 @@ import (
 	"github.com/dbre-maestro/maestro/internal/model"
 )
 
-func TestResolveLarkSecretStateAllowsSavingWhenCurrentSecretExists(t *testing.T) {
-	configured, required := resolveLarkSecretState("cli_existing", "", false, true)
+func TestResolveSecretStateAllowsSavingWhenCurrentSecretExists(t *testing.T) {
+	configured, required := resolveSecretState("cli_existing", "", false, true)
 
 	if required {
 		t.Fatal("secret should not be required when an existing configured secret is present")
@@ -19,8 +19,8 @@ func TestResolveLarkSecretStateAllowsSavingWhenCurrentSecretExists(t *testing.T)
 	}
 }
 
-func TestResolveLarkSecretStateRequiresSecretForFirstTimeConfiguration(t *testing.T) {
-	configured, required := resolveLarkSecretState("cli_new", "", false, false)
+func TestResolveSecretStateRequiresSecretForFirstTimeConfiguration(t *testing.T) {
+	configured, required := resolveSecretState("cli_new", "", false, false)
 
 	if !required {
 		t.Fatal("secret should be required when configuring Lark for the first time")
@@ -30,8 +30,8 @@ func TestResolveLarkSecretStateRequiresSecretForFirstTimeConfiguration(t *testin
 	}
 }
 
-func TestResolveLarkSecretStateMarksConfiguredWhenSecretProvided(t *testing.T) {
-	configured, required := resolveLarkSecretState("cli_new", "secret", false, false)
+func TestResolveSecretStateMarksConfiguredWhenSecretProvided(t *testing.T) {
+	configured, required := resolveSecretState("cli_new", "secret", false, false)
 
 	if required {
 		t.Fatal("secret should not be required when the request provides one")
@@ -41,8 +41,8 @@ func TestResolveLarkSecretStateMarksConfiguredWhenSecretProvided(t *testing.T) {
 	}
 }
 
-func TestResolveLarkSecretStateDoesNotRequireSecretWhenAppIDIsEmpty(t *testing.T) {
-	configured, required := resolveLarkSecretState("", "", false, true)
+func TestResolveSecretStateDoesNotRequireSecretWhenAppIDIsEmpty(t *testing.T) {
+	configured, required := resolveSecretState("", "", false, true)
 
 	if required {
 		t.Fatal("secret should not be required when Lark App ID is empty")

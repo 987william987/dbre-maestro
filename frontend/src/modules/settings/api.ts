@@ -31,6 +31,15 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     lark_oauth_enabled: typeof settings.lark_oauth_enabled === 'boolean' ? settings.lark_oauth_enabled : false,
     lark_oauth_site: settings.lark_oauth_site === 'feishu' ? 'feishu' : 'lark',
     lark_oauth_redirect_url: typeof settings.lark_oauth_redirect_url === 'string' ? settings.lark_oauth_redirect_url : '',
+    sso_oidc_enabled: typeof settings.sso_oidc_enabled === 'boolean' ? settings.sso_oidc_enabled : false,
+    sso_oidc_display_name: typeof settings.sso_oidc_display_name === 'string' ? settings.sso_oidc_display_name : 'Authentik',
+    sso_oidc_issuer_url: typeof settings.sso_oidc_issuer_url === 'string' ? settings.sso_oidc_issuer_url : '',
+    sso_oidc_client_id: typeof settings.sso_oidc_client_id === 'string' ? settings.sso_oidc_client_id : '',
+    sso_oidc_client_secret: typeof settings.sso_oidc_client_secret === 'string' ? settings.sso_oidc_client_secret : '',
+    sso_oidc_client_secret_configured: typeof settings.sso_oidc_client_secret_configured === 'boolean' ? settings.sso_oidc_client_secret_configured : false,
+    sso_oidc_redirect_url: typeof settings.sso_oidc_redirect_url === 'string' ? settings.sso_oidc_redirect_url : '',
+    sso_oidc_scopes: Array.isArray(settings.sso_oidc_scopes) ? settings.sso_oidc_scopes : ['openid', 'profile', 'email', 'dbre'],
+    sso_oidc_trust_mfa: typeof settings.sso_oidc_trust_mfa === 'boolean' ? settings.sso_oidc_trust_mfa : false,
     sql_editor_app_timeout_seconds:
       typeof settings.sql_editor_app_timeout_seconds === 'number' ? settings.sql_editor_app_timeout_seconds : 30,
     sql_editor_mysql_max_execution_time_ms:

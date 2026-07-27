@@ -29,6 +29,7 @@ type AuthContextValue = {
   accessToken: string | null
   login: (params: LoginParams) => Promise<LoginResult>
   consumeLarkLogin?: (ticket: string) => Promise<LoginResult>
+  consumeSSOLogin?: (ticket: string) => Promise<LoginResult>
   verifyMFA?: (params: MFAVerifyParams) => Promise<void>
   logout: () => Promise<void>
   clearAuth: () => void
@@ -285,6 +286,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     throw new Error('Lark sign-in failed')
   }, [completeLogin])
 
+  const consumeSSOLogin = useCallback(async (ticket: string): Promise<LoginResult> => {
+    const { response, data } = await fetchJSON<LoginResponse>('/auth/sso/login/result/consume', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ticket }),
+    })
+
+    if (!response.ok) {
+      const message =
+        data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+          ? data.error
+          : 'SSO sign-in failed'
+      throw new Error(message)
+    }
+
+    if (data?.access_token) {
+      await completeLogin(data.access_token)
+      return { status: 'authenticated', returnTo: data.return_to }
+    }
+
+    if ((data?.mfa_required || data?.mfa_setup_required) && data.mfa_token) {
+      return {
+        status: 'mfa_required',
+        mfaToken: data.mfa_token,
+        setupRequired: data.mfa_setup_required === true,
+        otpAuthURL: data.otp_auth_url,
+        mfaSecret: data.mfa_secret,
+        qrDataURL: data.qr_data_url,
+      }
+    }
+
+    throw new Error('SSO sign-in failed')
+  }, [completeLogin])
+
   const verifyMFA = useCallback(async ({ mfaToken, code }: MFAVerifyParams) => {
     const { response, data } = await fetchJSON<LoginResponse>('/auth/mfa/verify', {
       method: 'POST',
@@ -329,11 +366,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     accessToken,
     login,
     consumeLarkLogin,
+    consumeSSOLogin,
     verifyMFA,
     logout,
     clearAuth,
     isAuthenticated: status === 'authenticated' && user !== null,
-  }), [accessToken, clearAuth, login, logout, status, user, verifyMFA])
+  }), [accessToken, clearAuth, consumeLarkLogin, consumeSSOLogin, login, logout, status, user, verifyMFA])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

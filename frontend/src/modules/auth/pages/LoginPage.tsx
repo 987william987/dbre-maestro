@@ -11,7 +11,7 @@ import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 
 export function LoginPage() {
-  const { isAuthenticated, login, consumeLarkLogin, status, user, verifyMFA } = useAuth()
+  const { isAuthenticated, login, consumeLarkLogin, consumeSSOLogin, status, user, verifyMFA } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
@@ -27,6 +27,8 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [larkLoading, setLarkLoading] = useState(false)
+  const [ssoLoading, setSSOLoading] = useState(false)
+  const [ssoProvider, setSSOProvider] = useState<{ display_name: string; start_url: string } | null>(null)
   const [error, setError] = useState('')
   const [setupCompleted, setSetupCompleted] = useState<boolean | null>(null)
 
@@ -51,13 +53,89 @@ export function LoginPage() {
   }, [])
 
   useEffect(() => {
+    let active = true
+    void apiClient.get<{ providers?: Array<{ display_name?: string; start_url?: string }> }>('/auth/sso/providers')
+      .then((result) => {
+        if (!active) {
+          return
+        }
+        const provider = Array.isArray(result.providers)
+          ? result.providers.find((item) => typeof item.start_url === 'string' && item.start_url !== '')
+          : null
+        setSSOProvider(provider ? {
+          display_name: provider.display_name || 'SSO',
+          start_url: provider.start_url || '/api/auth/sso/start',
+        } : null)
+      })
+      .catch(() => {
+        if (active) {
+          setSSOProvider(null)
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
     const params = new URLSearchParams(location.search)
     const ticket = params.get('lark_ticket')?.trim() ?? ''
     const larkError = params.get('lark_error')?.trim() ?? ''
+    const ssoTicket = params.get('sso_ticket')?.trim() ?? ''
+    const ssoError = params.get('sso_error')?.trim() ?? ''
+    if (ssoError) {
+      setError(ssoLoginErrorMessage(ssoError))
+      navigate('/login', { replace: true })
+      return
+    }
     if (larkError) {
       setError(larkLoginErrorMessage(larkError))
       navigate('/login', { replace: true })
       return
+    }
+    if (ssoTicket) {
+      let active = true
+      setLoading(true)
+      setError('')
+      if (!consumeSSOLogin) {
+        setError('SSO login is unavailable.')
+        setLoading(false)
+        navigate('/login', { replace: true })
+        return
+      }
+      void consumeSSOLogin(ssoTicket)
+        .then((result) => {
+          if (!active) {
+            return
+          }
+          navigate('/login', { replace: true })
+          if (result.status === 'mfa_required') {
+            setMFAChallenge({
+              token: result.mfaToken,
+              setupRequired: result.setupRequired,
+              otpAuthURL: result.otpAuthURL,
+              mfaSecret: result.mfaSecret,
+              qrDataURL: result.qrDataURL,
+            })
+            setMFACode('')
+            return
+          }
+          navigate(result.returnTo ?? '/', { replace: true })
+        })
+        .catch((consumeError: unknown) => {
+          if (active) {
+            setError(consumeError instanceof Error ? consumeError.message : 'SSO login failed. Please try again later.')
+            navigate('/login', { replace: true })
+          }
+        })
+        .finally(() => {
+          if (active) {
+            setLoading(false)
+          }
+        })
+      return () => {
+        active = false
+      }
     }
     if (!ticket) {
       return
@@ -106,7 +184,7 @@ export function LoginPage() {
     return () => {
       active = false
     }
-  }, [consumeLarkLogin, location.search, location.state, navigate])
+  }, [consumeLarkLogin, consumeSSOLogin, location.search, location.state, navigate])
 
   if (status === 'loading') {
     return (
@@ -123,7 +201,8 @@ export function LoginPage() {
 
   const setupRequired = setupCompleted === false
   const loginDisabled = setupRequired || loading || (mfaChallenge ? mfaCode.length !== 6 : username.trim() === '' || password.trim() === '')
-  const larkDisabled = setupRequired || loading || larkLoading
+  const larkDisabled = setupRequired || loading || larkLoading || ssoLoading
+  const ssoDisabled = setupRequired || loading || larkLoading || ssoLoading
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -179,6 +258,18 @@ export function LoginPage() {
       setError(startError instanceof Error ? startError.message : 'Failed to start Lark login.')
       setLarkLoading(false)
     }
+  }
+
+  const handleSSOLogin = () => {
+    if (setupRequired || !ssoProvider) {
+      return
+    }
+    setError('')
+    setSSOLoading(true)
+    const nextPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
+    const returnTo = nextPath && nextPath.startsWith('/') ? nextPath : '/'
+    const separator = ssoProvider.start_url.includes('?') ? '&' : '?'
+    window.location.assign(`${ssoProvider.start_url}${separator}returnTo=${encodeURIComponent(returnTo)}`)
   }
 
   return (
@@ -295,18 +386,34 @@ export function LoginPage() {
         </form>
 
         {!mfaChallenge ? (
-          <button
-            type="button"
-            disabled={larkDisabled}
-            onClick={handleLarkLogin}
-            className={cn(
-              'mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-control border border-border px-4 text-sm font-bold transition-colors',
-              'bg-panel text-ink hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50',
-            )}
-          >
-            {larkLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <img src={larkLogoUrl} alt="" className="h-5 w-5 rounded-full" />}
-            {larkLoading ? 'Redirecting…' : 'Sign in with Lark'}
-          </button>
+          <>
+            {ssoProvider ? (
+              <button
+                type="button"
+                disabled={ssoDisabled}
+                onClick={handleSSOLogin}
+                className={cn(
+                  'mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-control border border-border px-4 text-sm font-bold transition-colors',
+                  'bg-panel text-ink hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50',
+                )}
+              >
+                {ssoLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {ssoLoading ? 'Redirecting…' : `Sign in with ${ssoProvider.display_name}`}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled={larkDisabled}
+              onClick={handleLarkLogin}
+              className={cn(
+                'mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-control border border-border px-4 text-sm font-bold transition-colors',
+                'bg-panel text-ink hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50',
+              )}
+            >
+              {larkLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <img src={larkLogoUrl} alt="" className="h-5 w-5 rounded-full" />}
+              {larkLoading ? 'Redirecting…' : 'Sign in with Lark'}
+            </button>
+          </>
         ) : null}
 
         {setupCompleted === false ? (
@@ -341,4 +448,17 @@ function larkLoginErrorMessage(code: string) {
     return 'Please complete the Setup Wizard before signing in.'
   }
   return 'Lark login failed. Please try again later.'
+}
+
+function ssoLoginErrorMessage(code: string) {
+  if (code === 'access_denied') {
+    return 'SSO authorization was cancelled.'
+  }
+  if (code === 'user_disabled') {
+    return 'The SSO account is linked to a disabled user.'
+  }
+  if (code === 'setup_required') {
+    return 'Please complete the Setup Wizard before signing in.'
+  }
+  return 'SSO login failed. Please try again later.'
 }
