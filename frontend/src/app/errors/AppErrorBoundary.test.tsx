@@ -35,6 +35,17 @@ function mockFetchReturning(markupText: string) {
   }))
 }
 
+function mockSendBeacon() {
+  const sendBeacon = vi.fn((_url: string, _data?: BodyInit) => true)
+  vi.stubGlobal('navigator', { ...navigator, sendBeacon })
+  return sendBeacon
+}
+
+async function beaconPayload(sendBeacon: ReturnType<typeof mockSendBeacon>, callIndex = 0) {
+  const [, body] = sendBeacon.mock.calls[callIndex]
+  return JSON.parse(await (body as Blob).text()) as { reason: string; error_message: string; route: string }
+}
+
 // The module keeps its "already reloaded this session" state in module-level
 // variables and derives its baseline signature from document.documentElement
 // at import time — both must be reset per test via a fresh module instance.
@@ -98,11 +109,49 @@ describe('GlobalErrorBoundary — proactive version-mismatch reload', () => {
     expect(reload).toHaveBeenCalledTimes(1)
   })
 
-  it('版本沒變時不會 reload —— 避免誤觸發', async () => {
+  it('背景輪詢觸發的 reload 會送一筆 reason=periodic-poll 的日誌 beacon', async () => {
+    vi.useFakeTimers()
+    const { GlobalErrorBoundary } = await loadFreshModule()
+    const fetchMock = mockFetchReturning(CHANGED_MARKUP_TEXT)
+    vi.stubGlobal('fetch', fetchMock)
+    const sendBeacon = mockSendBeacon()
+    const { restore } = mockLocationReload()
+    restoreLocation = restore
+
+    render(<GlobalErrorBoundary><div>ok</div></GlobalErrorBoundary>)
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+
+    expect(sendBeacon).toHaveBeenCalledTimes(1)
+    expect(sendBeacon.mock.calls[0][0]).toBe('/api/frontend/reload-events')
+    const payload = await beaconPayload(sendBeacon)
+    expect(payload.reason).toBe('periodic-poll')
+  })
+
+  it('visibilitychange 觸發的 reload 會送一筆 reason=visibility-change 的日誌 beacon', async () => {
+    const { GlobalErrorBoundary } = await loadFreshModule()
+    const fetchMock = mockFetchReturning(CHANGED_MARKUP_TEXT)
+    vi.stubGlobal('fetch', fetchMock)
+    const sendBeacon = mockSendBeacon()
+    const { reload, restore } = mockLocationReload()
+    restoreLocation = restore
+
+    render(<GlobalErrorBoundary><div>ok</div></GlobalErrorBoundary>)
+    setVisibility('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+
+    await vi.waitFor(() => {
+      expect(reload).toHaveBeenCalledTimes(1)
+    })
+    const payload = await beaconPayload(sendBeacon)
+    expect(payload.reason).toBe('visibility-change')
+  })
+
+  it('版本沒變時不會 reload —— 避免誤觸發，也不會送日誌 beacon', async () => {
     vi.useFakeTimers()
     const { GlobalErrorBoundary } = await loadFreshModule()
     const fetchMock = mockFetchReturning(UNCHANGED_MARKUP_TEXT)
     vi.stubGlobal('fetch', fetchMock)
+    const sendBeacon = mockSendBeacon()
     const { reload, restore } = mockLocationReload()
     restoreLocation = restore
 
@@ -112,6 +161,7 @@ describe('GlobalErrorBoundary — proactive version-mismatch reload', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(reload).not.toHaveBeenCalled()
+    expect(sendBeacon).not.toHaveBeenCalled()
   })
 
   it('fetch 回應被截斷（無 /assets/ 參照）時視為無法判斷，不會誤觸發 reload', async () => {
@@ -203,6 +253,28 @@ describe('AppErrorBoundary — 非 chunk-load 的 render 錯誤走版本檢查',
     await vi.waitFor(() => {
       expect(reload).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it('render 錯誤觸發的自動 reload 會送一筆帶原始錯誤訊息的日誌 beacon', async () => {
+    const { AppErrorBoundary } = await loadFreshModule()
+    const fetchMock = mockFetchReturning(CHANGED_MARKUP_TEXT)
+    vi.stubGlobal('fetch', fetchMock)
+    const sendBeacon = mockSendBeacon()
+    const { reload, restore } = mockLocationReload()
+    restoreLocation = restore
+
+    render(
+      <AppErrorBoundary>
+        <BoomOnRender />
+      </AppErrorBoundary>,
+    )
+
+    await vi.waitFor(() => {
+      expect(reload).toHaveBeenCalledTimes(1)
+    })
+    const payload = await beaconPayload(sendBeacon)
+    expect(payload.reason).toBe('render-error')
+    expect(payload.error_message).toContain('insertBefore')
   })
 
   it('版本沒變時照常顯示錯誤畫面 —— 真的 bug 不會被吃掉，且沒有 Reload app 按鈕', async () => {

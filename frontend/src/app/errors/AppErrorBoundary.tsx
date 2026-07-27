@@ -29,6 +29,35 @@ const initialDocumentAssetSignature = typeof document === 'undefined'
   ? null
   : documentAssetSignature(document.documentElement.outerHTML)
 
+// Identifies which of the self-healing paths triggered a reload — sent as
+// telemetry so a stale-bundle reload is distinguishable from a real bug in
+// the audit log after the fact, instead of vanishing silently.
+type ReloadReason =
+  | 'chunk-load-error'
+  | 'render-error'
+  | 'window-error'
+  | 'unhandled-rejection'
+  | 'visibility-change'
+  | 'periodic-poll'
+
+function reportReloadEvent(reason: ReloadReason, extra: { errorMessage?: string; currentSignature?: string }) {
+  if (typeof navigator === 'undefined' || typeof navigator.sendBeacon !== 'function') {
+    return
+  }
+  try {
+    const payload = JSON.stringify({
+      reason,
+      error_message: extra.errorMessage?.slice(0, 500) ?? '',
+      route: typeof window !== 'undefined' ? window.location.pathname + window.location.search : '',
+      previous_signature: initialDocumentAssetSignature ?? '',
+      current_signature: extra.currentSignature ?? '',
+    })
+    navigator.sendBeacon('/api/frontend/reload-events', new Blob([payload], { type: 'application/json' }))
+  } catch {
+    // Best-effort only — never let telemetry failure block the reload itself.
+  }
+}
+
 function formatUnknownError(error: unknown) {
   if (error instanceof Error) {
     return error
@@ -56,12 +85,13 @@ function maybeReloadForDynamicImportError(error: Error) {
     return false
   }
 
+  reportReloadEvent('chunk-load-error', { errorMessage: error.message })
   window.location.reload()
   chunkReloadRequested = true
   return true
 }
 
-async function maybeReloadForVersionMismatch() {
+async function maybeReloadForVersionMismatch(reason: ReloadReason, error?: Error) {
   if (typeof window === 'undefined' || typeof fetch === 'undefined' || versionReloadRequested) {
     return false
   }
@@ -92,6 +122,7 @@ async function maybeReloadForVersionMismatch() {
 
     window.sessionStorage.setItem(VERSION_RELOAD_STORAGE_KEY, currentSignature)
     versionReloadRequested = true
+    reportReloadEvent(reason, { errorMessage: error?.message, currentSignature })
     window.location.reload()
     return true
   } catch {
@@ -167,7 +198,7 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, AppErro
     }
 
     const componentStack = info.componentStack ?? ''
-    void maybeReloadForVersionMismatch().then((reloading) => {
+    void maybeReloadForVersionMismatch('render-error', error).then((reloading) => {
       if (!reloading) {
         this.setState({ error, componentStack })
       }
@@ -206,7 +237,7 @@ export class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, Glo
 
   private handleVisibilityChange = () => {
     if (document.visibilityState === 'visible') {
-      void maybeReloadForVersionMismatch()
+      void maybeReloadForVersionMismatch('visibility-change')
     }
   }
 
@@ -215,7 +246,7 @@ export class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, Glo
     if (maybeReloadForDynamicImportError(error)) {
       return
     }
-    void maybeReloadForVersionMismatch().then((reloading) => {
+    void maybeReloadForVersionMismatch('window-error', error).then((reloading) => {
       if (!reloading) {
         this.setState({ error })
       }
@@ -227,7 +258,7 @@ export class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, Glo
     if (maybeReloadForDynamicImportError(error)) {
       return
     }
-    void maybeReloadForVersionMismatch().then((reloading) => {
+    void maybeReloadForVersionMismatch('unhandled-rejection', error).then((reloading) => {
       if (!reloading) {
         this.setState({ error })
       }
@@ -240,7 +271,7 @@ export class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, Glo
     document.addEventListener('visibilitychange', this.handleVisibilityChange)
     this.versionPollTimer = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        void maybeReloadForVersionMismatch()
+        void maybeReloadForVersionMismatch('periodic-poll')
       }
     }, VERSION_POLL_INTERVAL_MS)
   }
