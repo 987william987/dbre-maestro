@@ -7,6 +7,7 @@ type AppErrorBoundaryState = {
 
 const CHUNK_RELOAD_STORAGE_KEY = 'dbre-maestro:chunk-reload-attempted'
 const VERSION_RELOAD_STORAGE_KEY = 'dbre-maestro:version-reload-attempted'
+const VERSION_POLL_INTERVAL_MS = 5 * 60 * 1000
 let chunkReloadRequested = false
 let versionReloadRequested = false
 
@@ -117,15 +118,6 @@ function RuntimeErrorPanel({
               <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words text-xs text-danger">{detail}</pre>
             ) : null}
           </div>
-          {loadError ? (
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="mt-5 inline-flex h-10 items-center justify-center rounded-control bg-brand px-4 text-sm font-bold text-white transition hover:bg-slate-800"
-            >
-              Reload app
-            </button>
-          ) : null}
         </div>
       </div>
     </div>
@@ -153,12 +145,22 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, AppErro
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    if (chunkReloadRequested && isDynamicImportLoadError(error)) {
+    if (isDynamicImportLoadError(error)) {
+      if (chunkReloadRequested) {
+        return
+      }
+      this.setState({
+        error,
+        componentStack: info.componentStack ?? '',
+      })
       return
     }
-    this.setState({
-      error,
-      componentStack: info.componentStack ?? '',
+
+    const componentStack = info.componentStack ?? ''
+    void maybeReloadForVersionMismatch().then((reloading) => {
+      if (!reloading) {
+        this.setState({ error, componentStack })
+      }
     })
   }
 
@@ -190,6 +192,14 @@ export class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, Glo
     error: null,
   }
 
+  private versionPollTimer: ReturnType<typeof setInterval> | null = null
+
+  private handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      void maybeReloadForVersionMismatch()
+    }
+  }
+
   private handleErrorEvent = (event: ErrorEvent) => {
     const error = formatUnknownError(event.error ?? event.message)
     if (maybeReloadForDynamicImportError(error)) {
@@ -217,11 +227,21 @@ export class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, Glo
   componentDidMount() {
     window.addEventListener('error', this.handleErrorEvent)
     window.addEventListener('unhandledrejection', this.handleRejectionEvent)
+    document.addEventListener('visibilitychange', this.handleVisibilityChange)
+    this.versionPollTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void maybeReloadForVersionMismatch()
+      }
+    }, VERSION_POLL_INTERVAL_MS)
   }
 
   componentWillUnmount() {
     window.removeEventListener('error', this.handleErrorEvent)
     window.removeEventListener('unhandledrejection', this.handleRejectionEvent)
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange)
+    if (this.versionPollTimer !== null) {
+      clearInterval(this.versionPollTimer)
+    }
   }
 
   render() {
