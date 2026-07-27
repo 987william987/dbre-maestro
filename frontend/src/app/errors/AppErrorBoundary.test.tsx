@@ -114,6 +114,25 @@ describe('GlobalErrorBoundary — proactive version-mismatch reload', () => {
     expect(reload).not.toHaveBeenCalled()
   })
 
+  it('fetch 回應被截斷（無 /assets/ 參照）時視為無法判斷，不會誤觸發 reload', async () => {
+    // Regression test for the audit finding: a network hiccup mid-fetch can
+    // legitimately return a 200 OK with a truncated/garbage body that has
+    // zero /assets/ matches. That must never be treated as "definitely a
+    // new version" — it should be a no-op, retried on the next check cycle.
+    vi.useFakeTimers()
+    const { GlobalErrorBoundary } = await loadFreshModule()
+    const fetchMock = mockFetchReturning('<html><body>connection interrupted, this is not index.html</body></html>')
+    vi.stubGlobal('fetch', fetchMock)
+    const { reload, restore } = mockLocationReload()
+    restoreLocation = restore
+
+    render(<GlobalErrorBoundary><div>ok</div></GlobalErrorBoundary>)
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(reload).not.toHaveBeenCalled()
+  })
+
   it('分頁從背景切回前景時，立即檢查一次版本並 reload', async () => {
     const { GlobalErrorBoundary } = await loadFreshModule()
     const fetchMock = mockFetchReturning(CHANGED_MARKUP_TEXT)

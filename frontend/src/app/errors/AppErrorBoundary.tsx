@@ -11,16 +11,22 @@ const VERSION_POLL_INTERVAL_MS = 5 * 60 * 1000
 let chunkReloadRequested = false
 let versionReloadRequested = false
 
-function documentAssetSignature(markup: string) {
+// Returns null (rather than falling back to the raw markup) when no /assets/
+// references are found — comparing full markup would compare a live,
+// hydrated DOM against static server HTML, which never match even when
+// nothing changed. A truncated fetch response (network hiccup mid-request)
+// can also legitimately produce zero matches; treat that as "can't tell",
+// not "definitely different".
+function documentAssetSignature(markup: string): string | null {
   const assetPaths = Array.from(markup.matchAll(/\b(?:src|href)=["']([^"']*\/assets\/[^"']+)["']/g))
     .map((match) => match[1])
     .sort()
 
-  return assetPaths.length > 0 ? assetPaths.join('|') : markup
+  return assetPaths.length > 0 ? assetPaths.join('|') : null
 }
 
 const initialDocumentAssetSignature = typeof document === 'undefined'
-  ? ''
+  ? null
   : documentAssetSignature(document.documentElement.outerHTML)
 
 function formatUnknownError(error: unknown) {
@@ -40,11 +46,12 @@ function maybeReloadForDynamicImportError(error: Error) {
     return false
   }
 
+  const dedupeKey = initialDocumentAssetSignature ?? 'unknown'
   try {
-    if (window.sessionStorage.getItem(CHUNK_RELOAD_STORAGE_KEY) === initialDocumentAssetSignature) {
+    if (window.sessionStorage.getItem(CHUNK_RELOAD_STORAGE_KEY) === dedupeKey) {
       return false
     }
-    window.sessionStorage.setItem(CHUNK_RELOAD_STORAGE_KEY, initialDocumentAssetSignature)
+    window.sessionStorage.setItem(CHUNK_RELOAD_STORAGE_KEY, dedupeKey)
   } catch {
     return false
   }
@@ -56,6 +63,9 @@ function maybeReloadForDynamicImportError(error: Error) {
 
 async function maybeReloadForVersionMismatch() {
   if (typeof window === 'undefined' || typeof fetch === 'undefined' || versionReloadRequested) {
+    return false
+  }
+  if (initialDocumentAssetSignature === null) {
     return false
   }
 
@@ -73,7 +83,7 @@ async function maybeReloadForVersionMismatch() {
 
     const currentMarkup = await response.text()
     const currentSignature = documentAssetSignature(currentMarkup)
-    if (currentSignature === initialDocumentAssetSignature) {
+    if (currentSignature === null || currentSignature === initialDocumentAssetSignature) {
       return false
     }
     if (window.sessionStorage.getItem(VERSION_RELOAD_STORAGE_KEY) === currentSignature) {
