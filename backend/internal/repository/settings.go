@@ -25,6 +25,14 @@ const (
 	settingLarkOAuthEnabled              = "lark_oauth_enabled"
 	settingLarkOAuthSite                 = "lark_oauth_site"
 	settingLarkOAuthRedirectURL          = "lark_oauth_redirect_url"
+	settingSSOOIDCEnabled                = "sso_oidc_enabled"
+	settingSSOOIDCDisplayName            = "sso_oidc_display_name"
+	settingSSOOIDCIssuerURL              = "sso_oidc_issuer_url"
+	settingSSOOIDCClientID               = "sso_oidc_client_id"
+	settingSSOOIDCClientSecret           = "sso_oidc_client_secret"
+	settingSSOOIDCRedirectURL            = "sso_oidc_redirect_url"
+	settingSSOOIDCScopes                 = "sso_oidc_scopes"
+	settingSSOOIDCTrustMFA               = "sso_oidc_trust_mfa"
 	settingSQLEditorAppTimeoutSeconds    = "sql_editor_app_timeout_seconds"
 	settingSQLEditorMySQLMaxExecTimeMs   = "sql_editor_mysql_max_execution_time_ms"
 	settingSQLEditorPGStatementTimeoutMs = "sql_editor_postgres_statement_timeout_ms"
@@ -72,6 +80,8 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 		DBMetadataObjectSyncIntervalMins:     60,
 		DBMetadataCronTimezone:               "Asia/Taipei",
 		LarkOAuthSite:                        "lark",
+		SSOOIDCDisplayName:                   "Authentik",
+		SSOOIDCScopes:                        []string{"openid", "profile", "email", "dbre"},
 	}
 	exportReviewerIDs, err := r.getUint64List(ctx, settingSensitiveExportReviewers)
 	if err != nil {
@@ -128,6 +138,63 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	}
 	if larkOAuthRedirectURL != nil {
 		settings.LarkOAuthRedirectURL = strings.TrimSpace(*larkOAuthRedirectURL)
+	}
+	ssoOIDCEnabled, err := r.getBool(ctx, settingSSOOIDCEnabled)
+	if err != nil {
+		return nil, err
+	}
+	if ssoOIDCEnabled != nil {
+		settings.SSOOIDCEnabled = *ssoOIDCEnabled
+	}
+	ssoOIDCDisplayName, err := r.getString(ctx, settingSSOOIDCDisplayName)
+	if err != nil {
+		return nil, err
+	}
+	if ssoOIDCDisplayName != nil && strings.TrimSpace(*ssoOIDCDisplayName) != "" {
+		settings.SSOOIDCDisplayName = strings.TrimSpace(*ssoOIDCDisplayName)
+	}
+	if settings.SSOOIDCDisplayName == "" {
+		settings.SSOOIDCDisplayName = "Authentik"
+	}
+	ssoOIDCIssuerURL, err := r.getString(ctx, settingSSOOIDCIssuerURL)
+	if err != nil {
+		return nil, err
+	}
+	if ssoOIDCIssuerURL != nil {
+		settings.SSOOIDCIssuerURL = strings.TrimRight(strings.TrimSpace(*ssoOIDCIssuerURL), "/")
+	}
+	ssoOIDCClientID, err := r.getString(ctx, settingSSOOIDCClientID)
+	if err != nil {
+		return nil, err
+	}
+	if ssoOIDCClientID != nil {
+		settings.SSOOIDCClientID = strings.TrimSpace(*ssoOIDCClientID)
+	}
+	ssoOIDCSecretConfigured, err := r.hasValue(ctx, settingSSOOIDCClientSecret)
+	if err != nil {
+		return nil, err
+	}
+	settings.SSOOIDCClientSecretConfigured = ssoOIDCSecretConfigured
+	ssoOIDCRedirectURL, err := r.getString(ctx, settingSSOOIDCRedirectURL)
+	if err != nil {
+		return nil, err
+	}
+	if ssoOIDCRedirectURL != nil {
+		settings.SSOOIDCRedirectURL = strings.TrimSpace(*ssoOIDCRedirectURL)
+	}
+	ssoOIDCScopes, err := r.getStringList(ctx, settingSSOOIDCScopes)
+	if err != nil {
+		return nil, err
+	}
+	if len(ssoOIDCScopes) > 0 {
+		settings.SSOOIDCScopes = ssoOIDCScopes
+	}
+	ssoOIDCTrustMFA, err := r.getBool(ctx, settingSSOOIDCTrustMFA)
+	if err != nil {
+		return nil, err
+	}
+	if ssoOIDCTrustMFA != nil {
+		settings.SSOOIDCTrustMFA = *ssoOIDCTrustMFA
 	}
 	sqlEditorAppTimeoutSeconds, err := r.getInt(ctx, settingSQLEditorAppTimeoutSeconds)
 	if err != nil {
@@ -286,6 +353,32 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 	if err := upsertString(ctx, tx, settingLarkOAuthRedirectURL, strings.TrimSpace(settings.LarkOAuthRedirectURL)); err != nil {
 		return err
 	}
+	if err := upsertBool(ctx, tx, settingSSOOIDCEnabled, settings.SSOOIDCEnabled); err != nil {
+		return err
+	}
+	if err := upsertString(ctx, tx, settingSSOOIDCDisplayName, strings.TrimSpace(settings.SSOOIDCDisplayName)); err != nil {
+		return err
+	}
+	if err := upsertString(ctx, tx, settingSSOOIDCIssuerURL, strings.TrimRight(strings.TrimSpace(settings.SSOOIDCIssuerURL), "/")); err != nil {
+		return err
+	}
+	if err := upsertString(ctx, tx, settingSSOOIDCClientID, strings.TrimSpace(settings.SSOOIDCClientID)); err != nil {
+		return err
+	}
+	if settings.SSOOIDCClientSecret != "" {
+		if err := r.upsertEncryptedString(ctx, tx, settingSSOOIDCClientSecret, settings.SSOOIDCClientSecret); err != nil {
+			return err
+		}
+	}
+	if err := upsertString(ctx, tx, settingSSOOIDCRedirectURL, strings.TrimSpace(settings.SSOOIDCRedirectURL)); err != nil {
+		return err
+	}
+	if err := upsertStringList(ctx, tx, settingSSOOIDCScopes, defaultOIDCScopes(settings.SSOOIDCScopes)); err != nil {
+		return err
+	}
+	if err := upsertBool(ctx, tx, settingSSOOIDCTrustMFA, settings.SSOOIDCTrustMFA); err != nil {
+		return err
+	}
 	if err := upsertInt(ctx, tx, settingSQLEditorAppTimeoutSeconds, settings.SQLEditorAppTimeoutSeconds); err != nil {
 		return err
 	}
@@ -423,6 +516,17 @@ func (r *SettingsRepo) GetApprovalPolicy(ctx context.Context, workflowType model
 
 func (r *SettingsRepo) GetLarkAppSecret(ctx context.Context) (string, error) {
 	return r.getEncryptedString(ctx, settingLarkAppSecret)
+}
+
+func (r *SettingsRepo) GetSSOOIDCClientSecret(ctx context.Context) (string, error) {
+	return r.getEncryptedString(ctx, settingSSOOIDCClientSecret)
+}
+
+func defaultOIDCScopes(scopes []string) []string {
+	if len(scopes) > 0 {
+		return scopes
+	}
+	return []string{"openid", "profile", "email", "dbre"}
 }
 
 func normalizeLarkOAuthSite(site string) string {

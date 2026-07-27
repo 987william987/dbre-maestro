@@ -190,6 +190,38 @@ func TestLoadOverridesLarkOAuthScopes(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultsOIDCSSOEnterpriseEmailPolicy(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.OIDCSSO.RequireEnterpriseEmail {
+		t.Fatal("OIDCSSO.RequireEnterpriseEmail = false, want true")
+	}
+	if len(cfg.OIDCSSO.EnterpriseEmailDomains) != 1 || cfg.OIDCSSO.EnterpriseEmailDomains[0] != "edgex.exchange" {
+		t.Fatalf("OIDCSSO.EnterpriseEmailDomains = %#v, want edgex.exchange", cfg.OIDCSSO.EnterpriseEmailDomains)
+	}
+}
+
+func TestLoadOverridesOIDCSSOEnterpriseEmailPolicy(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SSO_OIDC_REQUIRE_ENTERPRISE_EMAIL", "false")
+	t.Setenv("SSO_OIDC_ENTERPRISE_EMAIL_DOMAINS", "example.com,edgex.exchange")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.OIDCSSO.RequireEnterpriseEmail {
+		t.Fatal("OIDCSSO.RequireEnterpriseEmail = true, want false")
+	}
+	if len(cfg.OIDCSSO.EnterpriseEmailDomains) != 2 || cfg.OIDCSSO.EnterpriseEmailDomains[0] != "example.com" || cfg.OIDCSSO.EnterpriseEmailDomains[1] != "edgex.exchange" {
+		t.Fatalf("OIDCSSO.EnterpriseEmailDomains = %#v, want example.com, edgex.exchange", cfg.OIDCSSO.EnterpriseEmailDomains)
+	}
+}
+
 func TestLoadRejectsInvalidDBConnectionHostPolicy(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("DB_CONNECTION_HOST_POLICY_ENFORCEMENT", "enforce")

@@ -41,6 +41,15 @@ type LarkIdentityInput struct {
 	PasswordHash string
 }
 
+type SSOIdentityInput struct {
+	Provider     string
+	Subject      string
+	Email        string
+	DisplayName  string
+	LarkOpenID   string
+	PasswordHash string
+}
+
 func NewUserRepo(db *sqlx.DB, encKey ...[]byte) *UserRepo {
 	var key []byte
 	if len(encKey) > 0 {
@@ -70,6 +79,49 @@ func (r *UserRepo) GetByLarkLoginIdentity(ctx context.Context, openID, unionID s
 		return nil, nil
 	}
 	return &u, err
+}
+
+func (r *UserRepo) GetByExternalIdentity(ctx context.Context, provider, subject string) (*model.User, error) {
+	provider = strings.TrimSpace(provider)
+	subject = strings.TrimSpace(subject)
+	if provider == "" || subject == "" {
+		return nil, nil
+	}
+	var u model.User
+	err := r.db.GetContext(ctx, &u, `SELECT * FROM users WHERE external_identity_source = ? AND external_identity_id = ? ORDER BY id LIMIT 1`, provider, subject)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &u, err
+}
+
+func (r *UserRepo) BindExternalIdentity(ctx context.Context, userID uint64, provider, subject string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE users
+		SET external_identity_source = ?, external_identity_id = ?, password_login_disabled = 1, updated_at = ?
+		WHERE id = ?
+	`, strings.TrimSpace(provider), strings.TrimSpace(subject), timeutil.NowUTC(), userID)
+	return err
+}
+
+func (r *UserRepo) UpdateLarkRecipientIfEmpty(ctx context.Context, userID uint64, larkRecipient string) (bool, error) {
+	larkRecipient = strings.TrimSpace(larkRecipient)
+	if larkRecipient == "" {
+		return false, nil
+	}
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE users
+		SET lark_recipient = ?, updated_at = ?
+		WHERE id = ? AND lark_recipient = ''
+	`, larkRecipient, timeutil.NowUTC(), userID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 func (r *UserRepo) BindLarkIdentity(ctx context.Context, userID uint64, identity LarkIdentityInput) error {
@@ -115,6 +167,39 @@ func (r *UserRepo) CreateLarkDeveloper(ctx context.Context, username string, ide
 		strings.TrimSpace(identity.DisplayName), strings.TrimSpace(identity.AvatarURL), now, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("create lark user: %w", err)
+	}
+	id, _ := res.LastInsertId()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO auth_group_memberships (user_id, auth_group, granted_by, expires_at, created_at)
+		VALUES (?, ?, NULL, NULL, ?)
+		ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at), granted_by = VALUES(granted_by)
+	`, id, model.AuthGroupDeveloper, now); err != nil {
+		return nil, fmt.Errorf("grant developer group: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.GetByID(ctx, uint64(id))
+}
+
+func (r *UserRepo) CreateSSODeveloper(ctx context.Context, username string, identity SSOIdentityInput) (*model.User, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	now := timeutil.NowUTC()
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO users (
+		    username, email, lark_recipient, password,
+		    external_identity_source, external_identity_id, password_login_disabled,
+		    is_protected, is_active, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, ?, ?)
+	`, username, strings.TrimSpace(identity.Email), strings.TrimSpace(identity.LarkOpenID), identity.PasswordHash,
+		strings.TrimSpace(identity.Provider), strings.TrimSpace(identity.Subject), now, now)
+	if err != nil {
+		return nil, fmt.Errorf("create sso user: %w", err)
 	}
 	id, _ := res.LastInsertId()
 	if _, err := tx.ExecContext(ctx, `

@@ -9,6 +9,7 @@ vi.mock('@/modules/settings/api', () => ({
   getSettings: vi.fn(),
   listSettingsDBConnections: vi.fn(),
   patchSettings: vi.fn(),
+  previewWorkflowRules: vi.fn(),
 }))
 vi.mock('@/modules/users/api', () => ({
   listUsers: vi.fn(),
@@ -22,12 +23,13 @@ vi.mock('@/shared/auth/AuthContext', () => ({
   }),
 }))
 
-import { getSettings, listSettingsDBConnections } from '@/modules/settings/api'
+import { getSettings, listSettingsDBConnections, previewWorkflowRules } from '@/modules/settings/api'
 import { listAuthGroups } from '@/modules/auth-groups/api'
 import { listUsers } from '@/modules/users/api'
 
 const mockedGetSettings = vi.mocked(getSettings)
 const mockedListSettingsDBConnections = vi.mocked(listSettingsDBConnections)
+const mockedPreviewWorkflowRules = vi.mocked(previewWorkflowRules)
 const mockedListUsers = vi.mocked(listUsers)
 const mockedListAuthGroups = vi.mocked(listAuthGroups)
 
@@ -39,6 +41,15 @@ function makeSettings(overrides: Partial<PlatformSettings> = {}): PlatformSettin
     lark_oauth_enabled: false,
     lark_oauth_site: 'lark',
     lark_oauth_redirect_url: '',
+    sso_oidc_enabled: false,
+    sso_oidc_display_name: 'Authentik',
+    sso_oidc_issuer_url: '',
+    sso_oidc_client_id: '',
+    sso_oidc_client_secret: '',
+    sso_oidc_client_secret_configured: false,
+    sso_oidc_redirect_url: '',
+    sso_oidc_scopes: ['openid', 'profile', 'email', 'dbre'],
+    sso_oidc_trust_mfa: false,
     sensitive_export_reviewer_user_ids: [],
     sensitive_query_access_reviewer_user_ids: [],
     require_non_sensitive_export_review: true,
@@ -109,12 +120,15 @@ describe('SettingsPage', () => {
   beforeEach(() => {
     mockedGetSettings.mockReset()
     mockedListSettingsDBConnections.mockReset()
+    mockedPreviewWorkflowRules.mockReset()
     mockedListUsers.mockReset()
     mockedListAuthGroups.mockReset()
+    mockedPreviewWorkflowRules.mockResolvedValue({ previews: [] })
   })
 
   it('loads the settings page without depending on the users API', async () => {
     mockedGetSettings.mockResolvedValue({
+      ...makeSettings(),
       lark_app_id: '',
       lark_app_secret_configured: false,
       lark_oauth_enabled: false,

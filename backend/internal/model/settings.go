@@ -15,6 +15,15 @@ type PlatformSettings struct {
 	LarkOAuthEnabled                     bool             `json:"lark_oauth_enabled"`
 	LarkOAuthSite                        string           `json:"lark_oauth_site"`
 	LarkOAuthRedirectURL                 string           `json:"lark_oauth_redirect_url"`
+	SSOOIDCEnabled                       bool             `json:"sso_oidc_enabled"`
+	SSOOIDCDisplayName                   string           `json:"sso_oidc_display_name"`
+	SSOOIDCIssuerURL                     string           `json:"sso_oidc_issuer_url"`
+	SSOOIDCClientID                      string           `json:"sso_oidc_client_id"`
+	SSOOIDCClientSecret                  string           `json:"sso_oidc_client_secret,omitempty"`
+	SSOOIDCClientSecretConfigured        bool             `json:"sso_oidc_client_secret_configured"`
+	SSOOIDCRedirectURL                   string           `json:"sso_oidc_redirect_url"`
+	SSOOIDCScopes                        []string         `json:"sso_oidc_scopes"`
+	SSOOIDCTrustMFA                      bool             `json:"sso_oidc_trust_mfa"`
 	SQLEditorAppTimeoutSeconds           int              `json:"sql_editor_app_timeout_seconds"`
 	SQLEditorMySQLMaxExecutionTimeMs     int              `json:"sql_editor_mysql_max_execution_time_ms"`
 	SQLEditorPostgresStatementTimeoutMs  int              `json:"sql_editor_postgres_statement_timeout_ms"`

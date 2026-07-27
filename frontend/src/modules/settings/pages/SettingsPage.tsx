@@ -21,6 +21,15 @@ type SettingsForm = {
   larkOAuthEnabled: boolean
   larkOAuthSite: 'lark' | 'feishu'
   larkOAuthRedirectURL: string
+  ssoOIDCEnabled: boolean
+  ssoOIDCDisplayName: string
+  ssoOIDCIssuerURL: string
+  ssoOIDCClientID: string
+  ssoOIDCClientSecret: string
+  ssoOIDCClientSecretConfigured: boolean
+  ssoOIDCRedirectURL: string
+  ssoOIDCScopes: string
+  ssoOIDCTrustMFA: boolean
   sqlEditorAppTimeoutSeconds: string
   sqlEditorMySQLMaxExecutionTimeMs: string
   sqlEditorPostgresStatementTimeoutMs: string
@@ -267,6 +276,71 @@ export function SettingsPage() {
                   value={form.larkOAuthRedirectURL}
                   onChange={(value) => setForm((current) => current ? { ...current, larkOAuthRedirectURL: value } : current)}
                   placeholder="https://dbre-maestro-test.tskyrocket.xyz/api/auth/lark/login/callback"
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-border bg-panel shadow-soft">
+            <div className="border-b border-border/80 px-4 py-3">
+              <p className="text-[14px] font-semibold text-ink">OIDC SSO</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Configure a standard OIDC provider such as Authentik. Userinfo must include email and may include lark_open_id for directed Lark notifications.</p>
+            </div>
+            <div className="grid gap-4 px-4 py-4 md:grid-cols-2">
+              <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
+                <Switch
+                  ariaLabel="Enable OIDC SSO login"
+                  checked={form.ssoOIDCEnabled}
+                  onChange={(checked) => setForm((current) => current ? { ...current, ssoOIDCEnabled: checked } : current)}
+                />
+                Enable OIDC SSO login
+              </label>
+              <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
+                <Switch
+                  ariaLabel="Trust OIDC MFA"
+                  checked={form.ssoOIDCTrustMFA}
+                  onChange={(checked) => setForm((current) => current ? { ...current, ssoOIDCTrustMFA: checked } : current)}
+                />
+                Trust provider MFA
+              </label>
+              <Field
+                label="Display Name"
+                value={form.ssoOIDCDisplayName}
+                onChange={(value) => setForm((current) => current ? { ...current, ssoOIDCDisplayName: value } : current)}
+                placeholder="Authentik"
+              />
+              <Field
+                label="Client ID"
+                value={form.ssoOIDCClientID}
+                onChange={(value) => setForm((current) => current ? { ...current, ssoOIDCClientID: value } : current)}
+              />
+              <Field
+                label={`Client Secret${form.ssoOIDCClientSecretConfigured ? ' (Configured)' : ''}`}
+                value={form.ssoOIDCClientSecret}
+                onChange={(value) => setForm((current) => current ? { ...current, ssoOIDCClientSecret: value } : current)}
+                placeholder={form.ssoOIDCClientSecretConfigured ? 'Leave blank to keep existing secret' : 'Enter client secret'}
+                type="password"
+              />
+              <Field
+                label="Scopes"
+                value={form.ssoOIDCScopes}
+                onChange={(value) => setForm((current) => current ? { ...current, ssoOIDCScopes: value } : current)}
+                placeholder="openid, profile, email, dbre"
+              />
+              <div className="md:col-span-2">
+                <Field
+                  label="Issuer URL"
+                  value={form.ssoOIDCIssuerURL}
+                  onChange={(value) => setForm((current) => current ? { ...current, ssoOIDCIssuerURL: value } : current)}
+                  placeholder="https://auth.example.com/application/o/dbre-maestro"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <Field
+                  label="Redirect URL"
+                  value={form.ssoOIDCRedirectURL}
+                  onChange={(value) => setForm((current) => current ? { ...current, ssoOIDCRedirectURL: value } : current)}
+                  placeholder="https://dbre.example.com/api/auth/sso/callback"
                 />
               </div>
             </div>
@@ -889,6 +963,15 @@ function toForm(settings: PlatformSettings): SettingsForm {
     larkOAuthEnabled: settings.lark_oauth_enabled,
     larkOAuthSite: settings.lark_oauth_site === 'feishu' ? 'feishu' : 'lark',
     larkOAuthRedirectURL: settings.lark_oauth_redirect_url,
+    ssoOIDCEnabled: settings.sso_oidc_enabled,
+    ssoOIDCDisplayName: settings.sso_oidc_display_name,
+    ssoOIDCIssuerURL: settings.sso_oidc_issuer_url,
+    ssoOIDCClientID: settings.sso_oidc_client_id,
+    ssoOIDCClientSecret: '',
+    ssoOIDCClientSecretConfigured: settings.sso_oidc_client_secret_configured,
+    ssoOIDCRedirectURL: settings.sso_oidc_redirect_url,
+    ssoOIDCScopes: settings.sso_oidc_scopes.join(', '),
+    ssoOIDCTrustMFA: settings.sso_oidc_trust_mfa,
     sqlEditorAppTimeoutSeconds: String(settings.sql_editor_app_timeout_seconds),
     sqlEditorMySQLMaxExecutionTimeMs: String(settings.sql_editor_mysql_max_execution_time_ms),
     sqlEditorPostgresStatementTimeoutMs: String(settings.sql_editor_postgres_statement_timeout_ms),
@@ -926,6 +1009,15 @@ function toPayload(
     lark_oauth_enabled: form.larkOAuthEnabled,
     lark_oauth_site: form.larkOAuthSite,
     lark_oauth_redirect_url: form.larkOAuthRedirectURL.trim(),
+    sso_oidc_enabled: form.ssoOIDCEnabled,
+    sso_oidc_display_name: form.ssoOIDCDisplayName.trim(),
+    sso_oidc_issuer_url: form.ssoOIDCIssuerURL.trim(),
+    sso_oidc_client_id: form.ssoOIDCClientID.trim(),
+    sso_oidc_client_secret: form.ssoOIDCClientSecret,
+    sso_oidc_client_secret_configured: form.ssoOIDCClientSecretConfigured,
+    sso_oidc_redirect_url: form.ssoOIDCRedirectURL.trim(),
+    sso_oidc_scopes: splitCSV(form.ssoOIDCScopes),
+    sso_oidc_trust_mfa: form.ssoOIDCTrustMFA,
     sql_editor_app_timeout_seconds: parsePositiveInt(form.sqlEditorAppTimeoutSeconds, 30),
     sql_editor_mysql_max_execution_time_ms: parsePositiveInt(form.sqlEditorMySQLMaxExecutionTimeMs, 25000),
     sql_editor_postgres_statement_timeout_ms: parsePositiveInt(form.sqlEditorPostgresStatementTimeoutMs, 25000),

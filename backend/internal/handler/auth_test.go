@@ -13,10 +13,12 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/dbre-maestro/maestro/internal/auth"
+	"github.com/dbre-maestro/maestro/internal/config"
 	"github.com/dbre-maestro/maestro/internal/crypto"
 	"github.com/dbre-maestro/maestro/internal/larkoauth"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/oidcsso"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
@@ -42,6 +44,26 @@ func (m auditDetailsReason) Match(v driver.Value) bool {
 		return false
 	}
 	return details.Reason == string(m)
+}
+
+type mockOIDCSSOClient struct {
+	authorizeURL string
+	identity     oidcsso.Identity
+	err          error
+}
+
+func (m mockOIDCSSOClient) AuthorizeURL(ctx context.Context, cfg config.OIDCSSOConfig, state string) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+	return m.authorizeURL, nil
+}
+
+func (m mockOIDCSSOClient) ExchangeCode(ctx context.Context, cfg config.OIDCSSOConfig, code string) (oidcsso.Identity, error) {
+	if m.err != nil {
+		return oidcsso.Identity{}, m.err
+	}
+	return m.identity, nil
 }
 
 func authUserRows(isActive bool) *sqlmock.Rows {
@@ -74,8 +96,160 @@ func expectSetupCompleted(mock sqlmock.Sqlmock, count int) {
 
 func sessionRows(id uint64, userID uint64) *sqlmock.Rows {
 	now := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
-	return sqlmock.NewRows([]string{"id", "user_id", "token_hash", "user_agent", "ip_address", "expires_at", "revoked_at", "created_at"}).
-		AddRow(id, userID, "hash", nil, nil, now.Add(time.Hour), nil, now)
+	return sqlmock.NewRows([]string{"id", "user_id", "token_hash", "user_agent", "ip_address", "auth_method", "auth_provider", "mfa_satisfied", "mfa_source", "expires_at", "revoked_at", "created_at"}).
+		AddRow(id, userID, "hash", nil, nil, "password", "", false, "", now.Add(time.Hour), nil, now)
+}
+
+func TestFindOrCreateSSOUserRejectsUnverifiedEmailBeforeAutoBinding(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), nil, nil, []byte("secret"), ssoEnterpriseEmailConfig())
+
+	mock.ExpectQuery(`SELECT \* FROM users WHERE external_identity_source = \? AND external_identity_id = \?`).
+		WithArgs("oidc", "authentik-user-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	_, err = handler.findOrCreateSSOUser(context.Background(), oidcsso.Identity{
+		Subject:                   "authentik-user-1",
+		Email:                     "alice@edgex.exchange",
+		EmailVerified:             false,
+		EmailVerifiedClaimPresent: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "email is not verified") {
+		t.Fatalf("err = %v, want unverified email error", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestFindOrCreateSSOUserAllowsMissingEmailVerifiedForCompanyEmail(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), nil, nil, []byte("secret"), ssoEnterpriseEmailConfig())
+
+	mock.ExpectQuery(`SELECT \* FROM users WHERE external_identity_source = \? AND external_identity_id = \?`).
+		WithArgs("oidc", "authentik-user-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(`SELECT \* FROM users WHERE email = \?`).
+		WithArgs("alice@edgex.exchange").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+			AddRow(7, "alice", "alice@edgex.exchange", "hash", 0, 0, 1, time.Now(), time.Now()))
+	mock.ExpectExec(`UPDATE users`).
+		WithArgs("oidc", "authentik-user-1", sqlmock.AnyArg(), uint64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(uint64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+			AddRow(7, "alice", "alice@edgex.exchange", "hash", 0, 0, 1, time.Now(), time.Now()))
+
+	user, err := handler.findOrCreateSSOUser(context.Background(), oidcsso.Identity{
+		Subject:                   "authentik-user-1",
+		Email:                     "alice@edgex.exchange",
+		EmailVerifiedClaimPresent: false,
+	})
+	if err != nil {
+		t.Fatalf("findOrCreateSSOUser error: %v", err)
+	}
+	if user == nil || user.ID != 7 {
+		t.Fatalf("user = %#v, want id 7", user)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestFindOrCreateSSOUserRejectsNonCompanyEmailBeforeAutoBinding(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(repository.NewUserRepo(sqlxDB), nil, nil, []byte("secret"), ssoEnterpriseEmailConfig())
+
+	mock.ExpectQuery(`SELECT \* FROM users WHERE external_identity_source = \? AND external_identity_id = \?`).
+		WithArgs("oidc", "authentik-user-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	_, err = handler.findOrCreateSSOUser(context.Background(), oidcsso.Identity{
+		Subject:                   "authentik-user-1",
+		Email:                     "alice@example.com",
+		EmailVerified:             true,
+		EmailVerifiedClaimPresent: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "email domain is not allowed") {
+		t.Fatalf("err = %v, want domain error", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func ssoEnterpriseEmailConfig() config.OIDCSSOConfig {
+	return config.OIDCSSOConfig{
+		RequireEnterpriseEmail: true,
+		EnterpriseEmailDomains: []string{"edgex.exchange"},
+	}
+}
+
+func configuredOIDCSSOConfig() config.OIDCSSOConfig {
+	cfg := ssoEnterpriseEmailConfig()
+	cfg.Enabled = true
+	cfg.DisplayName = "Authentik"
+	cfg.IssuerURL = "https://auth.example.com/application/o/dbre"
+	cfg.ClientID = "dbre"
+	cfg.ClientSecret = "secret"
+	cfg.RedirectURL = "https://dbre.example.com/api/auth/sso/callback"
+	cfg.Scopes = []string{"openid", "profile", "email", "dbre"}
+	return cfg
+}
+
+func TestSSOUsernameBasePrefersEmailLocalPart(t *testing.T) {
+	got := ssoUsernameBase(oidcsso.Identity{
+		Email: "William.Yeh@edgex.exchange",
+		Name:  "Ignored Name",
+	})
+	if got != "william.yeh" {
+		t.Fatalf("ssoUsernameBase = %q, want william.yeh", got)
+	}
+}
+
+func TestResolveOIDCSSOConfigAppliesDefaults(t *testing.T) {
+	handler := NewAuthHandler(nil, nil, nil, []byte("secret"), config.OIDCSSOConfig{
+		Enabled:                true,
+		IssuerURL:              "https://auth.example.com",
+		ClientID:               "dbre",
+		ClientSecret:           "secret",
+		RedirectURL:            "https://dbre.example.com/api/auth/sso/callback",
+		RequireEnterpriseEmail: true,
+		EnterpriseEmailDomains: []string{"edgex.exchange"},
+	})
+
+	cfg, err := handler.resolveOIDCSSOConfig(context.Background())
+	if err != nil {
+		t.Fatalf("resolveOIDCSSOConfig error: %v", err)
+	}
+	if cfg.DisplayName != "Authentik" {
+		t.Fatalf("DisplayName = %q, want Authentik", cfg.DisplayName)
+	}
+	if len(cfg.Scopes) != 4 || cfg.Scopes[0] != "openid" {
+		t.Fatalf("Scopes = %#v, want default oidc scopes", cfg.Scopes)
+	}
+	if !cfg.RequireEnterpriseEmail || len(cfg.EnterpriseEmailDomains) != 1 || cfg.EnterpriseEmailDomains[0] != "edgex.exchange" {
+		t.Fatalf("enterprise email policy = %#v / %#v", cfg.RequireEnterpriseEmail, cfg.EnterpriseEmailDomains)
+	}
 }
 
 func TestAuthHandlerMe(t *testing.T) {
@@ -479,6 +653,159 @@ func TestAuthHandlerStartLarkLoginRequiresSetupCompleted(t *testing.T) {
 	}
 }
 
+func TestAuthHandlerStartSSOLoginRequiresSetupCompleted(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(
+		repository.NewUserRepo(sqlxDB),
+		repository.NewSessionRepo(sqlxDB),
+		nil,
+		[]byte("secret"),
+		configuredOIDCSSOConfig(),
+		repository.NewSSOLoginRepo(sqlxDB),
+		mockOIDCSSOClient{authorizeURL: "https://auth.example.com/authorize"},
+	)
+
+	expectSetupCompleted(mock, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/sso/start", nil)
+	rec := httptest.NewRecorder()
+	handler.StartSSOLogin(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+	if !strings.Contains(rec.Body.String(), "setup is required before login") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerStartSSOLoginRedirectsToProvider(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(
+		repository.NewUserRepo(sqlxDB),
+		repository.NewSessionRepo(sqlxDB),
+		nil,
+		[]byte("secret"),
+		configuredOIDCSSOConfig(),
+		repository.NewSSOLoginRepo(sqlxDB),
+		mockOIDCSSOClient{authorizeURL: "https://auth.example.com/authorize?state=generated"},
+	)
+
+	expectSetupCompleted(mock, 1)
+	mock.ExpectExec(`INSERT INTO sso_login_states`).
+		WithArgs(sqlmock.AnyArg(), "/tickets", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/sso/start?returnTo=/tickets", nil)
+	req.RemoteAddr = "10.0.0.1:12345"
+	rec := httptest.NewRecorder()
+	handler.StartSSOLogin(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusFound, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "https://auth.example.com/authorize?state=generated" {
+		t.Fatalf("Location = %q", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerCompleteSSOLoginRejectsUnknownState(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(
+		repository.NewUserRepo(sqlxDB),
+		repository.NewSessionRepo(sqlxDB),
+		nil,
+		[]byte("secret"),
+		configuredOIDCSSOConfig(),
+		repository.NewSSOLoginRepo(sqlxDB),
+		mockOIDCSSOClient{identity: oidcsso.Identity{Subject: "sub", Email: "alice@edgex.exchange"}},
+	)
+
+	expectSetupCompleted(mock, 1)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \*\s+FROM sso_login_states\s+WHERE state = \? AND used_at IS NULL AND expires_at > \?`).
+		WithArgs("missing", sqlmock.AnyArg()).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/sso/callback?state=missing&code=code", nil)
+	rec := httptest.NewRecorder()
+	handler.CompleteSSOLogin(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
+	}
+	if got := rec.Header().Get("Location"); got != "/login?sso_error=login_failed" {
+		t.Fatalf("Location = %q", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestAuthHandlerConsumeSSOLoginResultRejectsUnknownTicket(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	handler := NewAuthHandler(
+		repository.NewUserRepo(sqlxDB),
+		repository.NewSessionRepo(sqlxDB),
+		nil,
+		[]byte("secret"),
+		configuredOIDCSSOConfig(),
+		repository.NewSSOLoginRepo(sqlxDB),
+	)
+
+	expectSetupCompleted(mock, 1)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT \*\s+FROM sso_login_states\s+WHERE ticket = \? AND ticket_used_at IS NULL AND ticket_expires_at > \? AND user_id IS NOT NULL`).
+		WithArgs("missing-ticket", sqlmock.AnyArg()).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/sso/login/result/consume", strings.NewReader(`{"ticket":"missing-ticket"}`))
+	rec := httptest.NewRecorder()
+	handler.ConsumeSSOLoginResult(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid sso login ticket") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestAuthHandlerLoginInvalidCredentialsWritesAudit(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -644,7 +971,7 @@ func TestAuthHandlerVerifyMFAMarksChallengeUsed(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), uint64(3), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`INSERT INTO sessions`).
-		WithArgs(uint64(7), sqlmock.AnyArg(), nil, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(uint64(7), sqlmock.AnyArg(), nil, sqlmock.AnyArg(), "password", "", true, "platform_totp", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(33, 1))
 	mock.ExpectQuery(`SELECT \* FROM sessions WHERE id = \?`).
 		WithArgs(int64(33)).
