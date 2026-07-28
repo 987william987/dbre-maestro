@@ -114,6 +114,28 @@ async function fetchJSON<T>(path: string, init: RequestInit = {}) {
   return { response, data: data as T }
 }
 
+// Two tabs can race to rotate the same shared refresh cookie (e.g. an
+// already-open tab plus a fresh tab opened from a Lark ticket link). The
+// losing tab gets a benign "stale refresh token" 401 — the backend leaves
+// the browser's current cookie (the winner's new one) untouched in that
+// case, so a short retry picks it up instead of forcing a real logout.
+// Any other 401 reason (real reuse detection, expired session, etc.) is not
+// retried — it means the session is genuinely gone.
+const REFRESH_STALE_RETRY_DELAY_MS = 500
+
+async function attemptRefresh(): Promise<{ token: string | null; staleRetryable: boolean }> {
+  const { response, data } = await fetchJSON<LoginResponse & { error?: string }>('/auth/refresh', {
+    method: 'POST',
+  })
+  if (response.ok && data?.access_token) {
+    return { token: data.access_token, staleRetryable: false }
+  }
+  return {
+    token: null,
+    staleRetryable: response.status === 401 && data?.error === 'stale refresh token',
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading')
   const [user, setUser] = useState<CurrentUser | null>(null)
@@ -154,17 +176,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     refreshPromiseRef.current = (async () => {
-      const { response, data } = await fetchJSON<LoginResponse>('/auth/refresh', {
-        method: 'POST',
-      })
+      let result = await attemptRefresh()
+      if (!result.token && result.staleRetryable) {
+        await new Promise((resolve) => setTimeout(resolve, REFRESH_STALE_RETRY_DELAY_MS))
+        result = await attemptRefresh()
+      }
 
-      if (!response.ok || !data?.access_token) {
+      if (!result.token) {
         clearAuth()
         return null
       }
 
-      applyAccessToken(data.access_token)
-      return data.access_token
+      applyAccessToken(result.token)
+      return result.token
     })()
 
     try {
