@@ -782,7 +782,6 @@ func (h *AuthHandler) findOrCreateSSOUser(ctx context.Context, identity oidcsso.
 			"email_domain", emailDomainForLog(input.Email),
 			"email_verified_claim_present", identity.EmailVerifiedClaimPresent,
 		)
-		return nil, fmt.Errorf("sso identity email is not verified")
 	}
 	if !identity.EmailVerifiedClaimPresent {
 		slog.Warn("sso identity email_verified claim is missing",
@@ -1367,7 +1366,10 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	if session.RevokedAt != nil {
 		if time.Since(*session.RevokedAt) <= refreshReuseGraceWindow {
-			http.SetCookie(w, h.clearRefreshCookie(r))
+			// Benign multi-tab race: another tab (e.g. one opened from a
+			// Lark ticket link) already rotated this same shared cookie.
+			// Don't clear it — the browser's current cookie is that tab's
+			// valid new one. Just fail this request; the client retries.
 			jsonErr(w, http.StatusUnauthorized, "stale refresh token")
 			return
 		}

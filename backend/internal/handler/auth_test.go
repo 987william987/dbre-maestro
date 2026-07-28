@@ -100,7 +100,7 @@ func sessionRows(id uint64, userID uint64) *sqlmock.Rows {
 		AddRow(id, userID, "hash", nil, nil, "password", "", false, "", now.Add(time.Hour), nil, now)
 }
 
-func TestFindOrCreateSSOUserRejectsUnverifiedEmailBeforeAutoBinding(t *testing.T) {
+func TestFindOrCreateSSOUserAllowsUnverifiedCompanyEmail(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -113,15 +113,29 @@ func TestFindOrCreateSSOUserRejectsUnverifiedEmailBeforeAutoBinding(t *testing.T
 	mock.ExpectQuery(`SELECT \* FROM users WHERE external_identity_source = \? AND external_identity_id = \?`).
 		WithArgs("oidc", "authentik-user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(`SELECT \* FROM users WHERE email = \?`).
+		WithArgs("alice@edgex.exchange").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+			AddRow(7, "alice", "alice@edgex.exchange", "hash", 0, 0, 1, time.Now(), time.Now()))
+	mock.ExpectExec(`UPDATE users`).
+		WithArgs("oidc", "authentik-user-1", sqlmock.AnyArg(), uint64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
+		WithArgs(uint64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
+			AddRow(7, "alice", "alice@edgex.exchange", "hash", 0, 0, 1, time.Now(), time.Now()))
 
-	_, err = handler.findOrCreateSSOUser(context.Background(), oidcsso.Identity{
+	user, err := handler.findOrCreateSSOUser(context.Background(), oidcsso.Identity{
 		Subject:                   "authentik-user-1",
 		Email:                     "alice@edgex.exchange",
 		EmailVerified:             false,
 		EmailVerifiedClaimPresent: true,
 	})
-	if err == nil || !strings.Contains(err.Error(), "email is not verified") {
-		t.Fatalf("err = %v, want unverified email error", err)
+	if err != nil {
+		t.Fatalf("findOrCreateSSOUser error: %v", err)
+	}
+	if user == nil || user.ID != 7 {
+		t.Fatalf("user = %#v, want id 7", user)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
@@ -1204,6 +1218,13 @@ func TestAuthHandlerRefreshTokenReuseWithinGraceDoesNotRevokeAllSessions(t *test
 	}
 	if !strings.Contains(rec.Body.String(), "stale refresh token") {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+	// Regression: a benign multi-tab race (e.g. a second tab opened from a
+	// Lark ticket link) must not clear the refresh cookie — another tab may
+	// have already rotated it to a valid new value, and clearing it here
+	// would destroy that tab's session too.
+	if cookies := rec.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("refresh cookie should not be cleared on a benign grace-window race: %#v", cookies)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
