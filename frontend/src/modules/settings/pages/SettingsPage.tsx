@@ -998,6 +998,7 @@ function toPayload(
 ): PlatformSettings {
   const isProduction = current?.app_env === 'production'
   const connectionDBTypes = new Map(connections.map((connection) => [connection.id, connection.db_type]))
+  const connectionIDs = new Set(connections.map((connection) => connection.id))
   return {
     sensitive_export_reviewer_user_ids: current?.sensitive_export_reviewer_user_ids ?? [],
     app_env: current?.app_env,
@@ -1030,7 +1031,7 @@ function toPayload(
     db_metadata_inventory_cron: form.inventoryCron.trim(),
     db_metadata_inventory_sync_interval_minutes: current?.db_metadata_inventory_sync_interval_minutes ?? 5,
     db_metadata_object_enabled: form.objectEnabled,
-    db_metadata_object_enabled_connection_ids: form.objectConnectionIDs,
+    db_metadata_object_enabled_connection_ids: form.objectConnectionIDs.filter((connectionID) => connectionIDs.has(connectionID)),
     db_metadata_object_cron: form.objectCron.trim(),
     db_metadata_object_sync_interval_minutes: current?.db_metadata_object_sync_interval_minutes ?? 60,
     db_metadata_cron_timezone: form.cronTimezone.trim(),

@@ -248,4 +248,43 @@ describe('LoginPage', () => {
     await waitFor(() => expect(consumeSSOLogin).toHaveBeenCalledWith('ticket-123'))
     await waitFor(() => expect(screen.getByText('tickets page')).toBeInTheDocument())
   })
+
+  it('已登入時仍優先消耗 OIDC SSO callback ticket，避免沿用既有登入方式', async () => {
+    const consumeSSOLogin = vi.fn().mockResolvedValue({ status: 'authenticated', returnTo: '/sql-editor' })
+
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'william',
+        authGroups: ['admin'],
+        authGroupDetails: [],
+        permissions: ['sql_editor.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+        authMethod: 'lark',
+        authProvider: '',
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      consumeSSOLogin,
+      verifyMFA: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/login?sso_ticket=ticket-456']}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/sql-editor" element={<div>sql editor page</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(consumeSSOLogin).toHaveBeenCalledWith('ticket-456'))
+    await waitFor(() => expect(screen.getByText('sql editor page')).toBeInTheDocument())
+  })
 })

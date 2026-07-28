@@ -151,6 +151,11 @@ const QUERY_ACCESS_DURATION_OPTIONS = [
   { value: String(3 * 365 * 24 * 60), label: '3 years' },
 ]
 
+const LARK_RECIPIENT_TYPE_OPTIONS = [
+  { value: 'open_id', label: 'Open ID' },
+  { value: 'union_id', label: 'Union ID' },
+]
+
 type QueryAccessRuleDraft = {
   subjectType: 'user' | 'auth_group'
   subjectID: string
@@ -1508,19 +1513,18 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         />
                       </label>
                       <div className="grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)]">
-                        <label className="grid gap-1.5 text-[12px] font-medium text-muted">
-                          Recipient Type
-                          <select
-                            aria-label="Lark Recipient Type"
+                        <div className="grid gap-1.5 text-[12px] font-medium text-muted">
+                          <span>Recipient Type</span>
+                          <DropdownSelect
+                            ariaLabel="Lark Recipient Type"
                             value={userDraft.larkRecipientType}
-                            onChange={(event) => setUserDraft((current) => ({ ...current, larkRecipientType: event.target.value === 'union_id' ? 'union_id' : 'open_id' }))}
+                            onChange={(value) => setUserDraft((current) => ({ ...current, larkRecipientType: value === 'union_id' ? 'union_id' : 'open_id' }))}
+                            options={LARK_RECIPIENT_TYPE_OPTIONS}
                             disabled={saving || userDrawerReadOnly}
-                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
-                          >
-                            <option value="open_id">Open ID</option>
-                            <option value="union_id">Union ID</option>
-                          </select>
-                        </label>
+                            searchable={false}
+                            triggerClassName="h-10 bg-panel-soft text-[13px] focus:border-accent focus:ring-2 focus:ring-accent/20"
+                          />
+                        </div>
                         <label className="grid gap-1.5 text-[12px] font-medium text-muted">
                           Lark Union ID
                           <input
