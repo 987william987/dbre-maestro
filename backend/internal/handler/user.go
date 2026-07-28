@@ -74,6 +74,8 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 		Username          string            `json:"username"`
 		Email             string            `json:"email"`
 		LarkRecipient     string            `json:"lark_recipient"`
+		LarkRecipientType string            `json:"lark_recipient_type"`
+		LarkUnionID       string            `json:"lark_union_id"`
 		AuthGroups        []model.AuthGroup `json:"auth_groups"`
 		Permissions       []string          `json:"permissions"`
 		DirectPermissions []string          `json:"direct_permissions"`
@@ -123,6 +125,8 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 			Username:          u.Username,
 			Email:             u.Email,
 			LarkRecipient:     u.LarkRecipient,
+			LarkRecipientType: normalizeLarkRecipientType(u.LarkRecipientType),
+			LarkUnionID:       u.LarkUnionID,
 			AuthGroups:        groups,
 			Permissions:       permissionKeys,
 			DirectPermissions: directPermissionKeys,
@@ -139,10 +143,12 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 // POST /users — Admin only
 func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Username      string `json:"username"`
-		Email         string `json:"email"`
-		LarkRecipient string `json:"lark_recipient"`
-		Password      string `json:"password"`
+		Username          string `json:"username"`
+		Email             string `json:"email"`
+		LarkRecipient     string `json:"lark_recipient"`
+		LarkRecipientType string `json:"lark_recipient_type"`
+		LarkUnionID       string `json:"lark_union_id"`
+		Password          string `json:"password"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -183,7 +189,9 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.users.Create(r.Context(), req.Username, req.Email, strings.TrimSpace(req.LarkRecipient), string(hash), false)
+	larkRecipientType := normalizeLarkRecipientType(req.LarkRecipientType)
+	larkUnionID := strings.TrimSpace(req.LarkUnionID)
+	user, err := h.users.Create(r.Context(), req.Username, req.Email, strings.TrimSpace(req.LarkRecipient), larkRecipientType, larkUnionID, string(hash), false)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "create user failed")
 		return
@@ -196,11 +204,11 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "user_create",
 		ResourceType: "user",
 		ResourceID:   &user.ID,
-		Details:      map[string]string{"username": user.Username, "email": user.Email, "lark_recipient": user.LarkRecipient},
+		Details:      map[string]string{"username": user.Username, "email": user.Email, "lark_recipient": user.LarkRecipient, "lark_recipient_type": larkRecipientType, "lark_union_id_present": strconv.FormatBool(larkUnionID != "")},
 		IPAddress:    clientIP(r),
 	})
 
-	jsonCreated(w, map[string]any{"id": user.ID, "username": user.Username, "email": user.Email, "lark_recipient": user.LarkRecipient})
+	jsonCreated(w, map[string]any{"id": user.ID, "username": user.Username, "email": user.Email, "lark_recipient": user.LarkRecipient, "lark_recipient_type": larkRecipientType, "lark_union_id": larkUnionID})
 }
 
 // GET /users/{id} — Admin only
@@ -262,6 +270,8 @@ func (h *UserHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"username":                 user.Username,
 		"email":                    user.Email,
 		"lark_recipient":           user.LarkRecipient,
+		"lark_recipient_type":      normalizeLarkRecipientType(user.LarkRecipientType),
+		"lark_union_id":            user.LarkUnionID,
 		"protected":                user.IsProtected,
 		"is_active":                user.IsActive,
 		"created_at":               user.CreatedAt,
@@ -532,6 +542,8 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		Username              *string   `json:"username"`
 		Email                 *string   `json:"email"`
 		LarkRecipient         *string   `json:"lark_recipient"`
+		LarkRecipientType     *string   `json:"lark_recipient_type"`
+		LarkUnionID           *string   `json:"lark_union_id"`
 		Password              *string   `json:"password"`
 		IsActive              *bool     `json:"is_active"`
 		AuthGroups            *[]string `json:"auth_groups"`
@@ -561,8 +573,16 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	if req.LarkRecipient != nil {
 		larkRecipient = strings.TrimSpace(*req.LarkRecipient)
 	}
+	larkRecipientType := normalizeLarkRecipientType(user.LarkRecipientType)
+	if req.LarkRecipientType != nil {
+		larkRecipientType = normalizeLarkRecipientType(*req.LarkRecipientType)
+	}
+	larkUnionID := user.LarkUnionID
+	if req.LarkUnionID != nil {
+		larkUnionID = strings.TrimSpace(*req.LarkUnionID)
+	}
 
-	if err := h.users.Update(r.Context(), id, username, email, larkRecipient); err != nil {
+	if err := h.users.Update(r.Context(), id, username, email, larkRecipient, larkRecipientType, larkUnionID); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "update user failed")
 		return
 	}
@@ -709,11 +729,18 @@ func (h *UserHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "user_update",
 		ResourceType: "user",
 		ResourceID:   &id,
-		Details:      map[string]string{"username": username, "email": email, "lark_recipient": larkRecipient, "is_active": strconv.FormatBool(isActive)},
+		Details:      map[string]string{"username": username, "email": email, "lark_recipient": larkRecipient, "lark_recipient_type": larkRecipientType, "lark_union_id_present": strconv.FormatBool(larkUnionID != ""), "is_active": strconv.FormatBool(isActive)},
 		IPAddress:    clientIP(r),
 	})
 
-	jsonOK(w, map[string]any{"id": id, "username": username, "email": email, "lark_recipient": larkRecipient, "is_active": isActive})
+	jsonOK(w, map[string]any{"id": id, "username": username, "email": email, "lark_recipient": larkRecipient, "lark_recipient_type": larkRecipientType, "lark_union_id": larkUnionID, "is_active": isActive})
+}
+
+func normalizeLarkRecipientType(value string) string {
+	if strings.TrimSpace(value) == "union_id" {
+		return "union_id"
+	}
+	return "open_id"
 }
 
 // DELETE /users/{id} — Admin only

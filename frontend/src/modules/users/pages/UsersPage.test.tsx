@@ -351,6 +351,8 @@ describe('UsersPage', () => {
         username: 'alice',
         email: 'alice@example.com',
         lark_recipient: '',
+        lark_recipient_type: 'open_id',
+        lark_union_id: '',
         password: 'Secret123!',
       })
     })
@@ -413,6 +415,8 @@ describe('UsersPage', () => {
         username: 'bobby',
         email: 'bobby@example.com',
         lark_recipient: '',
+        lark_recipient_type: 'open_id',
+        lark_union_id: '',
         is_active: true,
         auth_groups: ['reviewer'],
         direct_permissions: [],

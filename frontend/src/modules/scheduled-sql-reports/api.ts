@@ -41,6 +41,8 @@ export type ScheduledReportRecipient = {
   username: string
   email: string
   lark_recipient: string
+  lark_recipient_type: 'open_id' | 'union_id'
+  lark_union_id: string
 }
 
 export type ScheduledSQLReportPayload = {

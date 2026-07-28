@@ -268,8 +268,8 @@ func TestUserHandlerPatchCannotRemoveAdminMembershipWithoutAllPermissionsAdmin(t
 	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
 		WithArgs(uint64(7)).
 		WillReturnRows(userRows())
-	mock.ExpectExec(`UPDATE users SET username=\?, email=\?, lark_recipient=\?, updated_at=\? WHERE id=\?`).
-		WithArgs("alice", "alice@example.com", "", sqlmock.AnyArg(), uint64(7)).
+	mock.ExpectExec(`UPDATE users SET username=\?, email=\?, lark_recipient=\?, lark_recipient_type=\?, lark_union_id=\?, updated_at=\? WHERE id=\?`).
+		WithArgs("alice", "alice@example.com", "", "open_id", "", sqlmock.AnyArg(), uint64(7)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT membership_id AS id, user_id, auth_group, granted_by, expires_at, created_at`).
 		WithArgs(uint64(7), sqlmock.AnyArg(), uint64(7), sqlmock.AnyArg()).
@@ -355,8 +355,8 @@ func TestUserHandlerPatchDisableUserRevokesSessions(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
 		WithArgs(uint64(7)).
 		WillReturnRows(userRows())
-	mock.ExpectExec(`UPDATE users SET username=\?, email=\?, lark_recipient=\?, updated_at=\? WHERE id=\?`).
-		WithArgs("alice", "alice@example.com", "", sqlmock.AnyArg(), uint64(7)).
+	mock.ExpectExec(`UPDATE users SET username=\?, email=\?, lark_recipient=\?, lark_recipient_type=\?, lark_union_id=\?, updated_at=\? WHERE id=\?`).
+		WithArgs("alice", "alice@example.com", "", "open_id", "", sqlmock.AnyArg(), uint64(7)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`UPDATE users SET is_active=\?, updated_at=\? WHERE id=\?`).
 		WithArgs(false, sqlmock.AnyArg(), uint64(7)).

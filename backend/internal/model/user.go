@@ -18,6 +18,8 @@ type User struct {
 	Username               string     `db:"username"`
 	Email                  string     `db:"email"`
 	LarkRecipient          string     `db:"lark_recipient"`
+	LarkRecipientType      string     `db:"lark_recipient_type"`
+	LarkUnionID            string     `db:"lark_union_id"`
 	Password               string     `db:"password"`
 	ExternalIdentitySource string     `db:"external_identity_source"`
 	ExternalIdentityID     string     `db:"external_identity_id"`

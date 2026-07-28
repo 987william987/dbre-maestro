@@ -13,6 +13,8 @@ type CreateUserPayload = {
   username: string
   email: string
   lark_recipient?: string
+  lark_recipient_type?: 'open_id' | 'union_id'
+  lark_union_id?: string
   password: string
 }
 
@@ -21,12 +23,16 @@ type CreateUserResponse = {
   username: string
   email: string
   lark_recipient?: string
+  lark_recipient_type?: 'open_id' | 'union_id'
+  lark_union_id?: string
 }
 
 type PatchUserPayload = {
   username?: string
   email?: string
   lark_recipient?: string
+  lark_recipient_type?: 'open_id' | 'union_id'
+  lark_union_id?: string
   password?: string
   is_active?: boolean
   auth_groups?: string[]
@@ -91,6 +97,8 @@ export function listUsers() {
       ? response.users.map((user) => ({
           ...user,
           lark_recipient: typeof user.lark_recipient === 'string' ? user.lark_recipient : '',
+          lark_recipient_type: user.lark_recipient_type === 'union_id' ? 'union_id' : 'open_id',
+          lark_union_id: typeof user.lark_union_id === 'string' ? user.lark_union_id : '',
           auth_groups: Array.isArray(user.auth_groups) ? user.auth_groups : [],
           permissions: Array.isArray(user.permissions) ? user.permissions : [],
           direct_permissions: Array.isArray(user.direct_permissions) ? user.direct_permissions : [],
@@ -104,6 +112,8 @@ export function getUser(id: number) {
   return apiClient.get<UserDetail>(`/users/${id}`).then((user): UserDetail => ({
     ...user,
     lark_recipient: typeof user.lark_recipient === 'string' ? user.lark_recipient : '',
+    lark_recipient_type: user.lark_recipient_type === 'union_id' ? 'union_id' : 'open_id',
+    lark_union_id: typeof user.lark_union_id === 'string' ? user.lark_union_id : '',
     memberships: Array.isArray(user.memberships) ? user.memberships : [],
     permissions: Array.isArray(user.permissions) ? user.permissions : [],
     db_connection_ids: Array.isArray(user.db_connection_ids) ? user.db_connection_ids : [],

@@ -193,7 +193,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.users.Create(r.Context(), req.Username, req.Email, "", string(hash), true)
+	user, err := h.users.Create(r.Context(), req.Username, req.Email, "", "open_id", "", string(hash), true)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "create user failed")
 		return
@@ -754,6 +754,7 @@ func (h *AuthHandler) findOrCreateSSOUser(ctx context.Context, identity oidcsso.
 		Email:       strings.TrimSpace(identity.Email),
 		DisplayName: strings.TrimSpace(identity.Name),
 		LarkOpenID:  strings.TrimSpace(identity.LarkOpenID),
+		LarkUnionID: strings.TrimSpace(identity.LarkUnionID),
 	}
 	if input.Subject == "" {
 		return nil, fmt.Errorf("sso identity missing subject")
@@ -820,38 +821,36 @@ func (h *AuthHandler) handleSSOLarkRecipient(ctx context.Context, user *model.Us
 	if user == nil {
 		return
 	}
-	larkOpenID := strings.TrimSpace(identity.LarkOpenID)
-	if larkOpenID == "" {
-		slog.Warn("sso identity missing lark_open_id", "user_id", user.ID, "username", user.Username, "email_domain", emailDomainForLog(identity.Email))
-		h.notifyAdminsAboutSSOLarkIssue(ctx, "sso_lark_open_id_missing", "SSO login missing Lark Open ID", fmt.Sprintf("SSO login for %s (%s) did not include lark_open_id. Please check Authentik scope mapping.", user.Username, user.Email), user)
+	larkUnionID := strings.TrimSpace(identity.LarkUnionID)
+	if larkUnionID == "" {
+		slog.Warn("sso identity missing lark_union_id", "user_id", user.ID, "username", user.Username, "email_domain", emailDomainForLog(identity.Email), "lark_open_id_present", strings.TrimSpace(identity.LarkOpenID) != "")
+		h.notifyAdminsAboutSSOLarkIssue(ctx, "sso_lark_union_id_missing", "SSO login missing Lark Union ID", fmt.Sprintf("SSO login for %s (%s) did not include lark_union_id. Please check Authentik scope mapping or set the user's Lark Union ID manually.", user.Username, user.Email), user)
 		return
 	}
-	current := strings.TrimSpace(user.LarkRecipient)
-	if current == "" {
-		updated, err := h.users.UpdateLarkRecipientIfEmpty(ctx, user.ID, larkOpenID)
-		if err != nil {
-			slog.Warn("sso lark recipient auto-bind failed", "user_id", user.ID, "err", err)
-			return
-		}
-		if updated {
-			slog.Info("sso lark recipient auto-bound", "user_id", user.ID, "username", user.Username)
-			h.logAuditContext(ctx, repository.AuditEntry{
-				ActorID:      &user.ID,
-				ActorName:    user.Username,
-				ActionType:   "sso_lark_recipient_bound",
-				ResourceType: "user",
-				ResourceID:   &user.ID,
-				Details: map[string]any{
-					"username": user.Username,
-					"source":   "oidc_claim",
-				},
-			})
-		}
+	currentUnionID := strings.TrimSpace(user.LarkUnionID)
+	if currentUnionID != "" && currentUnionID != larkUnionID {
+		slog.Warn("sso lark union id conflict", "user_id", user.ID, "username", user.Username, "existing_present", true, "claim_present", true)
+		h.notifyAdminsAboutSSOLarkIssue(ctx, "sso_lark_union_id_conflict", "SSO Lark Union ID conflict", fmt.Sprintf("SSO login for %s (%s) returned a lark_union_id that differs from the existing value. DBRE kept the existing value. Please verify the user mapping.", user.Username, user.Email), user)
 		return
 	}
-	if current != larkOpenID {
-		slog.Warn("sso lark recipient conflict", "user_id", user.ID, "username", user.Username, "existing_present", current != "", "claim_present", true)
-		h.notifyAdminsAboutSSOLarkIssue(ctx, "sso_lark_recipient_conflict", "SSO Lark Open ID conflict", fmt.Sprintf("SSO login for %s (%s) returned a lark_open_id that differs from the existing DBRE Lark Open ID. DBRE kept the existing value. Please verify the user mapping.", user.Username, user.Email), user)
+	updated, err := h.users.UpdateLarkUnionID(ctx, user.ID, larkUnionID)
+	if err != nil {
+		slog.Warn("sso lark union id auto-bind failed", "user_id", user.ID, "err", err)
+		return
+	}
+	if updated {
+		slog.Info("sso lark union id auto-bound", "user_id", user.ID, "username", user.Username)
+		h.logAuditContext(ctx, repository.AuditEntry{
+			ActorID:      &user.ID,
+			ActorName:    user.Username,
+			ActionType:   "sso_lark_union_id_bound",
+			ResourceType: "user",
+			ResourceID:   &user.ID,
+			Details: map[string]any{
+				"username": user.Username,
+				"source":   "oidc_claim",
+			},
+		})
 	}
 }
 

@@ -91,6 +91,8 @@ type UserDraft = {
   username: string
   email: string
   larkRecipient: string
+  larkRecipientType: 'open_id' | 'union_id'
+  larkUnionID: string
   password: string
   isActive: boolean
   authGroups: AuthGroup[]
@@ -122,6 +124,8 @@ const EMPTY_USER_DRAFT: UserDraft = {
   username: '',
   email: '',
   larkRecipient: '',
+  larkRecipientType: 'open_id',
+  larkUnionID: '',
   password: '',
   isActive: true,
   authGroups: [],
@@ -469,6 +473,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         username: detail.username,
         email: detail.email,
         larkRecipient: detail.lark_recipient,
+        larkRecipientType: detail.lark_recipient_type === 'union_id' ? 'union_id' : 'open_id',
+        larkUnionID: detail.lark_union_id ?? '',
         password: '',
         isActive: detail.is_active,
         authGroups: detail.memberships.map((membership) => membership.auth_group),
@@ -596,6 +602,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         `Username: ${userDraft.username}`,
         `Email: ${userDraft.email}`,
         `Lark Open ID: ${userDraft.larkRecipient || 'Not set'}`,
+        `Lark Recipient Type: ${formatLarkRecipientType(userDraft.larkRecipientType)}`,
+        `Lark Union ID: ${userDraft.larkUnionID || 'Not set'}`,
         `Auth Groups: ${formatAuthGroupList(userDraft.authGroups, authGroupLabelMap)}`,
         `Direct Permissions: ${formatPermissionList(userDraft.directPermissions)}`,
         `Direct DB Scope: ${formatConnectionIDs(userDraft.directDBConnectionIDs, connections)}`,
@@ -682,6 +690,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
           username: userDraft.username,
           email: userDraft.email,
           lark_recipient: userDraft.larkRecipient.trim(),
+          lark_recipient_type: userDraft.larkRecipientType,
+          lark_union_id: userDraft.larkUnionID.trim(),
           password: userDraft.password,
         })
         if (userDraft.authGroups.length > 0 || userDraft.directPermissions.length > 0 || userDraft.directDBConnectionIDs.length > 0) {
@@ -715,6 +725,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
           username?: string
           email?: string
           lark_recipient?: string
+          lark_recipient_type?: 'open_id' | 'union_id'
+          lark_union_id?: string
           password?: string
           is_active?: boolean
           auth_groups?: string[]
@@ -730,6 +742,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
           payload.username = userDraft.username
           payload.email = userDraft.email
           payload.lark_recipient = userDraft.larkRecipient.trim()
+          payload.lark_recipient_type = userDraft.larkRecipientType
+          payload.lark_union_id = userDraft.larkUnionID.trim()
           payload.is_active = userDraft.isActive
           payload.auth_groups = userDraft.authGroups
           payload.direct_permissions = userDraft.directPermissions
@@ -1493,6 +1507,32 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                           className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
                         />
                       </label>
+                      <div className="grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)]">
+                        <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                          Recipient Type
+                          <select
+                            aria-label="Lark Recipient Type"
+                            value={userDraft.larkRecipientType}
+                            onChange={(event) => setUserDraft((current) => ({ ...current, larkRecipientType: event.target.value === 'union_id' ? 'union_id' : 'open_id' }))}
+                            disabled={saving || userDrawerReadOnly}
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
+                          >
+                            <option value="open_id">Open ID</option>
+                            <option value="union_id">Union ID</option>
+                          </select>
+                        </label>
+                        <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                          Lark Union ID
+                          <input
+                            aria-label="Lark Union ID"
+                            value={userDraft.larkUnionID}
+                            onChange={(event) => setUserDraft((current) => ({ ...current, larkUnionID: event.target.value }))}
+                            disabled={saving || userDrawerReadOnly}
+                            placeholder="Enter a union_id, for example on_xxxxxxxxxxxxx"
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-60"
+                          />
+                        </label>
+                      </div>
                       <label className="grid gap-1.5 text-[12px] font-medium text-muted">
                         Password
                         <input
@@ -2077,6 +2117,13 @@ function summarizeUserChanges(
   if (draft.larkRecipient !== original.lark_recipient) {
     lines.push(`Lark Open ID: ${original.lark_recipient || 'Not set'} -> ${draft.larkRecipient || 'Not set'}`)
   }
+  const originalLarkRecipientType = original.lark_recipient_type === 'union_id' ? 'union_id' : 'open_id'
+  if (draft.larkRecipientType !== originalLarkRecipientType) {
+    lines.push(`Lark Recipient Type: ${formatLarkRecipientType(original.lark_recipient_type)} -> ${formatLarkRecipientType(draft.larkRecipientType)}`)
+  }
+  if (draft.larkUnionID !== (original.lark_union_id ?? '')) {
+    lines.push(`Lark Union ID: ${original.lark_union_id || 'Not set'} -> ${draft.larkUnionID || 'Not set'}`)
+  }
   if (draft.password.trim()) {
     lines.push('Password: updated')
   }
@@ -2094,6 +2141,10 @@ function summarizeUserChanges(
   }
 
   return lines
+}
+
+function formatLarkRecipientType(value: 'open_id' | 'union_id' | undefined) {
+  return value === 'union_id' ? 'Union ID' : 'Open ID'
 }
 
 function canManageProtectedAccess(user: CurrentUser | null) {

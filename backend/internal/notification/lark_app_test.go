@@ -63,6 +63,52 @@ func TestSendToRecipientUsesOpenID(t *testing.T) {
 	}
 }
 
+func TestSendToRecipientTypeUsesUnionID(t *testing.T) {
+	var seenMessageRequest bool
+
+	client := NewClient(Config{
+		Mode:      ModeApp,
+		AppID:     "cli_test",
+		AppSecret: "secret_test",
+	})
+	client.http = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch {
+			case req.URL.String() == "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal":
+				return jsonResponse(http.StatusOK, `{"code":0,"tenant_access_token":"tenant-token","expire":7200}`), nil
+			case strings.HasPrefix(req.URL.String(), "https://open.larksuite.com/open-apis/im/v1/messages"):
+				seenMessageRequest = true
+				if got := req.URL.Query().Get("receive_id_type"); got != "union_id" {
+					t.Fatalf("receive_id_type = %q, want union_id", got)
+				}
+				body, err := io.ReadAll(req.Body)
+				if err != nil {
+					t.Fatalf("read request body: %v", err)
+				}
+				payload := string(body)
+				if !strings.Contains(payload, `"receive_id":"on_test_recipient"`) {
+					t.Fatalf("receive_id payload mismatch: %s", payload)
+				}
+				return jsonResponse(http.StatusOK, `{"code":0,"msg":"success"}`), nil
+			default:
+				t.Fatalf("unexpected request: %s", req.URL.String())
+				return nil, nil
+			}
+		}),
+	}
+
+	result := client.SendToRecipientType(context.Background(), "union_id", "on_test_recipient", Message{Title: "ticket", Body: "hello"})
+	if result.Err != nil {
+		t.Fatalf("expected success, got error: %v", result.Err)
+	}
+	if result.Attempts != 1 {
+		t.Fatalf("Attempts = %d, want 1", result.Attempts)
+	}
+	if !seenMessageRequest {
+		t.Fatal("expected message request to be sent")
+	}
+}
+
 func TestSendToRecipientRefreshesInvalidTenantToken(t *testing.T) {
 	var tokenRequests int
 	var messageRequests int

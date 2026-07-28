@@ -47,6 +47,7 @@ type SSOIdentityInput struct {
 	Email        string
 	DisplayName  string
 	LarkOpenID   string
+	LarkUnionID  string
 	PasswordHash string
 }
 
@@ -104,16 +105,16 @@ func (r *UserRepo) BindExternalIdentity(ctx context.Context, userID uint64, prov
 	return err
 }
 
-func (r *UserRepo) UpdateLarkRecipientIfEmpty(ctx context.Context, userID uint64, larkRecipient string) (bool, error) {
-	larkRecipient = strings.TrimSpace(larkRecipient)
-	if larkRecipient == "" {
+func (r *UserRepo) UpdateLarkUnionID(ctx context.Context, userID uint64, larkUnionID string) (bool, error) {
+	larkUnionID = strings.TrimSpace(larkUnionID)
+	if larkUnionID == "" {
 		return false, nil
 	}
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE users
-		SET lark_recipient = ?, updated_at = ?
-		WHERE id = ? AND lark_recipient = ''
-	`, larkRecipient, timeutil.NowUTC(), userID)
+		SET lark_union_id = ?, lark_recipient_type = 'union_id', updated_at = ?
+		WHERE id = ? AND (lark_union_id = '' OR lark_union_id = ?)
+	`, larkUnionID, timeutil.NowUTC(), userID, larkUnionID)
 	if err != nil {
 		return false, err
 	}
@@ -129,6 +130,7 @@ func (r *UserRepo) BindLarkIdentity(ctx context.Context, userID uint64, identity
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE users
 		SET lark_recipient = ?,
+		    lark_recipient_type = 'open_id',
 		    external_identity_source = 'lark',
 		    external_identity_id = ?,
 		    lark_login_open_id = ?,
@@ -156,12 +158,12 @@ func (r *UserRepo) CreateLarkDeveloper(ctx context.Context, username string, ide
 	now := timeutil.NowUTC()
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO users (
-		    username, email, lark_recipient, password,
+		    username, email, lark_recipient, lark_recipient_type, password,
 		    external_identity_source, external_identity_id, password_login_disabled,
 		    lark_login_open_id, lark_login_union_id, lark_display_name, lark_avatar_url,
 		    lark_bound_at, lark_binding_status,
 		    is_protected, is_active, created_at, updated_at
-		) VALUES (?, ?, ?, ?, 'lark', ?, 1, ?, ?, ?, ?, ?, 'bound', 0, 1, ?, ?)
+		) VALUES (?, ?, ?, 'open_id', ?, 'lark', ?, 1, ?, ?, ?, ?, ?, 'bound', 0, 1, ?, ?)
 	`, username, strings.TrimSpace(identity.Email), strings.TrimSpace(identity.OpenID), identity.PasswordHash,
 		firstNonEmptyUserValue(identity.UnionID, identity.OpenID), strings.TrimSpace(identity.OpenID), strings.TrimSpace(identity.UnionID),
 		strings.TrimSpace(identity.DisplayName), strings.TrimSpace(identity.AvatarURL), now, now, now)
@@ -190,13 +192,17 @@ func (r *UserRepo) CreateSSODeveloper(ctx context.Context, username string, iden
 	defer tx.Rollback()
 
 	now := timeutil.NowUTC()
+	larkRecipientType := "open_id"
+	if strings.TrimSpace(identity.LarkUnionID) != "" {
+		larkRecipientType = "union_id"
+	}
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO users (
-		    username, email, lark_recipient, password,
+		    username, email, lark_recipient, lark_recipient_type, lark_union_id, password,
 		    external_identity_source, external_identity_id, password_login_disabled,
 		    is_protected, is_active, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, ?, ?)
-	`, username, strings.TrimSpace(identity.Email), strings.TrimSpace(identity.LarkOpenID), identity.PasswordHash,
+		) VALUES (?, ?, '', ?, ?, ?, ?, ?, 1, 0, 1, ?, ?)
+	`, username, strings.TrimSpace(identity.Email), larkRecipientType, strings.TrimSpace(identity.LarkUnionID), identity.PasswordHash,
 		strings.TrimSpace(identity.Provider), strings.TrimSpace(identity.Subject), now, now)
 	if err != nil {
 		return nil, fmt.Errorf("create sso user: %w", err)
@@ -215,10 +221,10 @@ func (r *UserRepo) CreateSSODeveloper(ctx context.Context, username string, iden
 	return r.GetByID(ctx, uint64(id))
 }
 
-func (r *UserRepo) Create(ctx context.Context, username, email, larkRecipient, passwordHash string, isProtected bool) (*model.User, error) {
+func (r *UserRepo) Create(ctx context.Context, username, email, larkRecipient, larkRecipientType, larkUnionID, passwordHash string, isProtected bool) (*model.User, error) {
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO users (username, email, lark_recipient, password, is_protected, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-		username, email, larkRecipient, passwordHash, isProtected, timeutil.NowUTC(), timeutil.NowUTC(),
+		`INSERT INTO users (username, email, lark_recipient, lark_recipient_type, lark_union_id, password, is_protected, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+		username, email, strings.TrimSpace(larkRecipient), normalizeLarkRecipientType(larkRecipientType), strings.TrimSpace(larkUnionID), passwordHash, isProtected, timeutil.NowUTC(), timeutil.NowUTC(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
@@ -676,13 +682,20 @@ func (r *UserRepo) ListDirectDBConnectionIDs(ctx context.Context, userID uint64)
 	return ids, err
 }
 
-// Update patches username, email, and lark recipient. Call separately to update password hash.
-func (r *UserRepo) Update(ctx context.Context, id uint64, username, email, larkRecipient string) error {
+// Update patches username, email, and lark notification recipient. Call separately to update password hash.
+func (r *UserRepo) Update(ctx context.Context, id uint64, username, email, larkRecipient, larkRecipientType, larkUnionID string) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE users SET username=?, email=?, lark_recipient=?, updated_at=? WHERE id=?`,
-		username, email, larkRecipient, timeutil.NowUTC(), id,
+		`UPDATE users SET username=?, email=?, lark_recipient=?, lark_recipient_type=?, lark_union_id=?, updated_at=? WHERE id=?`,
+		username, email, strings.TrimSpace(larkRecipient), normalizeLarkRecipientType(larkRecipientType), strings.TrimSpace(larkUnionID), timeutil.NowUTC(), id,
 	)
 	return err
+}
+
+func normalizeLarkRecipientType(value string) string {
+	if strings.TrimSpace(value) == "union_id" {
+		return "union_id"
+	}
+	return "open_id"
 }
 
 func (r *UserRepo) UpdateActive(ctx context.Context, id uint64, isActive bool) error {
