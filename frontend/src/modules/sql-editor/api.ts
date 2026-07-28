@@ -42,8 +42,8 @@ type QueryConstraintsResponse = {
   postgres_statement_timeout_ms: number
 }
 
-export function executeQuery(payload: QueryPayload): Promise<QueryResult> {
-  return apiClient.post<QueryResult>('/query', payload).then((response) => ({
+export function executeQuery(payload: QueryPayload, signal?: AbortSignal): Promise<QueryResult> {
+  return apiClient.post<QueryResult>('/query', payload, { signal }).then((response) => ({
     ...response,
     columns: Array.isArray(response.columns) ? response.columns : [],
     raw_columns: Array.isArray(response.raw_columns) ? response.raw_columns : [],

@@ -18,6 +18,8 @@ import {
   Play,
   Plus,
   RefreshCw,
+  ShieldAlert,
+  Square,
   Star,
   StarOff,
   Table2,
@@ -60,6 +62,11 @@ import {
   getSQLEditorWorkspaceSnapshot,
   saveSQLEditorWorkspaceSnapshot,
 } from '@/modules/sql-editor/workspaceMemory'
+
+const IS_MAC_PLATFORM = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
+const RUN_QUERY_SHORTCUT_LABEL = IS_MAC_PLATFORM ? '⌘+↵' : 'Ctrl+↵'
+const EXPLAIN_SHORTCUT_LABEL = IS_MAC_PLATFORM ? '⌘+E' : 'Ctrl+E'
+const FORMAT_SHORTCUT_LABEL = IS_MAC_PLATFORM ? '⌘+⇧+F' : 'Ctrl+Shift+F'
 
 type EditorTab = {
   id: string
@@ -1115,15 +1122,35 @@ function filterAssetTree(nodes: AssetTreeNode[], searchTerm: string): AssetTreeN
   })
 }
 
+async function copyToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+    return false
+  }
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function AssetTree({
   nodes,
   onSelect,
   onToggle,
+  onCopied,
 }: {
   nodes: AssetTreeNode[]
   onSelect: (node: AssetTreeNode) => void
   onToggle: (node: AssetTreeNode) => void
+  onCopied: (x: number, y: number) => void
 }) {
+  async function copyNodeLabel(label: string, x: number, y: number) {
+    if (await copyToClipboard(label)) {
+      onCopied(x, y)
+    }
+  }
+
   function iconForNode(node: AssetTreeNode) {
     if (node.kind === 'connection') {
       return <Workflow className="h-3.5 w-3.5" />
@@ -1144,7 +1171,10 @@ function AssetTree({
     const hasChildren = node.children.length > 0
     const canExpand = node.kind !== 'table' && node.kind !== 'redis_db'
     const paddingLeft = 8 + depth * 14
-    const handleNodeClick = () => {
+    const handleNodeClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+      const x = event.clientX
+      const y = event.clientY
+      void copyNodeLabel(node.label, x, y)
       if (canExpand) {
         onSelect(node)
         onToggle(node)
@@ -1184,6 +1214,25 @@ export function SQLEditorPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { pushToast } = useToast()
+  const [copiedIndicator, setCopiedIndicator] = useState<{ x: number; y: number } | null>(null)
+  const copiedIndicatorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showCopiedIndicator = useCallback((x: number, y: number) => {
+    if (copiedIndicatorTimeoutRef.current !== null) {
+      clearTimeout(copiedIndicatorTimeoutRef.current)
+    }
+    setCopiedIndicator({ x, y })
+    copiedIndicatorTimeoutRef.current = setTimeout(() => {
+      setCopiedIndicator(null)
+      copiedIndicatorTimeoutRef.current = null
+    }, 600)
+  }, [])
+  useEffect(() => {
+    return () => {
+      if (copiedIndicatorTimeoutRef.current !== null) {
+        clearTimeout(copiedIndicatorTimeoutRef.current)
+      }
+    }
+  }, [])
   const workspaceOwnerKey = user ? String(user.id) : ''
   const initialWorkspaceRef = useRef<SQLEditorWorkspaceDraft | null>(null)
   if (!initialWorkspaceRef.current) {
@@ -1211,6 +1260,7 @@ export function SQLEditorPage() {
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
   const [queryConstraints, setQueryConstraints] = useState(DEFAULT_QUERY_CONSTRAINTS)
   const [runningTabIDs, setRunningTabIDs] = useState<string[]>([])
+  const runningControllersRef = useRef<Map<string, AbortController>>(new Map())
   const [exportingTabIDs, setExportingTabIDs] = useState<string[]>([])
   const [sensitiveAccessTabIDs, setSensitiveAccessTabIDs] = useState<string[]>([])
   const [savedQueryToDelete, setSavedQueryToDelete] = useState<SavedQuery | null>(null)
@@ -1910,12 +1960,14 @@ export function SQLEditorPage() {
     const tabSnapshot = activeTab
     const connectionSnapshot = activeConnection
 
+    const controller = new AbortController()
+    runningControllersRef.current.set(tabID, controller)
     setRunningTabIDs((current) => (current.includes(tabID) ? current : [...current, tabID]))
     updateTabByID(tabID, { error: '' })
 
     try {
       const finalSQL = mode === 'explain' ? buildExplainSQL(sqlToExecute) : sqlToExecute
-      const result = await executeQuery(buildQueryPayload(tabSnapshot, finalSQL, connectionSnapshot ?? null))
+      const result = await executeQuery(buildQueryPayload(tabSnapshot, finalSQL, connectionSnapshot ?? null), controller.signal)
 
       updateTabByID(tabID, {
         result,
@@ -1930,6 +1982,11 @@ export function SQLEditorPage() {
       void listQueryHistory(HISTORY_LIMIT).then((response) => setHistory(response.history)).catch(() => undefined)
       pushToast(mode === 'explain' ? 'Explain completed.' : 'Query completed.', 'success')
     } catch (error) {
+      if (controller.signal.aborted) {
+        updateTabByID(tabID, { error: '' })
+        pushToast('Query stopped.', 'info')
+        return
+      }
       const message = error instanceof ApiError || error instanceof Error ? error.message : 'Query execution failed.'
       updateTabByID(tabID, {
         error: message,
@@ -1946,6 +2003,7 @@ export function SQLEditorPage() {
         }))
       }
     } finally {
+      runningControllersRef.current.delete(tabID)
       setRunningTabIDs((current) => current.filter((id) => id !== tabID))
     }
   }
@@ -1956,6 +2014,13 @@ export function SQLEditorPage() {
 
   async function handleExplainQuery() {
     await executeEditorSQL('explain')
+  }
+
+  function handleStopQuery() {
+    if (!activeTab) {
+      return
+    }
+    runningControllersRef.current.get(activeTab.id)?.abort()
   }
 
   function openQueryAccessTicket() {
@@ -2431,6 +2496,26 @@ export function SQLEditorPage() {
                 return true
               }
               void handleRunQuery()
+              return true
+            },
+          },
+          {
+            key: 'Mod-e',
+            run: () => {
+              if (activeTabRunning || !activeTab?.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())) {
+                return true
+              }
+              void handleExplainQuery()
+              return true
+            },
+          },
+          {
+            key: 'Mod-Shift-f',
+            run: () => {
+              if (!activeTab?.sql.trim()) {
+                return true
+              }
+              handleFormatSQL()
               return true
             },
           },
@@ -2925,7 +3010,16 @@ export function SQLEditorPage() {
                                   <button
                                     key={connection.id}
                                     type="button"
-                                    onClick={() => handleSelectConnection(connection)}
+                                    onClick={(event) => {
+                                      const x = event.clientX
+                                      const y = event.clientY
+                                      void copyToClipboard(connection.name).then((copied) => {
+                                        if (copied) {
+                                          showCopiedIndicator(x, y)
+                                        }
+                                      })
+                                      handleSelectConnection(connection)
+                                    }}
                                     className={`flex w-full items-center rounded-md px-2.5 py-2 text-left text-[12px] ${
                                       selected
                                         ? 'bg-panel-soft text-ink ring-1 ring-border'
@@ -2992,6 +3086,7 @@ export function SQLEditorPage() {
                     nodes={renderedExplorerNodes}
                     onSelect={handleSelectNode}
                     onToggle={(node) => void handleToggleNode(node)}
+                    onCopied={showCopiedIndicator}
                   />
                 )}
               </div>
@@ -3014,26 +3109,45 @@ export function SQLEditorPage() {
                       type="button"
                       onClick={handleFormatSQL}
                       disabled={!activeTab.sql.trim()}
-                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-black transition hover:bg-page disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-white"
                     >
                       Format
+                      <span aria-hidden="true" className="text-[11px] font-normal text-black">{FORMAT_SHORTCUT_LABEL}</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleExplainQuery}
                       disabled={!canQuery || activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
-                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-black transition hover:bg-page disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-white"
                     >
-                      {activeTabRunning ? 'Running...' : 'Explain'}
+                      {activeTabRunning ? 'Running...' : (
+                        <>
+                          Explain
+                          <span aria-hidden="true" className="text-[11px] font-normal text-black">{EXPLAIN_SHORTCUT_LABEL}</span>
+                        </>
+                      )}
                     </button>
                     <button
                       type="button"
-                      onClick={handleRunQuery}
-                      disabled={!canQuery || activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
-                      className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={activeTabRunning ? handleStopQuery : handleRunQuery}
+                      disabled={!activeTabRunning && (!canQuery || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim()))}
+                      title={activeTabRunning ? 'Stop the running query' : undefined}
+                      className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-[13px] font-bold text-white transition disabled:cursor-not-allowed disabled:bg-border disabled:text-faint ${
+                        activeTabRunning ? 'bg-danger hover:bg-red-700' : 'bg-brand hover:bg-slate-800'
+                      }`}
                     >
-                      <Play className="h-4 w-4" />
-                      {activeTabRunning ? 'Running...' : 'Run Query'}
+                      {activeTabRunning ? (
+                        <>
+                          <Square className="h-3.5 w-3.5" />
+                          Stop
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-4 w-4" />
+                          Run
+                          <span aria-hidden="true" className="text-[11px] font-medium text-white">{RUN_QUERY_SHORTCUT_LABEL}</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -3399,9 +3513,20 @@ export function SQLEditorPage() {
                           {visibleResultColumnIndexes.map((columnIndex) => (
                             <DataTableHeaderCell
                               key={`${activeTab.result?.columns[columnIndex]}-${columnIndex}`}
-                              className={sensitiveColumnIndexSet.has(columnIndex) ? 'text-[#b9381f]' : ''}
                             >
-                              {activeTab.result?.columns[columnIndex]}
+                              {sensitiveColumnIndexSet.has(columnIndex) ? (
+                                <span className="group/sensitive relative inline-flex items-center gap-1 text-[#b9381f]">
+                                  {activeTab.result?.columns[columnIndex]}
+                                  <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-warning" />
+                                  <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white shadow-lg group-hover/sensitive:block">
+                                    Sensitive column
+                                  </span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1">
+                                  {activeTab.result?.columns[columnIndex]}
+                                </span>
+                              )}
                             </DataTableHeaderCell>
                           ))}
                         </tr>
@@ -3686,6 +3811,14 @@ export function SQLEditorPage() {
           }
         }}
       />
+      {copiedIndicator ? (
+        <div
+          className="pointer-events-none fixed z-50 -translate-y-1/2 rounded-md bg-ink px-2 py-1 text-[11px] font-semibold text-white shadow-lg"
+          style={{ left: copiedIndicator.x + 14, top: copiedIndicator.y }}
+        >
+          Copied
+        </div>
+      ) : null}
     </div>
   )
 }

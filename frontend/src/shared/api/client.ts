@@ -147,10 +147,11 @@ export const apiClient = {
 
     return response
   },
-  post: <T>(path: string, body?: unknown) =>
+  post: <T>(path: string, body?: unknown, options?: { signal?: AbortSignal }) =>
     request<T>(path, {
       method: 'POST',
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: options?.signal,
     }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, {
