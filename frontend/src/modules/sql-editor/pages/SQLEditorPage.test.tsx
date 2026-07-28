@@ -356,6 +356,79 @@ describe('SQLEditorPage', () => {
     expect(screen.getByText('No query has been executed yet.')).toBeInTheDocument()
   })
 
+  it('點擊集群/庫名/表名節點時，同時展開並把名稱複製到剪貼簿', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+
+    mockedListMetadata.mockImplementation(async (_connectionID, params) => {
+      if (params?.database) {
+        return {
+          db_type: 'mysql',
+          level: 'table',
+          database: params.database,
+          items: [
+            {
+              kind: 'table',
+              database: params.database,
+              schema: params.database,
+              name: 'tickets',
+              engine: 'InnoDB',
+              row_count: 12,
+              data_size_bytes: 1024,
+              index_size_bytes: 512,
+              comment: '',
+            },
+          ],
+        }
+      }
+
+      return {
+        db_type: 'mysql',
+        level: 'database',
+        items: [
+          { kind: 'database', name: 'maestro' },
+        ],
+      }
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run Query' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+
+    // Selecting a connection from the picker list also copies its name, and
+    // shows a bare "Copied" indicator positioned next to the click, not a
+    // bottom-right toast with the object name baked in.
+    fireEvent.click(screen.getByText('Primary MySQL'), { clientX: 100, clientY: 200 })
+    expect(await screen.findByText('maestro')).toBeInTheDocument()
+    expect(writeText).toHaveBeenNthCalledWith(1, 'Primary MySQL')
+    const firstIndicator = await screen.findByText('Copied')
+    expect(firstIndicator.style.left).toBe('114px')
+    expect(firstIndicator.style.top).toBe('200px')
+
+    // Clicking the database node (an AssetTree node) both expands it (table
+    // node appears) and copies its label — the two happen together.
+    fireEvent.click(screen.getByText('maestro'), { clientX: 50, clientY: 60 })
+    expect(await screen.findByText('tickets')).toBeInTheDocument()
+    expect(writeText).toHaveBeenNthCalledWith(2, 'maestro')
+    const secondIndicator = await screen.findByText('Copied')
+    expect(secondIndicator.style.left).toBe('64px')
+    expect(secondIndicator.style.top).toBe('60px')
+
+    // Table nodes don't expand (no children), but the click still copies.
+    fireEvent.click(screen.getByText('tickets'))
+    expect(writeText).toHaveBeenNthCalledWith(3, 'tickets')
+    expect(await screen.findByText('Copied')).toBeInTheDocument()
+
+    vi.unstubAllGlobals()
+  })
+
   it('access token 更新時不應清空 SQL Editor workspace', async () => {
     let accessToken = 'token-before-refresh'
     mockedUseAuth.mockImplementation(() => ({

@@ -1115,15 +1115,35 @@ function filterAssetTree(nodes: AssetTreeNode[], searchTerm: string): AssetTreeN
   })
 }
 
+async function copyToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+    return false
+  }
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function AssetTree({
   nodes,
   onSelect,
   onToggle,
+  onCopied,
 }: {
   nodes: AssetTreeNode[]
   onSelect: (node: AssetTreeNode) => void
   onToggle: (node: AssetTreeNode) => void
+  onCopied: (x: number, y: number) => void
 }) {
+  async function copyNodeLabel(label: string, x: number, y: number) {
+    if (await copyToClipboard(label)) {
+      onCopied(x, y)
+    }
+  }
+
   function iconForNode(node: AssetTreeNode) {
     if (node.kind === 'connection') {
       return <Workflow className="h-3.5 w-3.5" />
@@ -1144,7 +1164,10 @@ function AssetTree({
     const hasChildren = node.children.length > 0
     const canExpand = node.kind !== 'table' && node.kind !== 'redis_db'
     const paddingLeft = 8 + depth * 14
-    const handleNodeClick = () => {
+    const handleNodeClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+      const x = event.clientX
+      const y = event.clientY
+      void copyNodeLabel(node.label, x, y)
       if (canExpand) {
         onSelect(node)
         onToggle(node)
@@ -1184,6 +1207,25 @@ export function SQLEditorPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { pushToast } = useToast()
+  const [copiedIndicator, setCopiedIndicator] = useState<{ x: number; y: number } | null>(null)
+  const copiedIndicatorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showCopiedIndicator = useCallback((x: number, y: number) => {
+    if (copiedIndicatorTimeoutRef.current !== null) {
+      clearTimeout(copiedIndicatorTimeoutRef.current)
+    }
+    setCopiedIndicator({ x, y })
+    copiedIndicatorTimeoutRef.current = setTimeout(() => {
+      setCopiedIndicator(null)
+      copiedIndicatorTimeoutRef.current = null
+    }, 600)
+  }, [])
+  useEffect(() => {
+    return () => {
+      if (copiedIndicatorTimeoutRef.current !== null) {
+        clearTimeout(copiedIndicatorTimeoutRef.current)
+      }
+    }
+  }, [])
   const workspaceOwnerKey = user ? String(user.id) : ''
   const initialWorkspaceRef = useRef<SQLEditorWorkspaceDraft | null>(null)
   if (!initialWorkspaceRef.current) {
@@ -2925,7 +2967,16 @@ export function SQLEditorPage() {
                                   <button
                                     key={connection.id}
                                     type="button"
-                                    onClick={() => handleSelectConnection(connection)}
+                                    onClick={(event) => {
+                                      const x = event.clientX
+                                      const y = event.clientY
+                                      void copyToClipboard(connection.name).then((copied) => {
+                                        if (copied) {
+                                          showCopiedIndicator(x, y)
+                                        }
+                                      })
+                                      handleSelectConnection(connection)
+                                    }}
                                     className={`flex w-full items-center rounded-md px-2.5 py-2 text-left text-[12px] ${
                                       selected
                                         ? 'bg-panel-soft text-ink ring-1 ring-border'
@@ -2992,6 +3043,7 @@ export function SQLEditorPage() {
                     nodes={renderedExplorerNodes}
                     onSelect={handleSelectNode}
                     onToggle={(node) => void handleToggleNode(node)}
+                    onCopied={showCopiedIndicator}
                   />
                 )}
               </div>
@@ -3686,6 +3738,14 @@ export function SQLEditorPage() {
           }
         }}
       />
+      {copiedIndicator ? (
+        <div
+          className="pointer-events-none fixed z-50 -translate-y-1/2 rounded-md bg-ink px-2 py-1 text-[11px] font-semibold text-white shadow-lg"
+          style={{ left: copiedIndicator.x + 14, top: copiedIndicator.y }}
+        >
+          Copied
+        </div>
+      ) : null}
     </div>
   )
 }
