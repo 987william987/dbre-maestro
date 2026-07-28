@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -104,8 +105,94 @@ func (r *DBConnectionRepo) List(ctx context.Context) ([]model.DBConnection, erro
 }
 
 func (r *DBConnectionRepo) Delete(ctx context.Context, id uint64) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM db_connections WHERE id = ?`, id)
-	return err
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete db_connection tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err := cleanupDBConnectionReferences(ctx, tx, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM db_connections WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete db_connection: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete db_connection tx: %w", err)
+	}
+	tx = nil
+	return nil
+}
+
+func cleanupDBConnectionReferences(ctx context.Context, tx *sqlx.Tx, connectionID uint64) error {
+	if err := removeDBConnectionFromObjectScanSettings(ctx, tx, connectionID); err != nil {
+		return err
+	}
+
+	now := timeutil.NowUTC()
+	statements := []struct {
+		query string
+		args  []any
+		label string
+	}{
+		{query: `DELETE FROM db_connection_credentials WHERE db_connection_id = ?`, args: []any{connectionID}, label: "db connection credentials"},
+		{query: `DELETE FROM user_db_connections WHERE db_connection_id = ?`, args: []any{connectionID}, label: "user db connection grants"},
+		{query: `DELETE FROM auth_group_db_connections WHERE db_connection_id = ?`, args: []any{connectionID}, label: "auth group db connection grants"},
+		{query: `DELETE FROM db_object_snapshots WHERE db_connection_id = ?`, args: []any{connectionID}, label: "db object snapshots"},
+		{query: `DELETE FROM masking_whitelist WHERE db_connection_id = ?`, args: []any{connectionID}, label: "masking whitelist"},
+		{query: `DELETE FROM masking_rules WHERE db_connection_id = ?`, args: []any{connectionID}, label: "masking rules"},
+		{query: `DELETE FROM redis_sensitive_key_prefixes WHERE db_connection_id = ?`, args: []any{connectionID}, label: "redis sensitive key prefixes"},
+		{query: `DELETE FROM query_access_rules WHERE connection_id = ?`, args: []any{connectionID}, label: "query access rules"},
+		{query: `DELETE FROM query_access_grants WHERE connection_id = ?`, args: []any{connectionID}, label: "legacy query access grants"},
+		{query: `DELETE FROM scheduled_sql_report_runs WHERE report_id IN (SELECT id FROM scheduled_sql_reports WHERE db_connection_id = ?)`, args: []any{connectionID}, label: "scheduled sql report runs"},
+		{query: `DELETE FROM scheduled_sql_reports WHERE db_connection_id = ?`, args: []any{connectionID}, label: "scheduled sql reports"},
+		{query: `UPDATE workflow_rules SET db_connection_id = NULL, updated_at = ? WHERE db_connection_id = ?`, args: []any{now, connectionID}, label: "workflow rules"},
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			return fmt.Errorf("cleanup %s for db_connection %d: %w", statement.label, connectionID, err)
+		}
+	}
+	return nil
+}
+
+func removeDBConnectionFromObjectScanSettings(ctx context.Context, tx *sqlx.Tx, connectionID uint64) error {
+	var raw string
+	err := tx.GetContext(ctx, &raw, `SELECT value FROM platform_settings WHERE key_name = ?`, settingDBMetadataObjectConnectionIDs)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load object scan connection setting: %w", err)
+	}
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+
+	var items []uint64
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return fmt.Errorf("decode object scan connection setting: %w", err)
+	}
+	next := make([]uint64, 0, len(items))
+	removed := false
+	for _, item := range items {
+		if item == connectionID {
+			removed = true
+			continue
+		}
+		next = append(next, item)
+	}
+	if !removed {
+		return nil
+	}
+	if err := upsertUint64List(ctx, tx, settingDBMetadataObjectConnectionIDs, next); err != nil {
+		return fmt.Errorf("update object scan connection setting: %w", err)
+	}
+	return nil
 }
 
 // DecryptPassword decrypts the stored password for use when opening a connection pool.

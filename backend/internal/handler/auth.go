@@ -1583,6 +1583,20 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	authMethod := ""
+	authProvider := ""
+	if h.sessions != nil {
+		session, err := h.sessions.GetByID(r.Context(), middleware.SessionIDFromCtx(r.Context()))
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load session failed")
+			return
+		}
+		if session != nil {
+			authMethod = session.AuthMethod
+			authProvider = session.AuthProvider
+		}
+	}
+
 	jsonOK(w, map[string]any{
 		"id":                userID,
 		"username":          middleware.UsernameFromCtx(r.Context()),
@@ -1591,6 +1605,8 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		"auth_groups":       authGroupViews,
 		"permissions":       permissions,
 		"db_connection_ids": dbConnectionIDs,
+		"auth_method":       authMethod,
+		"auth_provider":     authProvider,
 	})
 }
 

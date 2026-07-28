@@ -68,6 +68,18 @@ func (r *SessionRepo) GetByTokenHash(ctx context.Context, hash string) (*model.S
 	return &s, err
 }
 
+func (r *SessionRepo) GetByID(ctx context.Context, id uint64) (*model.Session, error) {
+	if id == 0 {
+		return nil, nil
+	}
+	var s model.Session
+	err := r.db.GetContext(ctx, &s, `SELECT * FROM sessions WHERE id = ?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &s, err
+}
+
 func (r *SessionRepo) ListForUser(ctx context.Context, userID uint64) ([]model.Session, error) {
 	return r.ListForUserLimit(ctx, userID, 0)
 }
