@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/repository"
 )
 
@@ -43,31 +44,31 @@ func (d *Dispatcher) NotifyUsers(ctx context.Context, userIDs []uint64, msg Mess
 		return SendResult{Err: fmt.Errorf("load lark recipients failed: %w", err)}
 	}
 
-	recipients := make([]string, 0, len(users))
+	recipients := make([]larkRecipient, 0, len(users))
 	seen := make(map[string]struct{}, len(users))
 	for _, user := range users {
-		recipient := strings.TrimSpace(user.LarkRecipient)
+		recipientType, recipient := larkRecipientForUser(user)
 		if recipient == "" {
 			continue
 		}
-		key := strings.ToLower(recipient)
+		key := strings.ToLower(recipientType + ":" + recipient)
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
-		recipients = append(recipients, recipient)
+		recipients = append(recipients, larkRecipient{recipientType: recipientType, recipient: recipient})
 	}
 	if len(recipients) == 0 {
-		return SendResult{SkippedReason: "no_lark_recipient_open_id"}
+		return SendResult{SkippedReason: "no_lark_recipient"}
 	}
 
 	var failed []string
 	totalAttempts := 0
 	for _, recipient := range recipients {
-		result := client.SendToRecipient(ctx, recipient, msg)
+		result := client.SendToRecipientType(ctx, recipient.recipientType, recipient.recipient, msg)
 		totalAttempts += result.Attempts
 		if result.Err != nil {
-			failed = append(failed, fmt.Sprintf("%s: %s", recipient, result.Err.Error()))
+			failed = append(failed, fmt.Sprintf("%s:%s: %s", recipient.recipientType, recipient.recipient, result.Err.Error()))
 		}
 	}
 	if len(failed) > 0 {
@@ -95,31 +96,31 @@ func (d *Dispatcher) SendFileToUsers(ctx context.Context, userIDs []uint64, file
 	if err != nil {
 		return SendResult{Err: fmt.Errorf("load lark recipients failed: %w", err)}
 	}
-	recipients := make([]string, 0, len(users))
+	recipients := make([]larkRecipient, 0, len(users))
 	seen := make(map[string]struct{}, len(users))
 	for _, user := range users {
-		recipient := strings.TrimSpace(user.LarkRecipient)
+		recipientType, recipient := larkRecipientForUser(user)
 		if recipient == "" {
 			continue
 		}
-		key := strings.ToLower(recipient)
+		key := strings.ToLower(recipientType + ":" + recipient)
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
-		recipients = append(recipients, recipient)
+		recipients = append(recipients, larkRecipient{recipientType: recipientType, recipient: recipient})
 	}
 	if len(recipients) == 0 {
-		return SendResult{SkippedReason: "no_lark_recipient_open_id"}
+		return SendResult{SkippedReason: "no_lark_recipient"}
 	}
 
 	var failed []string
 	totalAttempts := 0
 	for _, recipient := range recipients {
-		result := client.SendFileToRecipient(ctx, recipient, filename, data)
+		result := client.SendFileToRecipientType(ctx, recipient.recipientType, recipient.recipient, filename, data)
 		totalAttempts += result.Attempts
 		if result.Err != nil {
-			failed = append(failed, fmt.Sprintf("%s: %s", recipient, result.Err.Error()))
+			failed = append(failed, fmt.Sprintf("%s:%s: %s", recipient.recipientType, recipient.recipient, result.Err.Error()))
 		}
 	}
 	if len(failed) > 0 {
@@ -129,6 +130,18 @@ func (d *Dispatcher) SendFileToUsers(ctx context.Context, userIDs []uint64, file
 		}
 	}
 	return SendResult{Attempts: totalAttempts}
+}
+
+type larkRecipient struct {
+	recipientType string
+	recipient     string
+}
+
+func larkRecipientForUser(user model.User) (string, string) {
+	if strings.TrimSpace(user.LarkRecipientType) == "union_id" {
+		return "union_id", strings.TrimSpace(user.LarkUnionID)
+	}
+	return "open_id", strings.TrimSpace(user.LarkRecipient)
 }
 
 func (d *Dispatcher) resolveClient(ctx context.Context) (*Client, Mode, error) {

@@ -19,6 +19,8 @@ type Identity struct {
 	EmailVerifiedClaimPresent bool
 	Name                      string
 	LarkOpenID                string
+	LarkUnionID               string
+	LarkTenantKey             string
 	RawClaims                 map[string]any
 }
 
@@ -148,6 +150,8 @@ func (c HTTPClient) fetchUserinfo(ctx context.Context, endpoint string, accessTo
 		EmailVerifiedClaimPresent: emailVerifiedPresent,
 		Name:                      claimString(claims, "name"),
 		LarkOpenID:                claimString(claims, "lark_open_id"),
+		LarkUnionID:               claimString(claims, "lark_union_id"),
+		LarkTenantKey:             claimString(claims, "lark_tenant_key"),
 		RawClaims:                 claims,
 	}
 	if identity.Subject == "" {

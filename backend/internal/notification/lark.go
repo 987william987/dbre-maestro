@@ -120,6 +120,12 @@ func (c *Client) Send(ctx context.Context, msg Message) SendResult {
 
 // SendToRecipient sends an app message to a Lark open_id recipient.
 func (c *Client) SendToRecipient(ctx context.Context, recipient string, msg Message) SendResult {
+	return c.SendToRecipientType(ctx, "open_id", recipient, msg)
+}
+
+// SendToRecipientType sends an app message to a Lark recipient using receive_id_type.
+func (c *Client) SendToRecipientType(ctx context.Context, recipientType string, recipient string, msg Message) SendResult {
+	recipientType = normalizeReceiveIDType(recipientType)
 	recipient = strings.TrimSpace(recipient)
 	if recipient == "" {
 		return SendResult{}
@@ -138,7 +144,7 @@ func (c *Client) SendToRecipient(ctx context.Context, recipient string, msg Mess
 			}
 		}
 
-		status, err := c.postAppMessage(ctx, "open_id", recipient, msg)
+		status, err := c.postAppMessage(ctx, recipientType, recipient, msg)
 		if err != nil {
 			var apiErr *larkAPIError
 			if errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 {
@@ -173,7 +179,21 @@ func (c *Client) SendToRecipient(ctx context.Context, recipient string, msg Mess
 	}
 }
 
+func normalizeReceiveIDType(value string) string {
+	switch strings.TrimSpace(value) {
+	case "union_id":
+		return "union_id"
+	default:
+		return "open_id"
+	}
+}
+
 func (c *Client) SendFileToRecipient(ctx context.Context, recipient string, filename string, data []byte) SendResult {
+	return c.SendFileToRecipientType(ctx, "open_id", recipient, filename, data)
+}
+
+func (c *Client) SendFileToRecipientType(ctx context.Context, recipientType string, recipient string, filename string, data []byte) SendResult {
+	recipientType = normalizeReceiveIDType(recipientType)
 	recipient = strings.TrimSpace(recipient)
 	if recipient == "" {
 		return SendResult{}
@@ -200,7 +220,7 @@ func (c *Client) SendFileToRecipient(ctx context.Context, recipient string, file
 			}
 			return SendResult{Attempts: attempt, Err: err}
 		}
-		if err := c.postAppFileMessage(ctx, "open_id", recipient, fileKey); err != nil {
+		if err := c.postAppFileMessage(ctx, recipientType, recipient, fileKey); err != nil {
 			if shouldRetryLarkError(err) {
 				lastErr = fmt.Errorf("attempt %d send file message: %w", attempt, err)
 				continue

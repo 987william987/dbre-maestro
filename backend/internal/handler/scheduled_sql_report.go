@@ -113,10 +113,12 @@ func (h *ScheduledSQLReportHandler) ListRecipients(w http.ResponseWriter, r *htt
 		return
 	}
 	type recipient struct {
-		ID            uint64 `json:"id"`
-		Username      string `json:"username"`
-		Email         string `json:"email"`
-		LarkRecipient string `json:"lark_recipient"`
+		ID                uint64 `json:"id"`
+		Username          string `json:"username"`
+		Email             string `json:"email"`
+		LarkRecipient     string `json:"lark_recipient"`
+		LarkRecipientType string `json:"lark_recipient_type"`
+		LarkUnionID       string `json:"lark_union_id"`
 	}
 	items := make([]recipient, 0, len(users))
 	for _, user := range users {
@@ -124,10 +126,12 @@ func (h *ScheduledSQLReportHandler) ListRecipients(w http.ResponseWriter, r *htt
 			continue
 		}
 		items = append(items, recipient{
-			ID:            user.ID,
-			Username:      user.Username,
-			Email:         user.Email,
-			LarkRecipient: user.LarkRecipient,
+			ID:                user.ID,
+			Username:          user.Username,
+			Email:             user.Email,
+			LarkRecipient:     user.LarkRecipient,
+			LarkRecipientType: normalizeLarkRecipientType(user.LarkRecipientType),
+			LarkUnionID:       user.LarkUnionID,
 		})
 	}
 	jsonOK(w, map[string]any{"users": items})

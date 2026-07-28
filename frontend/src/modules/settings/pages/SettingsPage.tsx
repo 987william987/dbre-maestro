@@ -234,7 +234,7 @@ export function SettingsPage() {
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Lark Notifications</p>
-              <p className="mt-1 text-[12px] leading-5 text-muted">Configure Lark app credentials for ticket notifications and Lark OAuth login. Directed delivery uses each user&apos;s configured Lark Open ID. Leave App Secret blank to keep the existing secret.</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Configure Lark app credentials for ticket notifications and Lark OAuth login. Directed delivery uses each user&apos;s configured Lark recipient. Leave App Secret blank to keep the existing secret.</p>
             </div>
             <div className="grid gap-4 px-4 py-4 md:grid-cols-2">
               <Field
@@ -284,7 +284,7 @@ export function SettingsPage() {
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">OIDC SSO</p>
-              <p className="mt-1 text-[12px] leading-5 text-muted">Configure a standard OIDC provider such as Authentik. Userinfo must include email and may include lark_open_id for directed Lark notifications.</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Configure a standard OIDC provider such as Authentik. Userinfo must include email and should include lark_union_id for directed Lark notifications.</p>
             </div>
             <div className="grid gap-4 px-4 py-4 md:grid-cols-2">
               <label className="flex items-center gap-2 text-[13px] font-medium text-ink">

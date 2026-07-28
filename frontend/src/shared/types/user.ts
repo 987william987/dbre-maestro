@@ -5,6 +5,8 @@ export type UserSummary = {
   username: string
   email: string
   lark_recipient: string
+  lark_recipient_type?: 'open_id' | 'union_id'
+  lark_union_id?: string
   auth_groups: AuthGroup[]
   permissions?: string[]
   direct_permissions?: string[]
@@ -29,6 +31,8 @@ export type UserDetail = {
   username: string
   email: string
   lark_recipient: string
+  lark_recipient_type?: 'open_id' | 'union_id'
+  lark_union_id?: string
   protected: boolean
   is_active: boolean
   created_at: string

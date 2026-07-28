@@ -98,7 +98,7 @@ export function ScheduledSQLReportsPage() {
     [draft.schemaName, isPostgresConnection, loadingSchemas, schemaOptions],
   )
   const recipientOptions = useMemo(
-    () => recipients.filter((recipient) => recipient.lark_recipient.trim() !== ''),
+    () => recipients.filter((recipient) => recipient.lark_recipient_type === 'union_id' ? recipient.lark_union_id.trim() !== '' : recipient.lark_recipient.trim() !== ''),
     [recipients],
   )
 
@@ -385,7 +385,7 @@ export function ScheduledSQLReportsPage() {
                   </button>
                 )
               })}
-              {recipientOptions.length === 0 ? <p className="px-2 py-4 text-[12px] text-muted">No users have Lark Open ID configured.</p> : null}
+              {recipientOptions.length === 0 ? <p className="px-2 py-4 text-[12px] text-muted">No users have Lark recipient configured.</p> : null}
             </div>
           </Field>
 
