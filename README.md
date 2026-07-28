@@ -16,7 +16,7 @@ DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL / DML /
 - `Masking Rules`：欄位脫敏規則與 Unmask Whitelist
 - `SQL Review Rules`：依資料庫類型拆分的審核規則
 - `Users / Auth Groups / Resources`：權限、DB Scope 與資源綁定反查
-- `Settings`：SQL Editor timeout、Workflow Rules、Lark 與 DB Metadata 掃描設定
+- `Settings`：SQL Editor timeout、Workflow Rules、SSO / Lark 與 DB Metadata 掃描設定
 
 ## 文件入口
 
