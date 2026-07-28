@@ -44,8 +44,6 @@ type MeResponse = {
   auth_groups: Array<CurrentUser['authGroups'][number] | CurrentAuthGroup> | null
   permissions?: string[] | null
   db_connection_ids?: number[] | null
-  auth_method?: string | null
-  auth_provider?: string | null
 }
 
 type LoginResponse = {
@@ -99,8 +97,6 @@ function normalizeMe(payload: MeResponse): CurrentUser {
     dbConnectionIds: Array.isArray(payload.db_connection_ids) ? payload.db_connection_ids.filter((item): item is number => typeof item === 'number') : [],
     protected: payload.protected === true,
     isActive: payload.is_active !== false,
-    authMethod: typeof payload.auth_method === 'string' ? payload.auth_method : '',
-    authProvider: typeof payload.auth_provider === 'string' ? payload.auth_provider : '',
   }
 }
 
