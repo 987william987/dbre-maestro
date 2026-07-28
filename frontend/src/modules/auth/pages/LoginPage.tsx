@@ -194,7 +194,8 @@ export function LoginPage() {
     )
   }
 
-  if (isAuthenticated) {
+  const hasLoginTicket = new URLSearchParams(location.search).has('lark_ticket') || new URLSearchParams(location.search).has('sso_ticket')
+  if (isAuthenticated && !hasLoginTicket) {
     const nextPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
     return <Navigate to={nextPath ?? defaultRouteForPermissions(user?.permissions ?? [])} replace />
   }

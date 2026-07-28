@@ -156,6 +156,21 @@ function getReadOnlyHeaderNotice(pathname: string, permissions: string[]) {
 const SIDEBAR_COLLAPSE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 12 9 7v10Z' fill='%2318171b'/%3E%3Cpath d='m21 12-6-5v10Z' fill='%23c7c7cc'/%3E%3C/svg%3E") 12 12, pointer`
 const SIDEBAR_EXPAND_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 12 9 7v10Z' fill='%23c7c7cc'/%3E%3Cpath d='m21 12-6-5v10Z' fill='%2318171b'/%3E%3C/svg%3E") 12 12, pointer`
 
+function formatAuthMethod(method: string | undefined, provider: string | undefined) {
+  const normalizedMethod = (method ?? '').trim().toLowerCase()
+  const normalizedProvider = (provider ?? '').trim()
+  if (normalizedMethod === 'sso') {
+    return normalizedProvider ? `SSO (${normalizedProvider})` : 'SSO'
+  }
+  if (normalizedMethod === 'lark') {
+    return 'Lark'
+  }
+  if (normalizedMethod === 'password') {
+    return 'Password'
+  }
+  return normalizedMethod || 'Unknown'
+}
+
 const PAGE_HELP = [
   {
     match: (pathname: string) => pathname === '/tickets',
@@ -542,6 +557,7 @@ export function AppShell() {
   const headerNotice = useMemo(() => {
     return getReadOnlyHeaderNotice(location.pathname, user.permissions)
   }, [location.pathname, user.permissions])
+  const authMethodLabel = useMemo(() => formatAuthMethod(user.authMethod, user.authProvider), [user.authMethod, user.authProvider])
 
   useEffect(() => {
     setExpandedNavKeys((current) => {
@@ -880,6 +896,13 @@ export function AppShell() {
                   </div>
 
                   <div className="my-1 h-px bg-border" />
+
+                  <div className="flex items-center justify-between gap-2 rounded-md px-2 py-2">
+                    <span className="shrink-0 text-[11px] font-medium text-muted">Signed in via</span>
+                    <span className="inline-flex items-center rounded-pill border border-border bg-panel-soft px-2 py-0.5 text-[10px] font-medium text-ink">
+                      {authMethodLabel}
+                    </span>
+                  </div>
 
                   <div className="flex items-center justify-between gap-2 rounded-md px-2 py-2">
                     <span className="shrink-0 text-[11px] font-medium text-muted">Auth Groups</span>

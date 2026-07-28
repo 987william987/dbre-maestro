@@ -17,6 +17,8 @@ export type CurrentUser = {
   dbConnectionIds: number[]
   protected: boolean
   isActive: boolean
+  authMethod?: string
+  authProvider?: string
 }
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
