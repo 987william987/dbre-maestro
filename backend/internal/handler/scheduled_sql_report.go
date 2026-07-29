@@ -437,7 +437,7 @@ func (h *ScheduledSQLReportHandler) executeReport(ctx context.Context, report *m
 	timeout := defaultSQLEditorTimeoutSettings()
 	ctx, cancel := context.WithTimeout(ctx, timeout.AppTimeout)
 	defer cancel()
-	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, injectLimit(report.SQLContent, scheduledSQLReportLimit, conn.DBType), queryCtx, timeout)
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, injectLimit(report.SQLContent, scheduledSQLReportLimit, conn.DBType), queryCtx, timeout, mysqlQueryExecutionOptions{})
 	if err != nil {
 		return nil, "", 0, err
 	}

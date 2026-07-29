@@ -46,6 +46,7 @@ vi.mock('@/shared/auth/AuthContext', () => ({
 }))
 
 vi.mock('@/modules/sql-editor/api', () => ({
+  cancelQueryExecution: vi.fn(),
   listQueryConnections: vi.fn(),
   getQueryConstraints: vi.fn(),
   executeQuery: vi.fn(),
@@ -65,12 +66,13 @@ vi.mock('@/modules/exports/api', () => ({
 }))
 
 import { createExportRequest } from '@/modules/exports/api'
-import { createSavedQuery, createSensitiveAccessTicket, deleteSavedQuery, executeQuery, getQueryConstraints, listMetadata, listMetadataColumns, listMetadataDefinition, listMetadataSearchIndex, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
+import { cancelQueryExecution, createSavedQuery, createSensitiveAccessTicket, deleteSavedQuery, executeQuery, getQueryConstraints, listMetadata, listMetadataColumns, listMetadataDefinition, listMetadataSearchIndex, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 
 const mockedListQueryConnections = vi.mocked(listQueryConnections)
 const mockedGetQueryConstraints = vi.mocked(getQueryConstraints)
 const mockedExecuteQuery = vi.mocked(executeQuery)
+const mockedCancelQueryExecution = vi.mocked(cancelQueryExecution)
 const mockedListMetadata = vi.mocked(listMetadata)
 const mockedListMetadataSearchIndex = vi.mocked(listMetadataSearchIndex)
 const mockedListMetadataColumns = vi.mocked(listMetadataColumns)
@@ -108,6 +110,7 @@ describe('SQLEditorPage', () => {
       logout: vi.fn(),
       clearAuth: vi.fn(),
     })
+    mockedCancelQueryExecution.mockResolvedValue({ cancel_requested: true })
 
     Object.defineProperty(window, 'localStorage', {
       value: {
@@ -540,13 +543,14 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByText('Run'))
 
     expect(await screen.findByText('Test ticket')).toBeInTheDocument()
-    expect(mockedExecuteQuery).toHaveBeenCalledWith({
+    expect(mockedExecuteQuery).toHaveBeenCalledWith(expect.objectContaining({
       db_connection_id: 1,
       sql: 'SELECT 1;',
       database: undefined,
       schema: undefined,
       redis_db_index: undefined,
-    }, expect.any(AbortSignal))
+      query_execution_id: expect.any(String),
+    }), expect.any(AbortSignal))
 
     fireEvent.click(screen.getByText('EXPORT'))
 
@@ -687,13 +691,14 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByText('Run'))
 
     await waitFor(() => {
-      expect(mockedExecuteQuery).toHaveBeenCalledWith({
+      expect(mockedExecuteQuery).toHaveBeenCalledWith(expect.objectContaining({
         db_connection_id: 1,
         sql: 'SELECT * FROM tickets;',
         database: undefined,
         schema: undefined,
         redis_db_index: undefined,
-      }, expect.any(AbortSignal))
+        query_execution_id: expect.any(String),
+      }), expect.any(AbortSignal))
     })
   })
 
@@ -754,6 +759,10 @@ describe('SQLEditorPage', () => {
 
     fireEvent.click(stopButton)
 
+    await waitFor(() => {
+      const payload = mockedExecuteQuery.mock.calls[0]?.[0] as { query_execution_id?: string }
+      expect(mockedCancelQueryExecution).toHaveBeenCalledWith(payload.query_execution_id)
+    })
     expect(await screen.findByText('Query stopped.')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Run' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
@@ -788,13 +797,14 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Explain' }))
 
     await waitFor(() => {
-      expect(mockedExecuteQuery).toHaveBeenCalledWith({
+      expect(mockedExecuteQuery).toHaveBeenCalledWith(expect.objectContaining({
         db_connection_id: 1,
         sql: 'EXPLAIN SELECT * FROM tickets;',
         database: undefined,
         schema: undefined,
         redis_db_index: undefined,
-      }, expect.any(AbortSignal))
+        query_execution_id: expect.any(String),
+      }), expect.any(AbortSignal))
     })
   })
 
@@ -1901,13 +1911,14 @@ describe('SQLEditorPage', () => {
     fireEvent.click(await screen.findByText('analytics'))
     fireEvent.click(screen.getByText('Run'))
     await waitFor(() => {
-      expect(mockedExecuteQuery).toHaveBeenLastCalledWith({
+      expect(mockedExecuteQuery).toHaveBeenLastCalledWith(expect.objectContaining({
         db_connection_id: 1,
         sql: 'SELECT 1;',
         database: 'analytics',
         schema: undefined,
         redis_db_index: undefined,
-      }, expect.any(AbortSignal))
+        query_execution_id: expect.any(String),
+      }), expect.any(AbortSignal))
     })
 
     fireEvent.click(screen.getByText('New Tab'))
@@ -1916,25 +1927,27 @@ describe('SQLEditorPage', () => {
     fireEvent.click(await screen.findByText('maestro'))
     fireEvent.click(screen.getByText('Run'))
     await waitFor(() => {
-      expect(mockedExecuteQuery).toHaveBeenLastCalledWith({
+      expect(mockedExecuteQuery).toHaveBeenLastCalledWith(expect.objectContaining({
         db_connection_id: 1,
         sql: 'SELECT 1;',
         database: 'maestro',
         schema: undefined,
         redis_db_index: undefined,
-      }, expect.any(AbortSignal))
+        query_execution_id: expect.any(String),
+      }), expect.any(AbortSignal))
     })
 
     fireEvent.click(screen.getByText('Query 1'))
     fireEvent.click(screen.getByText('Run'))
     await waitFor(() => {
-      expect(mockedExecuteQuery).toHaveBeenLastCalledWith({
+      expect(mockedExecuteQuery).toHaveBeenLastCalledWith(expect.objectContaining({
         db_connection_id: 1,
         sql: 'SELECT 1;',
         database: 'analytics',
         schema: undefined,
         redis_db_index: undefined,
-      }, expect.any(AbortSignal))
+        query_execution_id: expect.any(String),
+      }), expect.any(AbortSignal))
     })
   })
 

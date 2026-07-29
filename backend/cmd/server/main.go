@@ -39,6 +39,11 @@ const (
 func timeoutExceptLongLivedPaths(timeout time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isLongRunningRequest(r) {
+				clearRequestWriteDeadline(w, r.URL.Path)
+				next.ServeHTTP(w, r)
+				return
+			}
 			if r.URL.Path == "/api/events/stream" || isExportDownloadPath(r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
@@ -46,6 +51,31 @@ func timeoutExceptLongLivedPaths(timeout time.Duration) func(http.Handler) http.
 			chimw.Timeout(timeout)(next).ServeHTTP(w, r)
 		})
 	}
+}
+
+func isLongRunningRequest(r *http.Request) bool {
+	if r == nil || r.URL == nil {
+		return false
+	}
+	return isQueryExecutionRequest(r.Method, r.URL.Path) || isTicketExecutionRequest(r.Method, r.URL.Path)
+}
+
+func clearRequestWriteDeadline(w http.ResponseWriter, path string) {
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		slog.Warn("request write deadline clear failed", "path", path, "err", err)
+	}
+}
+
+func isQueryExecutionRequest(method, path string) bool {
+	return method == http.MethodPost && (path == "/api/query" || path == "/api/query/")
+}
+
+func isTicketExecutionRequest(method, path string) bool {
+	if method != http.MethodPost || !strings.HasPrefix(path, "/api/tickets/") || !strings.HasSuffix(path, "/execute") {
+		return false
+	}
+	ticketRef := strings.TrimSuffix(strings.TrimPrefix(path, "/api/tickets/"), "/execute")
+	return ticketRef != "" && !strings.Contains(ticketRef, "/")
 }
 
 func isExportDownloadPath(path string) bool {
@@ -463,6 +493,7 @@ func main() {
 			r.With(requireSQLEditorQuery).Get("/connections", queryH.ListConnections)
 			r.With(requireSQLEditorRead).Get("/constraints", queryH.Constraints)
 			r.With(requireSQLEditorQuery).Post("/", queryH.Execute)
+			r.With(requireSQLEditorQuery).Post("/cancel", queryH.Cancel)
 			r.With(requireSQLEditorSensitiveApply).Post("/sensitive-access", queryH.CreateSensitiveAccessTicket)
 			r.With(requireSQLEditorQuery).Get("/history", queryH.ListHistory)
 			r.With(requireSQLEditorQuery).Get("/saved-queries", queryH.ListSavedQueries)

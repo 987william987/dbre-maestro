@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/masking"
@@ -78,6 +79,7 @@ type QueryHandler struct {
 	notifications *NotificationRouter
 	appBaseURL    string
 	jwtSecret     []byte
+	activeQueries *activeMySQLQueryRegistry
 }
 
 type sqlEditorConstraintsResponse struct {
@@ -92,6 +94,94 @@ type queryExecutionContext struct {
 	DatabaseName string
 	SchemaName   string
 	RedisDBIndex *int
+}
+
+type mysqlKillDBOpener func(ctx context.Context) (*sql.DB, string, func(), error)
+
+type mysqlQueryExecutionOptions struct {
+	QueryExecutionID string
+	UserID           uint64
+	Registry         *activeMySQLQueryRegistry
+	KillDBOpener     mysqlKillDBOpener
+}
+
+type activeMySQLQuery struct {
+	UserID       uint64
+	ConnectionID uint64
+	ThreadID     uint64
+	Statement    string
+	Conn         *model.DBConnection
+	KillDBOpener mysqlKillDBOpener
+	Cancel       context.CancelFunc
+	RegisteredAt time.Time
+}
+
+type pendingMySQLQueryCancel struct {
+	UserID    uint64
+	CreatedAt time.Time
+}
+
+type activeMySQLQueryRegistry struct {
+	mu             sync.Mutex
+	queries        map[string]activeMySQLQuery
+	pendingCancels map[string]pendingMySQLQueryCancel
+}
+
+func newActiveMySQLQueryRegistry() *activeMySQLQueryRegistry {
+	return &activeMySQLQueryRegistry{
+		queries:        make(map[string]activeMySQLQuery),
+		pendingCancels: make(map[string]pendingMySQLQueryCancel),
+	}
+}
+
+func (r *activeMySQLQueryRegistry) register(queryID string, query activeMySQLQuery) bool {
+	if r == nil || strings.TrimSpace(queryID) == "" {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(time.Now())
+	if pending, ok := r.pendingCancels[queryID]; ok && pending.UserID == query.UserID {
+		delete(r.pendingCancels, queryID)
+		return true
+	}
+	r.queries[queryID] = query
+	return false
+}
+
+func (r *activeMySQLQueryRegistry) remove(queryID string) {
+	if r == nil || strings.TrimSpace(queryID) == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.queries, queryID)
+}
+
+func (r *activeMySQLQueryRegistry) cancel(queryID string, userID uint64) (activeMySQLQuery, bool) {
+	if r == nil || strings.TrimSpace(queryID) == "" {
+		return activeMySQLQuery{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(time.Now())
+	query, ok := r.queries[queryID]
+	if ok && query.UserID == userID {
+		delete(r.queries, queryID)
+		return query, true
+	}
+	if !ok {
+		r.pendingCancels[queryID] = pendingMySQLQueryCancel{UserID: userID, CreatedAt: time.Now()}
+	}
+	return activeMySQLQuery{}, false
+}
+
+func (r *activeMySQLQueryRegistry) pruneLocked(now time.Time) {
+	for queryID, pending := range r.pendingCancels {
+		if now.Sub(pending.CreatedAt) > 2*time.Minute {
+			delete(r.pendingCancels, queryID)
+		}
+	}
 }
 
 func NewQueryHandler(
@@ -129,6 +219,7 @@ func NewQueryHandler(
 		notifications: NewNotificationRouter(notifRepo, audit, users, broker, lark),
 		appBaseURL:    strings.TrimRight(appBaseURL, "/"),
 		jwtSecret:     append([]byte(nil), jwtSecret...),
+		activeQueries: newActiveMySQLQueryRegistry(),
 	}
 }
 
@@ -189,12 +280,13 @@ func (h *QueryHandler) ListConnections(w http.ResponseWriter, r *http.Request) {
 // Returns: { "columns": [...], "rows": [[...]], "row_count": N, "duration_ms": N }
 func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		DBConnectionID uint64 `json:"db_connection_id"`
-		SQL            string `json:"sql"`
-		Limit          int    `json:"limit"`
-		Database       string `json:"database"`
-		Schema         string `json:"schema"`
-		RedisDBIndex   *int   `json:"redis_db_index"`
+		DBConnectionID   uint64 `json:"db_connection_id"`
+		SQL              string `json:"sql"`
+		Limit            int    `json:"limit"`
+		Database         string `json:"database"`
+		Schema           string `json:"schema"`
+		RedisDBIndex     *int   `json:"redis_db_index"`
+		QueryExecutionID string `json:"query_execution_id"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
@@ -290,8 +382,15 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	// Inject LIMIT if not present (simple heuristic for SELECT statements)
 	execSQL := injectLimit(req.SQL, limit, conn.DBType)
 	start := time.Now()
-	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx, timeoutSettings)
+	killDBOpener := h.mysqlReadwriteKillDBOpener(conn)
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx, timeoutSettings, mysqlQueryExecutionOptions{
+		QueryExecutionID: strings.TrimSpace(req.QueryExecutionID),
+		UserID:           userID,
+		Registry:         h.activeQueries,
+		KillDBOpener:     killDBOpener,
+	})
 	if err != nil {
+		logSQLEditorQueryError(ctx, userID, conn, queryCtx, req.SQL, time.Since(start), timeoutSettings, err)
 		writeQueryExecutionError(w, err, "query", timeoutSettings.AppTimeout)
 		return
 	}
@@ -353,6 +452,81 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		"sensitive_override_active": sensitiveOverrideActive,
 		"query_context_token":       queryContextToken,
 	})
+}
+
+func (h *QueryHandler) mysqlReadwriteKillDBOpener(conn *model.DBConnection) mysqlKillDBOpener {
+	return func(ctx context.Context) (*sql.DB, string, func(), error) {
+		resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadwrite)
+		if err != nil {
+			return nil, model.DBCredentialRoleReadwrite, func() {}, err
+		}
+		driver, dsn := pool.BuildDSN(resolvedConn, password)
+		db, err := pool.Open(driver, dsn, pool.ProfileExec)
+		if err != nil {
+			return nil, model.DBCredentialRoleReadwrite, func() {}, err
+		}
+		return db, model.DBCredentialRoleReadwrite, func() { db.Close() }, nil
+	}
+}
+
+func logSQLEditorQueryError(ctx context.Context, userID uint64, conn *model.DBConnection, queryCtx queryExecutionContext, sqlText string, duration time.Duration, timeoutSettings sqlEditorTimeoutSettings, err error) {
+	attrs := []any{
+		"user_id", userID,
+		"connection_id", conn.ID,
+		"connection_name", conn.Name,
+		"db_type", conn.DBType,
+		"database", queryCtx.DatabaseName,
+		"schema", queryCtx.SchemaName,
+		"duration_ms", duration.Milliseconds(),
+		"app_timeout", timeoutSettings.AppTimeout.String(),
+		"context_err", ctx.Err(),
+		"err", err,
+		"sql", truncate(sqlText, 500),
+	}
+	if errors.Is(err, context.Canceled) {
+		slog.Info("sql editor query canceled", attrs...)
+		return
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		slog.Info("sql editor query timed out", attrs...)
+		return
+	}
+	slog.Warn("sql editor query failed", attrs...)
+}
+
+func (h *QueryHandler) Cancel(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		QueryExecutionID string `json:"query_execution_id"`
+	}
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	queryID := strings.TrimSpace(req.QueryExecutionID)
+	if queryID == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "query_execution_id is required")
+		return
+	}
+
+	userID := middleware.UserIDFromCtx(r.Context())
+	query, ok := h.activeQueries.cancel(queryID, userID)
+	if !ok {
+		jsonOK(w, map[string]any{"cancel_requested": true, "pending": true})
+		return
+	}
+	if query.KillDBOpener == nil {
+		jsonErr(w, http.StatusInternalServerError, "query cancel credential is not configured")
+		return
+	}
+
+	if query.Cancel != nil {
+		query.Cancel()
+	}
+	if err := killMySQLQuery(context.Background(), query.Conn, query.ThreadID, query.Statement, query.KillDBOpener); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "query cancel failed")
+		return
+	}
+	jsonOK(w, map[string]any{"cancel_requested": true})
 }
 
 // POST /query/sensitive-access
@@ -695,11 +869,12 @@ func executeQueryForConnection(
 	sqlStr string,
 	queryCtx queryExecutionContext,
 	timeoutSettings sqlEditorTimeoutSettings,
+	options mysqlQueryExecutionOptions,
 ) (*masking.QueryResult, error) {
 	if conn.DBType == "postgres" || conn.DBType == "postgresql" {
 		return executePostgresQuery(ctx, conn, password, db, sqlStr, queryCtx, timeoutSettings)
 	}
-	return executeSQLQuery(ctx, conn, db, sqlStr, queryCtx, timeoutSettings)
+	return executeSQLQuery(ctx, conn, db, sqlStr, queryCtx, timeoutSettings, options)
 }
 
 func executeSQLQuery(
@@ -709,6 +884,7 @@ func executeSQLQuery(
 	sqlStr string,
 	queryCtx queryExecutionContext,
 	timeoutSettings sqlEditorTimeoutSettings,
+	options mysqlQueryExecutionOptions,
 ) (*masking.QueryResult, error) {
 	pinnedConn, err := db.Conn(ctx)
 	if err != nil {
@@ -724,6 +900,7 @@ func executeSQLQuery(
 	if _, err := pinnedConn.ExecContext(ctx, fmt.Sprintf("SET SESSION max_execution_time = %d", timeoutSettings.MySQLMaxExecutionTimeMs)); err != nil {
 		return nil, err
 	}
+	threadID := currentMySQLConnectionID(ctx, pinnedConn)
 
 	statements := splitSQLStatementsForLimit(sqlStr)
 	var result *masking.QueryResult
@@ -733,7 +910,7 @@ func executeSQLQuery(
 			continue
 		}
 
-		statementResult, err := executeSingleSQLStatement(ctx, pinnedConn, conn, trimmed, queryCtx)
+		statementResult, err := executeSingleSQLStatement(ctx, pinnedConn, conn, trimmed, queryCtx, threadID, options)
 		if err != nil {
 			return nil, err
 		}
@@ -811,8 +988,33 @@ func executeSingleSQLStatement(
 	conn *model.DBConnection,
 	statement string,
 	queryCtx queryExecutionContext,
+	threadID uint64,
+	options mysqlQueryExecutionOptions,
 ) (*masking.QueryResult, error) {
-	rows, err := pinnedConn.QueryContext(ctx, statement)
+	statementCtx := ctx
+	if threadID > 0 && options.Registry != nil && options.QueryExecutionID != "" {
+		var cancel context.CancelFunc
+		statementCtx, cancel = context.WithCancel(ctx)
+		if canceled := options.Registry.register(options.QueryExecutionID, activeMySQLQuery{
+			UserID:       options.UserID,
+			ConnectionID: conn.ID,
+			ThreadID:     threadID,
+			Statement:    statement,
+			Conn:         conn,
+			KillDBOpener: options.KillDBOpener,
+			Cancel:       cancel,
+			RegisteredAt: time.Now(),
+		}); canceled {
+			cancel()
+			return nil, context.Canceled
+		}
+		defer func() {
+			options.Registry.remove(options.QueryExecutionID)
+			cancel()
+		}()
+	}
+
+	rows, err := pinnedConn.QueryContext(statementCtx, statement)
 	if err != nil {
 		return nil, err
 	}
@@ -874,6 +1076,84 @@ func executeSingleSQLStatement(
 	}
 
 	return result, nil
+}
+
+func currentMySQLConnectionID(ctx context.Context, pinnedConn *sql.Conn) uint64 {
+	var threadID uint64
+	if err := pinnedConn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&threadID); err != nil {
+		slog.Warn("sql editor mysql connection id lookup failed", "err", err)
+		return 0
+	}
+	return threadID
+}
+
+func killMySQLQuery(ctx context.Context, conn *model.DBConnection, threadID uint64, statement string, killDBOpener mysqlKillDBOpener) error {
+	if killDBOpener == nil {
+		return fmt.Errorf("mysql query kill db opener is not configured")
+	}
+	openCtx, cancelOpen := context.WithTimeout(ctx, 5*time.Second)
+	killDB, killCredentialRole, cleanup, err := killDBOpener(openCtx)
+	cancelOpen()
+	if err != nil {
+		slog.Warn("sql editor mysql query kill db open failed",
+			"connection_id", conn.ID,
+			"connection_name", conn.Name,
+			"mysql_thread_id", threadID,
+			"kill_credential_role", killCredentialRole,
+			"err", err,
+			"sql", truncate(statement, 500),
+		)
+		return err
+	}
+	defer cleanup()
+
+	killCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := killDB.ExecContext(killCtx, "CALL mysql.rds_kill_query(?)", threadID); err == nil {
+		slog.Warn("sql editor mysql query killed",
+			"connection_id", conn.ID,
+			"connection_name", conn.Name,
+			"mysql_thread_id", threadID,
+			"method", "mysql.rds_kill_query",
+			"kill_credential_role", killCredentialRole,
+			"sql", truncate(statement, 500),
+		)
+		return nil
+	} else {
+		slog.Warn("sql editor mysql query kill failed",
+			"connection_id", conn.ID,
+			"connection_name", conn.Name,
+			"mysql_thread_id", threadID,
+			"method", "mysql.rds_kill_query",
+			"kill_credential_role", killCredentialRole,
+			"err", err,
+			"sql", truncate(statement, 500),
+		)
+	}
+
+	killConnCtx, cancelKillConn := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelKillConn()
+	if _, err := killDB.ExecContext(killConnCtx, "CALL mysql.rds_kill(?)", threadID); err != nil {
+		slog.Warn("sql editor mysql connection kill failed",
+			"connection_id", conn.ID,
+			"connection_name", conn.Name,
+			"mysql_thread_id", threadID,
+			"method", "mysql.rds_kill",
+			"kill_credential_role", killCredentialRole,
+			"err", err,
+			"sql", truncate(statement, 500),
+		)
+		return err
+	}
+	slog.Warn("sql editor mysql query killed",
+		"connection_id", conn.ID,
+		"connection_name", conn.Name,
+		"mysql_thread_id", threadID,
+		"method", "mysql.rds_kill",
+		"kill_credential_role", killCredentialRole,
+		"sql", truncate(statement, 500),
+	)
+	return nil
 }
 
 func isMySQLMetadataStatement(statement string) bool {

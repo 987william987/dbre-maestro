@@ -45,6 +45,7 @@ import { SearchInput } from '@/shared/ui/SearchInput'
 import { useNavigate } from 'react-router-dom'
 import { createExportRequest } from '@/modules/exports/api'
 import {
+  cancelQueryExecution,
   createSavedQuery,
   createSensitiveAccessTicket,
   deleteSavedQuery,
@@ -245,13 +246,21 @@ function parsePixelValue(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function buildQueryPayload(tab: EditorTab, sqlText: string, connection: DBConnection | null) {
+function createQueryExecutionID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `query-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function buildQueryPayload(tab: EditorTab, sqlText: string, connection: DBConnection | null, queryExecutionID: string) {
   return {
     db_connection_id: tab.connectionId!,
     sql: sqlText,
     database: tab.database || undefined,
     schema: queryContextSchemaName(connection, tab.schema) || undefined,
     redis_db_index: connection?.db_type === 'redis' && tab.database ? Number(tab.database) : undefined,
+    query_execution_id: queryExecutionID,
   }
 }
 
@@ -1267,6 +1276,7 @@ export function SQLEditorPage() {
   const [queryConstraints, setQueryConstraints] = useState(DEFAULT_QUERY_CONSTRAINTS)
   const [runningTabIDs, setRunningTabIDs] = useState<string[]>([])
   const runningControllersRef = useRef<Map<string, AbortController>>(new Map())
+  const runningQueryExecutionIDsRef = useRef<Map<string, string>>(new Map())
   const [exportingTabIDs, setExportingTabIDs] = useState<string[]>([])
   const [sensitiveAccessTabIDs, setSensitiveAccessTabIDs] = useState<string[]>([])
   const [savedQueryToDelete, setSavedQueryToDelete] = useState<SavedQuery | null>(null)
@@ -1968,13 +1978,15 @@ export function SQLEditorPage() {
     const connectionSnapshot = activeConnection
 
     const controller = new AbortController()
+    const queryExecutionID = createQueryExecutionID()
     runningControllersRef.current.set(tabID, controller)
+    runningQueryExecutionIDsRef.current.set(tabID, queryExecutionID)
     setRunningTabIDs((current) => (current.includes(tabID) ? current : [...current, tabID]))
     updateTabByID(tabID, { error: '' })
 
     try {
       const finalSQL = mode === 'explain' ? buildExplainSQL(sqlToExecute) : sqlToExecute
-      const result = await executeQuery(buildQueryPayload(tabSnapshot, finalSQL, connectionSnapshot ?? null), controller.signal)
+      const result = await executeQuery(buildQueryPayload(tabSnapshot, finalSQL, connectionSnapshot ?? null, queryExecutionID), controller.signal)
 
       updateTabByID(tabID, {
         result,
@@ -2011,6 +2023,7 @@ export function SQLEditorPage() {
       }
     } finally {
       runningControllersRef.current.delete(tabID)
+      runningQueryExecutionIDsRef.current.delete(tabID)
       setRunningTabIDs((current) => current.filter((id) => id !== tabID))
     }
   }
@@ -2026,6 +2039,10 @@ export function SQLEditorPage() {
   function handleStopQuery() {
     if (!activeTab) {
       return
+    }
+    const queryExecutionID = runningQueryExecutionIDsRef.current.get(activeTab.id)
+    if (queryExecutionID) {
+      void cancelQueryExecution(queryExecutionID).catch(() => undefined)
     }
     runningControllersRef.current.get(activeTab.id)?.abort()
   }
