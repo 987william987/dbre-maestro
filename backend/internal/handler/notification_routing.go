@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
@@ -70,6 +71,14 @@ func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) 
 		if result.Err != nil {
 			larkStatus = "failed"
 			larkError = result.Err.Error()
+			slog.Warn("notification delivery failed",
+				"type", route.NotifType,
+				"resource_type", route.ResourceType,
+				"resource_id", route.ResourceID,
+				"recipient_count", len(recipients),
+				"attempts", larkAttempts,
+				"err", larkError,
+			)
 			r.log(ctx, repository.AuditEntry{
 				ActionType:   "notification_failure",
 				ResourceType: route.ResourceType,
@@ -93,6 +102,17 @@ func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) 
 	} else if r.lark == nil && len(recipients) > 0 {
 		larkSkippedReason = "lark_dispatcher_not_configured"
 	}
+	slog.Info("notification delivery recorded",
+		"type", route.NotifType,
+		"resource_type", route.ResourceType,
+		"resource_id", route.ResourceID,
+		"recipient_count", len(recipients),
+		"in_app_created_count", len(inAppCreated),
+		"in_app_failed_count", len(inAppFailed),
+		"lark_status", larkStatus,
+		"lark_attempts", larkAttempts,
+		"lark_skipped_reason", larkSkippedReason,
+	)
 	for _, userID := range recipients {
 		errorMessage := larkError
 		if larkStatus == "skipped" {

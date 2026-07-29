@@ -160,10 +160,18 @@ func (h *AuthHandler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	count, err := h.users.CountUsers(r.Context())
 	if err != nil {
+		slog.Warn("setup failed: count users failed", "err", err)
 		jsonErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	if count > 0 {
+		slog.Warn("setup rejected: already completed", "ip", clientIP(r))
+		h.logAudit(r, repository.AuditEntry{
+			ActorName:    "System",
+			ActionType:   "setup_admin_create_failed",
+			ResourceType: "auth",
+			Details:      map[string]any{"reason": "setup_already_completed"},
+		})
 		jsonErr(w, http.StatusConflict, "setup already completed")
 		return
 	}
@@ -179,31 +187,69 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := validatePassword(req.Password); err != nil {
+		slog.Warn("setup rejected: invalid password policy", "username", strings.TrimSpace(req.Username), "ip", clientIP(r))
+		h.logAudit(r, repository.AuditEntry{
+			ActorName:    "System",
+			ActionType:   "setup_admin_create_failed",
+			ResourceType: "auth",
+			Details:      map[string]any{"username": strings.TrimSpace(req.Username), "reason": "invalid_password_policy"},
+		})
 		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	if req.Username == "" || req.Email == "" {
+		slog.Warn("setup rejected: missing required fields", "username", strings.TrimSpace(req.Username), "email_present", strings.TrimSpace(req.Email) != "", "ip", clientIP(r))
+		h.logAudit(r, repository.AuditEntry{
+			ActorName:    "System",
+			ActionType:   "setup_admin_create_failed",
+			ResourceType: "auth",
+			Details:      map[string]any{"username": strings.TrimSpace(req.Username), "email_present": strings.TrimSpace(req.Email) != "", "reason": "missing_required_fields"},
+		})
 		jsonErr(w, http.StatusUnprocessableEntity, "username and email are required")
 		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
+		slog.Warn("setup failed: hash password failed", "username", strings.TrimSpace(req.Username), "err", err)
 		jsonErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
 	user, err := h.users.Create(r.Context(), req.Username, req.Email, "", "open_id", "", string(hash), true)
 	if err != nil {
+		slog.Warn("setup failed: create admin user failed", "username", strings.TrimSpace(req.Username), "email", strings.TrimSpace(req.Email), "err", err)
+		h.logAudit(r, repository.AuditEntry{
+			ActorName:    "System",
+			ActionType:   "setup_admin_create_failed",
+			ResourceType: "auth",
+			Details:      map[string]any{"username": strings.TrimSpace(req.Username), "email": strings.TrimSpace(req.Email), "reason": "create_user_failed"},
+		})
 		jsonErr(w, http.StatusInternalServerError, "create user failed")
 		return
 	}
 
 	// Grant admin group
 	if err := h.users.AddMembership(r.Context(), user.ID, model.AuthGroupAdmin, nil, nil); err != nil {
+		slog.Warn("setup failed: grant admin failed", "user_id", user.ID, "username", user.Username, "err", err)
+		h.logAudit(r, repository.AuditEntry{
+			ActorName:    "System",
+			ActionType:   "setup_admin_create_failed",
+			ResourceType: "auth",
+			ResourceID:   &user.ID,
+			Details:      map[string]any{"username": user.Username, "email": user.Email, "reason": "grant_admin_failed"},
+		})
 		jsonErr(w, http.StatusInternalServerError, "grant admin failed")
 		return
 	}
+	slog.Info("setup admin created", "user_id", user.ID, "username", user.Username, "email", user.Email, "ip", clientIP(r))
+	h.logAudit(r, repository.AuditEntry{
+		ActorName:    "System",
+		ActionType:   "setup_admin_create",
+		ResourceType: "user",
+		ResourceID:   &user.ID,
+		Details:      map[string]any{"username": user.Username, "email": user.Email},
+	})
 
 	jsonCreated(w, map[string]any{"id": user.ID, "username": user.Username})
 }

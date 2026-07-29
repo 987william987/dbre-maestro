@@ -640,6 +640,21 @@ func (h *QueryHandler) CreateSavedQuery(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	savedQuery.ID = id
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "saved_query_create",
+		ResourceType: "saved_query",
+		ResourceID:   &savedQuery.ID,
+		Details: map[string]any{
+			"label":            savedQuery.Label,
+			"db_connection_id": savedQuery.DBConnectionID,
+			"database":         nullableStringValue(savedQuery.DatabaseName),
+			"schema":           nullableStringValue(savedQuery.SchemaName),
+			"redis_db_index":   savedQuery.RedisDBIndex,
+		},
+		IPAddress: clientIP(r),
+	})
 
 	jsonCreated(w, savedQuery)
 }
@@ -661,6 +676,14 @@ func (h *QueryHandler) DeleteSavedQuery(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusNotFound, "saved query not found")
 		return
 	}
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "saved_query_delete",
+		ResourceType: "saved_query",
+		ResourceID:   &id,
+		IPAddress:    clientIP(r),
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

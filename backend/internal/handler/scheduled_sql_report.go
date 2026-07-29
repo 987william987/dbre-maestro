@@ -349,6 +349,7 @@ func (h *ScheduledSQLReportHandler) RunReport(ctx context.Context, report *model
 		status = "failed"
 		message := runErr.Error()
 		errMessage = &message
+		slog.Warn("scheduled sql report run failed", "report_id", report.ID, "name", report.Name, "err", message)
 		h.audit.Log(ctx, repository.AuditEntry{
 			ActorName:    "system",
 			ActionType:   "scheduled_sql_report_run_failed",
@@ -364,6 +365,14 @@ func (h *ScheduledSQLReportHandler) RunReport(ctx context.Context, report *model
 		status = "failed"
 		message := "lark dispatcher is not configured"
 		errMessage = &message
+		slog.Warn("scheduled sql report delivery failed", "report_id", report.ID, "name", report.Name, "err", message)
+		h.audit.Log(ctx, repository.AuditEntry{
+			ActorName:    "system",
+			ActionType:   "scheduled_sql_report_delivery_failed",
+			ResourceType: "scheduled_sql_report",
+			ResourceID:   &report.ID,
+			Details:      map[string]any{"name": report.Name, "error": message, "recipient_user_ids": report.RecipientUserIDs},
+		})
 		return
 	}
 	result := h.lark.SendFileToUsers(ctx, report.RecipientUserIDs, generatedFileName, csvData)
@@ -371,6 +380,7 @@ func (h *ScheduledSQLReportHandler) RunReport(ctx context.Context, report *model
 		status = "failed"
 		message := result.Err.Error()
 		errMessage = &message
+		slog.Warn("scheduled sql report delivery failed", "report_id", report.ID, "name", report.Name, "recipient_count", len(report.RecipientUserIDs), "err", message)
 		h.audit.Log(ctx, repository.AuditEntry{
 			ActorName:    "system",
 			ActionType:   "scheduled_sql_report_delivery_failed",
@@ -383,6 +393,7 @@ func (h *ScheduledSQLReportHandler) RunReport(ctx context.Context, report *model
 	if result.SkippedReason != "" {
 		status = "failed"
 		errMessage = &result.SkippedReason
+		slog.Warn("scheduled sql report delivery failed", "report_id", report.ID, "name", report.Name, "recipient_count", len(report.RecipientUserIDs), "err", result.SkippedReason)
 		h.audit.Log(ctx, repository.AuditEntry{
 			ActorName:    "system",
 			ActionType:   "scheduled_sql_report_delivery_failed",
@@ -392,6 +403,7 @@ func (h *ScheduledSQLReportHandler) RunReport(ctx context.Context, report *model
 		})
 		return
 	}
+	slog.Info("scheduled sql report run complete", "report_id", report.ID, "name", report.Name, "row_count", rowCount, "file_name", generatedFileName, "recipient_count", len(report.RecipientUserIDs))
 	h.audit.Log(ctx, repository.AuditEntry{
 		ActorName:    "system",
 		ActionType:   "scheduled_sql_report_run",
