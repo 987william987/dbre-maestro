@@ -239,6 +239,10 @@ func collectRDSInventory(ctx context.Context, client *rds.Client, region string,
 
 func collectRedisInventory(ctx context.Context, client *elasticache.Client, region string) ([]model.CloudDBInventorySnapshot, error) {
 	items := make([]model.CloudDBInventorySnapshot, 0)
+	replicationGroups, err := describeRedisReplicationGroups(ctx, client, region)
+	if err != nil {
+		return nil, err
+	}
 	paginator := elasticache.NewDescribeCacheClustersPaginator(client, &elasticache.DescribeCacheClustersInput{
 		ShowCacheNodeInfo: boolPtr(true),
 	})
@@ -267,24 +271,90 @@ func collectRedisInventory(ctx context.Context, client *elasticache.Client, regi
 			if replicationGroupID == "" {
 				replicationGroupID = valueString(cluster.CacheClusterId)
 			}
+			role := "standalone"
+			clusterEndpoint := ""
+			clusterReaderEndpoint := ""
+			if node, ok := replicationGroups[valueString(cluster.CacheClusterId)]; ok {
+				role = node.role
+				clusterEndpoint = node.clusterEndpoint()
+				clusterReaderEndpoint = node.readerEndpoint
+			}
 			items = append(items, model.CloudDBInventorySnapshot{
-				Provider:           "aws",
-				Engine:             engine,
-				Region:             region,
-				AZ:                 stringPtr(az),
-				DBIdentifier:       replicationGroupID,
-				ClusterIdentifier:  stringPtr(replicationGroupID),
-				InstanceIdentifier: stringPtr(valueString(cluster.CacheClusterId)),
-				Role:               stringPtr("primary"),
-				EngineVersion:      stringPtr(valueString(cluster.EngineVersion)),
-				InstanceClass:      stringPtr(valueString(cluster.CacheNodeType)),
-				InstanceEndpoint:   stringPtr(instanceEndpoint),
-				RawPayloadJSON:     &rawPayloadString,
-				Tags:               tags,
+				Provider:              "aws",
+				Engine:                engine,
+				Region:                region,
+				AZ:                    stringPtr(az),
+				DBIdentifier:          replicationGroupID,
+				ClusterIdentifier:     stringPtr(replicationGroupID),
+				InstanceIdentifier:    stringPtr(valueString(cluster.CacheClusterId)),
+				Role:                  stringPtr(role),
+				EngineVersion:         stringPtr(valueString(cluster.EngineVersion)),
+				InstanceClass:         stringPtr(valueString(cluster.CacheNodeType)),
+				ClusterEndpoint:       stringPtr(clusterEndpoint),
+				ClusterReaderEndpoint: stringPtr(clusterReaderEndpoint),
+				InstanceEndpoint:      stringPtr(instanceEndpoint),
+				RawPayloadJSON:        &rawPayloadString,
+				Tags:                  tags,
 			})
 		}
 	}
 	return items, nil
+}
+
+type redisReplicationNode struct {
+	role                  string
+	configurationEndpoint string
+	primaryEndpoint       string
+	readerEndpoint        string
+}
+
+func (n redisReplicationNode) clusterEndpoint() string {
+	if n.configurationEndpoint != "" {
+		return n.configurationEndpoint
+	}
+	return n.primaryEndpoint
+}
+
+func describeRedisReplicationGroups(ctx context.Context, client *elasticache.Client, region string) (map[string]redisReplicationNode, error) {
+	index := map[string]redisReplicationNode{}
+	paginator := elasticache.NewDescribeReplicationGroupsPaginator(client, &elasticache.DescribeReplicationGroupsInput{})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("describe replication groups in %s: %w", region, err)
+		}
+		for _, group := range page.ReplicationGroups {
+			if strings.TrimSpace(valueString(group.Engine)) != "redis" {
+				continue
+			}
+			mergeRedisReplicationGroup(index, group)
+		}
+	}
+	return index, nil
+}
+
+func mergeRedisReplicationGroup(index map[string]redisReplicationNode, group elasticachetypes.ReplicationGroup) {
+	configurationEndpoint := valueElastiCacheEndpointAddress(group.ConfigurationEndpoint)
+	for _, nodeGroup := range group.NodeGroups {
+		primaryEndpoint := valueElastiCacheEndpointAddress(nodeGroup.PrimaryEndpoint)
+		readerEndpoint := valueElastiCacheEndpointAddress(nodeGroup.ReaderEndpoint)
+		for _, member := range nodeGroup.NodeGroupMembers {
+			clusterID := strings.TrimSpace(valueString(member.CacheClusterId))
+			if clusterID == "" {
+				continue
+			}
+			role := strings.TrimSpace(valueString(member.CurrentRole))
+			if role == "" {
+				role = "node"
+			}
+			index[clusterID] = redisReplicationNode{
+				role:                  role,
+				configurationEndpoint: configurationEndpoint,
+				primaryEndpoint:       primaryEndpoint,
+				readerEndpoint:        firstNonEmptyRedisEndpoint(valueElastiCacheEndpointAddress(member.ReadEndpoint), readerEndpoint),
+			}
+		}
+	}
 }
 
 func rdsResourceTags(ctx context.Context, client *rds.Client, arn string) map[string]string {
@@ -393,6 +463,16 @@ func valueElastiCacheEndpointAddress(endpoint *elasticachetypes.Endpoint) string
 		return ""
 	}
 	return valueString(endpoint.Address)
+}
+
+func firstNonEmptyRedisEndpoint(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func stringPtr(value string) *string {
