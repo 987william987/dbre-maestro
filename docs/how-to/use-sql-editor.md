@@ -56,15 +56,25 @@
 
    `History` 只顯示目前登入使用者自己的最近 20 筆查詢紀錄。其他使用者的查詢紀錄不會出現在你的 SQL Editor history 中。
 
-6. 若要看執行計畫，點擊 `Explain`。
+6. 如果查詢執行太久，點擊 `Stop`。
+
+   對 MySQL connection，Stop 會送出顯式 cancel request，後端會嘗試在 DB engine 側停止同一次查詢。正常情況下：
+
+   - UI 會結束 running 狀態
+   - 查詢回應會顯示已取消
+   - MySQL processlist 不應留下同一條長時間執行的 SQL
+
+   Stop 只取消目前這次 Run Query，不會取消其他 tab、其他使用者或已經完成的查詢。
+
+7. 若要看執行計畫，點擊 `Explain`。
 
    系統會把當前 statement 包成 `EXPLAIN ...;` 後送出。若原本已是 `EXPLAIN`，就直接沿用。
 
-7. 若查詢結果需要匯出，點擊匯出相關操作並建立 export 工單。
+8. 若查詢結果需要匯出，點擊匯出相關操作並建立 export 工單。
 
    你需要 `sql_editor.export`。匯出會建立工單；敏感導出永遠需要審批，普通導出是否需要審批由 Settings 控制。
 
-8. 若查詢命中敏感欄位且需要看原值，建立 sensitive access 工單。
+9. 若查詢命中敏感欄位且需要看原值，建立 sensitive access 工單。
 
    你需要 `sql_editor.sensitive_apply`。審核通過後，批准時間內可對應 scope 看未遮罩結果。
 
@@ -73,6 +83,7 @@
 你可以用以下方式確認操作成功：
 
 - `Run Query` 後，結果區顯示 `row_count` 與 `duration`
+- `Stop` 後，MySQL 長查詢不應繼續留在 processlist
 - `Explain` 後，結果區出現執行計畫資料
 - `History` 最多顯示你自己的最近 20 筆查詢紀錄
 - `Saved queries` 可看到新收藏
@@ -98,6 +109,22 @@
 
 這三個值由 Settings 頁面控制。
 
+### Stop 後 MySQL 查詢仍在跑
+
+如果點 Stop 後，DBA 在 MySQL processlist 仍看到同一條查詢，優先確認：
+
+- DB Connection 有設定 readwrite credential
+- readwrite credential 可執行 `mysql.rds_kill_query` 與 `mysql.rds_kill`
+- App 是否部署多個 replica，且 `/api/query` 和 `/api/query/cancel` 可能被打到不同 pod
+- 反向代理或 Ingress 是否讓 `/api/query/cancel` 正常送達後端
+
+Aurora/RDS MySQL 可用以下 grant 作為參考：
+
+```sql
+GRANT EXECUTE ON PROCEDURE mysql.rds_kill_query TO '<readwrite_user>'@'%';
+GRANT EXECUTE ON PROCEDURE mysql.rds_kill TO '<readwrite_user>'@'%';
+```
+
 ### Metadata 錯誤
 
 若左側資產樹出現暫時錯誤訊息，代表 metadata 讀取失敗。前端只顯示簡短錯誤，實際細節會寫在後端日誌。
@@ -109,5 +136,6 @@
 ## 相關文件
 
 - [SQL Editor 參考](../reference/sql-editor.md)
+- [SQL Editor 查詢取消機制](../explanation/sql-editor-query-cancellation.md)
 - [Tickets](../reference/tickets.md)
 - [Masking 與 DSL](../reference/masking-and-dsl.md)

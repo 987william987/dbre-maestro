@@ -72,6 +72,8 @@ SQL Editor、Export、Scheduled Report、metadata read path 會使用 readonly c
 - PostgreSQL：不可是 superuser，不可有 server file、dangerous extension、dblink、sequence write、危險 `SECURITY DEFINER` 函式使用權
 - Redis：若存在敏感 prefix，應在平台配置 Redis sensitive key prefix，阻擋讀 value 類命令
 
+SQL Editor Stop Query 是例外中的最小例外：查詢仍使用 readonly credential；只有 MySQL cancel 會用 readwrite credential 開短連線執行 `mysql.rds_kill_query`，失敗時 fallback `mysql.rds_kill`。這個 readwrite 權限只應授予 DB Connection 的 readwrite user，不應加到 readonly user。
+
 ## Redis 的特殊設計
 
 Redis 不使用欄位級 masking，因為 Redis 資料模型不是 table/column。平台採用更簡單的策略：
@@ -111,4 +113,4 @@ admin 不豁免這個邊界。若 admin William 提交工單，需要另一位 a
 - [設定與環境變數](../reference/configuration.md)
 - [Users / RBAC](../reference/users-and-rbac.md)
 - [Masking 與 DSL](../reference/masking-and-dsl.md)
-
+- [SQL Editor 查詢取消機制](sql-editor-query-cancellation.md)

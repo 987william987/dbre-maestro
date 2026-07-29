@@ -125,6 +125,7 @@ SQL Editor 走 `query` pool profile。預設值：
 | `database` | `string` | 否 | 目標 database |
 | `schema` | `string` | 否 | PostgreSQL schema |
 | `redis_db_index` | `number` | 否 | Redis DB index |
+| `query_execution_id` | `string` | 否 | 前端產生的單次執行 ID，用於 Stop Query |
 
 回應重點：
 
@@ -134,6 +135,76 @@ SQL Editor 走 `query` pool profile。預設值：
 - `row_count`
 - `duration_ms`
 - `sensitive_column_indexes`
+
+### `POST /api/query/cancel`
+
+取消正在執行的 SQL Editor 查詢。
+
+請求欄位：
+
+| 欄位 | 型別 | 必填 | 說明 |
+|---|---|---|---|
+| `query_execution_id` | `string` | 是 | `POST /api/query` 同一次執行帶入的 ID |
+
+回應範例：
+
+```json
+{
+  "cancel_requested": true
+}
+```
+
+若 Stop 早於後端完成 MySQL thread registration，後端會先記錄 pending cancel，回應仍是 `200`：
+
+```json
+{
+  "cancel_requested": true,
+  "pending": true
+}
+```
+
+Cancel 是 user-scoped：同一個使用者只能取消自己啟動的查詢。`query_execution_id` 是不透明 ID，不應暴露 MySQL thread id 給前端。
+
+### Stop Query / MySQL Cancel
+
+SQL Editor 的 Stop Query 目前對 MySQL 有額外 DB engine kill 機制：
+
+1. 前端每次 Run Query 產生一個 `query_execution_id`。
+2. `POST /api/query` 帶入該 ID。
+3. 後端用 readonly credential 執行查詢，並在 pinned MySQL connection 上讀取 `SELECT CONNECTION_ID()`。
+4. 查詢開始前，後端把 `query_execution_id`、user id、connection id、MySQL thread id 與 cancel function 註冊到 process-local registry。
+5. 使用者點 Stop 時，前端呼叫 `POST /api/query/cancel`。
+6. 後端先 cancel app context，再用 readwrite credential 開短連線執行 MySQL kill routine。
+
+MySQL kill 順序：
+
+```sql
+CALL mysql.rds_kill_query(<thread_id>);
+```
+
+若失敗，再 fallback：
+
+```sql
+CALL mysql.rds_kill(<thread_id>);
+```
+
+這個設計讓查詢本身仍保持 readonly credential，只在取消時短暫使用 readwrite credential 執行 Aurora/RDS MySQL kill routine。
+
+Readwrite credential 需要具備：
+
+```sql
+GRANT EXECUTE ON PROCEDURE mysql.rds_kill_query TO '<readwrite_user>'@'%';
+GRANT EXECUTE ON PROCEDURE mysql.rds_kill TO '<readwrite_user>'@'%';
+```
+
+readonly credential 不需要、也不建議授予上述 routine 權限。
+
+限制：
+
+- 這個 MySQL kill 機制是 Aurora/RDS MySQL 專用。
+- PostgreSQL 目前依賴 `statement_timeout` 與 request context cancellation，沒有獨立 `pg_cancel_backend` 類 kill 流程。
+- Registry 存在於單一 app process memory。若部署多個 replica 且沒有 sticky routing，`POST /api/query/cancel` 可能打到不同 pod，導致只能記成 pending cancel 而無法立即 kill 原查詢。
+- `/api/query/cancel` 不是 long-running request，不會豁免全域 request timeout。
 
 ### `POST /api/query/sensitive-access`
 
@@ -247,6 +318,7 @@ SQL Editor 左側資產樹使用：
 ## 相關文件
 
 - [How to 使用 SQL Editor](../how-to/use-sql-editor.md)
+- [SQL Editor 查詢取消機制](../explanation/sql-editor-query-cancellation.md)
 - [Tickets](tickets.md)
 - [Workflow Rules](workflow-rules.md)
 - [DB Connections](db-connections.md)
