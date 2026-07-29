@@ -44,6 +44,21 @@ func (h *UserHandler) logForbiddenUserMutation(r *http.Request, actorID, targetI
 	})
 }
 
+func (h *UserHandler) usersAudit(r *http.Request, actorID, targetID uint64, action string, details map[string]any) {
+	if h.audit == nil {
+		return
+	}
+	_ = h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   action,
+		ResourceType: "user",
+		ResourceID:   &targetID,
+		Details:      details,
+		IPAddress:    clientIP(r),
+	})
+}
+
 // GET /users/db-connections
 func (h *UserHandler) ListDBConnections(w http.ResponseWriter, r *http.Request) {
 	if h.dbConns == nil {
@@ -920,6 +935,7 @@ func (h *UserHandler) RemoveDirectPermission(w http.ResponseWriter, r *http.Requ
 		jsonErr(w, http.StatusInternalServerError, "remove direct permission failed")
 		return
 	}
+	h.usersAudit(r, actorID, id, "user_permission_remove", map[string]any{"permission_key": permissionKey})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -957,6 +973,7 @@ func (h *UserHandler) AddDirectDBConnection(w http.ResponseWriter, r *http.Reque
 		jsonErr(w, http.StatusInternalServerError, "add direct db connection failed")
 		return
 	}
+	h.usersAudit(r, actorID, id, "user_db_connection_add", map[string]any{"db_connection_id": req.DBConnectionID})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -987,5 +1004,6 @@ func (h *UserHandler) RemoveDirectDBConnection(w http.ResponseWriter, r *http.Re
 		jsonErr(w, http.StatusInternalServerError, "remove direct db connection failed")
 		return
 	}
+	h.usersAudit(r, actorID, id, "user_db_connection_remove", map[string]any{"db_connection_id": connID})
 	w.WriteHeader(http.StatusNoContent)
 }

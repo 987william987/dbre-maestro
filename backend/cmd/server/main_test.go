@@ -75,6 +75,31 @@ func TestRedactedRequestURIRedactsExportDownloadToken(t *testing.T) {
 	}
 }
 
+func TestIsLongRunningRequestMatchesExecutionRoutes(t *testing.T) {
+	for _, req := range []*http.Request{
+		httptest.NewRequest(http.MethodPost, "/api/query", nil),
+		httptest.NewRequest(http.MethodPost, "/api/query/", nil),
+		httptest.NewRequest(http.MethodPost, "/api/tickets/42/execute", nil),
+		httptest.NewRequest(http.MethodPost, "/api/tickets/TK-20260729-123456000-ABCDEF/execute", nil),
+	} {
+		if !isLongRunningRequest(req) {
+			t.Fatalf("isLongRunningRequest(%s %s) = false, want true", req.Method, req.URL.Path)
+		}
+	}
+
+	for _, req := range []*http.Request{
+		httptest.NewRequest(http.MethodGet, "/api/query", nil),
+		httptest.NewRequest(http.MethodPost, "/api/query/saved-queries", nil),
+		httptest.NewRequest(http.MethodPost, "/api/query-access", nil),
+		httptest.NewRequest(http.MethodPost, "/api/tickets/42/stop", nil),
+		httptest.NewRequest(http.MethodGet, "/api/tickets/42/execute", nil),
+	} {
+		if isLongRunningRequest(req) {
+			t.Fatalf("isLongRunningRequest(%s %s) = true, want false", req.Method, req.URL.Path)
+		}
+	}
+}
+
 func TestRegisterStaticFilesServesAsset(t *testing.T) {
 	staticDir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(staticDir, "assets"), 0o755); err != nil {

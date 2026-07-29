@@ -714,7 +714,7 @@ func (h *ExportHandler) downloadExportRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, req.SQLContent, queryCtx, timeoutSettings)
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, req.SQLContent, queryCtx, timeoutSettings, mysqlQueryExecutionOptions{})
 	if err != nil {
 		h.auditExportDownloadFailure(r, userID, req, "query_failed")
 		http.Error(w, "query failed", http.StatusInternalServerError)

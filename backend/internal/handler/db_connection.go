@@ -607,6 +607,21 @@ func (h *DBConnectionHandler) writeTestResult(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	actorID := middleware.UserIDFromCtx(r.Context())
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "db_connection_test",
+		ResourceType: "db_connection",
+		ResourceID:   &connectionID,
+		Details: map[string]any{
+			"ok":      ok,
+			"message": truncate(strings.TrimSpace(message), 300),
+			"results": results,
+		},
+		IPAddress: clientIP(r),
+	})
+
 	response := dbConnectionTestResponse{
 		OK:             ok,
 		LastTestStatus: "passed",

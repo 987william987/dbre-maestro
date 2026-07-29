@@ -9,6 +9,7 @@ type QueryPayload = {
   database?: string
   schema?: string
   redis_db_index?: number
+  query_execution_id?: string
 }
 
 type ColumnsResponse = {
@@ -53,6 +54,10 @@ export function executeQuery(payload: QueryPayload, signal?: AbortSignal): Promi
       ? response.rows.map((row) => (Array.isArray(row) ? row : []))
       : [],
   }))
+}
+
+export function cancelQueryExecution(queryExecutionId: string): Promise<{ cancel_requested: boolean }> {
+  return apiClient.post<{ cancel_requested: boolean }>('/query/cancel', { query_execution_id: queryExecutionId })
 }
 
 export function listQueryConnections() {

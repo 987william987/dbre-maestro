@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -141,6 +142,7 @@ func TestExecuteSQLQueryUsesDatabaseOnPinnedConnection(t *testing.T) {
 		"SELECT * FROM t_user LIMIT 200",
 		queryExecutionContext{DatabaseName: "analytics"},
 		defaultSQLEditorTimeoutSettings(),
+		mysqlQueryExecutionOptions{},
 	)
 	if err != nil {
 		t.Fatalf("executeSQLQuery() error = %v", err)
@@ -180,6 +182,7 @@ func TestExecuteSQLQueryMetadataStatementsDoNotInferMaskingOrigins(t *testing.T)
 		"SHOW DATABASES",
 		queryExecutionContext{},
 		defaultSQLEditorTimeoutSettings(),
+		mysqlQueryExecutionOptions{},
 	)
 	if err != nil {
 		t.Fatalf("executeSQLQuery() error = %v", err)
@@ -219,6 +222,7 @@ func TestExecuteSQLQueryRunsMultiStatementsSequentially(t *testing.T) {
 		"SELECT 1 LIMIT 200; SELECT * FROM t_user LIMIT 200",
 		queryExecutionContext{DatabaseName: "analytics"},
 		defaultSQLEditorTimeoutSettings(),
+		mysqlQueryExecutionOptions{},
 	)
 	if err != nil {
 		t.Fatalf("executeSQLQuery() error = %v", err)
@@ -255,6 +259,7 @@ func TestExecuteSQLQueryPreservesUnsafeIntegersAsStrings(t *testing.T) {
 		"SELECT user_id FROM t_account LIMIT 200",
 		queryExecutionContext{},
 		defaultSQLEditorTimeoutSettings(),
+		mysqlQueryExecutionOptions{},
 	)
 	if err != nil {
 		t.Fatalf("executeSQLQuery() error = %v", err)
@@ -292,6 +297,7 @@ func TestExecuteSQLQueryReturnsDisplayCellsAsStringsOrNull(t *testing.T) {
 		"SELECT mixed_values",
 		queryExecutionContext{},
 		defaultSQLEditorTimeoutSettings(),
+		mysqlQueryExecutionOptions{},
 	)
 	if err != nil {
 		t.Fatalf("executeSQLQuery() error = %v", err)
@@ -355,6 +361,7 @@ GROUP BY time
 ORDER BY time ASC`,
 		queryExecutionContext{DatabaseName: "analytics"},
 		defaultSQLEditorTimeoutSettings(),
+		mysqlQueryExecutionOptions{},
 	)
 	if err != nil {
 		t.Fatalf("executeSQLQuery() error = %v", err)
@@ -367,6 +374,104 @@ ORDER BY time ASC`,
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestKillMySQLQueryCallsRDSKillQuery(t *testing.T) {
+	killDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer killDB.Close()
+
+	mock.ExpectExec(`CALL mysql\.rds_kill_query\(\?\)`).
+		WithArgs(uint64(12345)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	opener := func(context.Context) (*sql.DB, string, func(), error) {
+		return killDB, model.DBCredentialRoleReadwrite, func() {}, nil
+	}
+	if err := killMySQLQuery(context.Background(), &model.DBConnection{ID: 7, Name: "aurora-prod"}, 12345, "SELECT COUNT(1) FROM big_table", opener); err != nil {
+		t.Fatalf("killMySQLQuery() error = %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestKillMySQLQueryFallsBackToRDSKill(t *testing.T) {
+	killDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer killDB.Close()
+
+	mock.ExpectExec(`CALL mysql\.rds_kill_query\(\?\)`).
+		WithArgs(uint64(12345)).
+		WillReturnError(fmt.Errorf("execute denied"))
+	mock.ExpectExec(`CALL mysql\.rds_kill\(\?\)`).
+		WithArgs(uint64(12345)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	opener := func(context.Context) (*sql.DB, string, func(), error) {
+		return killDB, model.DBCredentialRoleReadwrite, func() {}, nil
+	}
+	if err := killMySQLQuery(context.Background(), &model.DBConnection{ID: 7, Name: "aurora-prod"}, 12345, "SELECT COUNT(1) FROM big_table", opener); err != nil {
+		t.Fatalf("killMySQLQuery() error = %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestActiveMySQLQueryRegistryMarksPendingCancel(t *testing.T) {
+	registry := newActiveMySQLQueryRegistry()
+
+	if query, ok := registry.cancel("query-1", 42); ok {
+		t.Fatalf("cancel before register returned active query: %#v", query)
+	}
+
+	canceled := registry.register("query-1", activeMySQLQuery{
+		UserID:       42,
+		ConnectionID: 7,
+		ThreadID:     12345,
+		Statement:    "SELECT COUNT(1) FROM big_table",
+		Conn:         &model.DBConnection{ID: 7, Name: "aurora-prod"},
+		RegisteredAt: time.Now(),
+	})
+	if !canceled {
+		t.Fatal("register should observe pending cancel")
+	}
+}
+
+func TestActiveMySQLQueryRegistryCancelReturnsActiveQuery(t *testing.T) {
+	registry := newActiveMySQLQueryRegistry()
+	canceled := false
+	queryID := "query-1"
+	if wasPending := registry.register(queryID, activeMySQLQuery{
+		UserID:       42,
+		ConnectionID: 7,
+		ThreadID:     12345,
+		Statement:    "SELECT COUNT(1) FROM big_table",
+		Conn:         &model.DBConnection{ID: 7, Name: "aurora-prod"},
+		Cancel:       func() { canceled = true },
+		RegisteredAt: time.Now(),
+	}); wasPending {
+		t.Fatal("register should not report pending cancel")
+	}
+
+	query, ok := registry.cancel(queryID, 42)
+	if !ok {
+		t.Fatal("cancel should return active query")
+	}
+	if query.ThreadID != 12345 {
+		t.Fatalf("thread id = %d, want 12345", query.ThreadID)
+	}
+	query.Cancel()
+	if !canceled {
+		t.Fatal("active query cancel func was not invoked")
 	}
 }
 

@@ -497,6 +497,7 @@ func (h *AuthGroupHandler) AddPermission(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusInternalServerError, "add auth group permission failed")
 		return
 	}
+	h.usersAudit(r, actorID, "auth_group_permission_add", group.ID, map[string]string{"group_key": group.GroupKey, "permission_key": permissionKey})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -514,6 +515,7 @@ func (h *AuthGroupHandler) RemovePermission(w http.ResponseWriter, r *http.Reque
 		jsonErr(w, http.StatusInternalServerError, "remove auth group permission failed")
 		return
 	}
+	h.usersAudit(r, middleware.UserIDFromCtx(r.Context()), "auth_group_permission_remove", group.ID, map[string]string{"group_key": group.GroupKey, "permission_key": strings.TrimSpace(permissionKey)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -539,6 +541,7 @@ func (h *AuthGroupHandler) AddDBConnection(w http.ResponseWriter, r *http.Reques
 		jsonErr(w, http.StatusInternalServerError, "add auth group db connection failed")
 		return
 	}
+	h.usersAudit(r, actorID, "auth_group_db_connection_add", group.ID, map[string]string{"group_key": group.GroupKey, "db_connection_id": strconv.FormatUint(req.DBConnectionID, 10)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -556,6 +559,7 @@ func (h *AuthGroupHandler) RemoveDBConnection(w http.ResponseWriter, r *http.Req
 		jsonErr(w, http.StatusInternalServerError, "remove auth group db connection failed")
 		return
 	}
+	h.usersAudit(r, middleware.UserIDFromCtx(r.Context()), "auth_group_db_connection_remove", group.ID, map[string]string{"group_key": group.GroupKey, "db_connection_id": strconv.FormatUint(connID, 10)})
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -113,7 +113,7 @@ func (r *UserRepo) UpdateLarkUnionID(ctx context.Context, userID uint64, larkUni
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE users
 		SET lark_union_id = ?, lark_recipient_type = 'union_id', updated_at = ?
-		WHERE id = ? AND (lark_union_id = '' OR lark_union_id = ?)
+		WHERE id = ? AND (lark_union_id = '' OR (lark_union_id = ? AND lark_recipient_type <> 'union_id'))
 	`, larkUnionID, timeutil.NowUTC(), userID, larkUnionID)
 	if err != nil {
 		return false, err

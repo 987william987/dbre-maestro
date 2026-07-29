@@ -45,6 +45,7 @@ import { SearchInput } from '@/shared/ui/SearchInput'
 import { useNavigate } from 'react-router-dom'
 import { createExportRequest } from '@/modules/exports/api'
 import {
+  cancelQueryExecution,
   createSavedQuery,
   createSensitiveAccessTicket,
   deleteSavedQuery,
@@ -189,6 +190,7 @@ const EDITOR_LINE_HEIGHT = 18.2
 const EDITOR_VERTICAL_PADDING = 8
 const EDITOR_MIN_HEIGHT = EDITOR_VERTICAL_PADDING + EDITOR_BASE_VISIBLE_LINES * EDITOR_LINE_HEIGHT
 const RESULT_PAGE_SIZE = 50
+const EMPTY_RESULT_BLOCK_MIN_HEIGHT = 180
 const METADATA_ERROR_MESSAGE = 'Metadata is temporarily unavailable. Please try again later.'
 const DEFAULT_SENSITIVE_ACCESS_DURATION_MINUTES = 10
 const MAX_SENSITIVE_ACCESS_DURATION_MINUTES = 3 * 24 * 60
@@ -244,13 +246,21 @@ function parsePixelValue(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function buildQueryPayload(tab: EditorTab, sqlText: string, connection: DBConnection | null) {
+function createQueryExecutionID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `query-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function buildQueryPayload(tab: EditorTab, sqlText: string, connection: DBConnection | null, queryExecutionID: string) {
   return {
     db_connection_id: tab.connectionId!,
     sql: sqlText,
     database: tab.database || undefined,
     schema: queryContextSchemaName(connection, tab.schema) || undefined,
     redis_db_index: connection?.db_type === 'redis' && tab.database ? Number(tab.database) : undefined,
+    query_execution_id: queryExecutionID,
   }
 }
 
@@ -1209,6 +1219,11 @@ function AssetTree({
 
 export function SQLEditorPage() {
   const editorContainerRef = useRef<HTMLDivElement | null>(null)
+  const editorShellRef = useRef<HTMLElement | null>(null)
+  const explorerSectionRef = useRef<HTMLElement | null>(null)
+  const explorerTreeContainerRef = useRef<HTMLDivElement | null>(null)
+  const resultBlockRef = useRef<HTMLDivElement | null>(null)
+  const explorerTreeBaselineHeightRef = useRef<number | null>(null)
   const formatProfileRef = useRef<SQLFormatProfile | null>(null)
   const formatProfileIDRef = useRef(0)
   const navigate = useNavigate()
@@ -1261,6 +1276,7 @@ export function SQLEditorPage() {
   const [queryConstraints, setQueryConstraints] = useState(DEFAULT_QUERY_CONSTRAINTS)
   const [runningTabIDs, setRunningTabIDs] = useState<string[]>([])
   const runningControllersRef = useRef<Map<string, AbortController>>(new Map())
+  const runningQueryExecutionIDsRef = useRef<Map<string, string>>(new Map())
   const [exportingTabIDs, setExportingTabIDs] = useState<string[]>([])
   const [sensitiveAccessTabIDs, setSensitiveAccessTabIDs] = useState<string[]>([])
   const [savedQueryToDelete, setSavedQueryToDelete] = useState<SavedQuery | null>(null)
@@ -1269,6 +1285,7 @@ export function SQLEditorPage() {
   const [exportReason, setExportReason] = useState('')
   const [sensitiveAccessDurationDialog, setSensitiveAccessDurationDialog] = useState<SensitiveAccessDurationDialogState | null>(null)
   const [editorHeights, setEditorHeights] = useState<Record<string, string>>(() => initialWorkspaceRef.current!.editorHeights)
+  const [explorerTreeMaxHeight, setExplorerTreeMaxHeight] = useState(EMPTY_RESULT_BLOCK_MIN_HEIGHT)
   const [queryAccessAttentionKeys, setQueryAccessAttentionKeys] = useState<Record<string, number>>({})
   const workspaceOwnerKeyRef = useRef(workspaceOwnerKey)
 
@@ -1961,13 +1978,15 @@ export function SQLEditorPage() {
     const connectionSnapshot = activeConnection
 
     const controller = new AbortController()
+    const queryExecutionID = createQueryExecutionID()
     runningControllersRef.current.set(tabID, controller)
+    runningQueryExecutionIDsRef.current.set(tabID, queryExecutionID)
     setRunningTabIDs((current) => (current.includes(tabID) ? current : [...current, tabID]))
     updateTabByID(tabID, { error: '' })
 
     try {
       const finalSQL = mode === 'explain' ? buildExplainSQL(sqlToExecute) : sqlToExecute
-      const result = await executeQuery(buildQueryPayload(tabSnapshot, finalSQL, connectionSnapshot ?? null), controller.signal)
+      const result = await executeQuery(buildQueryPayload(tabSnapshot, finalSQL, connectionSnapshot ?? null, queryExecutionID), controller.signal)
 
       updateTabByID(tabID, {
         result,
@@ -2004,6 +2023,7 @@ export function SQLEditorPage() {
       }
     } finally {
       runningControllersRef.current.delete(tabID)
+      runningQueryExecutionIDsRef.current.delete(tabID)
       setRunningTabIDs((current) => current.filter((id) => id !== tabID))
     }
   }
@@ -2019,6 +2039,10 @@ export function SQLEditorPage() {
   function handleStopQuery() {
     if (!activeTab) {
       return
+    }
+    const queryExecutionID = runningQueryExecutionIDsRef.current.get(activeTab.id)
+    if (queryExecutionID) {
+      void cancelQueryExecution(queryExecutionID).catch(() => undefined)
     }
     runningControllersRef.current.get(activeTab.id)?.abort()
   }
@@ -2823,6 +2847,50 @@ export function SQLEditorPage() {
   }, [activeResultPage, activeResultView, activeTab?.id, activeTab?.result, totalResultPages, activeVisibleColumnIndexes])
 
   useLayoutEffect(() => {
+    const explorerSection = explorerSectionRef.current
+    const explorerTreeContainer = explorerTreeContainerRef.current
+    const editorShell = editorShellRef.current
+    if (!explorerSection || !explorerTreeContainer || !editorShell) {
+      return
+    }
+
+    const updateExplorerHeight = () => {
+      const explorerTop = explorerSection.getBoundingClientRect().top
+      const treeTop = explorerTreeContainer.getBoundingClientRect().top - explorerTop
+      const shellBottom = editorShell.getBoundingClientRect().bottom - explorerTop
+      const measuredBaselineHeight = Math.max(EMPTY_RESULT_BLOCK_MIN_HEIGHT, Math.ceil(shellBottom - treeTop))
+      if (explorerTreeBaselineHeightRef.current == null) {
+        explorerTreeBaselineHeightRef.current = measuredBaselineHeight
+      }
+
+      const resultBlock = resultBlockRef.current
+      const resultBlockHeight = resultBlock
+        ? Math.ceil(resultBlock.getBoundingClientRect().bottom - explorerTop - treeTop)
+        : EMPTY_RESULT_BLOCK_MIN_HEIGHT
+      const nextHeight = Math.max(explorerTreeBaselineHeightRef.current, resultBlockHeight)
+      if (nextHeight > 0) {
+        setExplorerTreeMaxHeight(nextHeight)
+      }
+    }
+
+    updateExplorerHeight()
+
+    if (typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    const observer = new ResizeObserver(updateExplorerHeight)
+    observer.observe(editorShell)
+    observer.observe(explorerSection)
+    observer.observe(explorerTreeContainer)
+    if (resultBlockRef.current) {
+      observer.observe(resultBlockRef.current)
+    }
+
+    return () => observer.disconnect()
+  }, [activeResultView, activeTab?.id, activeTab?.result, activeResultPage, activeVisibleColumnIndexes])
+
+  useLayoutEffect(() => {
     const profile = formatProfileRef.current
     const isPendingFormatProfile = Boolean(
       profile &&
@@ -2905,7 +2973,7 @@ export function SQLEditorPage() {
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
       {connectionsError ? <InlineAlert>{connectionsError}</InlineAlert> : null}
 
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
+      <section ref={editorShellRef} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-soft">
         <div className="border-b border-border/80 px-4">
           <div className="flex flex-wrap items-center gap-5">
             {tabs.map((tab) => (
@@ -2947,8 +3015,9 @@ export function SQLEditorPage() {
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
-          <section className="flex min-h-0 flex-col border-r border-border/80 bg-panel">
+        <div className="relative grid min-h-0 flex-1 items-start gap-3 xl:grid-cols-[280px_minmax(0,1fr)]">
+          <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-[280px] top-0 hidden w-px bg-border/80 xl:block" />
+          <section ref={explorerSectionRef} className="flex min-h-0 flex-col bg-panel">
             <div className="border-b border-border/70 px-3 py-2">
               <div className="relative">
                 <button
@@ -3064,7 +3133,7 @@ export function SQLEditorPage() {
                   <RefreshCw className={`h-3.5 w-3.5 ${activeSearchIndexStatus === 'loading' || activeExplorerRootLoading ? 'animate-spin' : ''}`} />
                 </button>
               </div>
-              <div className="mt-2 min-h-0 flex-1 overflow-auto">
+              <div ref={explorerTreeContainerRef} className="mt-2 min-h-0 flex-1 overflow-auto" style={{ maxHeight: explorerTreeMaxHeight }}>
                 {connectionsLoading ? (
                   <p className="px-1 py-1 text-[12px] text-muted">Loading connections...</p>
                 ) : activeExplorerRootLoading ? (
@@ -3326,15 +3395,16 @@ export function SQLEditorPage() {
                   </div>
                 ) : null}
 
-                <div translate="no" className="mt-3 min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-white">
-                  {activeResultView === 'history' ? (
-                    history.length === 0 ? (
-                      <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
-                        No query history yet.
-                      </div>
-                    ) : (
-                      <div className="divide-y divide-border">
-                        {history.map((entry) => (
+                <div ref={resultBlockRef}>
+                  <div translate="no" className="mt-3 min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-white">
+                    {activeResultView === 'history' ? (
+                      history.length === 0 ? (
+                        <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
+                          No query history yet.
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-border">
+                          {history.map((entry) => (
                           <button
                             key={entry.id}
                             type="button"
@@ -3354,10 +3424,10 @@ export function SQLEditorPage() {
                               {formatHistoryContext(entry)} / {entry.duration_ms} ms / {formatDateTime(entry.created_at, true)}
                             </p>
                           </button>
-                        ))}
-                      </div>
-                    )
-                  ) : activeResultView === 'saved' ? (
+                          ))}
+                        </div>
+                      )
+                    ) : activeResultView === 'saved' ? (
                     savedQueries.length === 0 ? (
                       <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
                         No saved queries yet.
@@ -3535,7 +3605,7 @@ export function SQLEditorPage() {
                         {pagedResultRows.map((row, rowOffset) => (
                           <DataTableRow key={`${activeTab.id}-row-${activeResultPage}-${rowOffset}`}>
                             {visibleResultColumnIndexes.map((columnIndex) => (
-                              <DataTableCell key={`${activeTab.id}-cell-${rowOffset}-${columnIndex}`} className="align-top">
+                              <DataTableCell key={`${activeTab.id}-cell-${rowOffset}-${columnIndex}`} className="whitespace-nowrap align-top">
                                 {!Array.isArray(row)
                                   ? <span className="text-muted">(empty)</span>
                                   : row[columnIndex] === null
@@ -3551,19 +3621,20 @@ export function SQLEditorPage() {
                     <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
                       No query has been executed yet.
                     </div>
-                  )}
-                </div>
-                {(activeResultView === 'result' || activeResultView === 'vertical') && activeTab.result && totalResultPages > 1 ? (
-                  <div className="mt-3">
-                    <Pagination
-                      offset={(activeResultPage - 1) * RESULT_PAGE_SIZE}
-                      pageSize={RESULT_PAGE_SIZE}
-                      count={Math.min(activeTab.result.rows.length - (activeResultPage - 1) * RESULT_PAGE_SIZE, RESULT_PAGE_SIZE)}
-                      total={activeTab.result.rows.length}
-                      onChange={(nextOffset) => updateActiveTab({ resultPage: Math.floor(nextOffset / RESULT_PAGE_SIZE) + 1 })}
-                    />
+                    )}
                   </div>
-                ) : null}
+                  {(activeResultView === 'result' || activeResultView === 'vertical') && activeTab.result && totalResultPages > 1 ? (
+                    <div className="mt-3">
+                      <Pagination
+                        offset={(activeResultPage - 1) * RESULT_PAGE_SIZE}
+                        pageSize={RESULT_PAGE_SIZE}
+                        count={Math.min(activeTab.result.rows.length - (activeResultPage - 1) * RESULT_PAGE_SIZE, RESULT_PAGE_SIZE)}
+                        total={activeTab.result.rows.length}
+                        onChange={(nextOffset) => updateActiveTab({ resultPage: Math.floor(nextOffset / RESULT_PAGE_SIZE) + 1 })}
+                      />
+                    </div>
+                  ) : null}
+                </div>
               </div>
               </div>
             )}
