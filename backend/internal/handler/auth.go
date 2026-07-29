@@ -840,17 +840,6 @@ func (h *AuthHandler) handleSSOLarkRecipient(ctx context.Context, user *model.Us
 	}
 	if updated {
 		slog.Info("sso lark union id auto-bound", "user_id", user.ID, "username", user.Username)
-		h.logAuditContext(ctx, repository.AuditEntry{
-			ActorID:      &user.ID,
-			ActorName:    user.Username,
-			ActionType:   "sso_lark_union_id_bound",
-			ResourceType: "user",
-			ResourceID:   &user.ID,
-			Details: map[string]any{
-				"username": user.Username,
-				"source":   "oidc_claim",
-			},
-		})
 	}
 }
 

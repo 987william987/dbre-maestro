@@ -1,21 +1,18 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/dbre-maestro/maestro/internal/repository"
 )
 
 type FrontendReloadHandler struct {
-	audit       *repository.AuditRepo
 	rateLimiter requestRateLimiter
 }
 
-func NewFrontendReloadHandler(audit *repository.AuditRepo) *FrontendReloadHandler {
+func NewFrontendReloadHandler() *FrontendReloadHandler {
 	return &FrontendReloadHandler{
-		audit:       audit,
 		rateLimiter: newRequestRateLimiter(30, time.Minute),
 	}
 }
@@ -57,20 +54,13 @@ func (h *FrontendReloadHandler) ReportReload(w http.ResponseWriter, r *http.Requ
 		reason = "unknown"
 	}
 
-	if h.audit == nil {
-		return
-	}
-	_ = h.audit.Log(r.Context(), repository.AuditEntry{
-		ActionType:   "frontend_stale_bundle_reload",
-		ResourceType: "frontend",
-		IPAddress:    clientIP(r),
-		Details: map[string]any{
-			"reason":             reason,
-			"error_message":      truncate(strings.TrimSpace(req.ErrorMessage), 500),
-			"route":              truncate(strings.TrimSpace(req.Route), 300),
-			"previous_signature": truncate(strings.TrimSpace(req.PreviousSignature), 500),
-			"current_signature":  truncate(strings.TrimSpace(req.CurrentSignature), 500),
-			"user_agent":         truncate(r.Header.Get("User-Agent"), 300),
-		},
-	})
+	slog.Info("frontend stale bundle reload",
+		"reason", reason,
+		"error_message", truncate(strings.TrimSpace(req.ErrorMessage), 500),
+		"route", truncate(strings.TrimSpace(req.Route), 300),
+		"previous_signature", truncate(strings.TrimSpace(req.PreviousSignature), 500),
+		"current_signature", truncate(strings.TrimSpace(req.CurrentSignature), 500),
+		"user_agent", truncate(r.Header.Get("User-Agent"), 300),
+		"ip", clientIP(r),
+	)
 }

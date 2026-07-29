@@ -88,7 +88,6 @@ const ACTION_OPTIONS = [
   { value: 'scheduled_sql_report_run', label: 'Run Scheduled SQL Report' },
   { value: 'scheduled_sql_report_run_failed', label: 'Scheduled SQL Report Run Failed' },
   { value: 'scheduled_sql_report_delivery_failed', label: 'Scheduled SQL Report Delivery Failed' },
-  { value: 'frontend_stale_bundle_reload', label: 'Frontend Stale Bundle Reload' },
 ] as const
 
 const RESOURCE_OPTIONS = [
@@ -99,7 +98,6 @@ const RESOURCE_OPTIONS = [
   { value: 'export', label: 'Export' },
   { value: 'audit_log', label: 'Audit Log' },
   { value: 'query_access_rule', label: 'Query Access Rule' },
-  { value: 'frontend', label: 'Frontend' },
 ] as const
 
 export function AuditLogsPage() {
