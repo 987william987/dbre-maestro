@@ -35,15 +35,28 @@ func (r *QueryArtifactRepo) AddHistory(ctx context.Context, entry *model.QueryHi
 	return uint64(id), nil
 }
 
-func (r *QueryArtifactRepo) ListHistory(ctx context.Context, userID uint64, limit int) ([]model.QueryHistoryEntry, error) {
+func (r *QueryArtifactRepo) CountHistory(ctx context.Context, userID uint64, since any) (int, error) {
+	var count int
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*)
+		 FROM query_history
+		 WHERE user_id = ? AND created_at >= ?`,
+		userID, since,
+	).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count query_history: %w", err)
+	}
+	return count, nil
+}
+
+func (r *QueryArtifactRepo) ListHistory(ctx context.Context, userID uint64, limit int, offset int, since any) ([]model.QueryHistoryEntry, error) {
 	history := make([]model.QueryHistoryEntry, 0, limit)
 	if err := r.db.SelectContext(ctx, &history,
 		`SELECT id, user_id, db_connection_id, db_connection_name, database_name, schema_name, redis_db_index, sql_content, row_count, duration_ms, created_at
 		 FROM query_history
-		 WHERE user_id = ?
+		 WHERE user_id = ? AND created_at >= ?
 		 ORDER BY created_at DESC
-		 LIMIT ?`,
-		userID, limit,
+		 LIMIT ? OFFSET ?`,
+		userID, since, limit, offset,
 	); err != nil {
 		return nil, fmt.Errorf("list query_history: %w", err)
 	}

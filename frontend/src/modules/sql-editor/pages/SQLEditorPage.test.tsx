@@ -1462,6 +1462,65 @@ describe('SQLEditorPage', () => {
     })
   })
 
+  it('History 超過一頁時使用 Pagination 載入下一頁', async () => {
+    mockedListQueryHistory
+      .mockResolvedValueOnce({
+        history: [{
+          id: 9,
+          db_connection_id: 1,
+          db_connection_name: 'Primary MySQL',
+          database_name: 'maestro',
+          schema_name: null,
+          redis_db_index: null,
+          sql_content: 'SELECT * FROM tickets;',
+          row_count: 12,
+          duration_ms: 123,
+          created_at: '2026-07-22T12:50:20Z',
+        }],
+        total: 21,
+        limit: 20,
+        offset: 0,
+        retention_days: 90,
+      })
+      .mockResolvedValueOnce({
+        history: [{
+          id: 10,
+          db_connection_id: 1,
+          db_connection_name: 'Primary MySQL',
+          database_name: 'maestro',
+          schema_name: null,
+          redis_db_index: null,
+          sql_content: 'SELECT * FROM tickets_archive;',
+          row_count: 3,
+          duration_ms: 88,
+          created_at: '2026-07-21T12:50:20Z',
+        }],
+        total: 21,
+        limit: 20,
+        offset: 20,
+        retention_days: 90,
+      })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run' })).toBeInTheDocument()
+    fireEvent.click(screen.getByText('History'))
+
+    expect(await screen.findByText('SELECT * FROM tickets;')).toBeInTheDocument()
+    expect(screen.getByText('Showing 1–1 of 21')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    expect(await screen.findByText('SELECT * FROM tickets_archive;')).toBeInTheDocument()
+    expect(mockedListQueryHistory).toHaveBeenLastCalledWith(20, 20)
+  })
+
   it('查詢結果表頭顯示 display columns，但保留 raw_columns 給其他用途', async () => {
     mockedExecuteQuery.mockResolvedValue({
       columns: ['id', 'user_id', 'account_id'],

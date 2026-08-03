@@ -374,11 +374,12 @@ function formatResultMetaLine(params: {
   selectedTable: MetadataItem | null
   detailHint: string
   historyCount: number
+  historyRetentionDays: number
   savedCount: number
   currentPage: number
   totalPages: number
 }): string {
-  const { resultView, result, selectedTable, detailHint, historyCount, savedCount, currentPage, totalPages } = params
+  const { resultView, result, selectedTable, detailHint, historyCount, historyRetentionDays, savedCount, currentPage, totalPages } = params
 
   if ((resultView === 'result' || resultView === 'vertical') && result) {
     const parts = [`${result.row_count} rows`, `${result.duration_ms} ms`]
@@ -391,7 +392,7 @@ function formatResultMetaLine(params: {
     return selectedTable ? `${selectedTable.schema}.${selectedTable.name}` : detailHint || 'Select a table to inspect its structure'
   }
   if (resultView === 'history') {
-    return `${historyCount} entries`
+    return `${historyCount} entries / ${historyRetentionDays} days`
   }
   return `${savedCount} entries`
 }
@@ -1269,6 +1270,9 @@ export function SQLEditorPage() {
   const [tabs, setTabs] = useState<EditorTab[]>(() => initialWorkspaceRef.current!.tabs)
   const [activeTabId, setActiveTabId] = useState<string>(() => initialWorkspaceRef.current!.activeTabId)
   const [history, setHistory] = useState<QueryHistoryEntry[]>([])
+  const [historyOffset, setHistoryOffset] = useState(0)
+  const [historyTotal, setHistoryTotal] = useState(0)
+  const [historyRetentionDays, setHistoryRetentionDays] = useState(90)
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
   const [queryConstraints, setQueryConstraints] = useState(DEFAULT_QUERY_CONSTRAINTS)
   const [runningTabIDs, setRunningTabIDs] = useState<string[]>([])
@@ -1387,26 +1391,28 @@ export function SQLEditorPage() {
     }
   }, [canQuery, pushToast])
 
+  const loadHistoryPage = useCallback(async (offset = 0) => {
+    try {
+      const response = await listQueryHistory(HISTORY_LIMIT, offset)
+      setHistory(response.history)
+      setHistoryOffset(response.offset)
+      setHistoryTotal(response.total)
+      setHistoryRetentionDays(response.retention_days)
+    } catch (error) {
+      pushToast(error instanceof ApiError ? error.message : 'Failed to load query history.', 'error')
+    }
+  }, [pushToast])
+
   useEffect(() => {
     let active = true
     if (!canQuery) {
       setHistory([])
+      setHistoryOffset(0)
+      setHistoryTotal(0)
+      setHistoryRetentionDays(90)
       setSavedQueries([])
       return () => {
         active = false
-      }
-    }
-
-    async function loadHistory() {
-      try {
-        const response = await listQueryHistory(HISTORY_LIMIT)
-        if (active) {
-          setHistory(response.history)
-        }
-      } catch (error) {
-        if (active) {
-          pushToast(error instanceof ApiError ? error.message : 'Failed to load query history.', 'error')
-        }
       }
     }
 
@@ -1423,7 +1429,20 @@ export function SQLEditorPage() {
       }
     }
 
-    void loadHistory()
+    void listQueryHistory(HISTORY_LIMIT, 0)
+      .then((response) => {
+        if (active) {
+          setHistory(response.history)
+          setHistoryOffset(response.offset)
+          setHistoryTotal(response.total)
+          setHistoryRetentionDays(response.retention_days)
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          pushToast(error instanceof ApiError ? error.message : 'Failed to load query history.', 'error')
+        }
+      })
     void loadSavedQueries()
 
     return () => {
@@ -1996,7 +2015,7 @@ export function SQLEditorPage() {
         lastRunAt: new Date().toISOString(),
         resultView: 'result',
       })
-      void listQueryHistory(HISTORY_LIMIT).then((response) => setHistory(response.history)).catch(() => undefined)
+      void loadHistoryPage(0)
       pushToast(mode === 'explain' ? 'Explain completed.' : 'Query completed.', 'success')
     } catch (error) {
       if (controller.signal.aborted) {
@@ -2584,11 +2603,12 @@ export function SQLEditorPage() {
     result: activeTab?.result ?? null,
     selectedTable: activeSelectedTable,
     detailHint,
-    historyCount: history.length,
+    historyCount: historyTotal,
+    historyRetentionDays,
     savedCount: savedQueries.length,
     currentPage: activeResultPage,
     totalPages: totalResultPages,
-  }), [activeResultPage, activeResultView, activeSelectedTable, activeTab?.result, detailHint, history.length, savedQueries.length, totalResultPages])
+  }), [activeResultPage, activeResultView, activeSelectedTable, activeTab?.result, detailHint, historyRetentionDays, historyTotal, savedQueries.length, totalResultPages])
 
   function handleSelectNode(node: AssetTreeNode) {
     if (activeExplorerSearch.trim() && activeConnection && node.kind !== 'connection' && node.kind !== 'redis_db') {
@@ -3668,6 +3688,18 @@ export function SQLEditorPage() {
                         count={Math.min(activeTab.result.rows.length - (activeResultPage - 1) * RESULT_PAGE_SIZE, RESULT_PAGE_SIZE)}
                         total={activeTab.result.rows.length}
                         onChange={(nextOffset) => updateActiveTab({ resultPage: Math.floor(nextOffset / RESULT_PAGE_SIZE) + 1 })}
+                      />
+                    </div>
+                  ) : activeResultView === 'history' && historyTotal > HISTORY_LIMIT ? (
+                    <div className="mt-3">
+                      <Pagination
+                        offset={historyOffset}
+                        pageSize={HISTORY_LIMIT}
+                        count={history.length}
+                        total={historyTotal}
+                        onChange={(nextOffset) => {
+                          void loadHistoryPage(nextOffset)
+                        }}
                       />
                     </div>
                   ) : null}

@@ -23,6 +23,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -31,9 +32,12 @@ import (
 )
 
 const (
-	defaultQueryLimit   = 200
-	maxQueryLimit       = 1000
-	defaultQueryTimeout = 30 * time.Second
+	defaultQueryLimit         = 200
+	maxQueryLimit             = 1000
+	defaultQueryTimeout       = 30 * time.Second
+	queryHistoryRetentionDays = 90
+	defaultQueryHistoryLimit  = 20
+	maxQueryHistoryLimit      = 100
 )
 
 type sqlEditorTimeoutSettings struct {
@@ -707,14 +711,34 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 
 func (h *QueryHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
-	limit := 20
+	limit := defaultQueryHistoryLimit
 	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 100 {
-			limit = parsed
+		if parsed, err := strconv.Atoi(v); err == nil {
+			switch {
+			case parsed <= 0:
+				limit = defaultQueryHistoryLimit
+			case parsed > maxQueryHistoryLimit:
+				limit = maxQueryHistoryLimit
+			default:
+				limit = parsed
+			}
+		}
+	}
+	offset := 0
+	if v := strings.TrimSpace(r.URL.Query().Get("offset")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			offset = parsed
 		}
 	}
 
-	history, err := h.artifacts.ListHistory(r.Context(), userID, limit)
+	since := timeutil.NowUTC().AddDate(0, 0, -queryHistoryRetentionDays)
+	total, err := h.artifacts.CountHistory(r.Context(), userID, since)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "count query history failed")
+		return
+	}
+
+	history, err := h.artifacts.ListHistory(r.Context(), userID, limit, offset, since)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "list query history failed")
 		return
@@ -722,7 +746,13 @@ func (h *QueryHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	if history == nil {
 		history = []model.QueryHistoryEntry{}
 	}
-	jsonOK(w, map[string]any{"history": history})
+	jsonOK(w, map[string]any{
+		"history":        history,
+		"total":          total,
+		"limit":          limit,
+		"offset":         offset,
+		"retention_days": queryHistoryRetentionDays,
+	})
 }
 
 func (h *QueryHandler) ListSavedQueries(w http.ResponseWriter, r *http.Request) {

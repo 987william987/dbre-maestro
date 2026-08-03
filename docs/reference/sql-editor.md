@@ -233,7 +233,7 @@ PostgreSQL 取消自己的 backend query 通常不需要額外授權。
 | `POST /api/query/saved-queries` | 新增收藏 |
 | `DELETE /api/query/saved-queries/{id}` | 刪除收藏 |
 
-`GET /api/query/history` 只回傳目前登入使用者自己的最近 20 筆查詢紀錄；不會列出其他使用者的 SQL Editor history。
+`GET /api/query/history` 只回傳目前登入使用者自己的查詢紀錄；不會列出其他使用者的 SQL Editor history。History 保留 90 天，API 支援 `limit` / `offset` 分頁，預設每頁 20 筆，最大 `limit` 為 100。
 
 ## Metadata Explorer
 

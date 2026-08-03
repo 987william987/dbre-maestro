@@ -54,7 +54,7 @@
    - History
    - Saved queries
 
-   `History` 只顯示目前登入使用者自己的最近 20 筆查詢紀錄。其他使用者的查詢紀錄不會出現在你的 SQL Editor history 中。
+   `History` 只顯示目前登入使用者自己的查詢紀錄。SQL Editor history 保留 90 天，前端以每頁 20 筆分頁顯示；其他使用者的查詢紀錄不會出現在你的 SQL Editor history 中。
 
 6. 如果查詢執行太久，點擊 `Stop`。
 
@@ -85,7 +85,7 @@
 - `Run Query` 後，結果區顯示 `row_count` 與 `duration`
 - `Stop` 後，MySQL / PostgreSQL 長查詢不應繼續留在 DB backend process list
 - `Explain` 後，結果區出現執行計畫資料
-- `History` 最多顯示你自己的最近 20 筆查詢紀錄
+- `History` 以分頁顯示你自己 90 天內的查詢紀錄
 - `Saved queries` 可看到新收藏
 - 工單送出後，可在 `/tickets` 看到對應工單
 
