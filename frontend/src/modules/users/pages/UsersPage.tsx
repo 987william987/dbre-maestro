@@ -34,7 +34,9 @@ import {
   DataTableRow,
   DataTableScroll,
   DataTableSurface,
+  SortableDataTableHeaderCell,
 } from '@/shared/ui/DataTable'
+import type { DataTableSortDirection } from '@/shared/ui/DataTable'
 
 type PermissionOption = {
   key: string
@@ -79,6 +81,10 @@ const SESSION_PAGE_SIZE = 5
 const PERMISSION_INDEX = new Map(PERMISSION_METADATA.map((item) => [item.key, item] as const))
 
 type ViewMode = 'users' | 'auth-groups' | 'resources' | 'query-access'
+type UsersSortKey = 'username' | 'status' | 'created' | 'updated'
+type AuthGroupsSortKey = 'authGroup' | 'created' | 'updated'
+type ResourcesSortKey = 'resource' | 'type'
+type QueryAccessSortKey = 'subject' | 'subjectType' | 'effect' | 'expires' | 'status'
 
 type DrawerState =
   | { mode: 'create-user' }
@@ -241,6 +247,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   const [usersOffset, setUsersOffset] = useState(0)
   const [authGroupsOffset, setAuthGroupsOffset] = useState(0)
   const [resourcesOffset, setResourcesOffset] = useState(0)
+  const [usersSortState, setUsersSortState] = useState<{ key: UsersSortKey; direction: DataTableSortDirection }>({ key: 'username', direction: 'asc' })
+  const [authGroupsSortState, setAuthGroupsSortState] = useState<{ key: AuthGroupsSortKey; direction: DataTableSortDirection }>({ key: 'authGroup', direction: 'asc' })
+  const [resourcesSortState, setResourcesSortState] = useState<{ key: ResourcesSortKey; direction: DataTableSortDirection }>({ key: 'resource', direction: 'asc' })
+  const [queryAccessSortState, setQueryAccessSortState] = useState<{ key: QueryAccessSortKey; direction: DataTableSortDirection }>({ key: 'expires', direction: 'asc' })
   const [users, setUsers] = useState<UserSummary[]>([])
   const [authGroups, setAuthGroups] = useState<AuthGroupDetail[]>([])
   const [connections, setConnections] = useState<DBConnection[]>([])
@@ -918,18 +928,25 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
         : drawerState?.mode === 'create-auth-group'
           ? 'Create Auth Group'
           : selectedAuthGroup?.label ?? 'Auth Group'
-  const pagedUsers = useMemo(() => users.slice(usersOffset, usersOffset + PAGE_SIZE), [users, usersOffset])
+  const sortedUsers = useMemo(() => [...users].sort((left, right) => compareUsers(left, right, usersSortState)), [users, usersSortState])
+  const sortedAuthGroups = useMemo(() => [...authGroups].sort((left, right) => compareAuthGroups(left, right, authGroupsSortState)), [authGroups, authGroupsSortState])
+  const sortedResources = useMemo(() => [...connections].sort((left, right) => compareResources(left, right, resourcesSortState)), [connections, resourcesSortState])
+  const sortedQueryAccessRules = useMemo(
+    () => [...queryAccessRules].sort((left, right) => compareQueryAccessRules(left, right, queryAccessSortState, users, authGroups)),
+    [authGroups, queryAccessRules, queryAccessSortState, users],
+  )
+  const pagedUsers = useMemo(() => sortedUsers.slice(usersOffset, usersOffset + PAGE_SIZE), [sortedUsers, usersOffset])
   const pagedAuthGroups = useMemo(
-    () => authGroups.slice(authGroupsOffset, authGroupsOffset + PAGE_SIZE),
-    [authGroups, authGroupsOffset],
+    () => sortedAuthGroups.slice(authGroupsOffset, authGroupsOffset + PAGE_SIZE),
+    [authGroupsOffset, sortedAuthGroups],
   )
   const pagedResources = useMemo(
-    () => connections.slice(resourcesOffset, resourcesOffset + PAGE_SIZE),
-    [connections, resourcesOffset],
+    () => sortedResources.slice(resourcesOffset, resourcesOffset + PAGE_SIZE),
+    [resourcesOffset, sortedResources],
   )
   const pagedQueryAccessRules = useMemo(
-    () => queryAccessRules.slice(queryAccessOffset, queryAccessOffset + PAGE_SIZE),
-    [queryAccessOffset, queryAccessRules],
+    () => sortedQueryAccessRules.slice(queryAccessOffset, queryAccessOffset + PAGE_SIZE),
+    [queryAccessOffset, sortedQueryAccessRules],
   )
   const databaseScopeOptions = [
     { value: '*', label: 'All databases (*)' },
@@ -978,6 +995,26 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       : viewMode === 'resources'
         ? setResourcesOffset
         : setQueryAccessOffset
+
+  function toggleUsersSort(key: UsersSortKey) {
+    setUsersSortState((current) => toggleSortState(current, key))
+    setUsersOffset(0)
+  }
+
+  function toggleAuthGroupsSort(key: AuthGroupsSortKey) {
+    setAuthGroupsSortState((current) => toggleSortState(current, key))
+    setAuthGroupsOffset(0)
+  }
+
+  function toggleResourcesSort(key: ResourcesSortKey) {
+    setResourcesSortState((current) => toggleSortState(current, key))
+    setResourcesOffset(0)
+  }
+
+  function toggleQueryAccessSort(key: QueryAccessSortKey) {
+    setQueryAccessSortState((current) => toggleSortState(current, key))
+    setQueryAccessOffset(0)
+  }
 
   useEffect(() => {
     if (usersOffset > 0 && usersOffset >= users.length) {
@@ -1078,13 +1115,13 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                 <DataTable>
                   <DataTableHead>
                     <tr>
-                      <DataTableHeaderCell>Username</DataTableHeaderCell>
+                      <SortableDataTableHeaderCell label="Username" sortKey="username" sortState={usersSortState} onSort={toggleUsersSort} />
                       <DataTableHeaderCell>Auth Groups</DataTableHeaderCell>
                       <DataTableHeaderCell>Permissions</DataTableHeaderCell>
                       <DataTableHeaderCell>DB Scope</DataTableHeaderCell>
-                      <DataTableHeaderCell>Status</DataTableHeaderCell>
-                      <DataTableHeaderCell>Created</DataTableHeaderCell>
-                      <DataTableHeaderCell>Updated</DataTableHeaderCell>
+                      <SortableDataTableHeaderCell label="Status" sortKey="status" sortState={usersSortState} onSort={toggleUsersSort} />
+                      <SortableDataTableHeaderCell label="Created" sortKey="created" sortState={usersSortState} onSort={toggleUsersSort} />
+                      <SortableDataTableHeaderCell label="Updated" sortKey="updated" sortState={usersSortState} onSort={toggleUsersSort} />
                       <DataTableHeaderCell>Action</DataTableHeaderCell>
                     </tr>
                   </DataTableHead>
@@ -1143,12 +1180,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                 <DataTable>
                   <DataTableHead>
                     <tr>
-                      <DataTableHeaderCell>Auth Group</DataTableHeaderCell>
+                      <SortableDataTableHeaderCell label="Auth Group" sortKey="authGroup" sortState={authGroupsSortState} onSort={toggleAuthGroupsSort} />
                       <DataTableHeaderCell>Users</DataTableHeaderCell>
                       <DataTableHeaderCell>Permissions</DataTableHeaderCell>
                       <DataTableHeaderCell>DB Scope</DataTableHeaderCell>
-                      <DataTableHeaderCell>Created</DataTableHeaderCell>
-                      <DataTableHeaderCell>Updated</DataTableHeaderCell>
+                      <SortableDataTableHeaderCell label="Created" sortKey="created" sortState={authGroupsSortState} onSort={toggleAuthGroupsSort} />
+                      <SortableDataTableHeaderCell label="Updated" sortKey="updated" sortState={authGroupsSortState} onSort={toggleAuthGroupsSort} />
                       <DataTableHeaderCell>Action</DataTableHeaderCell>
                     </tr>
                   </DataTableHead>
@@ -1196,8 +1233,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                 <DataTable>
                   <DataTableHead>
                     <tr>
-                      <DataTableHeaderCell>Resource</DataTableHeaderCell>
-                      <DataTableHeaderCell>Type</DataTableHeaderCell>
+                      <SortableDataTableHeaderCell label="Resource" sortKey="resource" sortState={resourcesSortState} onSort={toggleResourcesSort} />
+                      <SortableDataTableHeaderCell label="Type" sortKey="type" sortState={resourcesSortState} onSort={toggleResourcesSort} />
                       <DataTableHeaderCell>Direct Users</DataTableHeaderCell>
                       <DataTableHeaderCell>Auth Groups</DataTableHeaderCell>
                       <DataTableHeaderCell>Effective Users</DataTableHeaderCell>
@@ -1361,13 +1398,13 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                   <DataTable>
                     <DataTableHead>
                       <tr>
-                        <DataTableHeaderCell>Subject</DataTableHeaderCell>
-                        <DataTableHeaderCell>Subject Type</DataTableHeaderCell>
-                        <DataTableHeaderCell>Effect</DataTableHeaderCell>
+                        <SortableDataTableHeaderCell label="Subject" sortKey="subject" sortState={queryAccessSortState} onSort={toggleQueryAccessSort} />
+                        <SortableDataTableHeaderCell label="Subject Type" sortKey="subjectType" sortState={queryAccessSortState} onSort={toggleQueryAccessSort} />
+                        <SortableDataTableHeaderCell label="Effect" sortKey="effect" sortState={queryAccessSortState} onSort={toggleQueryAccessSort} />
                         <DataTableHeaderCell>DB Scope</DataTableHeaderCell>
                         <DataTableHeaderCell>Source</DataTableHeaderCell>
-                        <DataTableHeaderCell>Expires</DataTableHeaderCell>
-                        <DataTableHeaderCell>Status</DataTableHeaderCell>
+                        <SortableDataTableHeaderCell label="Expires" sortKey="expires" sortState={queryAccessSortState} onSort={toggleQueryAccessSort} />
+                        <SortableDataTableHeaderCell label="Status" sortKey="status" sortState={queryAccessSortState} onSort={toggleQueryAccessSort} />
                         {canWrite ? <DataTableHeaderCell>Action</DataTableHeaderCell> : null}
                       </tr>
                     </DataTableHead>
@@ -2208,6 +2245,107 @@ function formatConnectionIDs(connectionIDs: number[], connections: DBConnection[
   return connectionIDs.length > 0 ? connectionIDs.map((id) => getConnectionLabel(id, connections)).join(', ') : 'None'
 }
 
+function toggleSortState<TSortKey extends string>(current: { key: TSortKey; direction: DataTableSortDirection }, key: TSortKey) {
+  return {
+    key,
+    direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
+  } satisfies { key: TSortKey; direction: DataTableSortDirection }
+}
+
+function compareUsers(left: UserSummary, right: UserSummary, sortState: { key: UsersSortKey; direction: DataTableSortDirection }) {
+  const direction = sortDirection(sortState.direction)
+  let result = 0
+  switch (sortState.key) {
+    case 'username':
+      result = compareText(left.username, right.username)
+      break
+    case 'status':
+      result = compareText(left.is_active ? 'active' : 'disabled', right.is_active ? 'active' : 'disabled')
+      break
+    case 'created':
+      result = compareDate(left.created_at, right.created_at)
+      break
+    case 'updated':
+      result = compareDate(left.updated_at, right.updated_at)
+      break
+  }
+  return result !== 0 ? result * direction : compareText(left.username, right.username)
+}
+
+function compareAuthGroups(left: AuthGroupDetail, right: AuthGroupDetail, sortState: { key: AuthGroupsSortKey; direction: DataTableSortDirection }) {
+  const direction = sortDirection(sortState.direction)
+  let result = 0
+  switch (sortState.key) {
+    case 'authGroup':
+      result = compareText(left.label || left.name, right.label || right.name)
+      break
+    case 'created':
+      result = compareDate(left.created_at ?? '', right.created_at ?? '')
+      break
+    case 'updated':
+      result = compareDate(left.updated_at ?? '', right.updated_at ?? '')
+      break
+  }
+  return result !== 0 ? result * direction : compareText(left.label || left.name, right.label || right.name)
+}
+
+function compareResources(left: DBConnection, right: DBConnection, sortState: { key: ResourcesSortKey; direction: DataTableSortDirection }) {
+  const direction = sortDirection(sortState.direction)
+  const result = sortState.key === 'type'
+    ? compareText(formatDBType(left.db_type), formatDBType(right.db_type))
+    : compareText(left.name, right.name)
+  return result !== 0 ? result * direction : compareText(left.name, right.name)
+}
+
+function compareQueryAccessRules(
+  left: QueryAccessRule,
+  right: QueryAccessRule,
+  sortState: { key: QueryAccessSortKey; direction: DataTableSortDirection },
+  users: UserSummary[],
+  authGroups: AuthGroupDetail[],
+) {
+  const direction = sortDirection(sortState.direction)
+  let result = 0
+  switch (sortState.key) {
+    case 'subject':
+      result = compareText(formatQueryAccessSubjectText(left, users, authGroups), formatQueryAccessSubjectText(right, users, authGroups))
+      break
+    case 'subjectType':
+      result = compareText(formatQueryAccessSubjectType(left.subject_type), formatQueryAccessSubjectType(right.subject_type))
+      break
+    case 'effect':
+      result = compareText(left.effect, right.effect)
+      break
+    case 'expires':
+      result = compareDate(left.expires_at ?? '', right.expires_at ?? '')
+      break
+    case 'status':
+      result = compareText(getQueryAccessStatus(left), getQueryAccessStatus(right))
+      break
+  }
+  return result !== 0 ? result * direction : left.id - right.id
+}
+
+function sortDirection(direction: DataTableSortDirection) {
+  return direction === 'asc' ? 1 : -1
+}
+
+function compareText(left: string, right: string) {
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' })
+}
+
+function compareDate(left: string, right: string) {
+  return dateSortValue(left) - dateSortValue(right)
+}
+
+function dateSortValue(value: string) {
+  if (!value) {
+    return Number.POSITIVE_INFINITY
+  }
+  const time = new Date(value).getTime()
+  return Number.isFinite(time) ? time : Number.POSITIVE_INFINITY
+}
+
 function formatPermissionList(permissionKeys: string[]) {
   return permissionKeys.length > 0 ? permissionKeys.map((permissionKey) => getPermissionMeta(permissionKey).label).join(', ') : 'None'
 }
@@ -2229,6 +2367,10 @@ function formatDBType(dbType: string) {
 }
 
 function formatQueryAccessSubject(rule: QueryAccessRule, users: UserSummary[], authGroups: AuthGroupDetail[]) {
+  return formatQueryAccessSubjectText(rule, users, authGroups)
+}
+
+function formatQueryAccessSubjectText(rule: QueryAccessRule, users: UserSummary[], authGroups: AuthGroupDetail[]) {
   if (rule.subject_type === 'user') {
     return users.find((user) => user.id === rule.subject_id)?.username ?? `User #${rule.subject_id}`
   }
@@ -2259,6 +2401,16 @@ function formatQueryAccessSource(rule: QueryAccessRule) {
     return 'Manual rule'
   }
   return rule.granted_via
+}
+
+function getQueryAccessStatus(rule: QueryAccessRule) {
+  if (rule.revoked_at) {
+    return 'revoked'
+  }
+  if (rule.expires_at && new Date(rule.expires_at).getTime() <= Date.now()) {
+    return 'expired'
+  }
+  return 'active'
 }
 
 function hasAllPermissionsUser(user: UserSummary, authGroups: AuthGroupDetail[]) {

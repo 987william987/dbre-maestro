@@ -240,6 +240,48 @@ describe('UsersPage', () => {
     expect(within(row as HTMLTableRowElement).getByText('Dba')).toBeInTheDocument()
   })
 
+  it('Users 表格可以點擊 Username 表頭切換排序', async () => {
+    mockedListUsers.mockResolvedValue({
+      users: [
+        {
+          id: 2,
+          username: 'charlie',
+          email: 'charlie@example.com',
+          lark_recipient: '',
+          auth_groups: [],
+          db_connection_ids: [],
+          protected: false,
+          is_active: true,
+          created_at: '2026-06-10T00:00:00Z',
+          updated_at: '2026-06-10T00:00:00Z',
+        },
+        {
+          id: 3,
+          username: 'alice',
+          email: 'alice@example.com',
+          lark_recipient: '',
+          auth_groups: [],
+          db_connection_ids: [],
+          protected: false,
+          is_active: true,
+          created_at: '2026-06-11T00:00:00Z',
+          updated_at: '2026-06-11T00:00:00Z',
+        },
+      ],
+    })
+
+    renderPage()
+
+    expect(await screen.findByText('alice')).toBeInTheDocument()
+    let rows = screen.getAllByRole('row')
+    expect(within(rows[1]).getByText('alice')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Username ASC' }))
+
+    rows = screen.getAllByRole('row')
+    expect(within(rows[1]).getByText('charlie')).toBeInTheDocument()
+  })
+
   it('Query Access ticket 來源顯示工單號連結', async () => {
     mockedListUsers.mockResolvedValue({
       users: [

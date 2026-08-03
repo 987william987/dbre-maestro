@@ -215,6 +215,10 @@ describe('SQLEditorPage', () => {
     })
     mockedListQueryHistory.mockResolvedValue({
       history: [],
+      total: 0,
+      limit: 20,
+      offset: 0,
+      retention_days: 90,
     })
     mockedListSavedQueries.mockResolvedValue({
       saved_queries: [],
@@ -1431,6 +1435,10 @@ describe('SQLEditorPage', () => {
         duration_ms: 123,
         created_at: '2026-07-22T12:50:20Z',
       }],
+      total: 1,
+      limit: 20,
+      offset: 0,
+      retention_days: 90,
     })
 
     render(
