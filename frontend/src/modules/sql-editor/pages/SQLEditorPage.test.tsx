@@ -769,6 +769,67 @@ describe('SQLEditorPage', () => {
     expect(screen.queryByText('Query execution failed.')).not.toBeInTheDocument()
   })
 
+  it('Redis command 執行中不顯示 Stop，也不呼叫 cancel API', async () => {
+    mockedUseAuth.mockReturnValue({
+      user: {
+        id: 7,
+        username: 'admin',
+        authGroups: ['admin'],
+        authGroupDetails: [],
+        permissions: ['sql_editor.read', 'sql_editor.query'],
+        dbConnectionIds: [2],
+        protected: false,
+        isActive: true,
+      },
+      status: 'authenticated',
+      isAuthenticated: true,
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedListQueryConnections.mockResolvedValue({
+      connections: [
+        {
+          id: 2,
+          name: 'Redis Cache',
+          db_type: 'redis',
+          host: 'redis.local',
+          port: 6379,
+          database_name: null,
+          username: '',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          extra_params: null,
+          created_by: 1,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+    mockedExecuteQuery.mockReturnValue(new Promise(() => undefined) as ReturnType<typeof executeQuery>)
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Redis Cache'))
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+
+    await screen.findAllByRole('button', { name: 'Running...' })
+    for (const runningButton of screen.getAllByRole('button', { name: 'Running...' })) {
+      expect(runningButton).toBeDisabled()
+    }
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+    expect(mockedCancelQueryExecution).not.toHaveBeenCalled()
+  })
+
   it('點擊 Explain 會用 EXPLAIN 包裝目前 SQL 後執行', async () => {
     mockedExecuteQuery.mockResolvedValue({
       columns: ['id', 'select_type'],

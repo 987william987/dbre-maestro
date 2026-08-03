@@ -1525,6 +1525,7 @@ export function SQLEditorPage() {
       }))
   }, [filteredConnections])
   const activeTabRunning = activeTab ? runningTabIDs.includes(activeTab.id) : false
+  const activeTabCanStop = activeTabRunning && activeConnection?.db_type !== 'redis'
   const activeTabExporting = activeTab ? exportingTabIDs.includes(activeTab.id) : false
   const activeTabCreatingSensitiveAccess = activeTab ? sensitiveAccessTabIDs.includes(activeTab.id) : false
   const activeQueryAccessAttentionKey = activeTab ? queryAccessAttentionKeys[activeTab.id] : undefined
@@ -3198,18 +3199,20 @@ export function SQLEditorPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={activeTabRunning ? handleStopQuery : handleRunQuery}
-                      disabled={!activeTabRunning && (!canQuery || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim()))}
-                      title={activeTabRunning ? 'Stop the running query' : undefined}
+                      onClick={activeTabCanStop ? handleStopQuery : handleRunQuery}
+                      disabled={activeTabRunning ? !activeTabCanStop : (!canQuery || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim()))}
+                      title={activeTabCanStop ? 'Stop the running query' : undefined}
                       className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-[13px] font-bold text-white transition disabled:cursor-not-allowed disabled:bg-border disabled:text-faint ${
-                        activeTabRunning ? 'bg-danger hover:bg-red-700' : 'bg-brand hover:bg-slate-800'
+                        activeTabCanStop ? 'bg-danger hover:bg-red-700' : 'bg-brand hover:bg-slate-800'
                       }`}
                     >
-                      {activeTabRunning ? (
+                      {activeTabCanStop ? (
                         <>
                           <Square className="h-3.5 w-3.5" />
                           Stop
                         </>
+                      ) : activeTabRunning ? (
+                        'Running...'
                       ) : (
                         <>
                           <Play className="h-4 w-4" />

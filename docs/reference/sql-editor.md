@@ -154,7 +154,7 @@ SQL Editor 走 `query` pool profile。預設值：
 }
 ```
 
-若 Stop 早於後端完成 MySQL thread registration，後端會先記錄 pending cancel，回應仍是 `200`：
+若 Stop 早於後端完成 SQL backend registration，後端會先記錄 pending cancel，回應仍是 `200`：
 
 ```json
 {
@@ -163,47 +163,51 @@ SQL Editor 走 `query` pool profile。預設值：
 }
 ```
 
-Cancel 是 user-scoped：同一個使用者只能取消自己啟動的查詢。`query_execution_id` 是不透明 ID，不應暴露 MySQL thread id 給前端。
+Cancel 是 user-scoped：同一個使用者只能取消自己啟動的查詢。`query_execution_id` 是不透明 ID，不應暴露 MySQL thread id 或 PostgreSQL backend pid 給前端。
 
-### Stop Query / MySQL Cancel
+### Stop Query / SQL Cancel
 
-SQL Editor 的 Stop Query 目前對 MySQL 有額外 DB engine kill 機制：
+SQL Editor 的 Stop Query 目前支援 MySQL 與 PostgreSQL 的 DB engine cancel。Redis command 不提供 Stop；Redis 執行中按鈕只會顯示 running 狀態。
 
 1. 前端每次 Run Query 產生一個 `query_execution_id`。
 2. `POST /api/query` 帶入該 ID。
-3. 後端用 readonly credential 執行查詢，並在 pinned MySQL connection 上讀取 `SELECT CONNECTION_ID()`。
-4. 查詢開始前，後端把 `query_execution_id`、user id、connection id、MySQL thread id 與 cancel function 註冊到 process-local registry。
-5. 使用者點 Stop 時，前端呼叫 `POST /api/query/cancel`。
-6. 後端先 cancel app context，再用 readwrite credential 開短連線執行 MySQL kill routine。
+3. 後端用 readonly credential 執行查詢。
+4. MySQL 讀取 `SELECT CONNECTION_ID()`；PostgreSQL 讀取 backend pid。
+5. 查詢開始前，後端把 `query_execution_id`、user id、connection id、backend identifier 與 cancel function 註冊到 process-local registry。
+6. 使用者點 Stop 時，前端呼叫 `POST /api/query/cancel`。
+7. 後端用 readonly credential 開短連線執行 DB engine cancel，再 cancel app context。
 
-MySQL kill 順序：
+MySQL cancel 順序：
 
 ```sql
 CALL mysql.rds_kill_query(<thread_id>);
-```
-
-若失敗，再 fallback：
-
-```sql
 CALL mysql.rds_kill(<thread_id>);
+KILL QUERY <thread_id>;
 ```
 
-這個設計讓查詢本身仍保持 readonly credential，只在取消時短暫使用 readwrite credential 執行 Aurora/RDS MySQL kill routine。
+前兩個 routine 用於 Aurora/RDS MySQL；最後的 `KILL QUERY` fallback 用於標準 MySQL / 社區版 MySQL。
 
-Readwrite credential 需要具備：
+Aurora/RDS MySQL 的 readonly credential 需要具備：
 
 ```sql
-GRANT EXECUTE ON PROCEDURE mysql.rds_kill_query TO '<readwrite_user>'@'%';
-GRANT EXECUTE ON PROCEDURE mysql.rds_kill TO '<readwrite_user>'@'%';
+GRANT EXECUTE ON PROCEDURE mysql.rds_kill_query TO '<readonly_user>'@'%';
+GRANT EXECUTE ON PROCEDURE mysql.rds_kill TO '<readonly_user>'@'%';
 ```
 
-readonly credential 不需要、也不建議授予上述 routine 權限。
+標準 MySQL / 社區版 MySQL 取消自己的 connection query 時，通常不需要額外授權。
+
+PostgreSQL cancel 使用：
+
+```sql
+SELECT pg_cancel_backend(<backend_pid>);
+```
+
+PostgreSQL 取消自己的 backend query 通常不需要額外授權。
 
 限制：
 
-- 這個 MySQL kill 機制是 Aurora/RDS MySQL 專用。
-- PostgreSQL 目前依賴 `statement_timeout` 與 request context cancellation，沒有獨立 `pg_cancel_backend` 類 kill 流程。
-- Registry 存在於單一 app process memory。若部署多個 replica 且沒有 sticky routing，`POST /api/query/cancel` 可能打到不同 pod，導致只能記成 pending cancel 而無法立即 kill 原查詢。
+- Redis command 不支援 Stop，也不會註冊到 cancel registry。
+- Registry 存在於單一 app process memory。若部署多個 replica 且沒有 sticky routing，`POST /api/query/cancel` 可能打到不同 pod，導致只能記成 pending cancel 而無法立即 cancel 原查詢。
 - `/api/query/cancel` 不是 long-running request，不會豁免全域 request timeout。
 
 ### `POST /api/query/sensitive-access`

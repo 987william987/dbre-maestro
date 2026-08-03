@@ -58,7 +58,7 @@
 
 6. 如果查詢執行太久，點擊 `Stop`。
 
-   對 MySQL connection，Stop 會送出顯式 cancel request，後端會嘗試在 DB engine 側停止同一次查詢。正常情況下：
+   對 MySQL / PostgreSQL connection，Stop 會送出顯式 cancel request，後端會嘗試在 DB engine 側停止同一次查詢。Redis command 不提供 Stop。正常情況下：
 
    - UI 會結束 running 狀態
    - 查詢回應會顯示已取消
@@ -83,7 +83,7 @@
 你可以用以下方式確認操作成功：
 
 - `Run Query` 後，結果區顯示 `row_count` 與 `duration`
-- `Stop` 後，MySQL 長查詢不應繼續留在 processlist
+- `Stop` 後，MySQL / PostgreSQL 長查詢不應繼續留在 DB backend process list
 - `Explain` 後，結果區出現執行計畫資料
 - `History` 最多顯示你自己的最近 20 筆查詢紀錄
 - `Saved queries` 可看到新收藏
@@ -109,20 +109,20 @@
 
 這三個值由 Settings 頁面控制。
 
-### Stop 後 MySQL 查詢仍在跑
+### Stop 後 SQL 查詢仍在跑
 
-如果點 Stop 後，DBA 在 MySQL processlist 仍看到同一條查詢，優先確認：
+如果點 Stop 後，DBA 在 MySQL processlist 或 PostgreSQL activity view 仍看到同一條查詢，優先確認：
 
-- DB Connection 有設定 readwrite credential
-- readwrite credential 可執行 `mysql.rds_kill_query` 與 `mysql.rds_kill`
+- DB Connection 有設定 readonly credential
+- Aurora/RDS MySQL 的 readonly credential 可執行 `mysql.rds_kill_query` 與 `mysql.rds_kill`
 - App 是否部署多個 replica，且 `/api/query` 和 `/api/query/cancel` 可能被打到不同 pod
 - 反向代理或 Ingress 是否讓 `/api/query/cancel` 正常送達後端
 
 Aurora/RDS MySQL 可用以下 grant 作為參考：
 
 ```sql
-GRANT EXECUTE ON PROCEDURE mysql.rds_kill_query TO '<readwrite_user>'@'%';
-GRANT EXECUTE ON PROCEDURE mysql.rds_kill TO '<readwrite_user>'@'%';
+GRANT EXECUTE ON PROCEDURE mysql.rds_kill_query TO '<readonly_user>'@'%';
+GRANT EXECUTE ON PROCEDURE mysql.rds_kill TO '<readonly_user>'@'%';
 ```
 
 ### Metadata 錯誤

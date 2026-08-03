@@ -72,7 +72,7 @@ SQL Editor、Export、Scheduled Report、metadata read path 會使用 readonly c
 - PostgreSQL：不可是 superuser，不可有 server file、dangerous extension、dblink、sequence write、危險 `SECURITY DEFINER` 函式使用權
 - Redis：若存在敏感 prefix，應在平台配置 Redis sensitive key prefix，阻擋讀 value 類命令
 
-SQL Editor Stop Query 是例外中的最小例外：查詢仍使用 readonly credential；只有 MySQL cancel 會用 readwrite credential 開短連線執行 `mysql.rds_kill_query`，失敗時 fallback `mysql.rds_kill`。這個 readwrite 權限只應授予 DB Connection 的 readwrite user，不應加到 readonly user。
+SQL Editor Stop Query 仍使用 readonly credential。MySQL cancel 會用 readonly credential 依序嘗試 `mysql.rds_kill_query`、`mysql.rds_kill`、`KILL QUERY <thread_id>`；PostgreSQL cancel 會用 readonly credential 執行 `pg_cancel_backend(<backend_pid>)`。Aurora/RDS MySQL 需要 DBA 額外授予 readonly user 執行前兩個 routine 的權限；標準 MySQL 取消自己的 connection query 通常不需要額外授權。
 
 ## Redis 的特殊設計
 
