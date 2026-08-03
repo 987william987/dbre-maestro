@@ -432,6 +432,7 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if h.artifacts != nil {
+		rowCount := len(result.Rows)
 		_, _ = h.artifacts.AddHistory(r.Context(), &model.QueryHistoryEntry{
 			UserID:           userID,
 			DBConnectionID:   req.DBConnectionID,
@@ -440,6 +441,7 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 			SchemaName:       optionalTrimmedString(req.Schema),
 			RedisDBIndex:     req.RedisDBIndex,
 			SQLContent:       req.SQL,
+			RowCount:         &rowCount,
 			DurationMs:       durationMs,
 		})
 	}
@@ -1680,12 +1682,14 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 	})
 
 	if h.artifacts != nil {
+		rowCount := len(result.Rows)
 		_, _ = h.artifacts.AddHistory(r.Context(), &model.QueryHistoryEntry{
 			UserID:           userID,
 			DBConnectionID:   conn.ID,
 			DBConnectionName: conn.Name,
 			RedisDBIndex:     &dbIndex,
 			SQLContent:       cmdLine,
+			RowCount:         &rowCount,
 			DurationMs:       durationMs,
 		})
 	}

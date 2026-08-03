@@ -1427,6 +1427,7 @@ describe('SQLEditorPage', () => {
         schema_name: null,
         redis_db_index: null,
         sql_content: 'SELECT * FROM tickets;',
+        row_count: 12,
         duration_ms: 123,
         created_at: '2026-07-22T12:50:20Z',
       }],
@@ -1444,7 +1445,14 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByText('History'))
 
     expect(await screen.findByText('SELECT * FROM tickets;')).toBeInTheDocument()
-    expect(screen.getByText(/Primary MySQL \/ maestro \/ 123 ms/)).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'SQL' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Connection' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Schema' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Rows' })).toBeInTheDocument()
+    expect(screen.getByText('Primary MySQL')).toBeInTheDocument()
+    expect(screen.getByText('maestro')).toBeInTheDocument()
+    expect(screen.getByText('12')).toBeInTheDocument()
+    expect(screen.getByText('123 ms')).toBeInTheDocument()
 
     fireEvent.click(screen.getByText('SELECT * FROM tickets;'))
 

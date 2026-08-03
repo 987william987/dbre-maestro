@@ -441,19 +441,16 @@ function formatSensitiveAccessExpiry(minutes: number) {
   return formatDateTime(expiresAt.toISOString(), true)
 }
 
-function formatHistoryContext(entry: QueryHistoryEntry) {
-  const parts = [entry.db_connection_name]
+function formatQuerySchema(entry: Pick<QueryHistoryEntry, 'database_name' | 'schema_name' | 'redis_db_index'>) {
   if (entry.redis_db_index !== undefined && entry.redis_db_index !== null) {
-    parts.push(`DB ${entry.redis_db_index}`)
-  } else {
-    if (entry.database_name?.trim()) {
-      parts.push(entry.database_name.trim())
-    }
-    if (entry.schema_name?.trim()) {
-      parts.push(entry.schema_name.trim())
-    }
+    return `DB ${entry.redis_db_index}`
   }
-  return parts.join(' / ')
+  const databaseName = entry.database_name?.trim() ?? ''
+  const schemaName = entry.schema_name?.trim() ?? ''
+  if (databaseName && schemaName && databaseName !== schemaName) {
+    return `${databaseName} / ${schemaName}`
+  }
+  return schemaName || databaseName || '-'
 }
 
 function createTab(seed = 1): EditorTab {
@@ -3406,29 +3403,44 @@ export function SQLEditorPage() {
                           No query history yet.
                         </div>
                       ) : (
-                        <div className="divide-y divide-border">
-                          {history.map((entry) => (
-                          <button
-                            key={entry.id}
-                            type="button"
-                            onClick={() => applySavedQuery({
-                              connectionId: entry.db_connection_id,
-                              sql: entry.sql_content,
-                              label: entry.db_connection_name,
-                              database: entry.database_name,
-                              schema: entry.schema_name,
-                              redisDbIndex: entry.redis_db_index,
-                              preserveTitle: true,
-                            })}
-                            className="block w-full px-4 py-3 text-left transition hover:bg-slate-50/70"
-                          >
-                            <p className="truncate text-[12px] font-semibold text-ink">{entry.sql_content}</p>
-                            <p className="mt-1 text-[11px] text-muted">
-                              {formatHistoryContext(entry)} / {entry.duration_ms} ms / {formatDateTime(entry.created_at, true)}
-                            </p>
-                          </button>
-                          ))}
-                        </div>
+                        <DataTable className="min-w-[980px]">
+                          <DataTableHead>
+                            <tr>
+                              <DataTableHeaderCell>SQL</DataTableHeaderCell>
+                              <DataTableHeaderCell>Connection</DataTableHeaderCell>
+                              <DataTableHeaderCell>Schema</DataTableHeaderCell>
+                              <DataTableHeaderCell>Rows</DataTableHeaderCell>
+                              <DataTableHeaderCell>Duration</DataTableHeaderCell>
+                              <DataTableHeaderCell>Executed At</DataTableHeaderCell>
+                            </tr>
+                          </DataTableHead>
+                          <DataTableBody>
+                            {history.map((entry) => (
+                              <DataTableRow
+                                key={entry.id}
+                                onClick={() => applySavedQuery({
+                                  connectionId: entry.db_connection_id,
+                                  sql: entry.sql_content,
+                                  label: entry.db_connection_name,
+                                  database: entry.database_name,
+                                  schema: entry.schema_name,
+                                  redisDbIndex: entry.redis_db_index,
+                                  preserveTitle: true,
+                                })}
+                                className="cursor-pointer"
+                              >
+                                <DataTableCell className="max-w-[520px]">
+                                  <p className="truncate font-semibold text-ink" title={entry.sql_content}>{entry.sql_content}</p>
+                                </DataTableCell>
+                                <DataTableCell className="whitespace-nowrap text-muted">{entry.db_connection_name}</DataTableCell>
+                                <DataTableCell className="whitespace-nowrap text-muted">{formatQuerySchema(entry)}</DataTableCell>
+                                <DataTableCell className="whitespace-nowrap text-muted">{entry.row_count ?? '-'}</DataTableCell>
+                                <DataTableCell className="whitespace-nowrap text-muted">{entry.duration_ms} ms</DataTableCell>
+                                <DataTableCell className="whitespace-nowrap text-muted">{formatDateTime(entry.created_at, true)}</DataTableCell>
+                              </DataTableRow>
+                            ))}
+                          </DataTableBody>
+                        </DataTable>
                       )
                     ) : activeResultView === 'saved' ? (
                     savedQueries.length === 0 ? (
@@ -3436,11 +3448,21 @@ export function SQLEditorPage() {
                         No saved queries yet.
                       </div>
                     ) : (
-                      <div className="divide-y divide-border">
-                        {savedQueries.map((entry) => (
-                          <div key={entry.id} className="flex items-start justify-between gap-3 px-4 py-3 transition hover:bg-slate-50/70">
-                            <button
-                              type="button"
+                      <DataTable className="min-w-[1040px]">
+                        <DataTableHead>
+                          <tr>
+                            <DataTableHeaderCell>Label</DataTableHeaderCell>
+                            <DataTableHeaderCell>SQL</DataTableHeaderCell>
+                            <DataTableHeaderCell>Connection</DataTableHeaderCell>
+                            <DataTableHeaderCell>Schema</DataTableHeaderCell>
+                            <DataTableHeaderCell>Updated</DataTableHeaderCell>
+                            {canQuery ? <DataTableHeaderCell className="text-right">Action</DataTableHeaderCell> : null}
+                          </tr>
+                        </DataTableHead>
+                        <DataTableBody>
+                          {savedQueries.map((entry) => (
+                            <DataTableRow
+                              key={entry.id}
                               onClick={() => applySavedQuery({
                                 connectionId: entry.db_connection_id,
                                 sql: entry.sql_content,
@@ -3449,27 +3471,36 @@ export function SQLEditorPage() {
                                 schema: entry.schema_name,
                                 redisDbIndex: entry.redis_db_index,
                               })}
-                              className="min-w-0 flex-1 text-left"
+                              className="cursor-pointer"
                             >
-                              <div className="flex items-center justify-between gap-3">
-                                <p className="truncate text-[12px] font-semibold text-ink">{entry.label}</p>
-                                <span className="shrink-0 text-[10px] text-muted">{entry.db_connection_name}</span>
-                              </div>
-                              <p className="mt-1 truncate text-[11px] text-muted">{entry.sql_content}</p>
-                            </button>
-                            {canQuery ? (
-                              <button
-                                type="button"
-                                onClick={() => setSavedQueryToDelete(entry)}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-white text-muted transition hover:bg-page hover:text-danger"
-                                aria-label={`Delete saved query ${entry.label}`}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
+                              <DataTableCell className="max-w-[220px]">
+                                <p className="truncate font-semibold text-ink" title={entry.label}>{entry.label}</p>
+                              </DataTableCell>
+                              <DataTableCell className="max-w-[520px]">
+                                <p className="truncate text-muted" title={entry.sql_content}>{entry.sql_content}</p>
+                              </DataTableCell>
+                              <DataTableCell className="whitespace-nowrap text-muted">{entry.db_connection_name}</DataTableCell>
+                              <DataTableCell className="whitespace-nowrap text-muted">{formatQuerySchema(entry)}</DataTableCell>
+                              <DataTableCell className="whitespace-nowrap text-muted">{formatDateTime(entry.updated_at, true)}</DataTableCell>
+                              {canQuery ? (
+                                <DataTableCell className="whitespace-nowrap text-right">
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      setSavedQueryToDelete(entry)
+                                    }}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-white text-muted transition hover:bg-page hover:text-danger"
+                                    aria-label={`Delete saved query ${entry.label}`}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </DataTableCell>
+                              ) : null}
+                            </DataTableRow>
+                          ))}
+                        </DataTableBody>
+                      </DataTable>
                     )
                   ) : activeResultView === 'object-meta' ? (
                     !activeSelectedTable ? (
