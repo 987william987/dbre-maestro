@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { javascript } from '@codemirror/lang-javascript'
 import { MySQL, PostgreSQL, StandardSQL, sql, type SQLNamespace } from '@codemirror/lang-sql'
@@ -3553,23 +3553,26 @@ export function SQLEditorPage() {
                             <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-faint">
                               Row {(activeResultPage - 1) * RESULT_PAGE_SIZE + rowOffset + 1}
                             </p>
-                            <div className="overflow-hidden rounded-lg border border-border bg-panel-soft">
-                              {visibleResultColumnIndexes.map((columnIndex) => (
-                                <div
-                                  key={`${activeTab.id}-vertical-${rowOffset}-${columnIndex}`}
-                                  className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-t border-border px-3 py-2 first:border-t-0 sm:grid-cols-[160px_minmax(0,1fr)]"
-                                >
-                                  <p className={`text-[10px] font-bold uppercase tracking-[0.14em] ${sensitiveColumnIndexSet.has(columnIndex) ? 'text-[#b9381f]' : 'text-faint'}`}>
+                            <div className="grid grid-cols-[max-content_minmax(240px,1fr)] rounded-lg border border-border bg-panel-soft">
+                              {visibleResultColumnIndexes.map((columnIndex, fieldOffset) => (
+                                <Fragment key={`${activeTab.id}-vertical-${rowOffset}-${columnIndex}`}>
+                                  <p
+                                    className={cn(
+                                      'whitespace-nowrap px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em]',
+                                      fieldOffset > 0 ? 'border-t border-border' : '',
+                                      sensitiveColumnIndexSet.has(columnIndex) ? 'text-[#b9381f]' : 'text-faint',
+                                    )}
+                                  >
                                     {activeTab.result?.columns[columnIndex]}
                                   </p>
-                                  <p className="break-all text-[12px] text-ink">
+                                  <p className={cn('break-all px-3 py-2 text-[12px] text-ink', fieldOffset > 0 ? 'border-t border-border' : '')}>
                                     {!Array.isArray(row)
                                       ? <span className="text-muted">(empty)</span>
                                       : row[columnIndex] === null
                                         ? <span className="text-muted">(null)</span>
                                         : String(row[columnIndex])}
                                   </p>
-                                </div>
+                                </Fragment>
                               ))}
                             </div>
                           </div>
