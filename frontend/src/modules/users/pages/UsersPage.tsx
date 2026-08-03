@@ -81,7 +81,7 @@ const SESSION_PAGE_SIZE = 5
 const PERMISSION_INDEX = new Map(PERMISSION_METADATA.map((item) => [item.key, item] as const))
 
 type ViewMode = 'users' | 'auth-groups' | 'resources' | 'query-access'
-type UsersSortKey = 'username' | 'status' | 'created' | 'updated'
+type UsersSortKey = 'username' | 'status' | 'online' | 'lastLogin' | 'created' | 'updated'
 type AuthGroupsSortKey = 'authGroup' | 'created' | 'updated'
 type ResourcesSortKey = 'resource' | 'type'
 type QueryAccessSortKey = 'subject' | 'subjectType' | 'effect' | 'expires' | 'status'
@@ -1120,6 +1120,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                       <DataTableHeaderCell>Permissions</DataTableHeaderCell>
                       <DataTableHeaderCell>DB Scope</DataTableHeaderCell>
                       <SortableDataTableHeaderCell label="Status" sortKey="status" sortState={usersSortState} onSort={toggleUsersSort} />
+                      <SortableDataTableHeaderCell label="Online" sortKey="online" sortState={usersSortState} onSort={toggleUsersSort} />
+                      <SortableDataTableHeaderCell label="Last Login" sortKey="lastLogin" sortState={usersSortState} onSort={toggleUsersSort} />
                       <SortableDataTableHeaderCell label="Created" sortKey="created" sortState={usersSortState} onSort={toggleUsersSort} />
                       <SortableDataTableHeaderCell label="Updated" sortKey="updated" sortState={usersSortState} onSort={toggleUsersSort} />
                       <DataTableHeaderCell>Action</DataTableHeaderCell>
@@ -1156,6 +1158,10 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                         <DataTableCell>
                           <Tag label={user.is_active ? 'active' : 'disabled'} tone={user.is_active ? 'success' : 'danger'} />
                         </DataTableCell>
+                        <DataTableCell>
+                          <Tag label={user.online ? 'online' : 'offline'} tone={user.online ? 'success' : 'default'} />
+                        </DataTableCell>
+                        <DataTableCell className="whitespace-nowrap">{user.last_login_at ? formatDateTime(user.last_login_at) : '—'}</DataTableCell>
                         <DataTableCell>{formatDateTime(user.created_at)}</DataTableCell>
                         <DataTableCell>{formatDateTime(user.updated_at)}</DataTableCell>
                         <DataTableCell>
@@ -1745,8 +1751,8 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
                     <CardSection title="Sessions" icon={<Shield className="h-4 w-4 text-accent" />}>
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
-                          <p className="text-[12px] font-semibold text-ink">Refresh Sessions</p>
-                          <p className="mt-1 text-[11px] text-muted">Review and revoke browser sessions for this user.</p>
+                          <p className="text-[12px] font-semibold text-ink">Session Management</p>
+                          <p className="mt-1 text-[11px] text-muted">Refresh the session list or revoke browser sessions for this user.</p>
                         </div>
                         <div className="flex items-center gap-2">
                           <button
@@ -2262,6 +2268,12 @@ function compareUsers(left: UserSummary, right: UserSummary, sortState: { key: U
     case 'status':
       result = compareText(left.is_active ? 'active' : 'disabled', right.is_active ? 'active' : 'disabled')
       break
+    case 'online':
+      result = compareBoolean(left.online === true, right.online === true)
+      break
+    case 'lastLogin':
+      result = compareDate(left.last_login_at ?? '', right.last_login_at ?? '')
+      break
     case 'created':
       result = compareDate(left.created_at, right.created_at)
       break
@@ -2336,6 +2348,13 @@ function compareText(left: string, right: string) {
 
 function compareDate(left: string, right: string) {
   return dateSortValue(left) - dateSortValue(right)
+}
+
+function compareBoolean(left: boolean, right: boolean) {
+  if (left === right) {
+    return 0
+  }
+  return left ? 1 : -1
 }
 
 function dateSortValue(value: string) {

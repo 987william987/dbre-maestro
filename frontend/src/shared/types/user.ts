@@ -13,6 +13,8 @@ export type UserSummary = {
   db_connection_ids?: number[]
   protected: boolean
   is_active: boolean
+  online?: boolean
+  last_login_at?: string | null
   created_at: string
   updated_at: string
 }

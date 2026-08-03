@@ -282,6 +282,54 @@ describe('UsersPage', () => {
     expect(within(rows[1]).getByText('charlie')).toBeInTheDocument()
   })
 
+  it('Users 表格顯示 Last Login 和 Online，並可依 Online 排序', async () => {
+    mockedListUsers.mockResolvedValue({
+      users: [
+        {
+          id: 2,
+          username: 'offline_user',
+          email: 'offline@example.com',
+          lark_recipient: '',
+          auth_groups: [],
+          db_connection_ids: [],
+          protected: false,
+          is_active: true,
+          online: false,
+          last_login_at: null,
+          created_at: '2026-06-10T00:00:00Z',
+          updated_at: '2026-06-10T00:00:00Z',
+        },
+        {
+          id: 3,
+          username: 'online_user',
+          email: 'online@example.com',
+          lark_recipient: '',
+          auth_groups: [],
+          db_connection_ids: [],
+          protected: false,
+          is_active: true,
+          online: true,
+          last_login_at: '2026-07-22T12:34:56Z',
+          created_at: '2026-06-11T00:00:00Z',
+          updated_at: '2026-06-11T00:00:00Z',
+        },
+      ],
+    })
+
+    renderPage()
+
+    expect(await screen.findByText('online_user')).toBeInTheDocument()
+    expect(screen.getByText(/2026\/07\/22/)).toBeInTheDocument()
+    expect(screen.getByText('online')).toBeInTheDocument()
+    expect(screen.getByText('offline')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Online' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Online ASC' }))
+
+    const rows = screen.getAllByRole('row')
+    expect(within(rows[1]).getByText('online_user')).toBeInTheDocument()
+  })
+
   it('Query Access ticket 來源顯示工單號連結', async () => {
     mockedListUsers.mockResolvedValue({
       users: [
