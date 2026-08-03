@@ -17,6 +17,7 @@ export type QueryHistoryEntry = {
   schema_name?: string | null
   redis_db_index?: number | null
   sql_content: string
+  row_count?: number | null
   duration_ms: number
   created_at: string
 }

@@ -10,6 +10,7 @@ vi.mock('@/shared/auth/AuthContext', () => ({
 
 vi.mock('@/modules/notifications/api', () => ({
   listNotifications: vi.fn(),
+  listNotificationSummary: vi.fn(),
   markNotificationRead: vi.fn(),
   markAllNotificationsRead: vi.fn(),
 }))
@@ -22,11 +23,12 @@ vi.mock('@/shared/api/client', async () => {
   }
 })
 
-import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
+import { listNotifications, listNotificationSummary, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 
 const mockedUseAuth = vi.mocked(useAuth)
 const mockedListNotifications = vi.mocked(listNotifications)
+const mockedListNotificationSummary = vi.mocked(listNotificationSummary)
 const mockedMarkNotificationRead = vi.mocked(markNotificationRead)
 const mockedMarkAllNotificationsRead = vi.mocked(markAllNotificationsRead)
 const storage = new Map<string, string>()
@@ -117,6 +119,11 @@ describe('AppShell notifications', () => {
       limit: 8,
       offset: 0,
     })
+    mockedListNotificationSummary.mockResolvedValue({
+      pending: 2,
+      review_required: 1,
+      execution_required: 3,
+    })
     mockedMarkNotificationRead.mockResolvedValue(undefined)
     mockedMarkAllNotificationsRead.mockResolvedValue(undefined)
   })
@@ -131,8 +138,11 @@ describe('AppShell notifications', () => {
     fireEvent.click(screen.getByLabelText('Notifications'))
 
     expect(screen.getByText('Notifications')).toBeInTheDocument()
-    expect(screen.getByText('工單待審批')).toBeInTheDocument()
-    expect(screen.getByText('工單 T-101 等待審核')).toBeInTheDocument()
+    expect(screen.getByText('Pending')).toBeInTheDocument()
+    expect(screen.getByText('Review')).toBeInTheDocument()
+    expect(screen.getByText('Execute')).toBeInTheDocument()
+    expect(screen.getByText('T-101')).toBeInTheDocument()
+    expect(screen.getByText('Pending review')).toBeInTheDocument()
   })
 
   it('可將全部通知標示已讀', async () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { javascript } from '@codemirror/lang-javascript'
 import { MySQL, PostgreSQL, StandardSQL, sql, type SQLNamespace } from '@codemirror/lang-sql'
@@ -374,11 +374,12 @@ function formatResultMetaLine(params: {
   selectedTable: MetadataItem | null
   detailHint: string
   historyCount: number
+  historyRetentionDays: number
   savedCount: number
   currentPage: number
   totalPages: number
 }): string {
-  const { resultView, result, selectedTable, detailHint, historyCount, savedCount, currentPage, totalPages } = params
+  const { resultView, result, selectedTable, detailHint, historyCount, historyRetentionDays, savedCount, currentPage, totalPages } = params
 
   if ((resultView === 'result' || resultView === 'vertical') && result) {
     const parts = [`${result.row_count} rows`, `${result.duration_ms} ms`]
@@ -391,7 +392,7 @@ function formatResultMetaLine(params: {
     return selectedTable ? `${selectedTable.schema}.${selectedTable.name}` : detailHint || 'Select a table to inspect its structure'
   }
   if (resultView === 'history') {
-    return `${historyCount} entries`
+    return `${historyCount} entries / ${historyRetentionDays} days`
   }
   return `${savedCount} entries`
 }
@@ -441,19 +442,16 @@ function formatSensitiveAccessExpiry(minutes: number) {
   return formatDateTime(expiresAt.toISOString(), true)
 }
 
-function formatHistoryContext(entry: QueryHistoryEntry) {
-  const parts = [entry.db_connection_name]
+function formatQuerySchema(entry: Pick<QueryHistoryEntry, 'database_name' | 'schema_name' | 'redis_db_index'>) {
   if (entry.redis_db_index !== undefined && entry.redis_db_index !== null) {
-    parts.push(`DB ${entry.redis_db_index}`)
-  } else {
-    if (entry.database_name?.trim()) {
-      parts.push(entry.database_name.trim())
-    }
-    if (entry.schema_name?.trim()) {
-      parts.push(entry.schema_name.trim())
-    }
+    return `DB ${entry.redis_db_index}`
   }
-  return parts.join(' / ')
+  const databaseName = entry.database_name?.trim() ?? ''
+  const schemaName = entry.schema_name?.trim() ?? ''
+  if (databaseName && schemaName && databaseName !== schemaName) {
+    return `${databaseName} / ${schemaName}`
+  }
+  return schemaName || databaseName || '-'
 }
 
 function createTab(seed = 1): EditorTab {
@@ -1272,6 +1270,9 @@ export function SQLEditorPage() {
   const [tabs, setTabs] = useState<EditorTab[]>(() => initialWorkspaceRef.current!.tabs)
   const [activeTabId, setActiveTabId] = useState<string>(() => initialWorkspaceRef.current!.activeTabId)
   const [history, setHistory] = useState<QueryHistoryEntry[]>([])
+  const [historyOffset, setHistoryOffset] = useState(0)
+  const [historyTotal, setHistoryTotal] = useState(0)
+  const [historyRetentionDays, setHistoryRetentionDays] = useState(90)
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
   const [queryConstraints, setQueryConstraints] = useState(DEFAULT_QUERY_CONSTRAINTS)
   const [runningTabIDs, setRunningTabIDs] = useState<string[]>([])
@@ -1390,26 +1391,28 @@ export function SQLEditorPage() {
     }
   }, [canQuery, pushToast])
 
+  const loadHistoryPage = useCallback(async (offset = 0) => {
+    try {
+      const response = await listQueryHistory(HISTORY_LIMIT, offset)
+      setHistory(response.history)
+      setHistoryOffset(response.offset)
+      setHistoryTotal(response.total)
+      setHistoryRetentionDays(response.retention_days)
+    } catch (error) {
+      pushToast(error instanceof ApiError ? error.message : 'Failed to load query history.', 'error')
+    }
+  }, [pushToast])
+
   useEffect(() => {
     let active = true
     if (!canQuery) {
       setHistory([])
+      setHistoryOffset(0)
+      setHistoryTotal(0)
+      setHistoryRetentionDays(90)
       setSavedQueries([])
       return () => {
         active = false
-      }
-    }
-
-    async function loadHistory() {
-      try {
-        const response = await listQueryHistory(HISTORY_LIMIT)
-        if (active) {
-          setHistory(response.history)
-        }
-      } catch (error) {
-        if (active) {
-          pushToast(error instanceof ApiError ? error.message : 'Failed to load query history.', 'error')
-        }
       }
     }
 
@@ -1426,7 +1429,20 @@ export function SQLEditorPage() {
       }
     }
 
-    void loadHistory()
+    void listQueryHistory(HISTORY_LIMIT, 0)
+      .then((response) => {
+        if (active) {
+          setHistory(response.history)
+          setHistoryOffset(response.offset)
+          setHistoryTotal(response.total)
+          setHistoryRetentionDays(response.retention_days)
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          pushToast(error instanceof ApiError ? error.message : 'Failed to load query history.', 'error')
+        }
+      })
     void loadSavedQueries()
 
     return () => {
@@ -1525,6 +1541,7 @@ export function SQLEditorPage() {
       }))
   }, [filteredConnections])
   const activeTabRunning = activeTab ? runningTabIDs.includes(activeTab.id) : false
+  const activeTabCanStop = activeTabRunning && activeConnection?.db_type !== 'redis'
   const activeTabExporting = activeTab ? exportingTabIDs.includes(activeTab.id) : false
   const activeTabCreatingSensitiveAccess = activeTab ? sensitiveAccessTabIDs.includes(activeTab.id) : false
   const activeQueryAccessAttentionKey = activeTab ? queryAccessAttentionKeys[activeTab.id] : undefined
@@ -1998,7 +2015,7 @@ export function SQLEditorPage() {
         lastRunAt: new Date().toISOString(),
         resultView: 'result',
       })
-      void listQueryHistory(HISTORY_LIMIT).then((response) => setHistory(response.history)).catch(() => undefined)
+      void loadHistoryPage(0)
       pushToast(mode === 'explain' ? 'Explain completed.' : 'Query completed.', 'success')
     } catch (error) {
       if (controller.signal.aborted) {
@@ -2586,11 +2603,12 @@ export function SQLEditorPage() {
     result: activeTab?.result ?? null,
     selectedTable: activeSelectedTable,
     detailHint,
-    historyCount: history.length,
+    historyCount: historyTotal,
+    historyRetentionDays,
     savedCount: savedQueries.length,
     currentPage: activeResultPage,
     totalPages: totalResultPages,
-  }), [activeResultPage, activeResultView, activeSelectedTable, activeTab?.result, detailHint, history.length, savedQueries.length, totalResultPages])
+  }), [activeResultPage, activeResultView, activeSelectedTable, activeTab?.result, detailHint, historyRetentionDays, historyTotal, savedQueries.length, totalResultPages])
 
   function handleSelectNode(node: AssetTreeNode) {
     if (activeExplorerSearch.trim() && activeConnection && node.kind !== 'connection' && node.kind !== 'redis_db') {
@@ -3198,18 +3216,20 @@ export function SQLEditorPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={activeTabRunning ? handleStopQuery : handleRunQuery}
-                      disabled={!activeTabRunning && (!canQuery || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim()))}
-                      title={activeTabRunning ? 'Stop the running query' : undefined}
+                      onClick={activeTabCanStop ? handleStopQuery : handleRunQuery}
+                      disabled={activeTabRunning ? !activeTabCanStop : (!canQuery || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim()))}
+                      title={activeTabCanStop ? 'Stop the running query' : undefined}
                       className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-[13px] font-bold text-white transition disabled:cursor-not-allowed disabled:bg-border disabled:text-faint ${
-                        activeTabRunning ? 'bg-danger hover:bg-red-700' : 'bg-brand hover:bg-slate-800'
+                        activeTabCanStop ? 'bg-danger hover:bg-red-700' : 'bg-brand hover:bg-slate-800'
                       }`}
                     >
-                      {activeTabRunning ? (
+                      {activeTabCanStop ? (
                         <>
                           <Square className="h-3.5 w-3.5" />
                           Stop
                         </>
+                      ) : activeTabRunning ? (
+                        'Running...'
                       ) : (
                         <>
                           <Play className="h-4 w-4" />
@@ -3403,29 +3423,44 @@ export function SQLEditorPage() {
                           No query history yet.
                         </div>
                       ) : (
-                        <div className="divide-y divide-border">
-                          {history.map((entry) => (
-                          <button
-                            key={entry.id}
-                            type="button"
-                            onClick={() => applySavedQuery({
-                              connectionId: entry.db_connection_id,
-                              sql: entry.sql_content,
-                              label: entry.db_connection_name,
-                              database: entry.database_name,
-                              schema: entry.schema_name,
-                              redisDbIndex: entry.redis_db_index,
-                              preserveTitle: true,
-                            })}
-                            className="block w-full px-4 py-3 text-left transition hover:bg-slate-50/70"
-                          >
-                            <p className="truncate text-[12px] font-semibold text-ink">{entry.sql_content}</p>
-                            <p className="mt-1 text-[11px] text-muted">
-                              {formatHistoryContext(entry)} / {entry.duration_ms} ms / {formatDateTime(entry.created_at, true)}
-                            </p>
-                          </button>
-                          ))}
-                        </div>
+                        <DataTable className="min-w-[980px]">
+                          <DataTableHead>
+                            <tr>
+                              <DataTableHeaderCell>SQL</DataTableHeaderCell>
+                              <DataTableHeaderCell>Connection</DataTableHeaderCell>
+                              <DataTableHeaderCell>Schema</DataTableHeaderCell>
+                              <DataTableHeaderCell>Rows</DataTableHeaderCell>
+                              <DataTableHeaderCell>Duration</DataTableHeaderCell>
+                              <DataTableHeaderCell>Executed At</DataTableHeaderCell>
+                            </tr>
+                          </DataTableHead>
+                          <DataTableBody>
+                            {history.map((entry) => (
+                              <DataTableRow
+                                key={entry.id}
+                                onClick={() => applySavedQuery({
+                                  connectionId: entry.db_connection_id,
+                                  sql: entry.sql_content,
+                                  label: entry.db_connection_name,
+                                  database: entry.database_name,
+                                  schema: entry.schema_name,
+                                  redisDbIndex: entry.redis_db_index,
+                                  preserveTitle: true,
+                                })}
+                                className="cursor-pointer"
+                              >
+                                <DataTableCell className="max-w-[520px]">
+                                  <p className="truncate font-semibold text-ink" title={entry.sql_content}>{entry.sql_content}</p>
+                                </DataTableCell>
+                                <DataTableCell className="whitespace-nowrap text-muted">{entry.db_connection_name}</DataTableCell>
+                                <DataTableCell className="whitespace-nowrap text-muted">{formatQuerySchema(entry)}</DataTableCell>
+                                <DataTableCell className="whitespace-nowrap text-muted">{entry.row_count ?? '-'}</DataTableCell>
+                                <DataTableCell className="whitespace-nowrap text-muted">{entry.duration_ms} ms</DataTableCell>
+                                <DataTableCell className="whitespace-nowrap text-muted">{formatDateTime(entry.created_at, true)}</DataTableCell>
+                              </DataTableRow>
+                            ))}
+                          </DataTableBody>
+                        </DataTable>
                       )
                     ) : activeResultView === 'saved' ? (
                     savedQueries.length === 0 ? (
@@ -3433,11 +3468,21 @@ export function SQLEditorPage() {
                         No saved queries yet.
                       </div>
                     ) : (
-                      <div className="divide-y divide-border">
-                        {savedQueries.map((entry) => (
-                          <div key={entry.id} className="flex items-start justify-between gap-3 px-4 py-3 transition hover:bg-slate-50/70">
-                            <button
-                              type="button"
+                      <DataTable className="min-w-[1040px]">
+                        <DataTableHead>
+                          <tr>
+                            <DataTableHeaderCell>Label</DataTableHeaderCell>
+                            <DataTableHeaderCell>SQL</DataTableHeaderCell>
+                            <DataTableHeaderCell>Connection</DataTableHeaderCell>
+                            <DataTableHeaderCell>Schema</DataTableHeaderCell>
+                            <DataTableHeaderCell>Updated</DataTableHeaderCell>
+                            {canQuery ? <DataTableHeaderCell className="text-right">Action</DataTableHeaderCell> : null}
+                          </tr>
+                        </DataTableHead>
+                        <DataTableBody>
+                          {savedQueries.map((entry) => (
+                            <DataTableRow
+                              key={entry.id}
                               onClick={() => applySavedQuery({
                                 connectionId: entry.db_connection_id,
                                 sql: entry.sql_content,
@@ -3446,27 +3491,36 @@ export function SQLEditorPage() {
                                 schema: entry.schema_name,
                                 redisDbIndex: entry.redis_db_index,
                               })}
-                              className="min-w-0 flex-1 text-left"
+                              className="cursor-pointer"
                             >
-                              <div className="flex items-center justify-between gap-3">
-                                <p className="truncate text-[12px] font-semibold text-ink">{entry.label}</p>
-                                <span className="shrink-0 text-[10px] text-muted">{entry.db_connection_name}</span>
-                              </div>
-                              <p className="mt-1 truncate text-[11px] text-muted">{entry.sql_content}</p>
-                            </button>
-                            {canQuery ? (
-                              <button
-                                type="button"
-                                onClick={() => setSavedQueryToDelete(entry)}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-white text-muted transition hover:bg-page hover:text-danger"
-                                aria-label={`Delete saved query ${entry.label}`}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
+                              <DataTableCell className="max-w-[220px]">
+                                <p className="truncate font-semibold text-ink" title={entry.label}>{entry.label}</p>
+                              </DataTableCell>
+                              <DataTableCell className="max-w-[520px]">
+                                <p className="truncate text-muted" title={entry.sql_content}>{entry.sql_content}</p>
+                              </DataTableCell>
+                              <DataTableCell className="whitespace-nowrap text-muted">{entry.db_connection_name}</DataTableCell>
+                              <DataTableCell className="whitespace-nowrap text-muted">{formatQuerySchema(entry)}</DataTableCell>
+                              <DataTableCell className="whitespace-nowrap text-muted">{formatDateTime(entry.updated_at, true)}</DataTableCell>
+                              {canQuery ? (
+                                <DataTableCell className="whitespace-nowrap text-right">
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      setSavedQueryToDelete(entry)
+                                    }}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-white text-muted transition hover:bg-page hover:text-danger"
+                                    aria-label={`Delete saved query ${entry.label}`}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </DataTableCell>
+                              ) : null}
+                            </DataTableRow>
+                          ))}
+                        </DataTableBody>
+                      </DataTable>
                     )
                   ) : activeResultView === 'object-meta' ? (
                     !activeSelectedTable ? (
@@ -3553,23 +3607,26 @@ export function SQLEditorPage() {
                             <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-faint">
                               Row {(activeResultPage - 1) * RESULT_PAGE_SIZE + rowOffset + 1}
                             </p>
-                            <div className="overflow-hidden rounded-lg border border-border bg-panel-soft">
-                              {visibleResultColumnIndexes.map((columnIndex) => (
-                                <div
-                                  key={`${activeTab.id}-vertical-${rowOffset}-${columnIndex}`}
-                                  className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 border-t border-border px-3 py-2 first:border-t-0 sm:grid-cols-[160px_minmax(0,1fr)]"
-                                >
-                                  <p className={`text-[10px] font-bold uppercase tracking-[0.14em] ${sensitiveColumnIndexSet.has(columnIndex) ? 'text-[#b9381f]' : 'text-faint'}`}>
+                            <div className="grid grid-cols-[max-content_minmax(240px,1fr)] rounded-lg border border-border bg-panel-soft">
+                              {visibleResultColumnIndexes.map((columnIndex, fieldOffset) => (
+                                <Fragment key={`${activeTab.id}-vertical-${rowOffset}-${columnIndex}`}>
+                                  <p
+                                    className={cn(
+                                      'whitespace-nowrap px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em]',
+                                      fieldOffset > 0 ? 'border-t border-border' : '',
+                                      sensitiveColumnIndexSet.has(columnIndex) ? 'text-[#b9381f]' : 'text-faint',
+                                    )}
+                                  >
                                     {activeTab.result?.columns[columnIndex]}
                                   </p>
-                                  <p className="break-all text-[12px] text-ink">
+                                  <p className={cn('break-all px-3 py-2 text-[12px] text-ink', fieldOffset > 0 ? 'border-t border-border' : '')}>
                                     {!Array.isArray(row)
                                       ? <span className="text-muted">(empty)</span>
                                       : row[columnIndex] === null
                                         ? <span className="text-muted">(null)</span>
                                         : String(row[columnIndex])}
                                   </p>
-                                </div>
+                                </Fragment>
                               ))}
                             </div>
                           </div>
@@ -3631,6 +3688,18 @@ export function SQLEditorPage() {
                         count={Math.min(activeTab.result.rows.length - (activeResultPage - 1) * RESULT_PAGE_SIZE, RESULT_PAGE_SIZE)}
                         total={activeTab.result.rows.length}
                         onChange={(nextOffset) => updateActiveTab({ resultPage: Math.floor(nextOffset / RESULT_PAGE_SIZE) + 1 })}
+                      />
+                    </div>
+                  ) : activeResultView === 'history' && historyTotal > HISTORY_LIMIT ? (
+                    <div className="mt-3">
+                      <Pagination
+                        offset={historyOffset}
+                        pageSize={HISTORY_LIMIT}
+                        count={history.length}
+                        total={historyTotal}
+                        onChange={(nextOffset) => {
+                          void loadHistoryPage(nextOffset)
+                        }}
                       />
                     </div>
                   ) : null}

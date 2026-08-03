@@ -23,6 +23,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
+	"github.com/dbre-maestro/maestro/internal/timeutil"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -31,9 +32,12 @@ import (
 )
 
 const (
-	defaultQueryLimit   = 200
-	maxQueryLimit       = 1000
-	defaultQueryTimeout = 30 * time.Second
+	defaultQueryLimit         = 200
+	maxQueryLimit             = 1000
+	defaultQueryTimeout       = 30 * time.Second
+	queryHistoryRetentionDays = 90
+	defaultQueryHistoryLimit  = 20
+	maxQueryHistoryLimit      = 100
 )
 
 type sqlEditorTimeoutSettings struct {
@@ -79,7 +83,7 @@ type QueryHandler struct {
 	notifications *NotificationRouter
 	appBaseURL    string
 	jwtSecret     []byte
-	activeQueries *activeMySQLQueryRegistry
+	activeQueries *activeSQLQueryRegistry
 }
 
 type sqlEditorConstraintsResponse struct {
@@ -96,45 +100,47 @@ type queryExecutionContext struct {
 	RedisDBIndex *int
 }
 
-type mysqlKillDBOpener func(ctx context.Context) (*sql.DB, string, func(), error)
+type sqlCancelDBOpener func(ctx context.Context) (*sql.DB, string, func(), error)
 
-type mysqlQueryExecutionOptions struct {
+type sqlQueryExecutionOptions struct {
 	QueryExecutionID string
 	UserID           uint64
-	Registry         *activeMySQLQueryRegistry
-	KillDBOpener     mysqlKillDBOpener
+	Registry         *activeSQLQueryRegistry
+	CancelDBOpener   sqlCancelDBOpener
 }
 
-type activeMySQLQuery struct {
-	UserID       uint64
-	ConnectionID uint64
-	ThreadID     uint64
-	Statement    string
-	Conn         *model.DBConnection
-	KillDBOpener mysqlKillDBOpener
-	Cancel       context.CancelFunc
-	RegisteredAt time.Time
+type activeSQLQuery struct {
+	UserID         uint64
+	ConnectionID   uint64
+	DBType         string
+	MySQLThreadID  uint64
+	PostgresPID    uint64
+	Statement      string
+	Conn           *model.DBConnection
+	CancelDBOpener sqlCancelDBOpener
+	Cancel         context.CancelFunc
+	RegisteredAt   time.Time
 }
 
-type pendingMySQLQueryCancel struct {
+type pendingSQLQueryCancel struct {
 	UserID    uint64
 	CreatedAt time.Time
 }
 
-type activeMySQLQueryRegistry struct {
+type activeSQLQueryRegistry struct {
 	mu             sync.Mutex
-	queries        map[string]activeMySQLQuery
-	pendingCancels map[string]pendingMySQLQueryCancel
+	queries        map[string]activeSQLQuery
+	pendingCancels map[string]pendingSQLQueryCancel
 }
 
-func newActiveMySQLQueryRegistry() *activeMySQLQueryRegistry {
-	return &activeMySQLQueryRegistry{
-		queries:        make(map[string]activeMySQLQuery),
-		pendingCancels: make(map[string]pendingMySQLQueryCancel),
+func newActiveSQLQueryRegistry() *activeSQLQueryRegistry {
+	return &activeSQLQueryRegistry{
+		queries:        make(map[string]activeSQLQuery),
+		pendingCancels: make(map[string]pendingSQLQueryCancel),
 	}
 }
 
-func (r *activeMySQLQueryRegistry) register(queryID string, query activeMySQLQuery) bool {
+func (r *activeSQLQueryRegistry) register(queryID string, query activeSQLQuery) bool {
 	if r == nil || strings.TrimSpace(queryID) == "" {
 		return false
 	}
@@ -149,7 +155,7 @@ func (r *activeMySQLQueryRegistry) register(queryID string, query activeMySQLQue
 	return false
 }
 
-func (r *activeMySQLQueryRegistry) remove(queryID string) {
+func (r *activeSQLQueryRegistry) remove(queryID string) {
 	if r == nil || strings.TrimSpace(queryID) == "" {
 		return
 	}
@@ -158,9 +164,9 @@ func (r *activeMySQLQueryRegistry) remove(queryID string) {
 	delete(r.queries, queryID)
 }
 
-func (r *activeMySQLQueryRegistry) cancel(queryID string, userID uint64) (activeMySQLQuery, bool) {
+func (r *activeSQLQueryRegistry) cancel(queryID string, userID uint64) (activeSQLQuery, bool) {
 	if r == nil || strings.TrimSpace(queryID) == "" {
-		return activeMySQLQuery{}, false
+		return activeSQLQuery{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -171,12 +177,12 @@ func (r *activeMySQLQueryRegistry) cancel(queryID string, userID uint64) (active
 		return query, true
 	}
 	if !ok {
-		r.pendingCancels[queryID] = pendingMySQLQueryCancel{UserID: userID, CreatedAt: time.Now()}
+		r.pendingCancels[queryID] = pendingSQLQueryCancel{UserID: userID, CreatedAt: time.Now()}
 	}
-	return activeMySQLQuery{}, false
+	return activeSQLQuery{}, false
 }
 
-func (r *activeMySQLQueryRegistry) pruneLocked(now time.Time) {
+func (r *activeSQLQueryRegistry) pruneLocked(now time.Time) {
 	for queryID, pending := range r.pendingCancels {
 		if now.Sub(pending.CreatedAt) > 2*time.Minute {
 			delete(r.pendingCancels, queryID)
@@ -219,7 +225,7 @@ func NewQueryHandler(
 		notifications: NewNotificationRouter(notifRepo, audit, users, broker, lark),
 		appBaseURL:    strings.TrimRight(appBaseURL, "/"),
 		jwtSecret:     append([]byte(nil), jwtSecret...),
-		activeQueries: newActiveMySQLQueryRegistry(),
+		activeQueries: newActiveSQLQueryRegistry(),
 	}
 }
 
@@ -382,12 +388,12 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	// Inject LIMIT if not present (simple heuristic for SELECT statements)
 	execSQL := injectLimit(req.SQL, limit, conn.DBType)
 	start := time.Now()
-	killDBOpener := h.mysqlReadwriteKillDBOpener(conn)
-	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx, timeoutSettings, mysqlQueryExecutionOptions{
+	cancelDBOpener := h.readonlyCancelDBOpener(conn)
+	result, err := executeQueryForConnection(ctx, resolvedConn, password, pools.QueryPool, execSQL, queryCtx, timeoutSettings, sqlQueryExecutionOptions{
 		QueryExecutionID: strings.TrimSpace(req.QueryExecutionID),
 		UserID:           userID,
 		Registry:         h.activeQueries,
-		KillDBOpener:     killDBOpener,
+		CancelDBOpener:   cancelDBOpener,
 	})
 	if err != nil {
 		logSQLEditorQueryError(ctx, userID, conn, queryCtx, req.SQL, time.Since(start), timeoutSettings, err)
@@ -430,6 +436,7 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if h.artifacts != nil {
+		rowCount := len(result.Rows)
 		_, _ = h.artifacts.AddHistory(r.Context(), &model.QueryHistoryEntry{
 			UserID:           userID,
 			DBConnectionID:   req.DBConnectionID,
@@ -438,6 +445,7 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 			SchemaName:       optionalTrimmedString(req.Schema),
 			RedisDBIndex:     req.RedisDBIndex,
 			SQLContent:       req.SQL,
+			RowCount:         &rowCount,
 			DurationMs:       durationMs,
 		})
 	}
@@ -454,18 +462,18 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *QueryHandler) mysqlReadwriteKillDBOpener(conn *model.DBConnection) mysqlKillDBOpener {
+func (h *QueryHandler) readonlyCancelDBOpener(conn *model.DBConnection) sqlCancelDBOpener {
 	return func(ctx context.Context) (*sql.DB, string, func(), error) {
-		resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadwrite)
+		resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
 		if err != nil {
-			return nil, model.DBCredentialRoleReadwrite, func() {}, err
+			return nil, model.DBCredentialRoleReadonly, func() {}, err
 		}
 		driver, dsn := pool.BuildDSN(resolvedConn, password)
 		db, err := pool.Open(driver, dsn, pool.ProfileExec)
 		if err != nil {
-			return nil, model.DBCredentialRoleReadwrite, func() {}, err
+			return nil, model.DBCredentialRoleReadonly, func() {}, err
 		}
-		return db, model.DBCredentialRoleReadwrite, func() { db.Close() }, nil
+		return db, model.DBCredentialRoleReadonly, func() { db.Close() }, nil
 	}
 }
 
@@ -514,15 +522,15 @@ func (h *QueryHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"cancel_requested": true, "pending": true})
 		return
 	}
-	if query.KillDBOpener == nil {
+	if query.CancelDBOpener == nil {
 		jsonErr(w, http.StatusInternalServerError, "query cancel credential is not configured")
 		return
 	}
 
 	if query.Cancel != nil {
-		query.Cancel()
+		defer query.Cancel()
 	}
-	if err := killMySQLQuery(context.Background(), query.Conn, query.ThreadID, query.Statement, query.KillDBOpener); err != nil {
+	if err := cancelActiveSQLQuery(context.Background(), query); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "query cancel failed")
 		return
 	}
@@ -703,14 +711,34 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 
 func (h *QueryHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
-	limit := 20
+	limit := defaultQueryHistoryLimit
 	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 100 {
-			limit = parsed
+		if parsed, err := strconv.Atoi(v); err == nil {
+			switch {
+			case parsed <= 0:
+				limit = defaultQueryHistoryLimit
+			case parsed > maxQueryHistoryLimit:
+				limit = maxQueryHistoryLimit
+			default:
+				limit = parsed
+			}
+		}
+	}
+	offset := 0
+	if v := strings.TrimSpace(r.URL.Query().Get("offset")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			offset = parsed
 		}
 	}
 
-	history, err := h.artifacts.ListHistory(r.Context(), userID, limit)
+	since := timeutil.NowUTC().AddDate(0, 0, -queryHistoryRetentionDays)
+	total, err := h.artifacts.CountHistory(r.Context(), userID, since)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "count query history failed")
+		return
+	}
+
+	history, err := h.artifacts.ListHistory(r.Context(), userID, limit, offset, since)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "list query history failed")
 		return
@@ -718,7 +746,13 @@ func (h *QueryHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	if history == nil {
 		history = []model.QueryHistoryEntry{}
 	}
-	jsonOK(w, map[string]any{"history": history})
+	jsonOK(w, map[string]any{
+		"history":        history,
+		"total":          total,
+		"limit":          limit,
+		"offset":         offset,
+		"retention_days": queryHistoryRetentionDays,
+	})
 }
 
 func (h *QueryHandler) ListSavedQueries(w http.ResponseWriter, r *http.Request) {
@@ -869,10 +903,10 @@ func executeQueryForConnection(
 	sqlStr string,
 	queryCtx queryExecutionContext,
 	timeoutSettings sqlEditorTimeoutSettings,
-	options mysqlQueryExecutionOptions,
+	options sqlQueryExecutionOptions,
 ) (*masking.QueryResult, error) {
 	if conn.DBType == "postgres" || conn.DBType == "postgresql" {
-		return executePostgresQuery(ctx, conn, password, db, sqlStr, queryCtx, timeoutSettings)
+		return executePostgresQuery(ctx, conn, password, db, sqlStr, queryCtx, timeoutSettings, options)
 	}
 	return executeSQLQuery(ctx, conn, db, sqlStr, queryCtx, timeoutSettings, options)
 }
@@ -884,7 +918,7 @@ func executeSQLQuery(
 	sqlStr string,
 	queryCtx queryExecutionContext,
 	timeoutSettings sqlEditorTimeoutSettings,
-	options mysqlQueryExecutionOptions,
+	options sqlQueryExecutionOptions,
 ) (*masking.QueryResult, error) {
 	pinnedConn, err := db.Conn(ctx)
 	if err != nil {
@@ -930,6 +964,7 @@ func executePostgresQuery(
 	sqlStr string,
 	queryCtx queryExecutionContext,
 	timeoutSettings sqlEditorTimeoutSettings,
+	options sqlQueryExecutionOptions,
 ) (*masking.QueryResult, error) {
 	if queryCtx.DatabaseName != "" && !strings.EqualFold(queryCtx.DatabaseName, connectionDatabaseName(connModel)) {
 		scopedDB, cleanup, err := openScopedQueryDB(connModel, password, queryCtx)
@@ -958,6 +993,7 @@ func executePostgresQuery(
 	var result *masking.QueryResult
 	err = conn.Raw(func(driverConn any) error {
 		pgxConn := driverConn.(*stdlib.Conn).Conn()
+		backendPID := uint64(pgxConn.PgConn().PID())
 		statements := splitSQLStatementsForLimit(sqlStr)
 		for _, statement := range statements {
 			trimmed := strings.TrimSpace(statement)
@@ -965,7 +1001,7 @@ func executePostgresQuery(
 				continue
 			}
 
-			queryResult, err := executeSinglePostgresStatement(ctx, pgxConn, connModel, trimmed, queryCtx)
+			queryResult, err := executeSinglePostgresStatement(ctx, pgxConn, connModel, trimmed, queryCtx, backendPID, options)
 			if err != nil {
 				return err
 			}
@@ -989,21 +1025,22 @@ func executeSingleSQLStatement(
 	statement string,
 	queryCtx queryExecutionContext,
 	threadID uint64,
-	options mysqlQueryExecutionOptions,
+	options sqlQueryExecutionOptions,
 ) (*masking.QueryResult, error) {
 	statementCtx := ctx
 	if threadID > 0 && options.Registry != nil && options.QueryExecutionID != "" {
 		var cancel context.CancelFunc
 		statementCtx, cancel = context.WithCancel(ctx)
-		if canceled := options.Registry.register(options.QueryExecutionID, activeMySQLQuery{
-			UserID:       options.UserID,
-			ConnectionID: conn.ID,
-			ThreadID:     threadID,
-			Statement:    statement,
-			Conn:         conn,
-			KillDBOpener: options.KillDBOpener,
-			Cancel:       cancel,
-			RegisteredAt: time.Now(),
+		if canceled := options.Registry.register(options.QueryExecutionID, activeSQLQuery{
+			UserID:         options.UserID,
+			ConnectionID:   conn.ID,
+			DBType:         conn.DBType,
+			MySQLThreadID:  threadID,
+			Statement:      statement,
+			Conn:           conn,
+			CancelDBOpener: options.CancelDBOpener,
+			Cancel:         cancel,
+			RegisteredAt:   time.Now(),
 		}); canceled {
 			cancel()
 			return nil, context.Canceled
@@ -1087,7 +1124,16 @@ func currentMySQLConnectionID(ctx context.Context, pinnedConn *sql.Conn) uint64 
 	return threadID
 }
 
-func killMySQLQuery(ctx context.Context, conn *model.DBConnection, threadID uint64, statement string, killDBOpener mysqlKillDBOpener) error {
+func cancelActiveSQLQuery(ctx context.Context, query activeSQLQuery) error {
+	switch query.DBType {
+	case "postgres", "postgresql":
+		return cancelPostgresQuery(ctx, query.Conn, query.PostgresPID, query.Statement, query.CancelDBOpener)
+	default:
+		return killMySQLQuery(ctx, query.Conn, query.MySQLThreadID, query.Statement, query.CancelDBOpener)
+	}
+}
+
+func killMySQLQuery(ctx context.Context, conn *model.DBConnection, threadID uint64, statement string, killDBOpener sqlCancelDBOpener) error {
 	if killDBOpener == nil {
 		return fmt.Errorf("mysql query kill db opener is not configured")
 	}
@@ -1143,14 +1189,95 @@ func killMySQLQuery(ctx context.Context, conn *model.DBConnection, threadID uint
 			"err", err,
 			"sql", truncate(statement, 500),
 		)
+	} else {
+		slog.Warn("sql editor mysql query killed",
+			"connection_id", conn.ID,
+			"connection_name", conn.Name,
+			"mysql_thread_id", threadID,
+			"method", "mysql.rds_kill",
+			"kill_credential_role", killCredentialRole,
+			"sql", truncate(statement, 500),
+		)
+		return nil
+	}
+
+	killQueryCtx, cancelKillQuery := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelKillQuery()
+	if _, err := killDB.ExecContext(killQueryCtx, fmt.Sprintf("KILL QUERY %d", threadID)); err != nil {
+		slog.Warn("sql editor mysql query kill failed",
+			"connection_id", conn.ID,
+			"connection_name", conn.Name,
+			"mysql_thread_id", threadID,
+			"method", "mysql.kill_query",
+			"kill_credential_role", killCredentialRole,
+			"err", err,
+			"sql", truncate(statement, 500),
+		)
 		return err
 	}
 	slog.Warn("sql editor mysql query killed",
 		"connection_id", conn.ID,
 		"connection_name", conn.Name,
 		"mysql_thread_id", threadID,
-		"method", "mysql.rds_kill",
+		"method", "mysql.kill_query",
 		"kill_credential_role", killCredentialRole,
+		"sql", truncate(statement, 500),
+	)
+	return nil
+}
+
+func cancelPostgresQuery(ctx context.Context, conn *model.DBConnection, backendPID uint64, statement string, cancelDBOpener sqlCancelDBOpener) error {
+	if cancelDBOpener == nil {
+		return fmt.Errorf("postgres query cancel db opener is not configured")
+	}
+	openCtx, cancelOpen := context.WithTimeout(ctx, 5*time.Second)
+	cancelDB, cancelCredentialRole, cleanup, err := cancelDBOpener(openCtx)
+	cancelOpen()
+	if err != nil {
+		slog.Warn("sql editor postgres query cancel db open failed",
+			"connection_id", conn.ID,
+			"connection_name", conn.Name,
+			"postgres_backend_pid", backendPID,
+			"cancel_credential_role", cancelCredentialRole,
+			"err", err,
+			"sql", truncate(statement, 500),
+		)
+		return err
+	}
+	defer cleanup()
+
+	cancelCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var canceled bool
+	if err := cancelDB.QueryRowContext(cancelCtx, "SELECT pg_cancel_backend($1)", backendPID).Scan(&canceled); err != nil {
+		slog.Warn("sql editor postgres query cancel failed",
+			"connection_id", conn.ID,
+			"connection_name", conn.Name,
+			"postgres_backend_pid", backendPID,
+			"method", "postgres.pg_cancel_backend",
+			"cancel_credential_role", cancelCredentialRole,
+			"err", err,
+			"sql", truncate(statement, 500),
+		)
+		return err
+	}
+	if !canceled {
+		slog.Warn("sql editor postgres query cancel returned false",
+			"connection_id", conn.ID,
+			"connection_name", conn.Name,
+			"postgres_backend_pid", backendPID,
+			"method", "postgres.pg_cancel_backend",
+			"cancel_credential_role", cancelCredentialRole,
+			"sql", truncate(statement, 500),
+		)
+		return fmt.Errorf("postgres query cancel returned false")
+	}
+	slog.Warn("sql editor postgres query canceled",
+		"connection_id", conn.ID,
+		"connection_name", conn.Name,
+		"postgres_backend_pid", backendPID,
+		"method", "postgres.pg_cancel_backend",
+		"cancel_credential_role", cancelCredentialRole,
 		"sql", truncate(statement, 500),
 	)
 	return nil
@@ -1175,13 +1302,39 @@ func executeSinglePostgresStatement(
 	connModel *model.DBConnection,
 	statement string,
 	queryCtx queryExecutionContext,
+	backendPID uint64,
+	options sqlQueryExecutionOptions,
 ) (*masking.QueryResult, error) {
-	rows, err := pgxConn.Query(ctx, statement)
+	statementCtx := ctx
+	if backendPID > 0 && options.Registry != nil && options.QueryExecutionID != "" {
+		var cancel context.CancelFunc
+		statementCtx, cancel = context.WithCancel(ctx)
+		if canceled := options.Registry.register(options.QueryExecutionID, activeSQLQuery{
+			UserID:         options.UserID,
+			ConnectionID:   connModel.ID,
+			DBType:         connModel.DBType,
+			PostgresPID:    backendPID,
+			Statement:      statement,
+			Conn:           connModel,
+			CancelDBOpener: options.CancelDBOpener,
+			Cancel:         cancel,
+			RegisteredAt:   time.Now(),
+		}); canceled {
+			cancel()
+			return nil, context.Canceled
+		}
+		defer func() {
+			options.Registry.remove(options.QueryExecutionID)
+			cancel()
+		}()
+	}
+
+	rows, err := pgxConn.Query(statementCtx, statement)
 	if err != nil {
 		return nil, err
 	}
 
-	return collectPostgresQueryResult(ctx, rows, connModel, queryCtx, func(ctx context.Context, fields []pgconn.FieldDescription) ([]masking.ColumnOrigin, error) {
+	return collectPostgresQueryResult(statementCtx, rows, connModel, queryCtx, func(ctx context.Context, fields []pgconn.FieldDescription) ([]masking.ColumnOrigin, error) {
 		return resolvePostgresOrigins(ctx, pgxConn, fields)
 	})
 }
@@ -1559,12 +1712,14 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 	})
 
 	if h.artifacts != nil {
+		rowCount := len(result.Rows)
 		_, _ = h.artifacts.AddHistory(r.Context(), &model.QueryHistoryEntry{
 			UserID:           userID,
 			DBConnectionID:   conn.ID,
 			DBConnectionName: conn.Name,
 			RedisDBIndex:     &dbIndex,
 			SQLContent:       cmdLine,
+			RowCount:         &rowCount,
 			DurationMs:       durationMs,
 		})
 	}

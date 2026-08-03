@@ -215,6 +215,10 @@ describe('SQLEditorPage', () => {
     })
     mockedListQueryHistory.mockResolvedValue({
       history: [],
+      total: 0,
+      limit: 20,
+      offset: 0,
+      retention_days: 90,
     })
     mockedListSavedQueries.mockResolvedValue({
       saved_queries: [],
@@ -767,6 +771,67 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByRole('button', { name: 'Run' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
     expect(screen.queryByText('Query execution failed.')).not.toBeInTheDocument()
+  })
+
+  it('Redis command 執行中不顯示 Stop，也不呼叫 cancel API', async () => {
+    mockedUseAuth.mockReturnValue({
+      user: {
+        id: 7,
+        username: 'admin',
+        authGroups: ['admin'],
+        authGroupDetails: [],
+        permissions: ['sql_editor.read', 'sql_editor.query'],
+        dbConnectionIds: [2],
+        protected: false,
+        isActive: true,
+      },
+      status: 'authenticated',
+      isAuthenticated: true,
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedListQueryConnections.mockResolvedValue({
+      connections: [
+        {
+          id: 2,
+          name: 'Redis Cache',
+          db_type: 'redis',
+          host: 'redis.local',
+          port: 6379,
+          database_name: null,
+          username: '',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          extra_params: null,
+          created_by: 1,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+    mockedExecuteQuery.mockReturnValue(new Promise(() => undefined) as ReturnType<typeof executeQuery>)
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Redis Cache'))
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+
+    await screen.findAllByRole('button', { name: 'Running...' })
+    for (const runningButton of screen.getAllByRole('button', { name: 'Running...' })) {
+      expect(runningButton).toBeDisabled()
+    }
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+    expect(mockedCancelQueryExecution).not.toHaveBeenCalled()
   })
 
   it('點擊 Explain 會用 EXPLAIN 包裝目前 SQL 後執行', async () => {
@@ -1366,9 +1431,14 @@ describe('SQLEditorPage', () => {
         schema_name: null,
         redis_db_index: null,
         sql_content: 'SELECT * FROM tickets;',
+        row_count: 12,
         duration_ms: 123,
         created_at: '2026-07-22T12:50:20Z',
       }],
+      total: 1,
+      limit: 20,
+      offset: 0,
+      retention_days: 90,
     })
 
     render(
@@ -1383,7 +1453,14 @@ describe('SQLEditorPage', () => {
     fireEvent.click(screen.getByText('History'))
 
     expect(await screen.findByText('SELECT * FROM tickets;')).toBeInTheDocument()
-    expect(screen.getByText(/Primary MySQL \/ maestro \/ 123 ms/)).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'SQL' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Connection' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Schema' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Rows' })).toBeInTheDocument()
+    expect(screen.getByText('Primary MySQL')).toBeInTheDocument()
+    expect(screen.getByText('maestro')).toBeInTheDocument()
+    expect(screen.getByText('12')).toBeInTheDocument()
+    expect(screen.getByText('123 ms')).toBeInTheDocument()
 
     fireEvent.click(screen.getByText('SELECT * FROM tickets;'))
 
@@ -1391,6 +1468,65 @@ describe('SQLEditorPage', () => {
       expect(screen.getByLabelText('Close Query 1')).toBeInTheDocument()
       expect(mockedListMetadata).toHaveBeenCalledWith(1, { database: 'maestro' })
     })
+  })
+
+  it('History 超過一頁時使用 Pagination 載入下一頁', async () => {
+    mockedListQueryHistory
+      .mockResolvedValueOnce({
+        history: [{
+          id: 9,
+          db_connection_id: 1,
+          db_connection_name: 'Primary MySQL',
+          database_name: 'maestro',
+          schema_name: null,
+          redis_db_index: null,
+          sql_content: 'SELECT * FROM tickets;',
+          row_count: 12,
+          duration_ms: 123,
+          created_at: '2026-07-22T12:50:20Z',
+        }],
+        total: 21,
+        limit: 20,
+        offset: 0,
+        retention_days: 90,
+      })
+      .mockResolvedValueOnce({
+        history: [{
+          id: 10,
+          db_connection_id: 1,
+          db_connection_name: 'Primary MySQL',
+          database_name: 'maestro',
+          schema_name: null,
+          redis_db_index: null,
+          sql_content: 'SELECT * FROM tickets_archive;',
+          row_count: 3,
+          duration_ms: 88,
+          created_at: '2026-07-21T12:50:20Z',
+        }],
+        total: 21,
+        limit: 20,
+        offset: 20,
+        retention_days: 90,
+      })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run' })).toBeInTheDocument()
+    fireEvent.click(screen.getByText('History'))
+
+    expect(await screen.findByText('SELECT * FROM tickets;')).toBeInTheDocument()
+    expect(screen.getByText('Showing 1–1 of 21')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    expect(await screen.findByText('SELECT * FROM tickets_archive;')).toBeInTheDocument()
+    expect(mockedListQueryHistory).toHaveBeenLastCalledWith(20, 20)
   })
 
   it('查詢結果表頭顯示 display columns，但保留 raw_columns 給其他用途', async () => {

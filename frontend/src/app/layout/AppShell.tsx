@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import { listNotifications, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
+import { listNotifications, listNotificationSummary, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
 import { openEventStream } from '@/shared/api/client'
 import { hasAnyPermission, TICKET_WORKSPACE_PERMISSIONS } from '@/shared/auth/permissions'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
-import type { NotificationItem } from '@/shared/types/notification'
+import type { NotificationItem, NotificationSummary } from '@/shared/types/notification'
 import { useToast } from '@/shared/ui/ToastContext'
 
 type NavLeafItem = {
@@ -380,6 +380,7 @@ export function AppShell() {
   })
   const [expandedNavKeys, setExpandedNavKeys] = useState<string[]>([])
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [notificationSummary, setNotificationSummary] = useState<NotificationSummary>({ pending: 0, review_required: 0, execution_required: 0 })
   const [unreadCount, setUnreadCount] = useState(0)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const notificationRef = useRef<HTMLDivElement | null>(null)
@@ -420,12 +421,16 @@ export function AppShell() {
 
     async function loadNotifications(showToastForNew: boolean) {
       try {
-        const response = await listNotifications(10, 0)
+        const [response, summary] = await Promise.all([
+          listNotifications(10, 0),
+          listNotificationSummary(),
+        ])
         if (cancelled) {
           return
         }
 
         setNotifications(response.notifications)
+        setNotificationSummary(summary)
         setUnreadCount(response.unread)
 
         const nextIDs = new Set(response.notifications.map((item) => item.id))
@@ -509,6 +514,11 @@ export function AppShell() {
     if (notification.resource_type === 'ticket' && notification.resource_ref) {
       navigate(`/tickets/${notification.resource_ref}`)
     }
+  }
+
+  function openTicketQueue() {
+    setNotificationOpen(false)
+    navigate('/tickets')
   }
 
   const navItems = useMemo(
@@ -843,28 +853,30 @@ export function AppShell() {
                     </button>
                   </div>
 
+                  <div className="flex items-center gap-4 border-b border-border bg-panel-soft px-4 py-2 text-[12px] leading-5">
+                    <NotificationSummaryItem label="Pending" count={notificationSummary.pending} onClick={openTicketQueue} />
+                    <NotificationSummaryItem label="Review" count={notificationSummary.review_required} onClick={openTicketQueue} />
+                    <NotificationSummaryItem label="Execute" count={notificationSummary.execution_required} onClick={openTicketQueue} />
+                  </div>
+
                   {notifications.length === 0 ? (
                     <div className="px-4 py-5 text-[13px] text-muted">No notifications.</div>
                   ) : (
-                    <div className="max-h-[420px] overflow-y-auto">
+                    <div className="max-h-[420px] overflow-auto">
                       {notifications.map((notification) => (
                         <button
                           key={notification.id}
                           type="button"
                           onClick={() => void handleOpenNotification(notification)}
                           className={cn(
-                            'flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-panel-soft',
+                            'grid min-w-full w-max grid-cols-[auto_max-content_max-content_max-content] items-center gap-3 border-b border-border px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-panel-soft',
                             !notification.is_read && 'bg-white',
                           )}
                         >
-                          <span className={cn('mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full', notification.is_read ? 'bg-border' : 'bg-brand')} />
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-start justify-between gap-3">
-                              <span className="line-clamp-1 text-[14px] font-semibold text-ink">{notification.title}</span>
-                              <span className="shrink-0 text-[11px] text-muted">{formatRelativeTime(notification.created_at)}</span>
-                            </span>
-                            <span className="mt-1 block text-[12px] leading-5 text-muted">{notification.body}</span>
-                          </span>
+                          <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', notification.is_read ? 'bg-border' : 'bg-brand')} />
+                          <span className="whitespace-nowrap text-[12px] leading-5 text-ink">{formatNotificationResource(notification)}</span>
+                          <span className="whitespace-nowrap text-[12px] leading-5 text-ink">{formatNotificationType(notification)}</span>
+                          <span className="whitespace-nowrap text-[11px] text-muted">{formatRelativeTime(notification.created_at)}</span>
                         </button>
                       ))}
                     </div>
@@ -1059,6 +1071,60 @@ export function AppShell() {
       </div>
     </div>
   )
+}
+
+function NotificationSummaryItem({ label, count, onClick }: { label: string; count: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-muted transition-colors hover:bg-panel hover:text-ink"
+    >
+      <span>{label}</span>
+      <span className="font-semibold text-ink">{count}</span>
+    </button>
+  )
+}
+
+function formatNotificationResource(notification: NotificationItem) {
+  return notification.resource_ref || notification.title || notification.body.split('\n').find((line) => line.trim() !== '')?.trim() || notification.type
+}
+
+function formatNotificationType(notification: NotificationItem) {
+  if (notification.type === 'ticket_executed' && notification.title.includes('失敗')) {
+    return 'Execution failed'
+  }
+
+  switch (notification.type) {
+    case 'ticket_submitted':
+      return 'Submitted'
+    case 'ticket_pending_review':
+      return 'Pending review'
+    case 'ticket_auto_approved':
+      return 'Auto approved'
+    case 'ticket_pending_execution':
+      return 'Pending execution'
+    case 'ticket_approved':
+      return 'Approved'
+    case 'ticket_rejected':
+      return 'Rejected'
+    case 'ticket_executed':
+      return 'Completed'
+    case 'ticket_execution_failed':
+      return 'Execution failed'
+    case 'ticket_needs_admin_attention':
+      return 'Needs admin attention'
+    case 'ticket_revoked':
+      return 'Revoked'
+    case 'ticket_withdrawn':
+      return 'Withdrawn'
+    case 'export_approved':
+      return 'Export approved'
+    case 'export_rejected':
+      return 'Export rejected'
+    default:
+      return notification.type.replace(/_/g, ' ')
+  }
 }
 
 function isPathActive(pathname: string, target: string) {

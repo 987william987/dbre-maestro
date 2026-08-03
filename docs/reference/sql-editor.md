@@ -125,6 +125,7 @@ SQL Editor 走 `query` pool profile。預設值：
 | `database` | `string` | 否 | 目標 database |
 | `schema` | `string` | 否 | PostgreSQL schema |
 | `redis_db_index` | `number` | 否 | Redis DB index |
+| `query_execution_id` | `string` | 否 | 前端產生的單次執行 ID，用於 Stop Query |
 
 回應重點：
 
@@ -134,6 +135,80 @@ SQL Editor 走 `query` pool profile。預設值：
 - `row_count`
 - `duration_ms`
 - `sensitive_column_indexes`
+
+### `POST /api/query/cancel`
+
+取消正在執行的 SQL Editor 查詢。
+
+請求欄位：
+
+| 欄位 | 型別 | 必填 | 說明 |
+|---|---|---|---|
+| `query_execution_id` | `string` | 是 | `POST /api/query` 同一次執行帶入的 ID |
+
+回應範例：
+
+```json
+{
+  "cancel_requested": true
+}
+```
+
+若 Stop 早於後端完成 SQL backend registration，後端會先記錄 pending cancel，回應仍是 `200`：
+
+```json
+{
+  "cancel_requested": true,
+  "pending": true
+}
+```
+
+Cancel 是 user-scoped：同一個使用者只能取消自己啟動的查詢。`query_execution_id` 是不透明 ID，不應暴露 MySQL thread id 或 PostgreSQL backend pid 給前端。
+
+### Stop Query / SQL Cancel
+
+SQL Editor 的 Stop Query 目前支援 MySQL 與 PostgreSQL 的 DB engine cancel。Redis command 不提供 Stop；Redis 執行中按鈕只會顯示 running 狀態。
+
+1. 前端每次 Run Query 產生一個 `query_execution_id`。
+2. `POST /api/query` 帶入該 ID。
+3. 後端用 readonly credential 執行查詢。
+4. MySQL 讀取 `SELECT CONNECTION_ID()`；PostgreSQL 讀取 backend pid。
+5. 查詢開始前，後端把 `query_execution_id`、user id、connection id、backend identifier 與 cancel function 註冊到 process-local registry。
+6. 使用者點 Stop 時，前端呼叫 `POST /api/query/cancel`。
+7. 後端用 readonly credential 開短連線執行 DB engine cancel，再 cancel app context。
+
+MySQL cancel 順序：
+
+```sql
+CALL mysql.rds_kill_query(<thread_id>);
+CALL mysql.rds_kill(<thread_id>);
+KILL QUERY <thread_id>;
+```
+
+前兩個 routine 用於 Aurora/RDS MySQL；最後的 `KILL QUERY` fallback 用於標準 MySQL / 社區版 MySQL。
+
+Aurora/RDS MySQL 的 readonly credential 需要具備：
+
+```sql
+GRANT EXECUTE ON PROCEDURE mysql.rds_kill_query TO '<readonly_user>'@'%';
+GRANT EXECUTE ON PROCEDURE mysql.rds_kill TO '<readonly_user>'@'%';
+```
+
+標準 MySQL / 社區版 MySQL 取消自己的 connection query 時，通常不需要額外授權。
+
+PostgreSQL cancel 使用：
+
+```sql
+SELECT pg_cancel_backend(<backend_pid>);
+```
+
+PostgreSQL 取消自己的 backend query 通常不需要額外授權。
+
+限制：
+
+- Redis command 不支援 Stop，也不會註冊到 cancel registry。
+- Registry 存在於單一 app process memory。若部署多個 replica 且沒有 sticky routing，`POST /api/query/cancel` 可能打到不同 pod，導致只能記成 pending cancel 而無法立即 cancel 原查詢。
+- `/api/query/cancel` 不是 long-running request，不會豁免全域 request timeout。
 
 ### `POST /api/query/sensitive-access`
 
@@ -158,7 +233,7 @@ SQL Editor 走 `query` pool profile。預設值：
 | `POST /api/query/saved-queries` | 新增收藏 |
 | `DELETE /api/query/saved-queries/{id}` | 刪除收藏 |
 
-`GET /api/query/history` 只回傳目前登入使用者自己的最近 20 筆查詢紀錄；不會列出其他使用者的 SQL Editor history。
+`GET /api/query/history` 只回傳目前登入使用者自己的查詢紀錄；不會列出其他使用者的 SQL Editor history。History 保留 90 天，API 支援 `limit` / `offset` 分頁，預設每頁 20 筆，最大 `limit` 為 100。
 
 ## Metadata Explorer
 
@@ -247,6 +322,7 @@ SQL Editor 左側資產樹使用：
 ## 相關文件
 
 - [How to 使用 SQL Editor](../how-to/use-sql-editor.md)
+- [SQL Editor 查詢取消機制](../explanation/sql-editor-query-cancellation.md)
 - [Tickets](tickets.md)
 - [Workflow Rules](workflow-rules.md)
 - [DB Connections](db-connections.md)

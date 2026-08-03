@@ -49,6 +49,7 @@
 - [專案導覽](explanation/project-map.md)
 - [架構總覽](explanation/architecture-overview.md)
 - [安全邊界說明](explanation/security-boundaries.md)
+- [SQL Editor 查詢取消機制](explanation/sql-editor-query-cancellation.md)
 - [權限模型](explanation/permission-model.md)
 - [通知與工單更新架構：REST 初始化 + SSE 即時更新](explanation/notification-architecture-rest-vs-sse.md)
 

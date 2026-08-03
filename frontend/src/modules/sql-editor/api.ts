@@ -160,6 +160,10 @@ export async function listMetadataDefinition(connectionId: number, schema: strin
 
 type QueryHistoryResponse = {
   history: QueryHistoryEntry[]
+  total?: number
+  limit?: number
+  offset?: number
+  retention_days?: number
 }
 
 type SavedQueriesResponse = {
@@ -192,9 +196,17 @@ export type CreateSensitiveAccessResponse = {
   scope_count: number
 }
 
-export function listQueryHistory(limit = 20) {
-  return apiClient.get<QueryHistoryResponse>(`/query/history?limit=${limit}`).then((response) => ({
+export function listQueryHistory(limit = 20, offset = 0) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  })
+  return apiClient.get<QueryHistoryResponse>(`/query/history?${params.toString()}`).then((response) => ({
     history: Array.isArray(response.history) ? response.history : [],
+    total: typeof response.total === 'number' ? response.total : 0,
+    limit: typeof response.limit === 'number' ? response.limit : limit,
+    offset: typeof response.offset === 'number' ? response.offset : offset,
+    retention_days: typeof response.retention_days === 'number' ? response.retention_days : 90,
   }))
 }
 

@@ -11,6 +11,7 @@ type QueryHistoryEntry struct {
 	SchemaName       *string   `db:"schema_name"        json:"schema_name,omitempty"`
 	RedisDBIndex     *int      `db:"redis_db_index"     json:"redis_db_index,omitempty"`
 	SQLContent       string    `db:"sql_content"        json:"sql_content"`
+	RowCount         *int      `db:"row_count"          json:"row_count,omitempty"`
 	DurationMs       int64     `db:"duration_ms"        json:"duration_ms"`
 	CreatedAt        time.Time `db:"created_at"         json:"created_at"`
 }

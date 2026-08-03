@@ -17,7 +17,7 @@ import {
   DataTableScroll,
 } from '@/shared/ui/DataTable'
 
-const SESSION_PAGE_SIZE = 5
+const SESSION_PAGE_SIZE = 20
 
 export function SessionsPage() {
   const { pushToast } = useToast()
@@ -26,7 +26,8 @@ export function SessionsPage() {
   const [acting, setActing] = useState<number | 'all' | null>(null)
   const [error, setError] = useState('')
   const [sessionOffset, setSessionOffset] = useState(0)
-  const pagedSessions = useMemo(() => sessions.slice(sessionOffset, sessionOffset + SESSION_PAGE_SIZE), [sessionOffset, sessions])
+  const sortedSessions = useMemo(() => [...sessions].sort(compareAccountSessions), [sessions])
+  const pagedSessions = useMemo(() => sortedSessions.slice(sessionOffset, sessionOffset + SESSION_PAGE_SIZE), [sessionOffset, sortedSessions])
 
   async function loadSessions(options?: { background?: boolean }) {
     if (!options?.background) {
@@ -87,7 +88,7 @@ export function SessionsPage() {
         <section className="rounded-xl border border-border bg-panel shadow-soft">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/80 px-4 py-3">
             <div>
-              <p className="text-[14px] font-semibold text-ink">Refresh Sessions</p>
+              <p className="text-[14px] font-semibold text-ink">Session Management</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">A session represents a browser that can refresh your short-lived access token.</p>
             </div>
             <div className="flex items-center gap-2">
@@ -188,4 +189,20 @@ export function SessionsPage() {
       )}
     </div>
   )
+}
+
+function compareAccountSessions(left: AccountSession, right: AccountSession) {
+  if (left.is_current !== right.is_current) {
+    return left.is_current ? -1 : 1
+  }
+  const leftActive = isActiveSession(left)
+  const rightActive = isActiveSession(right)
+  if (leftActive !== rightActive) {
+    return leftActive ? -1 : 1
+  }
+  return new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+}
+
+function isActiveSession(session: AccountSession) {
+  return session.revoked_at == null && new Date(session.expires_at).getTime() > Date.now()
 }

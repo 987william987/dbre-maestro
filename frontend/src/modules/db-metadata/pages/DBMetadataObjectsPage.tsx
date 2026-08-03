@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, Check, SlidersHorizontal } from 'lucide-react'
+import { Check, SlidersHorizontal } from 'lucide-react'
 import { DBMetadataSectionTabs } from '@/modules/db-metadata/components/DBMetadataSectionTabs'
 import { listDBObjectSnapshots } from '@/modules/db-metadata/api'
 import { cn } from '@/lib/utils'
@@ -21,6 +21,7 @@ import {
   DataTableRow,
   DataTableScroll,
   DataTableSurface,
+  SortableDataTableHeaderCell,
 } from '@/shared/ui/DataTable'
 
 const PAGE_SIZE = 20
@@ -304,10 +305,10 @@ export function DBMetadataObjectsPage() {
                     {visibleColumns.includes('engine') ? <DataTableHeaderCell>Engine</DataTableHeaderCell> : null}
                     {visibleColumns.includes('databaseSchema') ? <DataTableHeaderCell>Database / Schema</DataTableHeaderCell> : null}
                     {visibleColumns.includes('table') ? <DataTableHeaderCell>Table</DataTableHeaderCell> : null}
-                    {visibleColumns.includes('rows') ? <SortableHeader label="Rows" sortKey="rows" sortState={sortState} onSort={toggleSort} /> : null}
-                    {visibleColumns.includes('dataSize') ? <SortableHeader label="Data Size" sortKey="dataSize" sortState={sortState} onSort={toggleSort} /> : null}
-                    {visibleColumns.includes('indexSize') ? <SortableHeader label="Index Size" sortKey="indexSize" sortState={sortState} onSort={toggleSort} /> : null}
-                    {visibleColumns.includes('totalSize') ? <SortableHeader label="Total Size" sortKey="totalSize" sortState={sortState} onSort={toggleSort} /> : null}
+                    {visibleColumns.includes('rows') ? <SortableDataTableHeaderCell label="Rows" sortKey="rows" sortState={sortState} onSort={toggleSort} /> : null}
+                    {visibleColumns.includes('dataSize') ? <SortableDataTableHeaderCell label="Data Size" sortKey="dataSize" sortState={sortState} onSort={toggleSort} /> : null}
+                    {visibleColumns.includes('indexSize') ? <SortableDataTableHeaderCell label="Index Size" sortKey="indexSize" sortState={sortState} onSort={toggleSort} /> : null}
+                    {visibleColumns.includes('totalSize') ? <SortableDataTableHeaderCell label="Total Size" sortKey="totalSize" sortState={sortState} onSort={toggleSort} /> : null}
                     {visibleColumns.includes('snapshotTime') ? <DataTableHeaderCell>Snapshot Time</DataTableHeaderCell> : null}
                   </tr>
                 </DataTableHead>
@@ -359,33 +360,6 @@ export function DBMetadataObjectsPage() {
         )}
       </DataTableSurface>
     </div>
-  )
-}
-
-function SortableHeader({
-  label,
-  sortKey,
-  sortState,
-  onSort,
-}: {
-  label: string
-  sortKey: SortKey
-  sortState: { key: SortKey; direction: SortDirection }
-  onSort: (key: SortKey) => void
-}) {
-  const active = sortState.key === sortKey
-  return (
-    <DataTableHeaderCell>
-      <button
-        type="button"
-        aria-label={active ? `${label} ${sortState.direction.toUpperCase()}` : label}
-        onClick={() => onSort(sortKey)}
-        className={cn('inline-flex items-center gap-1 text-left uppercase tracking-[0.16em] transition hover:text-ink', active ? 'text-ink' : 'text-faint')}
-      >
-        {label}
-        {active ? sortState.direction === 'desc' ? <ArrowDown className="h-3 w-3" aria-hidden="true" /> : <ArrowUp className="h-3 w-3" aria-hidden="true" /> : null}
-      </button>
-    </DataTableHeaderCell>
   )
 }
 

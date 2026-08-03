@@ -103,6 +103,8 @@ export function listUsers() {
           permissions: Array.isArray(user.permissions) ? user.permissions : [],
           direct_permissions: Array.isArray(user.direct_permissions) ? user.direct_permissions : [],
           db_connection_ids: Array.isArray(user.db_connection_ids) ? user.db_connection_ids : [],
+          online: user.online === true,
+          last_login_at: typeof user.last_login_at === 'string' ? user.last_login_at : null,
         }))
       : [],
   }))

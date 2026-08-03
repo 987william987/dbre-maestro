@@ -97,8 +97,23 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 		DBConnectionIDs   []uint64          `json:"db_connection_ids"`
 		Protected         bool              `json:"protected"`
 		IsActive          bool              `json:"is_active"`
+		LastLoginAt       *string           `json:"last_login_at"`
+		Online            bool              `json:"online"`
 		CreatedAt         string            `json:"created_at"`
 		UpdatedAt         string            `json:"updated_at"`
+	}
+	userIDs := make([]uint64, 0, len(users))
+	for _, u := range users {
+		userIDs = append(userIDs, u.ID)
+	}
+	sessionSummaries := map[uint64]repository.UserSessionSummary{}
+	if h.sessions != nil {
+		var err error
+		sessionSummaries, err = h.sessions.SummariesForUsers(r.Context(), userIDs, time.Now().UTC())
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "list user session summaries failed")
+			return
+		}
 	}
 	views := make([]userView, 0, len(users))
 	for _, u := range users {
@@ -135,6 +150,13 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 			dbConnectionIDs = []uint64{}
 		}
 
+		sessionSummary := sessionSummaries[u.ID]
+		var lastLoginAt *string
+		if sessionSummary.LastLoginAt != nil {
+			formatted := sessionSummary.LastLoginAt.UTC().Format("2006-01-02T15:04:05Z")
+			lastLoginAt = &formatted
+		}
+
 		views = append(views, userView{
 			ID:                u.ID,
 			Username:          u.Username,
@@ -148,6 +170,8 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 			DBConnectionIDs:   dbConnectionIDs,
 			Protected:         u.IsProtected,
 			IsActive:          u.IsActive,
+			LastLoginAt:       lastLoginAt,
+			Online:            sessionSummary.ActiveSessionCount > 0,
 			CreatedAt:         u.CreatedAt.Format("2006-01-02T15:04:05Z"),
 			UpdatedAt:         u.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		})

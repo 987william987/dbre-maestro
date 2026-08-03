@@ -24,6 +24,12 @@ type SessionCreateOptions struct {
 	MFASource    string
 }
 
+type UserSessionSummary struct {
+	UserID             uint64
+	LastLoginAt        *time.Time
+	ActiveSessionCount int
+}
+
 func NewSessionRepo(db *sqlx.DB) *SessionRepo {
 	return &SessionRepo{db: db}
 }
@@ -86,14 +92,56 @@ func (r *SessionRepo) ListForUser(ctx context.Context, userID uint64) ([]model.S
 
 func (r *SessionRepo) ListForUserLimit(ctx context.Context, userID uint64, limit int) ([]model.Session, error) {
 	var sessions []model.Session
-	query := `SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC`
-	args := []any{userID}
+	query := `SELECT * FROM sessions WHERE user_id = ? ORDER BY CASE WHEN revoked_at IS NULL AND expires_at > ? THEN 0 ELSE 1 END, created_at DESC`
+	args := []any{userID, timeutil.NowUTC()}
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)
 	}
 	err := r.db.SelectContext(ctx, &sessions, query, args...)
 	return sessions, err
+}
+
+func (r *SessionRepo) SummariesForUsers(ctx context.Context, userIDs []uint64, now time.Time) (map[uint64]UserSessionSummary, error) {
+	summaries := make(map[uint64]UserSessionSummary, len(userIDs))
+	if len(userIDs) == 0 {
+		return summaries, nil
+	}
+
+	query, args, err := sqlx.In(`
+		SELECT
+			user_id,
+			MAX(created_at) AS last_login_at,
+			SUM(CASE WHEN revoked_at IS NULL AND expires_at > ? THEN 1 ELSE 0 END) AS active_session_count
+		FROM sessions
+		WHERE user_id IN (?)
+		GROUP BY user_id
+	`, now.UTC(), userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("build session summaries query: %w", err)
+	}
+	query = r.db.Rebind(query)
+
+	var rows []struct {
+		UserID             uint64        `db:"user_id"`
+		LastLoginAt        *time.Time    `db:"last_login_at"`
+		ActiveSessionCount sql.NullInt64 `db:"active_session_count"`
+	}
+	if err := r.db.SelectContext(ctx, &rows, query, args...); err != nil {
+		return nil, fmt.Errorf("list session summaries: %w", err)
+	}
+	for _, row := range rows {
+		activeSessionCount := 0
+		if row.ActiveSessionCount.Valid {
+			activeSessionCount = int(row.ActiveSessionCount.Int64)
+		}
+		summaries[row.UserID] = UserSessionSummary{
+			UserID:             row.UserID,
+			LastLoginAt:        row.LastLoginAt,
+			ActiveSessionCount: activeSessionCount,
+		}
+	}
+	return summaries, nil
 }
 
 func (r *SessionRepo) Revoke(ctx context.Context, tokenHash string) error {
