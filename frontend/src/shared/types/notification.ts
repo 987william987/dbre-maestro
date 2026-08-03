@@ -18,3 +18,9 @@ export type NotificationListResponse = {
   limit: number
   offset: number
 }
+
+export type NotificationSummary = {
+  pending: number
+  review_required: number
+  execution_required: number
+}

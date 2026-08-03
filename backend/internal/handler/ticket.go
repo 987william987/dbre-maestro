@@ -197,7 +197,7 @@ var ticketNotificationPolicies = map[ticketNotificationEvent]ticketNotificationP
 	},
 	ticketEventExecutionFailed: {
 		Title:       "工單執行失敗",
-		NotifType:   "ticket_executed",
+		NotifType:   "ticket_execution_failed",
 		Roles:       []ticketRecipientRole{ticketRoleSubmitter, ticketRoleAssignedExecutor, ticketRoleExecutorPool, ticketRoleAdmin},
 		NotifyActor: true,
 		Status:      model.TicketStatusFailed,

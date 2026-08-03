@@ -11,11 +11,16 @@ import (
 )
 
 type NotificationHandler struct {
-	notifs *repository.NotificationRepo
+	notifs  *repository.NotificationRepo
+	tickets *repository.TicketRepo
 }
 
-func NewNotificationHandler(notifs *repository.NotificationRepo) *NotificationHandler {
-	return &NotificationHandler{notifs: notifs}
+func NewNotificationHandler(notifs *repository.NotificationRepo, tickets ...*repository.TicketRepo) *NotificationHandler {
+	var ticketRepo *repository.TicketRepo
+	if len(tickets) > 0 {
+		ticketRepo = tickets[0]
+	}
+	return &NotificationHandler{notifs: notifs, tickets: ticketRepo}
 }
 
 // GET /notifications
@@ -52,6 +57,26 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 		"limit":         limit,
 		"offset":        offset,
 	})
+}
+
+// GET /notifications/summary
+func (h *NotificationHandler) Summary(w http.ResponseWriter, r *http.Request) {
+	if h.tickets == nil {
+		jsonOK(w, repository.TicketTodoSummary{})
+		return
+	}
+	userID := middleware.UserIDFromCtx(r.Context())
+	summary, err := h.tickets.TodoSummary(
+		r.Context(),
+		userID,
+		middleware.HasPermission(r.Context(), permissionTicketReview, permissionSQLEditorExportReview, permissionSQLEditorSensitiveRev),
+		middleware.HasPermission(r.Context(), permissionTicketExecute),
+	)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load notification summary failed")
+		return
+	}
+	jsonOK(w, summary)
 }
 
 // POST /notifications/{id}/read

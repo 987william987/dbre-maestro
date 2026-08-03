@@ -49,6 +49,12 @@ type WorkflowDashboardSummary struct {
 	ByWorkflowError     []WorkflowDashboardErrorCount `json:"by_workflow_error"`
 }
 
+type TicketTodoSummary struct {
+	Pending           int64 `json:"pending"`
+	ReviewRequired    int64 `json:"review_required"`
+	ExecutionRequired int64 `json:"execution_required"`
+}
+
 type WorkflowDashboardCount struct {
 	Key   string `db:"key_name" json:"key"`
 	Count int64  `db:"count" json:"count"`
@@ -363,6 +369,59 @@ func (r *TicketRepo) List(ctx context.Context, filter TicketListFilter, limit, o
 		return nil, 0, err
 	}
 	return tickets, total, nil
+}
+
+func (r *TicketRepo) TodoSummary(ctx context.Context, userID uint64, canReview bool, canExecute bool) (*TicketTodoSummary, error) {
+	summary := &TicketTodoSummary{}
+	activeSubmitterStatuses := []model.TicketStatus{
+		model.TicketStatusPendingReview,
+		model.TicketStatusPendingExecution,
+	}
+	query, args, err := sqlx.In(
+		`SELECT COUNT(*) FROM tickets WHERE submitter_id = ? AND status IN (?)`,
+		userID,
+		activeSubmitterStatuses,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build pending ticket count query: %w", err)
+	}
+	if err := r.db.QueryRowContext(ctx, r.db.Rebind(query), args...).Scan(&summary.Pending); err != nil {
+		return nil, fmt.Errorf("count pending tickets: %w", err)
+	}
+
+	participantIDJSON := strconv.FormatUint(userID, 10)
+	if canReview {
+		if err := r.db.QueryRowContext(ctx,
+			`SELECT COUNT(*)
+			 FROM tickets t
+			 JOIN ticket_workflow_snapshots tws ON tws.ticket_id = t.id
+			 WHERE t.status = ?
+			   AND t.submitter_id <> ?
+			   AND tws.approval_enabled = 1
+			   AND COALESCE(tws.error_code, '') = ''
+			   AND JSON_CONTAINS(tws.approval_user_ids, ?)`,
+			model.TicketStatusPendingReview, userID, participantIDJSON,
+		).Scan(&summary.ReviewRequired); err != nil {
+			return nil, fmt.Errorf("count review required tickets: %w", err)
+		}
+	}
+
+	if canExecute {
+		if err := r.db.QueryRowContext(ctx,
+			`SELECT COUNT(*)
+			 FROM tickets t
+			 JOIN ticket_workflow_snapshots tws ON tws.ticket_id = t.id
+			 WHERE t.status = ?
+			   AND t.submitter_id <> ?
+			   AND (t.reviewer_id IS NULL OR t.reviewer_id <> ?)
+			   AND COALESCE(tws.error_code, '') = ''
+			   AND JSON_CONTAINS(tws.executor_user_ids, ?)`,
+			model.TicketStatusPendingExecution, userID, userID, participantIDJSON,
+		).Scan(&summary.ExecutionRequired); err != nil {
+			return nil, fmt.Errorf("count execution required tickets: %w", err)
+		}
+	}
+	return summary, nil
 }
 
 func (r *TicketRepo) WorkflowDashboardSummary(ctx context.Context) (*WorkflowDashboardSummary, error) {
