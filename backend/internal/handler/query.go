@@ -147,7 +147,7 @@ func (r *activeSQLQueryRegistry) register(queryID string, query activeSQLQuery) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pruneLocked(time.Now())
-	if pending, ok := r.pendingCancels[queryID]; ok && pending.UserID == query.UserID {
+	if pending, ok := r.pendingCancels[queryID]; ok && (pending.UserID == 0 || pending.UserID == query.UserID) {
 		delete(r.pendingCancels, queryID)
 		return true
 	}
@@ -179,6 +179,36 @@ func (r *activeSQLQueryRegistry) cancel(queryID string, userID uint64) (activeSQ
 	if !ok {
 		r.pendingCancels[queryID] = pendingSQLQueryCancel{UserID: userID, CreatedAt: time.Now()}
 	}
+	return activeSQLQuery{}, false
+}
+
+func (r *activeSQLQueryRegistry) cancelAny(queryID string) (activeSQLQuery, bool) {
+	if r == nil || strings.TrimSpace(queryID) == "" {
+		return activeSQLQuery{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(time.Now())
+	query, ok := r.queries[queryID]
+	if ok {
+		delete(r.queries, queryID)
+	}
+	return query, ok
+}
+
+func (r *activeSQLQueryRegistry) cancelAnyOrPending(queryID string) (activeSQLQuery, bool) {
+	if r == nil || strings.TrimSpace(queryID) == "" {
+		return activeSQLQuery{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(time.Now())
+	query, ok := r.queries[queryID]
+	if ok {
+		delete(r.queries, queryID)
+		return query, true
+	}
+	r.pendingCancels[queryID] = pendingSQLQueryCancel{UserID: 0, CreatedAt: time.Now()}
 	return activeSQLQuery{}, false
 }
 

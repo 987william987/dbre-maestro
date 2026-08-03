@@ -135,7 +135,7 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('Approval Flow')).toBeInTheDocument()
     expect(screen.getByText('reviewer.bob')).toBeInTheDocument()
     expect(screen.getByText('dba.cindy')).toBeInTheDocument()
-    expect(screen.getByText('Waiting for review')).toBeInTheDocument()
+    expect(screen.queryByText('Waiting for review')).not.toBeInTheDocument()
     expect(screen.getByText('Reject')).toBeInTheDocument()
     expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
   })
@@ -167,10 +167,10 @@ describe('TicketDetailPage role visibility', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByText('Waiting for DBA execution')).toBeInTheDocument())
-    expect(screen.getByText('Review completed')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('dba.cindy, dba.edgar')).toBeInTheDocument())
+    expect(screen.queryByText('Review completed')).not.toBeInTheDocument()
     expect(screen.getByText('dba.cindy, dba.edgar')).toBeInTheDocument()
-    expect(screen.getByText('Waiting for DBA execution')).toBeInTheDocument()
+    expect(screen.queryByText('Waiting for DBA execution')).not.toBeInTheDocument()
     expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
     expect(screen.queryByText('Execute')).not.toBeInTheDocument()
   })
@@ -578,7 +578,8 @@ describe('TicketDetailPage role visibility', () => {
     renderPage()
 
     expect(await screen.findByText('Approval Flow')).toBeInTheDocument()
-    expect(screen.getByText('Sensitive access was revoked and the ticket is closed')).toBeInTheDocument()
+    expect(screen.getByText('Approval outcome')).toBeInTheDocument()
+    expect(screen.queryByText('Sensitive access was revoked and the ticket is closed')).not.toBeInTheDocument()
     expect(screen.queryByText('Waiting for approval to complete the request')).not.toBeInTheDocument()
   })
 
@@ -773,7 +774,7 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('analytics_app')).toBeInTheDocument()
     expect(screen.getAllByText('dba.cindy').length).toBeGreaterThan(0)
     expect(screen.getByText('Statement Results')).toBeInTheDocument()
-    expect(screen.getByText('Execute Successfully')).toBeInTheDocument()
+    expect(screen.getAllByText('Completed').length).toBeGreaterThan(0)
     expect(screen.getByText('1.250s')).toBeInTheDocument()
   })
 })

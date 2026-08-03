@@ -623,6 +623,93 @@ func (r *TicketRepo) CreateExecution(ctx context.Context, e *model.TicketExecuti
 	return uint64(id), nil
 }
 
+func (r *TicketRepo) EnsureExecutions(ctx context.Context, ticketID uint64, statements []model.TicketExecution) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin ensure ticket executions tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var existing int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM ticket_executions WHERE ticket_id = ? FOR UPDATE`, ticketID).Scan(&existing); err != nil {
+		return fmt.Errorf("count ticket executions: %w", err)
+	}
+	if existing > 0 {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit ensure ticket executions tx: %w", err)
+		}
+		tx = nil
+		return nil
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO ticket_executions (ticket_id, seq, sql_stmt, status, started_at) VALUES (?, ?, ?, 'pending', NULL)`,
+			ticketID, statement.Seq, statement.SQLStmt,
+		); err != nil {
+			return fmt.Errorf("create pending ticket execution: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit ensure ticket executions tx: %w", err)
+	}
+	tx = nil
+	return nil
+}
+
+func (r *TicketRepo) GetExecution(ctx context.Context, ticketID uint64, executionID uint64) (*model.TicketExecution, error) {
+	var exec model.TicketExecution
+	err := r.db.GetContext(ctx, &exec, `SELECT * FROM ticket_executions WHERE id = ? AND ticket_id = ?`, executionID, ticketID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &exec, err
+}
+
+func (r *TicketRepo) MarkTicketExecuting(ctx context.Context, ticketID uint64, executorID uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tickets
+		 SET status = CASE WHEN status = 'pending_execution' THEN 'executing' ELSE status END,
+		     executor_id = COALESCE(executor_id, ?),
+		     started_at = COALESCE(started_at, ?),
+		     updated_at = ?
+		 WHERE id = ? AND status IN ('pending_execution', 'executing')`,
+		executorID, timeutil.NowUTC(), timeutil.NowUTC(), ticketID,
+	)
+	return err
+}
+
+func (r *TicketRepo) SetExecutionAggregateStatus(ctx context.Context, ticketID uint64, status model.TicketStatus) error {
+	now := timeutil.NowUTC()
+	if status == model.TicketStatusCompleted || status == model.TicketStatusFailed || status == model.TicketStatusStopped {
+		_, err := r.db.ExecContext(ctx,
+			`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
+			status, now, now, ticketID,
+		)
+		return err
+	}
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?`,
+		status, now, ticketID,
+	)
+	return err
+}
+
+func (r *TicketRepo) MarkExecutionRunningIfPending(ctx context.Context, id uint64) (bool, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE ticket_executions SET status = 'running', started_at = ?, completed_at = NULL, error_msg = NULL, duration_ms = NULL WHERE id = ? AND status = 'pending'`,
+		timeutil.NowUTC(), id,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 func (r *TicketRepo) MarkExecutionRunning(ctx context.Context, id uint64) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE ticket_executions SET status = 'running', started_at = ? WHERE id = ?`,
@@ -631,7 +718,15 @@ func (r *TicketRepo) MarkExecutionRunning(ctx context.Context, id uint64) error 
 	return err
 }
 
-func (r *TicketRepo) MarkExecutionDone(ctx context.Context, id uint64, rowsAffected *int64, durationMs int64, errMsg *string) error {
+func (r *TicketRepo) MarkExecutionStopped(ctx context.Context, id uint64, message string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE ticket_executions SET status = 'stopped', error_msg = ?, completed_at = ?, duration_ms = NULL WHERE id = ?`,
+		message, timeutil.NowUTC(), id,
+	)
+	return err
+}
+
+func (r *TicketRepo) MarkExecutionDone(ctx context.Context, id uint64, rowsAffected *int64, durationMs *int64, errMsg *string) error {
 	status := "completed"
 	if errMsg != nil {
 		status = "failed"

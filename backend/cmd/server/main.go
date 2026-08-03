@@ -545,6 +545,8 @@ func main() {
 				r.With(requireSensitiveReview).Post("/revoke", ticketH.Revoke)
 				r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)
 				r.With(requireTicketsExecute).Post("/stop", ticketH.Stop)
+				r.With(requireTicketsExecute).Post("/executions/{executionID}/execute", ticketH.ExecuteStatement)
+				r.With(requireTicketsExecute).Post("/executions/{executionID}/stop", ticketH.StopStatement)
 				r.With(requireSettingsWrite).Post("/retry-workflow-resolution", ticketH.RetryWorkflowResolution)
 			})
 		})

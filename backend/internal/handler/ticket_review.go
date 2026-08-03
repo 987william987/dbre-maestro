@@ -953,7 +953,7 @@ func (h *TicketHandler) runTicketRedisCommands(ticket *model.Ticket, executorID 
 		cmd, args, parseErr := sqlreview.ParseRedisCommand(commandLine)
 		if parseErr != nil {
 			msg := parseErr.Error()
-			_ = h.tickets.MarkExecutionDone(ctx, execID, nil, 0, &msg)
+			_ = h.tickets.MarkExecutionDone(ctx, execID, nil, nil, &msg)
 			finalStatus = model.TicketStatusFailed
 			break
 		}
@@ -983,11 +983,11 @@ func (h *TicketHandler) runTicketRedisCommands(ticket *model.Ticket, executorID 
 		durationMs := time.Since(startedAt).Milliseconds()
 		if execErr != nil && execErr != redis.Nil {
 			msg := execErr.Error()
-			_ = h.tickets.MarkExecutionDone(ctx, execID, nil, durationMs, &msg)
+			_ = h.tickets.MarkExecutionDone(ctx, execID, nil, &durationMs, &msg)
 			finalStatus = model.TicketStatusFailed
 			break
 		}
-		_ = h.tickets.MarkExecutionDone(ctx, execID, nil, durationMs, nil)
+		_ = h.tickets.MarkExecutionDone(ctx, execID, nil, &durationMs, nil)
 	}
 
 	h.finishTicket(ctx, ticket.ID, finalStatus, "")

@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Check, ChevronDown, Download, Loader2, Minus, Play, Plus, RotateCcw, ShieldCheck, ShieldX, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, Download, Loader2, Minus, Play, Plus, RotateCcw, ShieldCheck, ShieldX, Square, X } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { format as formatSQL } from 'sql-formatter'
 import { cn } from '@/lib/utils'
@@ -8,6 +8,7 @@ import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
 import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants, TicketWorkflowTrace } from '@/shared/types/ticket'
+import type { TicketStatus } from '@/shared/types/ticket'
 import type { CurrentUser } from '@/shared/types/auth'
 import type { AuditLog } from '@/shared/types/audit'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
@@ -17,7 +18,7 @@ import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useToast } from '@/shared/ui/ToastContext'
-import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, retryWorkflowResolution, revokeTicket, withdrawTicket } from '@/modules/tickets/api'
+import { approveTicket, downloadTicketExport, executeTicket, executeTicketStatement, getTicket, rejectTicket, retryWorkflowResolution, revokeTicket, stopTicketStatement, withdrawTicket } from '@/modules/tickets/api'
 
 function DetailTable({
   headers,
@@ -62,6 +63,17 @@ function formatTicketActor(name: string | null | undefined, id: number | null | 
     return String(id)
   }
   return '—'
+}
+
+function formatTicketDatabaseScope(ticket: Ticket, fallback: string) {
+  if (ticket.ticket_type === 'query_access') {
+    return fallback
+  }
+  const database = ticket.database_name || '—'
+  if (!ticket.schema_name) {
+    return database
+  }
+  return `${database} / ${ticket.schema_name}`
 }
 
 function isAdminUser(user: CurrentUser) {
@@ -203,19 +215,32 @@ function formatExecutionDuration(startedAt?: string | null, completedAt?: string
   return `${((end - start) / 1000).toFixed(3)}s`
 }
 
-function formatExecutionStage(status: string) {
+function statementStatusToTicketStatus(status: string): TicketStatus | null {
   switch (status) {
     case 'pending':
-      return 'Pending'
+      return 'pending_execution'
     case 'running':
-      return 'Running'
+      return 'executing'
     case 'completed':
-      return 'Execute Successfully'
+      return 'completed'
     case 'failed':
-      return 'Execute Failed'
+      return 'failed'
+    case 'stopped':
+      return 'stopped'
     default:
-      return status
+      return null
   }
+}
+
+function StatementExecutionBadge({ status }: { status: string | null }) {
+  if (!status) {
+    return <span className="text-muted">—</span>
+  }
+  const badgeStatus = statementStatusToTicketStatus(status)
+  if (!badgeStatus) {
+    return <span className="text-muted">{status}</span>
+  }
+  return <StatusBadge status={badgeStatus} className="px-2 py-0.5 text-[10px] leading-4 tracking-normal" />
 }
 
 function formatTicketTypeLabel(ticketType: string) {
@@ -413,6 +438,7 @@ function extractRealtimeTicketID(detail: unknown): string | null {
 }
 
 type StatementResultRow = {
+  executionID: number | null
   seq: number
   sql: string
   scanRows: number | null
@@ -420,7 +446,6 @@ type StatementResultRow = {
   reviewMessage: string | null
   rowsAffected: number | null
   executionStatus: string | null
-  currentStage: string | null
   duration: string | null
   errorMessage: string | null
 }
@@ -441,6 +466,7 @@ function buildStatementResults(detail: TicketDetail) {
       .filter((item): item is string => Boolean(item && item.trim()))
       .join(' | ')
     rows.set(result.seq, {
+      executionID: existing?.executionID ?? null,
       seq: result.seq,
       sql: result.sql_stmt,
       scanRows: Math.max(existing?.scanRows ?? 0, result.scan_rows),
@@ -448,7 +474,6 @@ function buildStatementResults(detail: TicketDetail) {
       reviewMessage: nextMessage || null,
       rowsAffected: existing?.rowsAffected ?? null,
       executionStatus: existing?.executionStatus ?? null,
-      currentStage: existing?.currentStage ?? null,
       duration: existing?.duration ?? null,
       errorMessage: existing?.errorMessage ?? null,
     })
@@ -457,6 +482,7 @@ function buildStatementResults(detail: TicketDetail) {
   detail.executions.forEach((execution) => {
     const existing = rows.get(execution.seq)
     rows.set(execution.seq, {
+      executionID: execution.id,
       seq: execution.seq,
       sql: existing?.sql || execution.sql_stmt,
       scanRows: existing?.scanRows ?? null,
@@ -464,10 +490,11 @@ function buildStatementResults(detail: TicketDetail) {
       reviewMessage: existing?.reviewMessage ?? null,
       rowsAffected: execution.rows_affected ?? 0,
       executionStatus: execution.status,
-      currentStage: formatExecutionStage(execution.status),
-      duration: typeof execution.duration_ms === 'number'
-        ? `${(execution.duration_ms / 1000).toFixed(3)}s`
-        : formatExecutionDuration(execution.started_at, execution.completed_at),
+      duration: execution.status === 'stopped'
+        ? null
+        : typeof execution.duration_ms === 'number'
+          ? `${(execution.duration_ms / 1000).toFixed(3)}s`
+          : formatExecutionDuration(execution.started_at, execution.completed_at),
       errorMessage: execution.error_msg ?? null,
     })
   })
@@ -482,7 +509,6 @@ type WorkflowStep = {
   title: string
   actor: string
   tone: WorkflowStepTone
-  detail: string
 }
 
 function joinParticipantNames(names: string[], fallback: string) {
@@ -507,12 +533,6 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
     ticket.status === 'pending_review' ? 'current'
       : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
       : 'done'
-  const reviewerDetail =
-    reviewerTone === 'current' ? 'Waiting for review'
-      : ticket.status === 'withdrawn' ? 'Withdrawn by submitter'
-      : reviewerTone === 'failed' ? 'Rejected at review stage'
-      : 'Review completed'
-
   const executorTone: WorkflowStepTone = !usesExecutor
     ? 'upcoming'
     : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'upcoming'
@@ -520,13 +540,6 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
         : ticket.status === 'completed' ? 'done'
           : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' ? 'failed'
             : 'upcoming'
-  const executorDetail = !usesExecutor
-    ? 'No execution stage for this ticket type'
-    : executorTone === 'current' ? 'Waiting for DBA execution'
-      : executorTone === 'done' ? 'Execution completed'
-        : executorTone === 'failed' ? 'Execution ended with an exception'
-          : 'Will enter execution after approval'
-
   const completionTone: WorkflowStepTone = usesExecutor
     ? ticket.status === 'completed' ? 'done'
       : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' || ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
@@ -534,33 +547,18 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
     : ticket.status === 'approved' || ticket.status === 'completed' ? 'done'
       : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' || ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
         : 'upcoming'
-  const completionDetail = usesExecutor
-    ? completionTone === 'done' ? 'Ticket closed successfully'
-      : completionTone === 'failed' ? 'Ticket closed unsuccessfully'
-        : 'Waiting for execution to finish'
-    : completionTone === 'done' ? 'Ticket completed after approval'
-      : completionTone === 'failed'
-        ? (ticket.ticket_type === 'sensitive_query_access' || ticket.ticket_type === 'query_access') && ticket.status === 'stopped'
-          ? ticket.ticket_type === 'query_access'
-            ? 'Query access was revoked and the ticket is closed'
-            : 'Sensitive access was revoked and the ticket is closed'
-          : 'Ticket closed unsuccessfully'
-        : 'Waiting for approval to complete the request'
-
   const steps: WorkflowStep[] = [
     {
       key: 'submitter',
       title: 'Submitted',
       actor: submitter,
       tone: 'done',
-      detail: 'Ticket has been created',
     },
     {
       key: 'reviewer',
       title: 'Review',
       actor: reviewer,
       tone: reviewerTone,
-      detail: reviewerDetail,
     },
   ]
 
@@ -570,7 +568,6 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
       title: 'Execution',
       actor: executor,
       tone: executorTone,
-      detail: executorDetail,
     })
   }
 
@@ -579,7 +576,6 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
     title: 'Complete',
     actor: usesExecutor ? 'System status update' : 'Approval outcome',
     tone: completionTone,
-    detail: completionDetail,
   })
 
   return steps
@@ -656,7 +652,6 @@ function WorkflowTimeline({
                 <div className="mt-3">
                   <p className="text-[13px] font-semibold text-ink">{step.title}</p>
                   <p className="mt-1 text-[12px] font-medium text-ink">{step.actor}</p>
-                  <p className="mt-1 text-[11px] text-muted">{step.detail}</p>
                 </div>
               </div>
             </div>
@@ -678,6 +673,7 @@ export function TicketDetailPage() {
   const [comment, setComment] = useState('')
   const [reason, setReason] = useState('')
   const [acting, setActing] = useState<'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke' | 'retry_workflow' | null>(null)
+  const [actingExecutionID, setActingExecutionID] = useState<number | null>(null)
   const [confirmAction, setConfirmAction] = useState<'withdraw' | 'execute' | 'revoke' | null>(null)
   const [downloadingExport, setDownloadingExport] = useState(false)
   const [otherDetailsOpen, setOtherDetailsOpen] = useState(false)
@@ -791,6 +787,8 @@ export function TicketDetailPage() {
     ...row,
     sql: formatTicketSQLForDisplay(row.sql, ticket?.ticket_type ?? 'dml'),
   }))
+  const showReviewMessageColumn = displayStatementResults.some((row) => Boolean(row.reviewMessage?.trim()))
+  const showErrorMessageColumn = displayStatementResults.some((row) => Boolean(row.errorMessage?.trim()))
   const expandableStatementKeys = displayStatementResults
     .filter((row) => isExpandableSql(row.sql))
     .map(statementResultKey)
@@ -871,6 +869,19 @@ export function TicketDetailPage() {
       setError(actionError instanceof ApiError ? actionError.message : 'Action failed. Please try again later.')
     } finally {
       setActing(null)
+    }
+  }
+
+  async function runStatementAction(executionID: number, action: () => Promise<Ticket | void>) {
+    setActingExecutionID(executionID)
+    setError('')
+    try {
+      await action()
+      await reloadTicket({ background: true })
+    } catch (actionError) {
+      setError(actionError instanceof ApiError ? actionError.message : 'Statement action failed. Please try again later.')
+    } finally {
+      setActingExecutionID(null)
     }
   }
 
@@ -973,12 +984,11 @@ export function TicketDetailPage() {
             <div className="px-4 py-4">
               <p className="text-[12px] font-semibold text-faint">Overview</p>
               <DetailTable
-                headers={['Ticket Type', 'DB Connection', 'Database', 'Schema', 'Submitter', 'Reviewer', 'Executor', 'Description', 'Current Status']}
+                headers={['Ticket Type', 'DB Connection', 'Database / Schema', 'Submitter', 'Reviewer', 'Executor', 'Description', 'Current Status']}
                 rows={[[
                   formatTicketTypeLabel(ticket.ticket_type),
                   ticket.ticket_type === 'query_access' ? queryAccessConnections : ticket.db_connection_name || ticket.db_connection_id || 'Not specified',
-                  ticket.ticket_type === 'query_access' ? queryAccessScopeSummary : ticket.database_name || '—',
-                  ticket.schema_name || '—',
+                  formatTicketDatabaseScope(ticket, queryAccessScopeSummary),
                   formatTicketActor(ticket.submitter_name, ticket.submitter_id),
                   formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null),
                   formatTicketActor(ticket.executor_name, ticket.executor_id ?? null),
@@ -1066,12 +1076,12 @@ export function TicketDetailPage() {
                       <col className="w-auto" />
                       <col className="w-[160px]" />
                       <col className="w-[140px]" />
-                      <col className="w-[180px]" />
+                      {showReviewMessageColumn ? <col className="w-[180px]" /> : null}
                       <col className="w-[150px]" />
-                      <col className="w-[160px]" />
                       <col className="w-[150px]" />
                       <col className="w-[90px]" />
-                      <col className="w-[220px]" />
+                      {showErrorMessageColumn ? <col className="w-[220px]" /> : null}
+                      <col className="w-[120px]" />
                     </colgroup>
                     <DataTableHead>
                       <tr>
@@ -1080,12 +1090,12 @@ export function TicketDetailPage() {
                         <DataTableHeaderCell className="pl-1 pr-2">SQL</DataTableHeaderCell>
                         <DataTableHeaderCell>Scan Rows</DataTableHeaderCell>
                         <DataTableHeaderCell>Review Status</DataTableHeaderCell>
-                        <DataTableHeaderCell>Review Message</DataTableHeaderCell>
+                        {showReviewMessageColumn ? <DataTableHeaderCell>Review Message</DataTableHeaderCell> : null}
                         <DataTableHeaderCell>Rows Affected</DataTableHeaderCell>
                         <DataTableHeaderCell>Execution Status</DataTableHeaderCell>
-                        <DataTableHeaderCell>Current Stage</DataTableHeaderCell>
                         <DataTableHeaderCell>Duration</DataTableHeaderCell>
-                        <DataTableHeaderCell>Error Message</DataTableHeaderCell>
+                        {showErrorMessageColumn ? <DataTableHeaderCell>Error Message</DataTableHeaderCell> : null}
+                        <DataTableHeaderCell>Action</DataTableHeaderCell>
                       </tr>
                     </DataTableHead>
                     <DataTableBody>
@@ -1093,6 +1103,9 @@ export function TicketDetailPage() {
                         const rowKey = statementResultKey(row)
                         const rowExpanded = expandedStatementSQLs.has(rowKey)
                         const rowExpandable = isExpandableSql(row.sql)
+                        const rowActionBusy = actingExecutionID === row.executionID
+                        const rowCanExecute = Boolean(canExecute && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
+                        const rowCanStop = Boolean(canExecute && row.executionID && row.executionStatus === 'running')
                         return (
                           <DataTableRow key={rowKey}>
                             <DataTableCell className="pl-2 pr-1 align-middle">
@@ -1124,12 +1137,40 @@ export function TicketDetailPage() {
                             </DataTableCell>
                             <DataTableCell className="break-words align-middle leading-6">{row.scanRows ?? '—'}</DataTableCell>
                             <DataTableCell className="break-words align-middle leading-6">{row.reviewStatus ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-middle leading-6 text-muted">{row.reviewMessage || '—'}</DataTableCell>
+                            {showReviewMessageColumn ? (
+                              <DataTableCell className="break-words align-middle leading-6 text-muted">{row.reviewMessage || '—'}</DataTableCell>
+                            ) : null}
                             <DataTableCell className="break-words align-middle leading-6">{row.rowsAffected ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-middle leading-6">{row.executionStatus ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-middle leading-6">{row.currentStage ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-middle leading-6"><StatementExecutionBadge status={row.executionStatus} /></DataTableCell>
                             <DataTableCell className="break-words align-middle leading-6">{row.duration ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-middle leading-6 text-muted">{row.errorMessage || '—'}</DataTableCell>
+                            {showErrorMessageColumn ? (
+                              <DataTableCell className="break-words align-middle leading-6 text-muted">{row.errorMessage || '—'}</DataTableCell>
+                            ) : null}
+                            <DataTableCell className="align-middle">
+                              {rowCanExecute && row.executionID ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void runStatementAction(row.executionID!, () => executeTicketStatement(ticket.ticket_no, row.executionID!))}
+                                  disabled={rowActionBusy}
+                                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {rowActionBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                                  Execute
+                                </button>
+                              ) : rowCanStop && row.executionID ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void runStatementAction(row.executionID!, () => stopTicketStatement(ticket.ticket_no, row.executionID!))}
+                                  disabled={rowActionBusy}
+                                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-2.5 text-[12px] font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {rowActionBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+                                  Stop
+                                </button>
+                              ) : (
+                                <span className="text-muted">—</span>
+                              )}
+                            </DataTableCell>
                           </DataTableRow>
                         )
                       })}
