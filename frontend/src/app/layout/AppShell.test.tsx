@@ -24,6 +24,7 @@ vi.mock('@/shared/api/client', async () => {
 })
 
 import { listNotifications, listNotificationSummary, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
+import { openEventStream } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 
 const mockedUseAuth = vi.mocked(useAuth)
@@ -31,6 +32,7 @@ const mockedListNotifications = vi.mocked(listNotifications)
 const mockedListNotificationSummary = vi.mocked(listNotificationSummary)
 const mockedMarkNotificationRead = vi.mocked(markNotificationRead)
 const mockedMarkAllNotificationsRead = vi.mocked(markAllNotificationsRead)
+const mockedOpenEventStream = vi.mocked(openEventStream)
 const storage = new Map<string, string>()
 
 function renderShell(initialEntry = '/tickets') {
@@ -64,6 +66,7 @@ function renderShell(initialEntry = '/tickets') {
 
 describe('AppShell notifications', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     storage.clear()
     Object.defineProperty(window, 'localStorage', {
       value: {
@@ -126,16 +129,17 @@ describe('AppShell notifications', () => {
     })
     mockedMarkNotificationRead.mockResolvedValue(undefined)
     mockedMarkAllNotificationsRead.mockResolvedValue(undefined)
+    mockedOpenEventStream.mockReturnValue(() => undefined)
   })
 
-  it('會顯示鈴鐺未讀數並可展開通知下拉', async () => {
+  it('會顯示鈴鐺待辦總數並可展開通知下拉', async () => {
     renderShell()
 
     await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
-    expect(screen.getByLabelText('Notifications')).toBeInTheDocument()
-    expect(screen.getByText('1')).toBeInTheDocument()
+    expect(screen.getByLabelText(/Notifications/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/6 pending actions/)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByLabelText('Notifications'))
+    fireEvent.click(screen.getByLabelText(/Notifications/))
 
     expect(screen.getByText('Notifications')).toBeInTheDocument()
     expect(screen.getByText('Pending')).toBeInTheDocument()
@@ -149,10 +153,36 @@ describe('AppShell notifications', () => {
     renderShell()
 
     await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
-    fireEvent.click(screen.getByLabelText('Notifications'))
+    fireEvent.click(screen.getByLabelText(/Notifications/))
     fireEvent.click(screen.getByText('Mark all read'))
 
     await waitFor(() => expect(mockedMarkAllNotificationsRead).toHaveBeenCalled())
+  })
+
+  it('ticket.updated realtime event 會刷新待辦計數', async () => {
+    let onEvent: Parameters<typeof openEventStream>[1]['onEvent'] | undefined
+    mockedOpenEventStream.mockImplementation((_path, callbacks) => {
+      onEvent = callbacks.onEvent
+      return () => undefined
+    })
+    mockedListNotificationSummary
+      .mockResolvedValueOnce({ pending: 0, review_required: 1, execution_required: 0 })
+      .mockResolvedValueOnce({ pending: 0, review_required: 0, execution_required: 2 })
+
+    renderShell()
+
+    await waitFor(() => expect(mockedListNotificationSummary).toHaveBeenCalledTimes(1))
+    expect(screen.getByLabelText(/1 pending actions/)).toBeInTheDocument()
+
+    onEvent?.({ event: 'ticket.updated', data: { ticket_id: 101, status: 'pending_execution' } })
+
+    await waitFor(() => expect(mockedListNotificationSummary).toHaveBeenCalledTimes(2))
+    expect(screen.getByLabelText(/2 pending actions/)).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText(/Notifications/))
+
+    expect(screen.getByText('Review')).toBeInTheDocument()
+    expect(screen.getByText('Execute')).toBeInTheDocument()
+    expect(mockedListNotifications).toHaveBeenCalledTimes(1)
   })
 
   it('有子項目的主導航會自動展開目前所在頁面', async () => {
