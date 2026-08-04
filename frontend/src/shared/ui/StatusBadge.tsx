@@ -1,3 +1,4 @@
+import { Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { TicketStatus } from '@/shared/types/ticket'
 
@@ -30,6 +31,7 @@ const STATUS_LABELS: Record<TicketStatus, string> = {
 }
 
 export function StatusBadge({ status, className }: { status: TicketStatus; className?: string }) {
+  const label = STATUS_LABELS[status]
   return (
     <span
       className={cn(
@@ -38,7 +40,17 @@ export function StatusBadge({ status, className }: { status: TicketStatus; class
         className,
       )}
     >
-      {STATUS_LABELS[status]}
+      {status === 'executing' ? (
+        <span className="inline-flex h-4 items-center gap-1">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>{label}</span>
+          <span className="inline-flex w-4 items-end gap-0.5" aria-hidden="true">
+            <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-duration:900ms]" />
+            <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:150ms] [animation-duration:900ms]" />
+            <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:300ms] [animation-duration:900ms]" />
+          </span>
+        </span>
+      ) : label}
     </span>
   )
 }

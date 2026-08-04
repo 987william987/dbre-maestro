@@ -525,6 +525,7 @@ type WorkflowStep = {
   title: string
   actor: string
   tone: WorkflowStepTone
+  running?: boolean
 }
 
 function joinParticipantNames(names: string[], fallback: string) {
@@ -584,6 +585,7 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
       title: 'Execution',
       actor: executor,
       tone: executorTone,
+      running: ticket.status === 'executing',
     })
   }
 
@@ -597,7 +599,14 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
   return steps
 }
 
-function WorkflowStepIcon({ tone }: { tone: WorkflowStepTone }) {
+function WorkflowStepIcon({ tone, running }: { tone: WorkflowStepTone; running?: boolean }) {
+  if (running) {
+    return (
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-slate-700">
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </span>
+    )
+  }
   if (tone === 'done') {
     return (
       <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-white">
@@ -628,12 +637,10 @@ function WorkflowTimeline({
   ticket,
   workflowParticipants,
   highlight,
-  refreshing,
 }: {
   ticket: Ticket
   workflowParticipants: TicketWorkflowParticipants
   highlight?: boolean
-  refreshing?: boolean
 }) {
   const steps = buildWorkflowSteps(ticket, workflowParticipants)
 
@@ -647,12 +654,6 @@ function WorkflowTimeline({
       <div className="border-b border-border/80 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <p className="text-[13px] font-semibold text-ink">Approval Flow</p>
-          {refreshing ? (
-            <span className="inline-flex items-center gap-2 text-[11px] font-medium text-muted">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-              Syncing status...
-            </span>
-          ) : null}
         </div>
       </div>
 
@@ -664,7 +665,7 @@ function WorkflowTimeline({
                 <span className="absolute left-[44px] right-0 top-[18px] h-px bg-border" aria-hidden="true" />
               ) : null}
               <div className="relative">
-                <WorkflowStepIcon tone={step.tone} />
+                <WorkflowStepIcon tone={step.tone} running={step.running} />
                 <div className="mt-3">
                   <p className="text-[13px] font-semibold text-ink">{step.title}</p>
                   <p className="mt-1 text-[12px] font-medium text-ink">{step.actor}</p>
@@ -694,7 +695,6 @@ export function TicketDetailPage() {
   const [downloadingExport, setDownloadingExport] = useState(false)
   const [otherDetailsOpen, setOtherDetailsOpen] = useState(false)
   const [debugTraceOpen, setDebugTraceOpen] = useState(false)
-  const [isRefreshing, setIsRefreshing] = useState(false)
   const [statusTransitioning, setStatusTransitioning] = useState(false)
   const [expandedStatementSQLs, setExpandedStatementSQLs] = useState<Set<string>>(() => new Set())
   const previousStatusRef = useRef<string | null>(null)
@@ -826,24 +826,14 @@ export function TicketDetailPage() {
     user.permissions.includes('tickets.apply'),
   )
 
-  async function reloadTicket(options?: { background?: boolean }) {
+  async function reloadTicket(_options?: { background?: boolean }) {
     if (!id) {
       return
     }
-    const background = options?.background === true
-    if (background) {
-      setIsRefreshing(true)
-    }
-    try {
-      const nextDetail = await getTicket(id)
-      startTransition(() => {
-        setDetail(nextDetail)
-      })
-    } finally {
-      if (background) {
-        setIsRefreshing(false)
-      }
-    }
+    const nextDetail = await getTicket(id)
+    startTransition(() => {
+      setDetail(nextDetail)
+    })
   }
 
   function setStatementSQLExpanded(key: string, expanded: boolean) {
@@ -948,15 +938,8 @@ export function TicketDetailPage() {
                 status={ticket.status}
                 className={cn(
                   statusTransitioning ? 'scale-[1.03] ring-4 ring-accent/15' : '',
-                  isRefreshing ? 'opacity-80' : '',
                 )}
               />
-            ) : null}
-            {isRefreshing ? (
-              <span className="inline-flex items-center gap-2 text-[11px] font-medium text-muted">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-                Updating...
-              </span>
             ) : null}
           </div>
           {ticket ? <p className="mt-1 truncate font-mono text-[12px] font-semibold text-accent">{ticket.ticket_no}</p> : null}
@@ -989,12 +972,11 @@ export function TicketDetailPage() {
       ) : !ticket || !detail ? (
         <div className="rounded-xl border border-border bg-panel p-6 text-sm text-muted shadow-soft">Ticket not found.</div>
       ) : (
-        <div className={cn('space-y-3 transition-opacity duration-300', isRefreshing ? 'opacity-95' : 'opacity-100')}>
+        <div className="space-y-3">
           <WorkflowTimeline
             ticket={ticket}
             workflowParticipants={detail.workflow_participants}
             highlight={statusTransitioning}
-            refreshing={isRefreshing}
           />
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="px-4 py-4">
@@ -1123,7 +1105,13 @@ export function TicketDetailPage() {
                         const rowCanExecute = Boolean(canExecute && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
                         const rowCanStop = Boolean(canExecute && row.executionID && row.executionStatus === 'running')
                         return (
-                          <DataTableRow key={rowKey}>
+                          <DataTableRow
+                            key={rowKey}
+                            className={cn(
+                              'transition-colors duration-500',
+                              row.executionStatus === 'running' ? 'bg-blue-50/35 hover:bg-blue-50/60' : '',
+                            )}
+                          >
                             <DataTableCell className="pl-2 pr-1 align-middle">
                               {rowExpandable ? (
                                 <button
