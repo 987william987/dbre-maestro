@@ -67,7 +67,7 @@ func TestRecoverTicketExecutionPanicMarksRunningStatementAndTicketFailed(t *test
 		     interruption_reason = ?,
 		     outcome_confidence = ?
 		 WHERE id = ?`)).
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "execution_panic", "unknown", executionID).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "execution_panic", ticketExecutionOutcomeUnknown, executionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`)).
 		WithArgs(model.TicketStatusFailed, sqlmock.AnyArg(), sqlmock.AnyArg(), ticketID).
@@ -133,7 +133,7 @@ func TestCancelActiveExecutionsForShutdownCancelsAndMarksExecutionFailed(t *test
 		     interruption_reason = ?,
 		     outcome_confidence = ?
 		 WHERE id = ?`)).
-		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "service_shutdown", "canceled", executionID).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "service_shutdown", ticketExecutionOutcomeServiceShutdown, executionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM ticket_executions WHERE ticket_id = ? ORDER BY seq`)).
 		WithArgs(ticketID).
@@ -153,7 +153,7 @@ func TestCancelActiveExecutionsForShutdownCancelsAndMarksExecutionFailed(t *test
 			"db_process_id",
 			"interruption_reason",
 			"outcome_confidence",
-		}).AddRow(executionID, ticketID, 1, "SELECT pg_sleep(60)", "failed", nil, "service shutdown during execution; database query cancellation completed", time.Now(), time.Now(), nil, time.Now(), "postgres_pid", uint64(1234), "service_shutdown", "canceled"))
+		}).AddRow(executionID, ticketID, 1, "SELECT pg_sleep(60)", "failed", nil, "service shutdown during execution; database query cancellation completed", time.Now(), time.Now(), nil, time.Now(), "postgres_pid", uint64(1234), "service_shutdown", ticketExecutionOutcomeServiceShutdown))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`)).
 		WithArgs(model.TicketStatusFailed, sqlmock.AnyArg(), sqlmock.AnyArg(), ticketID).
 		WillReturnResult(sqlmock.NewResult(0, 1))

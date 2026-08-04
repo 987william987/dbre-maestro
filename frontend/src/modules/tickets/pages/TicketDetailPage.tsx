@@ -464,6 +464,11 @@ type StatementResultRow = {
   executionStatus: string | null
   duration: string | null
   errorMessage: string | null
+  sentToDBAt: string | null
+  dbProcessType: string | null
+  dbProcessID: number | null
+  interruptionReason: string | null
+  outcomeConfidence: string | null
 }
 
 function statementResultKey(row: StatementResultRow) {
@@ -493,6 +498,11 @@ function buildStatementResults(detail: TicketDetail) {
       executionStatus: existing?.executionStatus ?? null,
       duration: existing?.duration ?? null,
       errorMessage: existing?.errorMessage ?? null,
+      sentToDBAt: existing?.sentToDBAt ?? null,
+      dbProcessType: existing?.dbProcessType ?? null,
+      dbProcessID: existing?.dbProcessID ?? null,
+      interruptionReason: existing?.interruptionReason ?? null,
+      outcomeConfidence: existing?.outcomeConfidence ?? null,
     })
   })
 
@@ -512,11 +522,55 @@ function buildStatementResults(detail: TicketDetail) {
         : typeof execution.duration_ms === 'number'
           ? `${(execution.duration_ms / 1000).toFixed(3)}s`
           : formatExecutionDuration(execution.started_at, execution.completed_at),
-      errorMessage: execution.error_msg ?? null,
+      errorMessage: formatExecutionOutcomeMessage(execution.outcome_confidence, execution.interruption_reason, execution.error_msg),
+      sentToDBAt: execution.sent_to_db_at ?? null,
+      dbProcessType: execution.db_process_type ?? null,
+      dbProcessID: execution.db_process_id ?? null,
+      interruptionReason: execution.interruption_reason ?? null,
+      outcomeConfidence: execution.outcome_confidence ?? null,
     })
   })
 
   return Array.from(rows.values()).sort((a, b) => a.seq - b.seq)
+}
+
+function formatExecutionOutcomeMessage(outcome?: string | null, reason?: string | null, errorMessage?: string | null) {
+  if (outcome === 'not_sent') {
+    return errorMessage
+      ? `SQL was not sent to DB. Connection/setup failed before execution: ${errorMessage}`
+      : 'SQL was not sent to DB. Connection/setup failed before execution.'
+  }
+  if (outcome === 'outcome_unknown') {
+    return errorMessage
+      ? `SQL was sent to DB, then the connection was interrupted. DB outcome is unknown; verify on target DB: ${errorMessage}`
+      : 'SQL was sent to DB, then the connection was interrupted. DB outcome is unknown; verify on target DB.'
+  }
+  if (outcome === 'manually_stopped' || reason === 'manually_stopped') {
+    return 'Manually stopped.'
+  }
+  if (outcome === 'service_shutdown' || reason === 'service_shutdown') {
+    return errorMessage
+      ? `Service shutdown during execution: ${errorMessage}`
+      : 'Service shutdown during execution.'
+  }
+  if (reason === 'service_restart') {
+    return errorMessage
+      ? `Service restarted during execution. DB outcome may require verification: ${errorMessage}`
+      : 'Service restarted during execution. DB outcome may require verification.'
+  }
+  if (reason === 'execution_panic') {
+    return errorMessage
+      ? `Platform execution process failed: ${errorMessage}`
+      : 'Platform execution process failed.'
+  }
+  return errorMessage ?? null
+}
+
+function formatExecutionRuntimeProcess(row: StatementResultRow) {
+  if (!row.dbProcessType || row.dbProcessID == null) {
+    return '—'
+  }
+  return `${row.dbProcessType}: ${row.dbProcessID}`
 }
 
 type WorkflowStepTone = 'done' | 'current' | 'upcoming' | 'failed'
@@ -814,6 +868,14 @@ export function TicketDetailPage() {
   }))
   const showReviewMessageColumn = displayStatementResults.some((row) => Boolean(row.reviewMessage?.trim()))
   const showErrorMessageColumn = displayStatementResults.some((row) => Boolean(row.errorMessage?.trim()))
+  const executionRuntimeRows = displayStatementResults.filter((row) => (
+    row.executionID != null ||
+    row.sentToDBAt ||
+    row.outcomeConfidence ||
+    row.interruptionReason ||
+    row.dbProcessType ||
+    row.dbProcessID != null
+  ))
   const expandableStatementKeys = displayStatementResults
     .filter((row) => isExpandableSql(row.sql))
     .map(statementResultKey)
@@ -1365,15 +1427,35 @@ export function TicketDetailPage() {
                 <ChevronDown className={`h-4 w-4 text-muted transition-transform ${otherDetailsOpen ? 'rotate-180' : ''}`} />
               </button>
               {otherDetailsOpen ? (
-                <DetailTable
-                  headers={['Action', 'Actor', 'Timestamp', 'Detail']}
-                  rows={detail.activity_logs.map((log) => [
-                    formatActivityAction(log.action_type),
-                    log.actor_name?.trim() ? log.actor_name : log.actor_id ? String(log.actor_id) : 'System',
-                    formatDateTime(log.created_at, true),
-                    formatActivityDetail(log),
-                  ])}
-                />
+                <div className="space-y-4">
+                  {executionRuntimeRows.length > 0 ? (
+                    <div>
+                      <p className="mt-3 text-[12px] font-semibold text-faint">Statement Runtime</p>
+                      <DetailTable
+                        headers={['ID', 'Sent To DB', 'DB Process', 'Outcome', 'Reason']}
+                        rows={executionRuntimeRows.map((row) => [
+                          row.seq,
+                          row.sentToDBAt ? formatDateTime(row.sentToDBAt, true) : '—',
+                          formatExecutionRuntimeProcess(row),
+                          row.outcomeConfidence || '—',
+                          row.interruptionReason || '—',
+                        ])}
+                      />
+                    </div>
+                  ) : null}
+                  <div>
+                    <p className="mt-3 text-[12px] font-semibold text-faint">Activity Log</p>
+                    <DetailTable
+                      headers={['Action', 'Actor', 'Timestamp', 'Detail']}
+                      rows={detail.activity_logs.map((log) => [
+                        formatActivityAction(log.action_type),
+                        log.actor_name?.trim() ? log.actor_name : log.actor_id ? String(log.actor_id) : 'System',
+                        formatDateTime(log.created_at, true),
+                        formatActivityDetail(log),
+                      ])}
+                    />
+                  </div>
+                </div>
               ) : null}
             </div>
 

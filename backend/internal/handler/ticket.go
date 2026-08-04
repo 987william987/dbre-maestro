@@ -3,9 +3,12 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strconv"
@@ -24,6 +27,8 @@ import (
 	"github.com/dbre-maestro/maestro/internal/sqlpolicy"
 	ticketsm "github.com/dbre-maestro/maestro/internal/ticket"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -64,10 +69,22 @@ type ticketWorkflowParticipants struct {
 }
 
 type ticketStatementExecutionResult struct {
-	rowsAffected *int64
-	durationMs   *int64
-	errMsg       *string
+	rowsAffected       *int64
+	durationMs         *int64
+	errMsg             *string
+	interruptionReason string
+	outcomeConfidence  string
+	sentToDB           bool
 }
+
+const (
+	ticketExecutionOutcomeCompleted       = "completed"
+	ticketExecutionOutcomeFailed          = "failed"
+	ticketExecutionOutcomeNotSent         = "not_sent"
+	ticketExecutionOutcomeUnknown         = "outcome_unknown"
+	ticketExecutionOutcomeManuallyStopped = "manually_stopped"
+	ticketExecutionOutcomeServiceShutdown = "service_shutdown"
+)
 
 type workflowTraceUser struct {
 	ID       uint64 `json:"id"`
@@ -2517,11 +2534,11 @@ func (h *TicketHandler) recoverTicketExecutionPanic(ticket *model.Ticket, execut
 		return
 	}
 	if execRow != nil && execRow.ID != 0 {
-		_ = h.tickets.MarkExecutionDone(ctx, execRow.ID, nil, nil, &message)
+		_ = h.tickets.MarkExecutionInterrupted(ctx, execRow.ID, message, "execution_panic", ticketExecutionOutcomeUnknown)
 	} else if executions, err := h.tickets.ListExecutions(ctx, ticket.ID); err == nil {
 		for _, execution := range executions {
 			if execution.Status == "running" {
-				_ = h.tickets.MarkExecutionInterrupted(ctx, execution.ID, message, "execution_panic", "unknown")
+				_ = h.tickets.MarkExecutionInterrupted(ctx, execution.ID, message, "execution_panic", ticketExecutionOutcomeUnknown)
 			}
 		}
 	}
@@ -2630,6 +2647,18 @@ func executionAuditDetails(details map[string]any, comment *string) map[string]a
 	return details
 }
 
+func addTicketStatementOutcomeAuditDetails(details map[string]any, result ticketStatementExecutionResult) {
+	if result.outcomeConfidence != "" {
+		details["outcome_confidence"] = result.outcomeConfidence
+	}
+	if result.interruptionReason != "" {
+		details["interruption_reason"] = result.interruptionReason
+	}
+	if result.sentToDB {
+		details["sent_to_db"] = true
+	}
+}
+
 func (h *TicketHandler) ensureTicketExecutionRows(ctx context.Context, ticket *model.Ticket) error {
 	if ticket == nil || ticket.DBConnectionID == nil {
 		return fmt.Errorf("ticket has no target db_connection")
@@ -2701,6 +2730,7 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64, op
 		if result.errMsg != nil {
 			statementAudit["error"] = *result.errMsg
 		}
+		addTicketStatementOutcomeAuditDetails(statementAudit, result)
 		executedStatements = append(executedStatements, statementAudit)
 
 		if result.errMsg != nil {
@@ -2804,23 +2834,45 @@ func (h *TicketHandler) runTicketStatementExecution(ticket *model.Ticket, execRo
 		})
 	}
 
-	rowsAffected, durationMs, execErr := h.executeTicketStatementSQL(ctx, ticket, execRow, executorID)
+	rowsAffected, durationMs, sentToDB, execErr := h.executeTicketStatementSQL(ctx, ticket, execRow, executorID)
 	result.durationMs = durationMs
 	result.rowsAffected = rowsAffected
+	result.sentToDB = sentToDB
 	if execErr != nil {
 		msg := execErr.Error()
 		result.errMsg = &msg
+		result.interruptionReason, result.outcomeConfidence = classifyTicketStatementExecutionError(execErr, sentToDB)
 	}
 
 	current, _ := h.tickets.GetExecution(ctx, ticket.ID, execRow.ID)
 	if current != nil && current.Status == "stopped" {
 		msg := "manually stopped"
 		result.errMsg = &msg
+		if current.InterruptionReason != nil {
+			result.interruptionReason = *current.InterruptionReason
+		}
+		if current.OutcomeConfidence != nil {
+			result.outcomeConfidence = *current.OutcomeConfidence
+		}
 	} else if current != nil && current.Status == "failed" {
 		result.errMsg = current.ErrorMsg
 		result.durationMs = current.DurationMs
+		if current.InterruptionReason != nil {
+			result.interruptionReason = *current.InterruptionReason
+		}
+		if current.OutcomeConfidence != nil {
+			result.outcomeConfidence = *current.OutcomeConfidence
+		}
 	} else {
-		_ = h.tickets.MarkExecutionDone(ctx, execRow.ID, result.rowsAffected, result.durationMs, result.errMsg)
+		if execErr != nil {
+			if result.outcomeConfidence == ticketExecutionOutcomeNotSent || result.outcomeConfidence == ticketExecutionOutcomeUnknown {
+				result.durationMs = nil
+			}
+			_ = h.tickets.MarkExecutionFailedWithOutcome(ctx, execRow.ID, result.durationMs, *result.errMsg, result.interruptionReason, result.outcomeConfidence)
+		} else {
+			result.outcomeConfidence = ticketExecutionOutcomeCompleted
+			_ = h.tickets.MarkExecutionDone(ctx, execRow.ID, result.rowsAffected, result.durationMs, result.errMsg)
+		}
 	}
 	if manual {
 		actionType := "ticket_statement_execute_complete"
@@ -2837,6 +2889,7 @@ func (h *TicketHandler) runTicketStatementExecution(ticket *model.Ticket, execRo
 		if result.errMsg != nil {
 			details["error"] = *result.errMsg
 		}
+		addTicketStatementOutcomeAuditDetails(details, result)
 		h.audit.Log(ctx, repository.AuditEntry{
 			ActorID:      &executorID,
 			ActorName:    h.auditActorName(ctx, &executorID, ""),
@@ -2851,10 +2904,10 @@ func (h *TicketHandler) runTicketStatementExecution(ticket *model.Ticket, execRo
 	return result
 }
 
-func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *model.Ticket, execRow model.TicketExecution, executorID uint64) (*int64, *int64, error) {
+func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *model.Ticket, execRow model.TicketExecution, executorID uint64) (*int64, *int64, bool, error) {
 	execDB, cleanup, resolvedConn, err := h.openTicketSQLDBWithConnection(ctx, *ticket.DBConnectionID, model.DBCredentialRoleReadwrite, ticket.DatabaseName)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	defer cleanup()
 
@@ -2865,7 +2918,7 @@ func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *m
 
 	pinnedConn, err := execDB.Conn(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	defer pinnedConn.Close()
 
@@ -2873,7 +2926,7 @@ func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *m
 		if ticket.SchemaName != nil && strings.TrimSpace(*ticket.SchemaName) != "" {
 			schemaName := strings.ReplaceAll(strings.TrimSpace(*ticket.SchemaName), `"`, `""`)
 			if _, err := pinnedConn.ExecContext(ctx, fmt.Sprintf(`SET search_path TO "%s"`, schemaName)); err != nil {
-				return nil, nil, err
+				return nil, nil, false, err
 			}
 		}
 		var backendPID uint64
@@ -2896,7 +2949,7 @@ func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *m
 
 	if ticket.DatabaseName != nil && strings.TrimSpace(*ticket.DatabaseName) != "" {
 		if _, err := pinnedConn.ExecContext(ctx, fmt.Sprintf("USE %s", quoteMySQLIdentifier(*ticket.DatabaseName))); err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 	}
 	threadID := currentMySQLConnectionID(ctx, pinnedConn)
@@ -2916,13 +2969,13 @@ func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *m
 	})
 }
 
-func (h *TicketHandler) execRegisteredTicketStatement(ctx context.Context, pinnedConn *sql.Conn, execRow model.TicketExecution, query activeSQLQuery) (*int64, *int64, error) {
+func (h *TicketHandler) execRegisteredTicketStatement(ctx context.Context, pinnedConn *sql.Conn, execRow model.TicketExecution, query activeSQLQuery) (*int64, *int64, bool, error) {
 	statementCtx, cancel := context.WithCancel(ctx)
 	query.Cancel = cancel
 	queryID := ticketExecutionQueryID(execRow.ID)
 	if canceled := h.activeExecutions.register(queryID, query); canceled {
 		cancel()
-		return nil, nil, context.Canceled
+		return nil, nil, false, context.Canceled
 	}
 	defer func() {
 		h.activeExecutions.remove(queryID)
@@ -2933,13 +2986,63 @@ func (h *TicketHandler) execRegisteredTicketStatement(ctx context.Context, pinne
 	res, err := pinnedConn.ExecContext(statementCtx, execRow.SQLStmt)
 	durationMs := time.Since(startedAt).Milliseconds()
 	if err != nil {
-		return nil, &durationMs, err
+		return nil, &durationMs, true, err
 	}
 	value, err := res.RowsAffected()
 	if err != nil {
-		return nil, &durationMs, nil
+		return nil, &durationMs, true, nil
 	}
-	return &value, &durationMs, nil
+	return &value, &durationMs, true, nil
+}
+
+func classifyTicketStatementExecutionError(err error, sentToDB bool) (string, string) {
+	if err == nil {
+		return "", ticketExecutionOutcomeCompleted
+	}
+	if !sentToDB {
+		return ticketExecutionOutcomeNotSent, ticketExecutionOutcomeNotSent
+	}
+	if isExplicitDatabaseExecutionError(err) {
+		return "", ticketExecutionOutcomeFailed
+	}
+	return "connection_interrupted", ticketExecutionOutcomeUnknown
+}
+
+func isExplicitDatabaseExecutionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return true
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, driver.ErrBadConn) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	connectionMarkers := []string{
+		"bad connection",
+		"broken pipe",
+		"connection refused",
+		"connection reset",
+		"connection was killed",
+		"server closed the connection",
+		"unexpected eof",
+	}
+	for _, marker := range connectionMarkers {
+		if strings.Contains(msg, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *TicketHandler) CancelActiveExecutionsForShutdown(ctx context.Context) int {
@@ -2986,9 +3089,9 @@ func (h *TicketHandler) CancelActiveExecutionsForShutdown(ctx context.Context) i
 				)
 			}
 			if h.tickets != nil {
-				outcomeConfidence := "canceled"
+				outcomeConfidence := ticketExecutionOutcomeServiceShutdown
 				if err != nil {
-					outcomeConfidence = "unknown"
+					outcomeConfidence = ticketExecutionOutcomeUnknown
 				}
 				_ = h.tickets.MarkExecutionInterrupted(ctx, executionID, message, "service_shutdown", outcomeConfidence)
 				if query.TicketID != 0 {

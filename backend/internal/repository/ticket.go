@@ -786,7 +786,7 @@ func (r *TicketRepo) MarkExecutionStopped(ctx context.Context, id uint64, messag
 		     interruption_reason = ?,
 		     outcome_confidence = ?
 		 WHERE id = ?`,
-		message, timeutil.NowUTC(), "manual_stop", "canceled", id,
+		message, timeutil.NowUTC(), "manually_stopped", "manually_stopped", id,
 	)
 	return err
 }
@@ -809,6 +809,26 @@ func (r *TicketRepo) MarkExecutionDone(ctx context.Context, id uint64, rowsAffec
 		     outcome_confidence = ?
 		 WHERE id = ?`,
 		status, rowsAffected, errMsg, timeutil.NowUTC(), durationMs, confidence, id,
+	)
+	return err
+}
+
+func (r *TicketRepo) MarkExecutionFailedWithOutcome(ctx context.Context, id uint64, durationMs *int64, errMsg, interruptionReason, outcomeConfidence string) error {
+	var reason any
+	if strings.TrimSpace(interruptionReason) != "" {
+		reason = interruptionReason
+	}
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE ticket_executions
+		 SET status = 'failed',
+		     rows_affected = NULL,
+		     error_msg = ?,
+		     completed_at = ?,
+		     duration_ms = ?,
+		     interruption_reason = ?,
+		     outcome_confidence = ?
+		 WHERE id = ?`,
+		errMsg, timeutil.NowUTC(), durationMs, reason, outcomeConfidence, id,
 	)
 	return err
 }
@@ -993,7 +1013,7 @@ func (r *TicketRepo) RecoverExecutingTickets(ctx context.Context) ([]TicketExecu
 					DBProcessType:      execRow.DBProcessType,
 					DBProcessID:        execRow.DBProcessID,
 					InterruptionReason: "service_restart",
-					OutcomeConfidence:  "unknown",
+					OutcomeConfidence:  "outcome_unknown",
 				})
 			case "completed":
 				completed++
@@ -1017,7 +1037,7 @@ func (r *TicketRepo) RecoverExecutingTickets(ctx context.Context) ([]TicketExecu
 					     interruption_reason = ?,
 					     outcome_confidence = ?
 					 WHERE id = ?`,
-					message, now, "service_restart", "unknown", execRow.ID,
+					message, now, "service_restart", "outcome_unknown", execRow.ID,
 				); err != nil {
 					return nil, fmt.Errorf("mark running ticket execution failed: %w", err)
 				}

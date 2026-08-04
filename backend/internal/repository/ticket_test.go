@@ -342,7 +342,7 @@ func TestTicketRecoverExecutingTicketsFailsRunningStatements(t *testing.T) {
 					     interruption_reason = ?,
 					     outcome_confidence = ?
 					 WHERE id = ?`)).
-		WithArgs("service restarted during execution; database outcome unknown; last known postgres_pid=4567", sqlmock.AnyArg(), "service_restart", "unknown", executionID).
+		WithArgs("service restarted during execution; database outcome unknown; last known postgres_pid=4567", sqlmock.AnyArg(), "service_restart", "outcome_unknown", executionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`)).
 		WithArgs(model.TicketStatusFailed, sqlmock.AnyArg(), sqlmock.AnyArg(), ticketID).
