@@ -238,6 +238,7 @@ func main() {
 				"status", recovery.Status,
 				"reason", recovery.Reason,
 				"failed_execution_ids", recovery.FailedExecutionIDs,
+				"failed_executions", recovery.FailedExecutions,
 			)
 			if err := auditRepo.Log(context.Background(), repository.AuditEntry{
 				ActorName:    "System",
@@ -248,6 +249,7 @@ func main() {
 					"status":               string(recovery.Status),
 					"reason":               recovery.Reason,
 					"failed_execution_ids": recovery.FailedExecutionIDs,
+					"failed_executions":    recovery.FailedExecutions,
 				},
 			}); err != nil {
 				slog.Warn("crash recovery audit log failed", "ticket_id", ticketID, "err", err)

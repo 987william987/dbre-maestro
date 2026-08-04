@@ -54,6 +54,17 @@ type TicketExecutionRecovery struct {
 	Status             model.TicketStatus
 	Reason             string
 	FailedExecutionIDs []uint64
+	FailedExecutions   []TicketExecutionRecoveryDetail
+}
+
+type TicketExecutionRecoveryDetail struct {
+	ExecutionID        uint64     `json:"execution_id"`
+	Seq                int        `json:"seq"`
+	SentToDBAt         *time.Time `json:"sent_to_db_at,omitempty"`
+	DBProcessType      *string    `json:"db_process_type,omitempty"`
+	DBProcessID        *uint64    `json:"db_process_id,omitempty"`
+	InterruptionReason string     `json:"interruption_reason"`
+	OutcomeConfidence  string     `json:"outcome_confidence"`
 }
 
 type TicketTodoSummary struct {
@@ -707,7 +718,18 @@ func (r *TicketRepo) SetExecutionAggregateStatus(ctx context.Context, ticketID u
 
 func (r *TicketRepo) MarkExecutionRunningIfPending(ctx context.Context, id uint64) (bool, error) {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE ticket_executions SET status = 'running', started_at = ?, completed_at = NULL, error_msg = NULL, duration_ms = NULL WHERE id = ? AND status = 'pending'`,
+		`UPDATE ticket_executions
+		 SET status = 'running',
+		     started_at = ?,
+		     completed_at = NULL,
+		     error_msg = NULL,
+		     duration_ms = NULL,
+		     sent_to_db_at = NULL,
+		     db_process_type = NULL,
+		     db_process_id = NULL,
+		     interruption_reason = NULL,
+		     outcome_confidence = NULL
+		 WHERE id = ? AND status = 'pending'`,
 		timeutil.NowUTC(), id,
 	)
 	if err != nil {
@@ -719,28 +741,82 @@ func (r *TicketRepo) MarkExecutionRunningIfPending(ctx context.Context, id uint6
 
 func (r *TicketRepo) MarkExecutionRunning(ctx context.Context, id uint64) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE ticket_executions SET status = 'running', started_at = ? WHERE id = ?`,
+		`UPDATE ticket_executions
+		 SET status = 'running',
+		     started_at = ?,
+		     sent_to_db_at = NULL,
+		     db_process_type = NULL,
+		     db_process_id = NULL,
+		     interruption_reason = NULL,
+		     outcome_confidence = NULL
+		 WHERE id = ?`,
 		timeutil.NowUTC(), id,
+	)
+	return err
+}
+
+func (r *TicketRepo) MarkExecutionSentToDB(ctx context.Context, id uint64, processType string, processID uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE ticket_executions
+		 SET sent_to_db_at = COALESCE(sent_to_db_at, ?),
+		     db_process_type = ?,
+		     db_process_id = ?,
+		     outcome_confidence = ?
+		 WHERE id = ? AND status = 'running'`,
+		timeutil.NowUTC(), processType, processID, "sent_to_db", id,
 	)
 	return err
 }
 
 func (r *TicketRepo) MarkExecutionStopped(ctx context.Context, id uint64, message string) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE ticket_executions SET status = 'stopped', error_msg = ?, completed_at = ?, duration_ms = NULL WHERE id = ?`,
-		message, timeutil.NowUTC(), id,
+		`UPDATE ticket_executions
+		 SET status = 'stopped',
+		     error_msg = ?,
+		     completed_at = ?,
+		     duration_ms = NULL,
+		     interruption_reason = ?,
+		     outcome_confidence = ?
+		 WHERE id = ?`,
+		message, timeutil.NowUTC(), "manual_stop", "canceled", id,
 	)
 	return err
 }
 
 func (r *TicketRepo) MarkExecutionDone(ctx context.Context, id uint64, rowsAffected *int64, durationMs *int64, errMsg *string) error {
 	status := "completed"
+	confidence := "completed"
 	if errMsg != nil {
 		status = "failed"
+		confidence = "failed"
 	}
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE ticket_executions SET status = ?, rows_affected = ?, error_msg = ?, completed_at = ?, duration_ms = ? WHERE id = ?`,
-		status, rowsAffected, errMsg, timeutil.NowUTC(), durationMs, id,
+		`UPDATE ticket_executions
+		 SET status = ?,
+		     rows_affected = ?,
+		     error_msg = ?,
+		     completed_at = ?,
+		     duration_ms = ?,
+		     interruption_reason = NULL,
+		     outcome_confidence = ?
+		 WHERE id = ?`,
+		status, rowsAffected, errMsg, timeutil.NowUTC(), durationMs, confidence, id,
+	)
+	return err
+}
+
+func (r *TicketRepo) MarkExecutionInterrupted(ctx context.Context, id uint64, message, reason, outcomeConfidence string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE ticket_executions
+		 SET status = 'failed',
+		     rows_affected = NULL,
+		     error_msg = ?,
+		     completed_at = ?,
+		     duration_ms = NULL,
+		     interruption_reason = ?,
+		     outcome_confidence = ?
+		 WHERE id = ?`,
+		message, timeutil.NowUTC(), reason, outcomeConfidence, id,
 	)
 	return err
 }
@@ -892,6 +968,7 @@ func (r *TicketRepo) RecoverExecutingTickets(ctx context.Context) ([]TicketExecu
 		}
 
 		failedExecutionIDs := make([]uint64, 0)
+		failedExecutions := make([]TicketExecutionRecoveryDetail, 0)
 		pending, running, completed, failed := 0, 0, 0, 0
 		for _, execRow := range executions {
 			switch execRow.Status {
@@ -901,6 +978,15 @@ func (r *TicketRepo) RecoverExecutingTickets(ctx context.Context) ([]TicketExecu
 				running++
 				failed++
 				failedExecutionIDs = append(failedExecutionIDs, execRow.ID)
+				failedExecutions = append(failedExecutions, TicketExecutionRecoveryDetail{
+					ExecutionID:        execRow.ID,
+					Seq:                execRow.Seq,
+					SentToDBAt:         execRow.SentToDBAt,
+					DBProcessType:      execRow.DBProcessType,
+					DBProcessID:        execRow.DBProcessID,
+					InterruptionReason: "service_restart",
+					OutcomeConfidence:  "unknown",
+				})
 			case "completed":
 				completed++
 			case "failed", "stopped":
@@ -909,13 +995,24 @@ func (r *TicketRepo) RecoverExecutingTickets(ctx context.Context) ([]TicketExecu
 		}
 
 		if len(failedExecutionIDs) > 0 {
-			if _, err := tx.ExecContext(ctx,
-				`UPDATE ticket_executions
-				 SET status = 'failed', error_msg = ?, completed_at = ?, duration_ms = NULL
-				 WHERE ticket_id = ? AND status = 'running'`,
-				restartReason, now, ticketID,
-			); err != nil {
-				return nil, fmt.Errorf("mark running ticket executions failed: %w", err)
+			for _, execRow := range executions {
+				if execRow.Status != "running" {
+					continue
+				}
+				message := ticketExecutionRestartMessage(execRow)
+				if _, err := tx.ExecContext(ctx,
+					`UPDATE ticket_executions
+					 SET status = 'failed',
+					     error_msg = ?,
+					     completed_at = ?,
+					     duration_ms = NULL,
+					     interruption_reason = ?,
+					     outcome_confidence = ?
+					 WHERE id = ?`,
+					message, now, "service_restart", "unknown", execRow.ID,
+				); err != nil {
+					return nil, fmt.Errorf("mark running ticket execution failed: %w", err)
+				}
 			}
 			running = 0
 		}
@@ -946,6 +1043,7 @@ func (r *TicketRepo) RecoverExecutingTickets(ctx context.Context) ([]TicketExecu
 			Status:             status,
 			Reason:             reason,
 			FailedExecutionIDs: failedExecutionIDs,
+			FailedExecutions:   failedExecutions,
 		})
 	}
 
@@ -954,6 +1052,20 @@ func (r *TicketRepo) RecoverExecutingTickets(ctx context.Context) ([]TicketExecu
 	}
 	tx = nil
 	return recoveries, nil
+}
+
+func ticketExecutionRestartMessage(execRow model.TicketExecution) string {
+	if execRow.SentToDBAt == nil {
+		return "service restarted while statement was running; database send state unknown"
+	}
+	if execRow.DBProcessType != nil && strings.TrimSpace(*execRow.DBProcessType) != "" && execRow.DBProcessID != nil && *execRow.DBProcessID != 0 {
+		return fmt.Sprintf(
+			"service restarted during execution; database outcome unknown; last known %s=%d",
+			strings.TrimSpace(*execRow.DBProcessType),
+			*execRow.DBProcessID,
+		)
+	}
+	return "service restarted after statement was sent to database; database outcome unknown"
 }
 
 func aggregateTicketStatusFromCounts(total, pending, running, completed, failed int) model.TicketStatus {

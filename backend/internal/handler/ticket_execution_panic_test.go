@@ -52,9 +52,22 @@ func TestRecoverTicketExecutionPanicMarksRunningStatementAndTicketFailed(t *test
 			"started_at",
 			"completed_at",
 			"duration_ms",
-		}).AddRow(executionID, ticketID, 1, ticket.SQLContent, "running", nil, nil, time.Now(), nil, nil))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE ticket_executions SET status = ?, rows_affected = ?, error_msg = ?, completed_at = ?, duration_ms = ? WHERE id = ?`)).
-		WithArgs("failed", nil, sqlmock.AnyArg(), sqlmock.AnyArg(), nil, executionID).
+			"sent_to_db_at",
+			"db_process_type",
+			"db_process_id",
+			"interruption_reason",
+			"outcome_confidence",
+		}).AddRow(executionID, ticketID, 1, ticket.SQLContent, "running", nil, nil, time.Now(), nil, nil, time.Now(), "mysql_thread_id", uint64(123), nil, "sent_to_db"))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE ticket_executions
+		 SET status = 'failed',
+		     rows_affected = NULL,
+		     error_msg = ?,
+		     completed_at = ?,
+		     duration_ms = NULL,
+		     interruption_reason = ?,
+		     outcome_confidence = ?
+		 WHERE id = ?`)).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "execution_panic", "unknown", executionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`)).
 		WithArgs(model.TicketStatusFailed, sqlmock.AnyArg(), sqlmock.AnyArg(), ticketID).
@@ -111,8 +124,16 @@ func TestCancelActiveExecutionsForShutdownCancelsAndMarksExecutionFailed(t *test
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT pg_cancel_backend($1)`)).
 		WithArgs(uint64(1234)).
 		WillReturnRows(sqlmock.NewRows([]string{"pg_cancel_backend"}).AddRow(true))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE ticket_executions SET status = ?, rows_affected = ?, error_msg = ?, completed_at = ?, duration_ms = ? WHERE id = ?`)).
-		WithArgs("failed", nil, sqlmock.AnyArg(), sqlmock.AnyArg(), nil, executionID).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE ticket_executions
+		 SET status = 'failed',
+		     rows_affected = NULL,
+		     error_msg = ?,
+		     completed_at = ?,
+		     duration_ms = NULL,
+		     interruption_reason = ?,
+		     outcome_confidence = ?
+		 WHERE id = ?`)).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "service_shutdown", "canceled", executionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM ticket_executions WHERE ticket_id = ? ORDER BY seq`)).
 		WithArgs(ticketID).
@@ -127,7 +148,12 @@ func TestCancelActiveExecutionsForShutdownCancelsAndMarksExecutionFailed(t *test
 			"started_at",
 			"completed_at",
 			"duration_ms",
-		}).AddRow(executionID, ticketID, 1, "SELECT pg_sleep(60)", "failed", nil, "service shutdown during execution; database query cancellation completed", time.Now(), time.Now(), nil))
+			"sent_to_db_at",
+			"db_process_type",
+			"db_process_id",
+			"interruption_reason",
+			"outcome_confidence",
+		}).AddRow(executionID, ticketID, 1, "SELECT pg_sleep(60)", "failed", nil, "service shutdown during execution; database query cancellation completed", time.Now(), time.Now(), nil, time.Now(), "postgres_pid", uint64(1234), "service_shutdown", "canceled"))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`)).
 		WithArgs(model.TicketStatusFailed, sqlmock.AnyArg(), sqlmock.AnyArg(), ticketID).
 		WillReturnResult(sqlmock.NewResult(0, 1))

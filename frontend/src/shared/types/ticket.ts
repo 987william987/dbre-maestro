@@ -92,6 +92,11 @@ export type TicketExecution = {
   started_at?: string | null
   completed_at?: string | null
   duration_ms?: number | null
+  sent_to_db_at?: string | null
+  db_process_type?: string | null
+  db_process_id?: number | null
+  interruption_reason?: string | null
+  outcome_confidence?: string | null
 }
 
 export type TicketReviewResult = {

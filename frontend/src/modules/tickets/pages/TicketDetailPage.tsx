@@ -506,7 +506,7 @@ function buildStatementResults(detail: TicketDetail) {
       reviewMessage: existing?.reviewMessage ?? null,
       rowsAffected: execution.rows_affected ?? 0,
       executionStatus: execution.status,
-      duration: execution.status === 'stopped'
+      duration: execution.status === 'stopped' || Boolean(execution.interruption_reason)
         ? null
         : typeof execution.duration_ms === 'number'
           ? `${(execution.duration_ms / 1000).toFixed(3)}s`

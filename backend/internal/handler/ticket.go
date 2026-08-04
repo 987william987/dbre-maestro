@@ -2503,7 +2503,7 @@ func (h *TicketHandler) recoverTicketExecutionPanic(ticket *model.Ticket, execut
 	} else if executions, err := h.tickets.ListExecutions(ctx, ticket.ID); err == nil {
 		for _, execution := range executions {
 			if execution.Status == "running" {
-				_ = h.tickets.MarkExecutionDone(ctx, execution.ID, nil, nil, &message)
+				_ = h.tickets.MarkExecutionInterrupted(ctx, execution.ID, message, "execution_panic", "unknown")
 			}
 		}
 	}
@@ -2860,6 +2860,9 @@ func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *m
 		}
 		var backendPID uint64
 		_ = pinnedConn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&backendPID)
+		if backendPID != 0 {
+			_ = h.tickets.MarkExecutionSentToDB(ctx, execRow.ID, "postgres_pid", backendPID)
+		}
 		return h.execRegisteredTicketStatement(ctx, pinnedConn, execRow, activeSQLQuery{
 			UserID:         executorID,
 			ConnectionID:   resolvedConn.ID,
@@ -2879,6 +2882,9 @@ func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *m
 		}
 	}
 	threadID := currentMySQLConnectionID(ctx, pinnedConn)
+	if threadID != 0 {
+		_ = h.tickets.MarkExecutionSentToDB(ctx, execRow.ID, "mysql_thread_id", threadID)
+	}
 	return h.execRegisteredTicketStatement(ctx, pinnedConn, execRow, activeSQLQuery{
 		UserID:         executorID,
 		ConnectionID:   resolvedConn.ID,
@@ -2962,7 +2968,11 @@ func (h *TicketHandler) CancelActiveExecutionsForShutdown(ctx context.Context) i
 				)
 			}
 			if h.tickets != nil {
-				_ = h.tickets.MarkExecutionDone(ctx, executionID, nil, nil, &message)
+				outcomeConfidence := "canceled"
+				if err != nil {
+					outcomeConfidence = "unknown"
+				}
+				_ = h.tickets.MarkExecutionInterrupted(ctx, executionID, message, "service_shutdown", outcomeConfidence)
 				if query.TicketID != 0 {
 					h.refreshTicketStatusFromExecutions(ctx, query.TicketID)
 					if h.broker != nil {
