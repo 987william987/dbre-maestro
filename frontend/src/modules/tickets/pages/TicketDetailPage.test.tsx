@@ -777,4 +777,40 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getAllByText('Completed').length).toBeGreaterThan(0)
     expect(screen.getByText('1.250s')).toBeInTheDocument()
   })
+
+  it('rejected 工單不把未執行 statement 顯示成 Pending Execution', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      status: 'rejected',
+      rejection_reason: 'reject at execution stage',
+    }, {
+      executions: [
+        {
+          id: 21,
+          ticket_id: 12,
+          seq: 1,
+          sql_stmt: 'CREATE TABLE test_i (id int);',
+          status: 'pending',
+          rows_affected: 0,
+          error_msg: null,
+          started_at: null,
+          completed_at: null,
+        },
+      ],
+    }))
+
+    renderPage()
+
+    expect(await screen.findByText('Statement Results')).toBeInTheDocument()
+    expect(screen.queryByText('Pending Execution')).not.toBeInTheDocument()
+  })
 })

@@ -472,6 +472,7 @@ function statementResultKey(row: StatementResultRow) {
 
 function buildStatementResults(detail: TicketDetail) {
   const rows = new Map<number, StatementResultRow>()
+  const hidePendingExecutionStatus = detail.ticket.status === 'rejected' || detail.ticket.status === 'withdrawn'
 
   detail.review_results.forEach((result) => {
     if (result.phase && result.phase !== 'validation') {
@@ -505,7 +506,7 @@ function buildStatementResults(detail: TicketDetail) {
       reviewStatus: existing?.reviewStatus ?? null,
       reviewMessage: existing?.reviewMessage ?? null,
       rowsAffected: execution.rows_affected ?? 0,
-      executionStatus: execution.status,
+      executionStatus: hidePendingExecutionStatus && execution.status === 'pending' ? null : execution.status,
       duration: execution.status === 'stopped' || Boolean(execution.interruption_reason)
         ? null
         : typeof execution.duration_ms === 'number'
