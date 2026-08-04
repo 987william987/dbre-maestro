@@ -702,6 +702,17 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 			NotifType:    "ticket_needs_admin_attention",
 			Title:        "工單需要管理員處理",
 			Body:         body,
+			LarkCard: buildLarkTicketCard(
+				r.Context(),
+				h.settings,
+				h.dbConns,
+				h.users,
+				h.appBaseURL,
+				ticket,
+				"工單需要管理員處理",
+				"ticket_needs_admin_attention",
+				exportTicketStateLabel(ticket.Status),
+			),
 		})
 		publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
 		jsonCreated(w, map[string]any{
@@ -744,6 +755,17 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		NotifType:    "ticket_pending_review",
 		Title:        exportPendingReviewTitle(),
 		Body:         body,
+		LarkCard: buildLarkTicketCard(
+			r.Context(),
+			h.settings,
+			h.dbConns,
+			h.users,
+			h.appBaseURL,
+			ticket,
+			exportPendingReviewTitle(),
+			"ticket_pending_review",
+			exportTicketStateLabel(model.TicketStatusPendingReview),
+		),
 	})
 	publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
 

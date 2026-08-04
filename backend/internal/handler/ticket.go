@@ -479,6 +479,17 @@ func (h *TicketHandler) dispatchTicketNotification(
 		NotifType:    policy.NotifType,
 		Title:        policy.Title,
 		Body:         body,
+		LarkCard: buildLarkTicketCard(
+			ctx,
+			h.settings,
+			h.dbConns,
+			h.users,
+			h.appBaseURL,
+			ticket,
+			policy.Title,
+			policy.NotifType,
+			h.ticketStateLabel(policy.Status),
+		),
 	})
 }
 

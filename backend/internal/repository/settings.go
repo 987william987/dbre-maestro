@@ -22,6 +22,8 @@ const (
 	settingRequireNonSensitiveExportRev  = "require_non_sensitive_export_review"
 	settingLarkAppID                     = "lark_app_id"
 	settingLarkAppSecret                 = "lark_app_secret"
+	settingLarkInteractiveCardsEnabled   = "lark_interactive_cards_enabled"
+	settingLarkCardVerificationToken     = "lark_card_verification_token"
 	settingLarkOAuthEnabled              = "lark_oauth_enabled"
 	settingLarkOAuthSite                 = "lark_oauth_site"
 	settingLarkOAuthRedirectURL          = "lark_oauth_redirect_url"
@@ -118,6 +120,18 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 		return nil, err
 	}
 	settings.LarkAppSecretConfigured = larkAppSecretConfigured
+	larkInteractiveCardsEnabled, err := r.getBool(ctx, settingLarkInteractiveCardsEnabled)
+	if err != nil {
+		return nil, err
+	}
+	if larkInteractiveCardsEnabled != nil {
+		settings.LarkInteractiveCardsEnabled = *larkInteractiveCardsEnabled
+	}
+	larkCardVerificationTokenConfigured, err := r.hasValue(ctx, settingLarkCardVerificationToken)
+	if err != nil {
+		return nil, err
+	}
+	settings.LarkCardVerificationTokenConfigured = larkCardVerificationTokenConfigured
 	larkOAuthEnabled, err := r.getBool(ctx, settingLarkOAuthEnabled)
 	if err != nil {
 		return nil, err
@@ -344,6 +358,14 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 			return err
 		}
 	}
+	if err := upsertBool(ctx, tx, settingLarkInteractiveCardsEnabled, settings.LarkInteractiveCardsEnabled); err != nil {
+		return err
+	}
+	if settings.LarkCardVerificationToken != "" {
+		if err := r.upsertEncryptedString(ctx, tx, settingLarkCardVerificationToken, settings.LarkCardVerificationToken); err != nil {
+			return err
+		}
+	}
 	if err := upsertBool(ctx, tx, settingLarkOAuthEnabled, settings.LarkOAuthEnabled); err != nil {
 		return err
 	}
@@ -516,6 +538,10 @@ func (r *SettingsRepo) GetApprovalPolicy(ctx context.Context, workflowType model
 
 func (r *SettingsRepo) GetLarkAppSecret(ctx context.Context) (string, error) {
 	return r.getEncryptedString(ctx, settingLarkAppSecret)
+}
+
+func (r *SettingsRepo) GetLarkCardVerificationToken(ctx context.Context) (string, error) {
+	return r.getEncryptedString(ctx, settingLarkCardVerificationToken)
 }
 
 func (r *SettingsRepo) GetSSOOIDCClientSecret(ctx context.Context) (string, error) {

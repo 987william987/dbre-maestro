@@ -8,6 +8,9 @@ export type PlatformSettings = {
   lark_app_id: string
   lark_app_secret?: string
   lark_app_secret_configured: boolean
+  lark_interactive_cards_enabled: boolean
+  lark_card_verification_token?: string
+  lark_card_verification_token_configured: boolean
   lark_oauth_enabled: boolean
   lark_oauth_site: 'lark' | 'feishu'
   lark_oauth_redirect_url: string

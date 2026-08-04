@@ -82,6 +82,32 @@ func (r *UserRepo) GetByLarkLoginIdentity(ctx context.Context, openID, unionID s
 	return &u, err
 }
 
+func (r *UserRepo) GetByLarkOperator(ctx context.Context, openID, unionID string) (*model.User, error) {
+	openID = strings.TrimSpace(openID)
+	unionID = strings.TrimSpace(unionID)
+	if openID == "" && unionID == "" {
+		return nil, nil
+	}
+
+	conditions := []string{}
+	args := []any{}
+	if unionID != "" {
+		conditions = append(conditions, "lark_union_id = ?", "lark_login_union_id = ?")
+		args = append(args, unionID, unionID)
+	}
+	if openID != "" {
+		conditions = append(conditions, "lark_login_open_id = ?", "(lark_recipient_type = 'open_id' AND lark_recipient = ?)")
+		args = append(args, openID, openID)
+	}
+	query := `SELECT * FROM users WHERE is_active = 1 AND (` + strings.Join(conditions, " OR ") + `) ORDER BY id LIMIT 1`
+	var u model.User
+	err := r.db.GetContext(ctx, &u, query, args...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &u, err
+}
+
 func (r *UserRepo) GetByExternalIdentity(ctx context.Context, provider, subject string) (*model.User, error) {
 	provider = strings.TrimSpace(provider)
 	subject = strings.TrimSpace(subject)
