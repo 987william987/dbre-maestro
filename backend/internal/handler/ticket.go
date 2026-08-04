@@ -2080,9 +2080,15 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isExecutionStageReject := ticket.Status == model.TicketStatusApproved || ticket.Status == model.TicketStatusPendingExecution
+	reviewerID := &userID
+	if isExecutionStageReject {
+		reviewerID = nil
+	}
+
 	ok, err := h.tickets.UpdateStatus(r.Context(), id,
 		ticket.Status, model.TicketStatusRejected,
-		&userID, nil, &req.Reason,
+		reviewerID, nil, &req.Reason,
 	)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "update failed")
@@ -2091,6 +2097,9 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		jsonErr(w, http.StatusConflict, "ticket status changed concurrently")
 		return
+	}
+	if isExecutionStageReject {
+		_ = h.tickets.SetExecutorIfEmpty(r.Context(), id, userID)
 	}
 
 	h.audit.Log(r.Context(), repository.AuditEntry{
@@ -2104,7 +2113,7 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	})
 
 	rejectDetail := req.Reason
-	if ticket.Status == model.TicketStatusApproved || ticket.Status == model.TicketStatusPendingExecution {
+	if isExecutionStageReject {
 		rejectDetail = "執行階段駁回：" + req.Reason
 	}
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventRejected, &userID, rejectDetail)

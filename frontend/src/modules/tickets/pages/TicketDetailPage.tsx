@@ -537,7 +537,7 @@ function joinParticipantNames(names: string[], fallback: string) {
   return normalized.join(', ')
 }
 
-function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflowParticipants): WorkflowStep[] {
+function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflowParticipants, activityLogs: AuditLog[] = []): WorkflowStep[] {
   const submitter = formatTicketActor(ticket.submitter_name, ticket.submitter_id)
   const reviewer = ticket.reviewer_id != null || ticket.reviewer_name
     ? formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null)
@@ -546,14 +546,20 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
     ? formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)
     : joinParticipantNames(workflowParticipants.executors, 'Pending executor assignment')
   const usesExecutor = ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml' || ticket.ticket_type === 'redis_command'
+  const rejectedAfterReview = usesExecutor && ticket.status === 'rejected' && (
+    ticket.executor_id != null ||
+    Boolean(ticket.executor_name) ||
+    activityLogs.some((log) => log.action_type === 'ticket_approve')
+  )
 
   const reviewerTone: WorkflowStepTone =
     ticket.status === 'pending_review' ? 'current'
-      : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
+      : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? rejectedAfterReview ? 'done' : 'failed'
       : 'done'
   const executorTone: WorkflowStepTone = !usesExecutor
     ? 'upcoming'
-    : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'upcoming'
+    : rejectedAfterReview ? 'failed'
+      : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'upcoming'
       : ticket.status === 'approved' || ticket.status === 'pending_execution' || ticket.status === 'executing' ? 'current'
         : ticket.status === 'completed' ? 'done'
           : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' ? 'failed'
@@ -600,35 +606,35 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
   return steps
 }
 
-function WorkflowStepIcon({ tone, running }: { tone: WorkflowStepTone; running?: boolean }) {
+function WorkflowStepIcon({ tone, running, label }: { tone: WorkflowStepTone; running?: boolean; label: string }) {
   if (running) {
     return (
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-slate-700">
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-slate-700" aria-label={`${label}: executing`}>
         <Loader2 className="h-5 w-5 animate-spin" />
       </span>
     )
   }
   if (tone === 'done') {
     return (
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-white">
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-white" aria-label={`${label}: completed`}>
         <Check className="h-5 w-5" />
       </span>
     )
   }
   if (tone === 'current') {
     return (
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border-[6px] border-accent bg-white text-accent" />
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border-[6px] border-accent bg-white text-accent" aria-label={`${label}: current`} />
     )
   }
   if (tone === 'failed') {
     return (
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-500 text-white">
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-500 text-white" aria-label={`${label}: failed`}>
         <X className="h-5 w-5" />
       </span>
     )
   }
   return (
-    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-300 text-white text-sm font-bold">
+    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-300 text-white text-sm font-bold" aria-label={`${label}: upcoming`}>
       •
     </span>
   )
@@ -637,13 +643,15 @@ function WorkflowStepIcon({ tone, running }: { tone: WorkflowStepTone; running?:
 function WorkflowTimeline({
   ticket,
   workflowParticipants,
+  activityLogs,
   highlight,
 }: {
   ticket: Ticket
   workflowParticipants: TicketWorkflowParticipants
+  activityLogs?: AuditLog[]
   highlight?: boolean
 }) {
-  const steps = buildWorkflowSteps(ticket, workflowParticipants)
+  const steps = buildWorkflowSteps(ticket, workflowParticipants, activityLogs)
 
   return (
     <section
@@ -666,7 +674,7 @@ function WorkflowTimeline({
                 <span className="absolute left-[44px] right-0 top-[18px] h-px bg-border" aria-hidden="true" />
               ) : null}
               <div className="relative">
-                <WorkflowStepIcon tone={step.tone} running={step.running} />
+                <WorkflowStepIcon tone={step.tone} running={step.running} label={step.title} />
                 <div className="mt-3">
                   <p className="text-[13px] font-semibold text-ink">{step.title}</p>
                   <p className="mt-1 text-[12px] font-medium text-ink">{step.actor}</p>
@@ -977,6 +985,7 @@ export function TicketDetailPage() {
           <WorkflowTimeline
             ticket={ticket}
             workflowParticipants={detail.workflow_participants}
+            activityLogs={detail.activity_logs}
             highlight={statusTransitioning}
           />
           <section className="rounded-xl border border-border bg-panel shadow-soft">

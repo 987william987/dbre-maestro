@@ -813,4 +813,58 @@ describe('TicketDetailPage role visibility', () => {
     expect(await screen.findByText('Statement Results')).toBeInTheDocument()
     expect(screen.queryByText('Pending Execution')).not.toBeInTheDocument()
   })
+
+  it('執行階段 reject 的 Approval Flow 會顯示 review completed 且 execution failed', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      ticket_type: 'ddl',
+      status: 'rejected',
+      reviewer_id: 2,
+      reviewer_name: 'reviewer.bob',
+      rejection_reason: 'reject at execution stage',
+    }, {
+      workflow_participants: {
+        reviewers: ['reviewer.bob'],
+        executors: ['dba.cindy'],
+      },
+      activity_logs: [
+        {
+          id: 1,
+          actor_id: 2,
+          actor_name: 'reviewer.bob',
+          action_type: 'ticket_approve',
+          resource_type: 'ticket',
+          resource_id: 12,
+          details: null,
+          ip_address: null,
+          created_at: '2026-06-09T10:01:00Z',
+        },
+        {
+          id: 2,
+          actor_id: 3,
+          actor_name: 'dba.cindy',
+          action_type: 'ticket_reject',
+          resource_type: 'ticket',
+          resource_id: 12,
+          details: { reason: 'reject at execution stage' },
+          ip_address: null,
+          created_at: '2026-06-09T10:02:00Z',
+        },
+      ],
+    }))
+
+    renderPage()
+
+    expect(await screen.findByLabelText('Review: completed')).toBeInTheDocument()
+    expect(screen.getByLabelText('Execution: failed')).toBeInTheDocument()
+  })
 })

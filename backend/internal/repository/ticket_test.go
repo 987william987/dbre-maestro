@@ -251,6 +251,27 @@ func TestTicketUpdateStatusStoresWithdrawReason(t *testing.T) {
 	}
 }
 
+func TestTicketSetExecutorIfEmptyDoesNotOverwriteExistingExecutor(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET executor_id = COALESCE(executor_id, ?), updated_at = ? WHERE id = ?`)).
+		WithArgs(uint64(7), sqlmock.AnyArg(), uint64(12)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := repo.SetExecutorIfEmpty(context.Background(), 12, 7); err != nil {
+		t.Fatalf("SetExecutorIfEmpty() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
 func TestTicketRecoverExecutingTicketsKeepsPartialManualTicketResumable(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

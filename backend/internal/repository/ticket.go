@@ -700,6 +700,14 @@ func (r *TicketRepo) MarkTicketExecuting(ctx context.Context, ticketID uint64, e
 	return err
 }
 
+func (r *TicketRepo) SetExecutorIfEmpty(ctx context.Context, ticketID uint64, executorID uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tickets SET executor_id = COALESCE(executor_id, ?), updated_at = ? WHERE id = ?`,
+		executorID, timeutil.NowUTC(), ticketID,
+	)
+	return err
+}
+
 func (r *TicketRepo) SetExecutionAggregateStatus(ctx context.Context, ticketID uint64, status model.TicketStatus) error {
 	now := timeutil.NowUTC()
 	if status == model.TicketStatusCompleted || status == model.TicketStatusFailed || status == model.TicketStatusStopped {
