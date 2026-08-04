@@ -548,7 +548,7 @@ func (h *TicketHandler) runMySQLDDLShadowValidation(
 	var tableShadowDB string
 	var tableCleanup func()
 	tableShadowPrepared := false
-	tableShadowCloneTables, tableShadowCloneErr := mysqlDDLShadowCloneTablesForStatements(statements, nullableStringValue(databaseName))
+	tableShadowCloneTables, tableShadowCloneErr := mysqlDDLShadowCloneTablesForValidStatements(ctx, readonlyDB, statements, nullableStringValue(databaseName))
 
 	for _, stmt := range statements {
 		statementKind := string(stmt.Kind)
@@ -794,6 +794,32 @@ func mysqlDDLShadowCloneTablesForStatements(statements []sqlparse.ParsedStatemen
 		items = append(items, nextItems...)
 	}
 	return items, nil
+}
+
+func mysqlDDLShadowCloneTablesForValidStatements(ctx context.Context, db *sql.DB, statements []sqlparse.ParsedStatement, selectedDatabase string) ([]mysqlShadowCloneTable, error) {
+	items := make([]mysqlShadowCloneTable, 0)
+	for _, stmt := range statements {
+		if isMySQLTableScopedDDL(stmt) {
+			if err := validateMySQLDDLTableExistence(ctx, db, stmt, selectedDatabase); err != nil {
+				continue
+			}
+		}
+		nextItems, err := mysqlDDLShadowCloneTables(stmt, selectedDatabase)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, nextItems...)
+	}
+	return items, nil
+}
+
+func isMySQLTableScopedDDL(stmt sqlparse.ParsedStatement) bool {
+	switch stmt.AST.(type) {
+	case *tidbast.CreateTableStmt, *tidbast.AlterTableStmt, *tidbast.DropTableStmt, *tidbast.TruncateTableStmt, *tidbast.RenameTableStmt:
+		return true
+	default:
+		return false
+	}
 }
 
 func mysqlDDLTableExistenceChecks(stmt sqlparse.ParsedStatement, selectedDatabase string) ([]mysqlDDLTableExistenceCheck, error) {
@@ -1446,7 +1472,7 @@ func buildValidationReviewItem(seq int, stmt, method string, stage *string, stat
 	}
 	if len(issues) > 0 {
 		item.Status = "error"
-		message := strings.Join(issues, "; ")
+		message := strings.Join(issues, "\n")
 		item.Message = &message
 	}
 	return item

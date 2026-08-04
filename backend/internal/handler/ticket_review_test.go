@@ -228,6 +228,46 @@ func TestMySQLDDLShadowCloneTablesForStatementsUsesBatchScope(t *testing.T) {
 	}
 }
 
+func TestMySQLDDLShadowCloneTablesForValidStatementsSkipsInvalidStatementDependencies(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "CREATE TABLE aaa LIKE config_infod; DROP TABLE config_info")
+	if err != nil {
+		t.Fatalf("parse SQL: %v", err)
+	}
+
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\).*information_schema\\.TABLES").
+		WithArgs("app", "aaa").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\).*information_schema\\.TABLES").
+		WithArgs("app", "config_infod").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\).*information_schema\\.TABLES").
+		WithArgs("app", "config_info").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	got, err := mysqlDDLShadowCloneTablesForValidStatements(context.Background(), db, parsed.Statements, "app")
+	if err != nil {
+		t.Fatalf("mysqlDDLShadowCloneTablesForValidStatements() error = %v", err)
+	}
+	want := []mysqlShadowCloneTable{{database: "app", table: "config_info", required: true}}
+	if len(got) != len(want) {
+		t.Fatalf("len(got) = %d, want %d; got = %#v", len(got), len(want), got)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("got[%d] = %#v, want %#v", index, got[index], want[index])
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
 func TestMySQLDDLTableExistenceChecks(t *testing.T) {
 	tests := []struct {
 		name string

@@ -238,13 +238,20 @@ function buildReviewSummaryRows(results: TicketReviewResult[]): ReviewSummaryRow
       } else if (next.status !== 'error') {
         next.status = result.status || 'warn'
       }
-      if (result.message?.trim()) {
-        next.messages.push(`${result.status || 'warn'}: ${result.message.trim()}`)
-      }
+      splitReviewMessages(result.message).forEach((message) => {
+        next.messages.push(message)
+      })
     }
     rows.set(result.seq, next)
   })
   return Array.from(rows.values()).sort((left, right) => left.seq - right.seq)
+}
+
+function splitReviewMessages(message?: string | null) {
+  return (message ?? '')
+    .split(/\n|;\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 function reviewTableLabel(table: { database_name?: string | null; schema_name?: string | null; table_name: string }) {

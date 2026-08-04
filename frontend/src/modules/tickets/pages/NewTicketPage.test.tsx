@@ -303,7 +303,7 @@ describe('NewTicketPage', () => {
           tables: [{ table_name: 'orders', row_count: 123456, data_size_bytes: 2147483648 }],
           scan_rows: 0,
           status: 'error',
-          message: 'table "orders" already exists',
+          message: 'CREATE TABLE missing comment; CREATE TABLE must use utf8mb4 charset',
         },
       ],
     })
@@ -326,7 +326,8 @@ describe('NewTicketPage', () => {
     expect(await screen.findByText('Summary')).toBeInTheDocument()
     expect(screen.getByText('123,456')).toBeInTheDocument()
     expect(screen.getByText('2.00 GB')).toBeInTheDocument()
-    expect(screen.getByText('error: table "orders" already exists')).toBeInTheDocument()
+    expect(screen.getByText(/CREATE TABLE missing comment/)).toBeInTheDocument()
+    expect(screen.getByText(/CREATE TABLE must use utf8mb4 charset/)).toBeInTheDocument()
     expect(screen.queryByText('Scan Rows')).not.toBeInTheDocument()
     expect(screen.queryByText('Parser Results')).not.toBeInTheDocument()
     expect(screen.queryByText('Validation Results')).not.toBeInTheDocument()
