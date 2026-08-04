@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -2026,7 +2027,7 @@ func (h *TicketHandler) startWorkflowAutoExecution(ctx context.Context, ticket *
 		Details:      details,
 	})
 	h.dispatchTicketNotification(ctx, ticket, ticketEventPendingExecution, actorID, notification)
-	go h.runTicketExecutionWithOptions(ticket, 0, ticketExecutionRunOptions{
+	go h.runTicketExecutionSafely(ticket, 0, ticketExecutionRunOptions{
 		Automated:        true,
 		ReviewerID:       optionalUint64Value(actorID),
 		WorkflowRuleID:   resolution.RuleID,
@@ -2324,7 +2325,7 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	// Run SQL asynchronously so the HTTP response returns immediately.
 	// Status is persisted to DB; the client polls GET /tickets/{id} for progress.
 	ticket.ExecutorID = &userID
-	go h.runTicketExecutionWithOptions(ticket, userID, ticketExecutionRunOptions{})
+	go h.runTicketExecutionSafely(ticket, userID, ticketExecutionRunOptions{})
 
 	h.publishTicketUpdateByID(r.Context(), id, ticket, &userID)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
@@ -2386,7 +2387,7 @@ func (h *TicketHandler) ExecuteStatement(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	go h.runTicketStatementExecution(ticket, *execRow, userID, true)
+	go h.runTicketStatementExecutionSafely(ticket, *execRow, userID, true)
 	updated, _ := h.tickets.GetByID(r.Context(), ticket.ID)
 	jsonOK(w, updated)
 }
@@ -2454,10 +2455,9 @@ func (h *TicketHandler) StopStatement(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// runTicketSQL splits the ticket SQL into statements and executes each one serially
-// against the target DB, recording results in ticket_executions.
-func (h *TicketHandler) runTicketExecution(ticket *model.Ticket, executorID uint64) {
-	h.runTicketExecutionWithOptions(ticket, executorID, ticketExecutionRunOptions{})
+func (h *TicketHandler) runTicketExecutionSafely(ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions) {
+	defer h.recoverTicketExecutionPanic(ticket, executorID, opts, nil)
+	h.runTicketExecutionWithOptions(ticket, executorID, opts)
 }
 
 func (h *TicketHandler) runTicketExecutionWithOptions(ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions) {
@@ -2466,6 +2466,115 @@ func (h *TicketHandler) runTicketExecutionWithOptions(ticket *model.Ticket, exec
 		return
 	}
 	h.runTicketSQL(ticket, executorID, opts)
+}
+
+func (h *TicketHandler) runTicketStatementExecutionSafely(ticket *model.Ticket, execRow model.TicketExecution, executorID uint64, manual bool) {
+	defer h.recoverTicketExecutionPanic(ticket, executorID, ticketExecutionRunOptions{}, &execRow)
+	h.runTicketStatementExecution(ticket, execRow, executorID, manual)
+}
+
+func (h *TicketHandler) recoverTicketExecutionPanic(ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions, execRow *model.TicketExecution) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	ctx := context.Background()
+	var ticketID uint64
+	if ticket != nil {
+		ticketID = ticket.ID
+	}
+	message := fmt.Sprintf("ticket execution panic: %v", recovered)
+	stack := string(debug.Stack())
+	slog.Error("ticket execution goroutine recovered panic",
+		"ticket_id", ticketID,
+		"executor_id", executorID,
+		"automated", opts.Automated,
+		"execution_id", optionalExecutionID(execRow),
+		"panic", recovered,
+		"stack", stack,
+	)
+
+	if ticket == nil || h.tickets == nil {
+		return
+	}
+	if execRow != nil && execRow.ID != 0 {
+		_ = h.tickets.MarkExecutionDone(ctx, execRow.ID, nil, nil, &message)
+	} else if executions, err := h.tickets.ListExecutions(ctx, ticket.ID); err == nil {
+		for _, execution := range executions {
+			if execution.Status == "running" {
+				_ = h.tickets.MarkExecutionDone(ctx, execution.ID, nil, nil, &message)
+			}
+		}
+	}
+	if execRow == nil {
+		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, message)
+	} else {
+		h.refreshTicketStatusFromExecutions(ctx, ticket.ID)
+	}
+
+	details := map[string]any{
+		"status": string(model.TicketStatusFailed),
+		"error":  message,
+	}
+	if execRow != nil {
+		details["execution_id"] = execRow.ID
+		details["seq"] = execRow.Seq
+		details["sql"] = execRow.SQLStmt
+	}
+	if opts.Automated {
+		details["automated"] = true
+		details["reviewer_id"] = opts.ReviewerID
+		details["workflow_rule_name"] = opts.WorkflowRuleName
+		if opts.WorkflowRuleID != nil {
+			details["workflow_rule_id"] = *opts.WorkflowRuleID
+		}
+	}
+	details = h.ticketAuditDetails(ctx, ticket, details)
+	actorID := ticketExecutionActorID(executorID, opts)
+	actorName := h.auditActorName(ctx, actorID, "")
+	if opts.Automated {
+		actorName = "workflow automation"
+	}
+	if h.audit != nil {
+		actionType := "ticket_execute_failed"
+		if execRow != nil {
+			actionType = "ticket_statement_execute_failed"
+		}
+		if opts.Automated {
+			actionType = "workflow_auto_execute_failed"
+		}
+		_ = h.audit.Log(ctx, repository.AuditEntry{
+			ActorID:      actorID,
+			ActorName:    actorName,
+			ActionType:   actionType,
+			ResourceType: "ticket",
+			ResourceID:   &ticket.ID,
+			Details:      details,
+		})
+	}
+	notificationActorID := actorID
+	if !opts.Automated && executorID == 0 {
+		notificationActorID = nil
+	}
+	h.dispatchTicketNotification(ctx, ticket, ticketEventExecutionFailed, notificationActorID, "工單執行程序異常中斷，平台已將執行狀態標記為失敗，請查看 execution log。")
+	h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
+}
+
+func optionalExecutionID(execRow *model.TicketExecution) uint64 {
+	if execRow == nil {
+		return 0
+	}
+	return execRow.ID
+}
+
+func ticketExecutionActorID(executorID uint64, opts ticketExecutionRunOptions) *uint64 {
+	if opts.Automated {
+		return &opts.ReviewerID
+	}
+	if executorID == 0 {
+		return nil
+	}
+	return &executorID
 }
 
 func ticketExecutionQueryID(executionID uint64) string {
@@ -2878,7 +2987,7 @@ func (h *TicketHandler) finishTicketExecutionStartFailure(ctx context.Context, t
 
 // RunScheduledTicket is the public entry point for the background scheduler.
 func (h *TicketHandler) RunScheduledTicket(ticket *model.Ticket, executorID uint64) {
-	h.runTicketExecution(ticket, executorID)
+	h.runTicketExecutionSafely(ticket, executorID, ticketExecutionRunOptions{})
 }
 
 func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
