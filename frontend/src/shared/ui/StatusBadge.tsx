@@ -25,7 +25,7 @@ const STATUS_LABELS: Record<TicketStatus, string> = {
   completed: 'Completed',
   failed: 'Failed',
   stopped: 'Stopped',
-  interrupted: 'Interrupted',
+  interrupted: 'Failed',
   needs_admin_attention: 'Needs Admin Attention',
 }
 

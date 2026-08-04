@@ -358,6 +358,8 @@ function formatActivityAction(actionType: string) {
       return 'Access Revoked'
     case 'ticket_schedule':
       return 'Execution Scheduled'
+    case 'ticket_execution_recovered':
+      return 'Execution Recovered'
     default:
       return actionType
     }
@@ -397,6 +399,18 @@ function formatActivityDetail(log: AuditLog) {
       return 'Access was revoked early.'
     case 'ticket_schedule':
       return 'Ticket was scheduled for execution.'
+    case 'ticket_execution_recovered': {
+      const reason = typeof details?.reason === 'string' && details.reason.trim()
+        ? details.reason.trim()
+        : 'Service restarted while the ticket was executing.'
+      const failedIDs = Array.isArray(details?.failed_execution_ids)
+        ? details.failed_execution_ids.filter((id) => typeof id === 'number' || typeof id === 'string')
+        : []
+      if (failedIDs.length > 0) {
+        return `${reason} Affected statement execution IDs: ${failedIDs.join(', ')}.`
+      }
+      return reason
+    }
     default:
       return details ? JSON.stringify(details) : '—'
   }

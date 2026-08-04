@@ -49,6 +49,13 @@ type WorkflowDashboardSummary struct {
 	ByWorkflowError     []WorkflowDashboardErrorCount `json:"by_workflow_error"`
 }
 
+type TicketExecutionRecovery struct {
+	TicketID           uint64
+	Status             model.TicketStatus
+	Reason             string
+	FailedExecutionIDs []uint64
+}
+
 type TicketTodoSummary struct {
 	Pending           int64 `json:"pending"`
 	ReviewRequired    int64 `json:"review_required"`
@@ -843,15 +850,127 @@ func (r *TicketRepo) GetDueScheduled(ctx context.Context) ([]model.Ticket, error
 	return tickets, err
 }
 
-// Crash recovery: on startup, scan executing → mark interrupted
-func (r *TicketRepo) MarkInterruptedAll(ctx context.Context) (int64, error) {
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE tickets SET status = 'interrupted', updated_at = ? WHERE status = 'executing'`,
-		timeutil.NowUTC(),
-	)
+// RecoverExecutingTickets reconciles tickets left in executing state after a service restart.
+func (r *TicketRepo) RecoverExecutingTickets(ctx context.Context) ([]TicketExecutionRecovery, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return nil, fmt.Errorf("begin ticket recovery tx: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	return n, nil
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var ticketIDs []uint64
+	if err := tx.SelectContext(ctx, &ticketIDs, `SELECT id FROM tickets WHERE status = ? FOR UPDATE`, model.TicketStatusExecuting); err != nil {
+		return nil, fmt.Errorf("list executing tickets for recovery: %w", err)
+	}
+
+	recoveries := make([]TicketExecutionRecovery, 0, len(ticketIDs))
+	now := timeutil.NowUTC()
+	const restartReason = "service restarted during execution; database outcome unknown"
+	for _, ticketID := range ticketIDs {
+		var executions []model.TicketExecution
+		if err := tx.SelectContext(ctx, &executions, `SELECT * FROM ticket_executions WHERE ticket_id = ? ORDER BY seq`, ticketID); err != nil {
+			return nil, fmt.Errorf("list ticket executions for recovery: %w", err)
+		}
+
+		if len(executions) == 0 {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
+				model.TicketStatusFailed, now, now, ticketID,
+			); err != nil {
+				return nil, fmt.Errorf("mark legacy executing ticket failed: %w", err)
+			}
+			recoveries = append(recoveries, TicketExecutionRecovery{
+				TicketID: ticketID,
+				Status:   model.TicketStatusFailed,
+				Reason:   "service restarted during legacy execution; execution progress unknown",
+			})
+			continue
+		}
+
+		failedExecutionIDs := make([]uint64, 0)
+		pending, running, completed, failed := 0, 0, 0, 0
+		for _, execRow := range executions {
+			switch execRow.Status {
+			case "pending":
+				pending++
+			case "running":
+				running++
+				failed++
+				failedExecutionIDs = append(failedExecutionIDs, execRow.ID)
+			case "completed":
+				completed++
+			case "failed", "stopped":
+				failed++
+			}
+		}
+
+		if len(failedExecutionIDs) > 0 {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE ticket_executions
+				 SET status = 'failed', error_msg = ?, completed_at = ?, duration_ms = NULL
+				 WHERE ticket_id = ? AND status = 'running'`,
+				restartReason, now, ticketID,
+			); err != nil {
+				return nil, fmt.Errorf("mark running ticket executions failed: %w", err)
+			}
+			running = 0
+		}
+
+		status := aggregateTicketStatusFromCounts(len(executions), pending, running, completed, failed)
+		if status == model.TicketStatusCompleted || status == model.TicketStatusFailed || status == model.TicketStatusStopped {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
+				status, now, now, ticketID,
+			); err != nil {
+				return nil, fmt.Errorf("mark recovered ticket terminal: %w", err)
+			}
+		} else {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?`,
+				status, now, ticketID,
+			); err != nil {
+				return nil, fmt.Errorf("mark recovered ticket resumable: %w", err)
+			}
+		}
+
+		reason := "service restarted during execution; ticket execution state recovered"
+		if len(failedExecutionIDs) > 0 {
+			reason = restartReason
+		}
+		recoveries = append(recoveries, TicketExecutionRecovery{
+			TicketID:           ticketID,
+			Status:             status,
+			Reason:             reason,
+			FailedExecutionIDs: failedExecutionIDs,
+		})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit ticket recovery tx: %w", err)
+	}
+	tx = nil
+	return recoveries, nil
+}
+
+func aggregateTicketStatusFromCounts(total, pending, running, completed, failed int) model.TicketStatus {
+	switch {
+	case total == 0:
+		return model.TicketStatusFailed
+	case pending == total:
+		return model.TicketStatusPendingExecution
+	case running > 0:
+		return model.TicketStatusExecuting
+	case pending > 0 && completed+failed > 0:
+		return model.TicketStatusExecuting
+	case completed == total:
+		return model.TicketStatusCompleted
+	case completed+failed == total && failed > 0:
+		return model.TicketStatusFailed
+	default:
+		return model.TicketStatusExecuting
+	}
 }
