@@ -617,7 +617,14 @@ func main() {
 	slog.Info("shutting down")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	srv.Shutdown(ctx)
+	shutdownErr := make(chan error, 1)
+	go func() {
+		shutdownErr <- srv.Shutdown(ctx)
+	}()
+	ticketH.CancelActiveExecutionsForShutdown(ctx)
+	if err := <-shutdownErr; err != nil {
+		slog.Warn("server shutdown failed", "err", err)
+	}
 }
 
 func dbxFromStdlib(raw *sql.DB) *sqlx.DB {
