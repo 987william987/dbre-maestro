@@ -3,12 +3,17 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/masking"
@@ -22,6 +27,8 @@ import (
 	"github.com/dbre-maestro/maestro/internal/sqlpolicy"
 	ticketsm "github.com/dbre-maestro/maestro/internal/ticket"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -42,6 +49,7 @@ type TicketHandler struct {
 	lark               *notification.Dispatcher
 	notifications      *NotificationRouter
 	forbiddenLimiter   requestRateLimiter
+	activeExecutions   *activeSQLQueryRegistry
 	appBaseURL         string
 	appEnv             string
 }
@@ -59,6 +67,24 @@ type ticketWorkflowParticipants struct {
 	Reviewers []string `json:"reviewers"`
 	Executors []string `json:"executors"`
 }
+
+type ticketStatementExecutionResult struct {
+	rowsAffected       *int64
+	durationMs         *int64
+	errMsg             *string
+	interruptionReason string
+	outcomeConfidence  string
+	sentToDB           bool
+}
+
+const (
+	ticketExecutionOutcomeCompleted       = "completed"
+	ticketExecutionOutcomeFailed          = "failed"
+	ticketExecutionOutcomeNotSent         = "not_sent"
+	ticketExecutionOutcomeUnknown         = "outcome_unknown"
+	ticketExecutionOutcomeManuallyStopped = "manually_stopped"
+	ticketExecutionOutcomeServiceShutdown = "service_shutdown"
+)
 
 type workflowTraceUser struct {
 	ID       uint64 `json:"id"`
@@ -90,16 +116,25 @@ type ticketWorkflowTrace struct {
 }
 
 type ticketReviewItem struct {
-	Seq              int     `json:"seq"`
-	SQLStmt          string  `json:"sql_stmt"`
-	Phase            string  `json:"phase"`
-	ValidationStage  *string `json:"validation_stage,omitempty"`
-	StatementKind    *string `json:"statement_kind,omitempty"`
-	ObjectType       *string `json:"object_type,omitempty"`
-	ValidationMethod *string `json:"validation_method,omitempty"`
-	ScanRows         int64   `json:"scan_rows"`
-	Status           string  `json:"status"`
-	Message          *string `json:"message,omitempty"`
+	Seq              int                         `json:"seq"`
+	SQLStmt          string                      `json:"sql_stmt"`
+	Phase            string                      `json:"phase"`
+	ValidationStage  *string                     `json:"validation_stage,omitempty"`
+	StatementKind    *string                     `json:"statement_kind,omitempty"`
+	ObjectType       *string                     `json:"object_type,omitempty"`
+	Tables           []ticketReviewTableMetadata `json:"tables,omitempty"`
+	ValidationMethod *string                     `json:"validation_method,omitempty"`
+	ScanRows         int64                       `json:"scan_rows"`
+	Status           string                      `json:"status"`
+	Message          *string                     `json:"message,omitempty"`
+}
+
+type ticketReviewTableMetadata struct {
+	DatabaseName  string `json:"database_name,omitempty"`
+	SchemaName    string `json:"schema_name,omitempty"`
+	TableName     string `json:"table_name"`
+	RowCount      *int64 `json:"row_count,omitempty"`
+	DataSizeBytes *int64 `json:"data_size_bytes,omitempty"`
 }
 
 type ticketDatabaseOption struct {
@@ -266,6 +301,7 @@ func NewTicketHandler(
 		lark:               lark,
 		notifications:      NewNotificationRouter(notifRepo, audit, users, broker, lark),
 		forbiddenLimiter:   newRequestRateLimiter(20, time.Minute),
+		activeExecutions:   newActiveSQLQueryRegistry(),
 		appBaseURL:         strings.TrimRight(appBaseURL, "/"),
 	}
 	for _, opt := range opts {
@@ -443,6 +479,17 @@ func (h *TicketHandler) dispatchTicketNotification(
 		NotifType:    policy.NotifType,
 		Title:        policy.Title,
 		Body:         body,
+		LarkCard: buildLarkTicketCard(
+			ctx,
+			h.settings,
+			h.dbConns,
+			h.users,
+			h.appBaseURL,
+			ticket,
+			policy.Title,
+			policy.NotifType,
+			h.ticketStateLabel(policy.Status),
+		),
 	})
 }
 
@@ -1247,6 +1294,10 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if (ticket.Status == model.TicketStatusPendingExecution || ticket.Status == model.TicketStatusExecuting) &&
+		(ticket.TicketType == model.TicketTypeDDL || ticket.TicketType == model.TicketTypeDML) {
+		_ = h.ensureTicketExecutionRows(r.Context(), ticket)
+	}
 	executions, _ := h.tickets.ListExecutions(r.Context(), id)
 	if executions == nil {
 		executions = []model.TicketExecution{}
@@ -1833,6 +1884,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		Comment *string `json:"comment"`
 	}
 	bindJSON(r, &req)
+	comment := trimOptionalString(req.Comment)
 
 	userID := middleware.UserIDFromCtx(r.Context())
 	allowed, err := h.canRejectTicket(r.Context(), ticket, userID)
@@ -1869,11 +1921,11 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 			value := time.Now().UTC().Add(time.Duration(*ticket.ApprovedDurationMinutes) * time.Minute)
 			expiresAt = &value
 		}
-		ok, err = h.queryAccess.ApproveTicket(r.Context(), id, ticket.Status, userID, req.Comment, ticket.SubmitterID, expiresAt)
+		ok, err = h.queryAccess.ApproveTicket(r.Context(), id, ticket.Status, userID, comment, ticket.SubmitterID, expiresAt)
 	} else {
 		ok, err = h.tickets.UpdateStatus(r.Context(), id,
 			ticket.Status, model.TicketStatusApproved,
-			&userID, req.Comment, nil,
+			&userID, comment, nil,
 		)
 	}
 	if err != nil {
@@ -1886,8 +1938,8 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	auditDetails := h.ticketAuditDetails(r.Context(), ticket, nil)
-	if req.Comment != nil && *req.Comment != "" {
-		auditDetails["comment"] = *req.Comment
+	if comment != nil {
+		auditDetails["comment"] = *comment
 	}
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
@@ -1900,8 +1952,8 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	})
 
 	body := fmt.Sprintf("Ticket %s has been approved", ticket.TicketNo)
-	if req.Comment != nil && *req.Comment != "" {
-		body += " — " + *req.Comment
+	if comment != nil {
+		body += " — " + *comment
 	}
 	if ticket.TicketType == model.TicketTypeSQLExport {
 		if _, err := h.ensureReadyExportRequest(r.Context(), ticket, &userID); err != nil {
@@ -1912,7 +1964,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	if targetStatus == model.TicketStatusPendingExecution {
 		ok, err = h.tickets.UpdateStatus(r.Context(), id,
 			model.TicketStatusApproved, model.TicketStatusPendingExecution,
-			&userID, req.Comment, nil,
+			&userID, comment, nil,
 		)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "move to pending execution failed")
@@ -2013,7 +2065,7 @@ func (h *TicketHandler) startWorkflowAutoExecution(ctx context.Context, ticket *
 		Details:      details,
 	})
 	h.dispatchTicketNotification(ctx, ticket, ticketEventPendingExecution, actorID, notification)
-	go h.runTicketExecutionWithOptions(ticket, 0, ticketExecutionRunOptions{
+	go h.runTicketExecutionSafely(ticket, 0, ticketExecutionRunOptions{
 		Automated:        true,
 		ReviewerID:       optionalUint64Value(actorID),
 		WorkflowRuleID:   resolution.RuleID,
@@ -2065,9 +2117,15 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isExecutionStageReject := ticket.Status == model.TicketStatusApproved || ticket.Status == model.TicketStatusPendingExecution
+	reviewerID := &userID
+	if isExecutionStageReject {
+		reviewerID = nil
+	}
+
 	ok, err := h.tickets.UpdateStatus(r.Context(), id,
 		ticket.Status, model.TicketStatusRejected,
-		&userID, nil, &req.Reason,
+		reviewerID, nil, &req.Reason,
 	)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "update failed")
@@ -2076,6 +2134,9 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		jsonErr(w, http.StatusConflict, "ticket status changed concurrently")
 		return
+	}
+	if isExecutionStageReject {
+		_ = h.tickets.SetExecutorIfEmpty(r.Context(), id, userID)
 	}
 
 	h.audit.Log(r.Context(), repository.AuditEntry{
@@ -2089,7 +2150,7 @@ func (h *TicketHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	})
 
 	rejectDetail := req.Reason
-	if ticket.Status == model.TicketStatusApproved || ticket.Status == model.TicketStatusPendingExecution {
+	if isExecutionStageReject {
 		rejectDetail = "執行階段駁回：" + req.Reason
 	}
 	h.dispatchTicketNotification(r.Context(), ticket, ticketEventRejected, &userID, rejectDetail)
@@ -2223,7 +2284,7 @@ func (h *TicketHandler) Stop(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /tickets/{id}/execute — T9: OCC protected; runs SQL on target DB
-// Body (optional): { "scheduled_at": "2026-06-11T10:00:00Z" }
+// Body (optional): { "scheduled_at": "2026-06-11T10:00:00Z", "comment": "..." }
 func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	ticket, resolved := h.resolveTicketRef(w, r)
 	if !resolved {
@@ -2237,8 +2298,10 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		ScheduledAt *time.Time `json:"scheduled_at"`
+		Comment     *string    `json:"comment"`
 	}
 	bindJSON(r, &req) // optional body; ignore parse errors
+	comment := trimOptionalString(req.Comment)
 
 	if ticket.Status != model.TicketStatusPendingExecution {
 		jsonErr(w, http.StatusUnprocessableEntity, "ticket is not pending execution")
@@ -2277,7 +2340,7 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 			ActionType:   "ticket_schedule",
 			ResourceType: "ticket",
 			ResourceID:   &id,
-			Details:      map[string]any{"scheduled_at": req.ScheduledAt},
+			Details:      executionAuditDetails(h.ticketAuditDetails(r.Context(), ticket, map[string]any{"scheduled_at": req.ScheduledAt}), comment),
 			IPAddress:    clientIP(r),
 		})
 		updated, _ := h.tickets.GetByID(r.Context(), id)
@@ -2302,23 +2365,146 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "ticket_execute_start",
 		ResourceType: "ticket",
 		ResourceID:   &id,
+		Details:      executionAuditDetails(h.ticketAuditDetails(r.Context(), ticket, nil), comment),
 		IPAddress:    clientIP(r),
 	})
 
 	// Run SQL asynchronously so the HTTP response returns immediately.
 	// Status is persisted to DB; the client polls GET /tickets/{id} for progress.
 	ticket.ExecutorID = &userID
-	go h.runTicketExecutionWithOptions(ticket, userID, ticketExecutionRunOptions{})
+	go h.runTicketExecutionSafely(ticket, userID, ticketExecutionRunOptions{})
 
 	h.publishTicketUpdateByID(r.Context(), id, ticket, &userID)
 	updated, _ := h.tickets.GetByID(r.Context(), id)
 	jsonOK(w, updated)
 }
 
-// runTicketSQL splits the ticket SQL into statements and executes each one serially
-// against the target DB, recording results in ticket_executions.
-func (h *TicketHandler) runTicketExecution(ticket *model.Ticket, executorID uint64) {
-	h.runTicketExecutionWithOptions(ticket, executorID, ticketExecutionRunOptions{})
+func (h *TicketHandler) ExecuteStatement(w http.ResponseWriter, r *http.Request) {
+	ticket, resolved := h.resolveTicketRef(w, r)
+	if !resolved {
+		return
+	}
+	if ticket == nil {
+		jsonErr(w, http.StatusNotFound, "ticket not found")
+		return
+	}
+	executionID, err := strconv.ParseUint(chi.URLParam(r, "executionID"), 10, 64)
+	if err != nil || executionID == 0 {
+		jsonErr(w, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+	if ticket.TicketType != model.TicketTypeDDL && ticket.TicketType != model.TicketTypeDML {
+		jsonErr(w, http.StatusUnprocessableEntity, "only ddl/dml statement executions are supported")
+		return
+	}
+	if ticket.DBConnectionID == nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "ticket has no target db_connection")
+		return
+	}
+	if ticket.Status != model.TicketStatusPendingExecution && ticket.Status != model.TicketStatusExecuting {
+		jsonErr(w, http.StatusUnprocessableEntity, "ticket is not executable")
+		return
+	}
+
+	userID := middleware.UserIDFromCtx(r.Context())
+	allowed, err := h.canExecuteTicket(r.Context(), ticket, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket execution check failed")
+		return
+	}
+	if !allowed {
+		h.forbidTicketAccess(w, r, ticket, "execute_statement", "not_executor")
+		return
+	}
+	if err := h.ensureTicketExecutionRows(r.Context(), ticket); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "prepare statement executions failed")
+		return
+	}
+	execRow, err := h.tickets.GetExecution(r.Context(), ticket.ID, executionID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load statement execution failed")
+		return
+	}
+	if execRow == nil {
+		jsonErr(w, http.StatusNotFound, "statement execution not found")
+		return
+	}
+	if execRow.Status != "pending" {
+		jsonErr(w, http.StatusConflict, "statement is not pending")
+		return
+	}
+
+	go h.runTicketStatementExecutionSafely(ticket, *execRow, userID, true)
+	updated, _ := h.tickets.GetByID(r.Context(), ticket.ID)
+	jsonOK(w, updated)
+}
+
+func (h *TicketHandler) StopStatement(w http.ResponseWriter, r *http.Request) {
+	ticket, resolved := h.resolveTicketRef(w, r)
+	if !resolved {
+		return
+	}
+	if ticket == nil {
+		jsonErr(w, http.StatusNotFound, "ticket not found")
+		return
+	}
+	executionID, err := strconv.ParseUint(chi.URLParam(r, "executionID"), 10, 64)
+	if err != nil || executionID == 0 {
+		jsonErr(w, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+	userID := middleware.UserIDFromCtx(r.Context())
+	allowed, err := h.canStopTicket(r.Context(), ticket, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket stop check failed")
+		return
+	}
+	if !allowed {
+		h.forbidTicketAccess(w, r, ticket, "stop_statement", "not_executor_or_admin")
+		return
+	}
+	execRow, err := h.tickets.GetExecution(r.Context(), ticket.ID, executionID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load statement execution failed")
+		return
+	}
+	if execRow == nil {
+		jsonErr(w, http.StatusNotFound, "statement execution not found")
+		return
+	}
+	if execRow.Status != "running" {
+		jsonErr(w, http.StatusConflict, "statement is not running")
+		return
+	}
+
+	query, ok := h.activeExecutions.cancelAnyOrPending(ticketExecutionQueryID(executionID))
+	if ok {
+		if query.Cancel != nil {
+			query.Cancel()
+		}
+		if err := cancelActiveSQLQuery(r.Context(), query); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "statement stop failed")
+			return
+		}
+	}
+	_ = h.tickets.MarkExecutionStopped(r.Context(), executionID, "manually stopped")
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "ticket_statement_stop",
+		ResourceType: "ticket",
+		ResourceID:   &ticket.ID,
+		Details:      h.ticketAuditDetails(r.Context(), ticket, map[string]any{"execution_id": executionID, "seq": execRow.Seq, "sql": execRow.SQLStmt}),
+		IPAddress:    clientIP(r),
+	})
+	h.refreshTicketStatusFromExecutions(r.Context(), ticket.ID)
+	h.publishTicketUpdateByID(r.Context(), ticket.ID, ticket, &userID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *TicketHandler) runTicketExecutionSafely(ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions) {
+	defer h.recoverTicketExecutionPanic(ticket, executorID, opts, nil)
+	h.runTicketExecutionWithOptions(ticket, executorID, opts)
 }
 
 func (h *TicketHandler) runTicketExecutionWithOptions(ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions) {
@@ -2327,6 +2513,180 @@ func (h *TicketHandler) runTicketExecutionWithOptions(ticket *model.Ticket, exec
 		return
 	}
 	h.runTicketSQL(ticket, executorID, opts)
+}
+
+func (h *TicketHandler) runTicketStatementExecutionSafely(ticket *model.Ticket, execRow model.TicketExecution, executorID uint64, manual bool) {
+	defer h.recoverTicketExecutionPanic(ticket, executorID, ticketExecutionRunOptions{}, &execRow)
+	h.runTicketStatementExecution(ticket, execRow, executorID, manual)
+}
+
+func (h *TicketHandler) recoverTicketExecutionPanic(ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions, execRow *model.TicketExecution) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	ctx := context.Background()
+	var ticketID uint64
+	if ticket != nil {
+		ticketID = ticket.ID
+	}
+	message := fmt.Sprintf("ticket execution panic: %v", recovered)
+	stack := string(debug.Stack())
+	slog.Error("ticket execution goroutine recovered panic",
+		"ticket_id", ticketID,
+		"executor_id", executorID,
+		"automated", opts.Automated,
+		"execution_id", optionalExecutionID(execRow),
+		"panic", recovered,
+		"stack", stack,
+	)
+
+	if ticket == nil || h.tickets == nil {
+		return
+	}
+	if execRow != nil && execRow.ID != 0 {
+		_ = h.tickets.MarkExecutionInterrupted(ctx, execRow.ID, message, "execution_panic", ticketExecutionOutcomeUnknown)
+	} else if executions, err := h.tickets.ListExecutions(ctx, ticket.ID); err == nil {
+		for _, execution := range executions {
+			if execution.Status == "running" {
+				_ = h.tickets.MarkExecutionInterrupted(ctx, execution.ID, message, "execution_panic", ticketExecutionOutcomeUnknown)
+			}
+		}
+	}
+	if execRow == nil {
+		h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, message)
+	} else {
+		h.refreshTicketStatusFromExecutions(ctx, ticket.ID)
+	}
+
+	details := map[string]any{
+		"status": string(model.TicketStatusFailed),
+		"error":  message,
+	}
+	if execRow != nil {
+		details["execution_id"] = execRow.ID
+		details["seq"] = execRow.Seq
+		details["sql"] = execRow.SQLStmt
+	}
+	if opts.Automated {
+		details["automated"] = true
+		details["reviewer_id"] = opts.ReviewerID
+		details["workflow_rule_name"] = opts.WorkflowRuleName
+		if opts.WorkflowRuleID != nil {
+			details["workflow_rule_id"] = *opts.WorkflowRuleID
+		}
+	}
+	details = h.ticketAuditDetails(ctx, ticket, details)
+	actorID := ticketExecutionActorID(executorID, opts)
+	actorName := h.auditActorName(ctx, actorID, "")
+	if opts.Automated {
+		actorName = "workflow automation"
+	}
+	if h.audit != nil {
+		actionType := "ticket_execute_failed"
+		if execRow != nil {
+			actionType = "ticket_statement_execute_failed"
+		}
+		if opts.Automated {
+			actionType = "workflow_auto_execute_failed"
+		}
+		_ = h.audit.Log(ctx, repository.AuditEntry{
+			ActorID:      actorID,
+			ActorName:    actorName,
+			ActionType:   actionType,
+			ResourceType: "ticket",
+			ResourceID:   &ticket.ID,
+			Details:      details,
+		})
+	}
+	notificationActorID := actorID
+	if !opts.Automated && executorID == 0 {
+		notificationActorID = nil
+	}
+	h.dispatchTicketNotification(ctx, ticket, ticketEventExecutionFailed, notificationActorID, "工單執行程序異常中斷，平台已將執行狀態標記為失敗，請查看 execution log。")
+	h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
+}
+
+func optionalExecutionID(execRow *model.TicketExecution) uint64 {
+	if execRow == nil {
+		return 0
+	}
+	return execRow.ID
+}
+
+func ticketExecutionActorID(executorID uint64, opts ticketExecutionRunOptions) *uint64 {
+	if opts.Automated {
+		return &opts.ReviewerID
+	}
+	if executorID == 0 {
+		return nil
+	}
+	return &executorID
+}
+
+func ticketExecutionQueryID(executionID uint64) string {
+	return fmt.Sprintf("ticket-execution-%d", executionID)
+}
+
+func ticketExecutionIDFromQueryID(queryID string) (uint64, bool) {
+	value := strings.TrimPrefix(queryID, "ticket-execution-")
+	if value == queryID || value == "" {
+		return 0, false
+	}
+	id, err := strconv.ParseUint(value, 10, 64)
+	return id, err == nil && id != 0
+}
+
+func trimOptionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func executionAuditDetails(details map[string]any, comment *string) map[string]any {
+	if details == nil {
+		details = map[string]any{}
+	}
+	if comment != nil {
+		details["comment"] = *comment
+	}
+	return details
+}
+
+func addTicketStatementOutcomeAuditDetails(details map[string]any, result ticketStatementExecutionResult) {
+	if result.outcomeConfidence != "" {
+		details["outcome_confidence"] = result.outcomeConfidence
+	}
+	if result.interruptionReason != "" {
+		details["interruption_reason"] = result.interruptionReason
+	}
+	if result.sentToDB {
+		details["sent_to_db"] = true
+	}
+}
+
+func (h *TicketHandler) ensureTicketExecutionRows(ctx context.Context, ticket *model.Ticket) error {
+	if ticket == nil || ticket.DBConnectionID == nil {
+		return fmt.Errorf("ticket has no target db_connection")
+	}
+	parsedStatements, _, err := h.parseTicketStatements(ctx, *ticket.DBConnectionID, ticket.SQLContent)
+	if err != nil {
+		return err
+	}
+	rows := make([]model.TicketExecution, 0, len(parsedStatements))
+	for _, parsedStatement := range parsedStatements {
+		stmt := strings.TrimSpace(parsedStatement.RawSQL)
+		if stmt == "" {
+			continue
+		}
+		rows = append(rows, model.TicketExecution{TicketID: ticket.ID, Seq: parsedStatement.Seq, SQLStmt: stmt})
+	}
+	return h.tickets.EnsureExecutions(ctx, ticket.ID, rows)
 }
 
 func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64, opts ticketExecutionRunOptions) {
@@ -2339,23 +2699,27 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64, op
 		executorName = "workflow automation"
 	}
 
-	execDB, cleanup, err := h.openTicketSQLDB(ctx, *ticket.DBConnectionID, model.DBCredentialRoleReadwrite, ticket.DatabaseName)
-	if err != nil {
-		h.finishTicketExecutionStartFailure(ctx, ticket, executorID, opts, "cannot connect: "+err.Error())
-		return
-	}
-	defer cleanup()
-
 	finalStatus := model.TicketStatusCompleted
 	executedStatements := []map[string]any{}
-	parsedStatements, _, err := h.parseTicketStatements(ctx, *ticket.DBConnectionID, ticket.SQLContent)
-	if err != nil {
+	if err := h.ensureTicketExecutionRows(ctx, ticket); err != nil {
 		h.finishTicketExecutionStartFailure(ctx, ticket, executorID, opts, "parse SQL failed: "+err.Error())
 		return
 	}
+	executions, err := h.tickets.ListExecutions(ctx, ticket.ID)
+	if err != nil {
+		h.finishTicketExecutionStartFailure(ctx, ticket, executorID, opts, "load execution rows failed: "+err.Error())
+		return
+	}
 
-	for _, parsedStatement := range parsedStatements {
-		stmt := strings.TrimSpace(parsedStatement.RawSQL)
+	for _, execRow := range executions {
+		stmt := strings.TrimSpace(execRow.SQLStmt)
+		if execRow.Status != "pending" {
+			if execRow.Status == "failed" || execRow.Status == "stopped" {
+				finalStatus = model.TicketStatusFailed
+				break
+			}
+			continue
+		}
 
 		// Check if ticket was stopped between statements
 		current, err := h.tickets.GetByID(ctx, ticket.ID)
@@ -2363,47 +2727,25 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64, op
 			return
 		}
 
-		execRow := &model.TicketExecution{
-			TicketID: ticket.ID,
-			Seq:      parsedStatement.Seq,
-			SQLStmt:  stmt,
-		}
-		execID, err := h.tickets.CreateExecution(ctx, execRow)
-		if err != nil {
-			h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "record execution failed")
-			return
-		}
-		_ = h.tickets.MarkExecutionRunning(ctx, execID)
-
-		startedAt := time.Now()
-		res, execErr := execDB.ExecContext(ctx, stmt)
-		durationMs := time.Since(startedAt).Milliseconds()
-		var rowsAffected *int64
-		var errMsg *string
-		if execErr != nil {
-			msg := execErr.Error()
-			errMsg = &msg
-			finalStatus = model.TicketStatusFailed
-		} else {
-			if value, err := res.RowsAffected(); err == nil {
-				rowsAffected = &value
-			}
-		}
+		result := h.runTicketStatementExecution(ticket, execRow, executorID, false)
 		statementAudit := map[string]any{
-			"seq":         parsedStatement.Seq,
-			"sql":         stmt,
-			"duration_ms": durationMs,
+			"seq": execRow.Seq,
+			"sql": stmt,
 		}
-		if rowsAffected != nil {
-			statementAudit["rows_affected"] = *rowsAffected
+		if result.durationMs != nil {
+			statementAudit["duration_ms"] = *result.durationMs
 		}
-		if errMsg != nil {
-			statementAudit["error"] = *errMsg
+		if result.rowsAffected != nil {
+			statementAudit["rows_affected"] = *result.rowsAffected
 		}
+		if result.errMsg != nil {
+			statementAudit["error"] = *result.errMsg
+		}
+		addTicketStatementOutcomeAuditDetails(statementAudit, result)
 		executedStatements = append(executedStatements, statementAudit)
-		_ = h.tickets.MarkExecutionDone(ctx, execID, rowsAffected, durationMs, errMsg)
 
-		if execErr != nil {
+		if result.errMsg != nil {
+			finalStatus = model.TicketStatusFailed
 			break
 		}
 	}
@@ -2462,6 +2804,355 @@ func (h *TicketHandler) runTicketSQL(ticket *model.Ticket, executorID uint64, op
 	h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
 }
 
+func (h *TicketHandler) runTicketStatementExecution(ticket *model.Ticket, execRow model.TicketExecution, executorID uint64, manual bool) ticketStatementExecutionResult {
+	ctx := context.Background()
+	result := ticketStatementExecutionResult{}
+	if ticket == nil || ticket.DBConnectionID == nil {
+		msg := "ticket has no target db_connection"
+		result.errMsg = &msg
+		return result
+	}
+	if err := h.tickets.MarkTicketExecuting(ctx, ticket.ID, executorID); err != nil {
+		msg := err.Error()
+		result.errMsg = &msg
+		return result
+	}
+	ok, err := h.tickets.MarkExecutionRunningIfPending(ctx, execRow.ID)
+	if err != nil {
+		msg := err.Error()
+		result.errMsg = &msg
+		return result
+	}
+	if !ok {
+		current, _ := h.tickets.GetExecution(ctx, ticket.ID, execRow.ID)
+		msg := "statement is not pending"
+		if current != nil {
+			msg = "statement is " + current.Status
+		}
+		result.errMsg = &msg
+		return result
+	}
+	h.publishTicketUpdateByID(ctx, ticket.ID, ticket, &executorID)
+
+	if manual {
+		h.audit.Log(ctx, repository.AuditEntry{
+			ActorID:      &executorID,
+			ActorName:    h.auditActorName(ctx, &executorID, ""),
+			ActionType:   "ticket_statement_execute_start",
+			ResourceType: "ticket",
+			ResourceID:   &ticket.ID,
+			Details:      h.ticketAuditDetails(ctx, ticket, map[string]any{"execution_id": execRow.ID, "seq": execRow.Seq, "sql": execRow.SQLStmt}),
+		})
+	}
+
+	rowsAffected, durationMs, sentToDB, execErr := h.executeTicketStatementSQL(ctx, ticket, execRow, executorID)
+	result.durationMs = durationMs
+	result.rowsAffected = rowsAffected
+	result.sentToDB = sentToDB
+	if execErr != nil {
+		msg := execErr.Error()
+		result.errMsg = &msg
+		result.interruptionReason, result.outcomeConfidence = classifyTicketStatementExecutionError(execErr, sentToDB)
+	}
+
+	current, _ := h.tickets.GetExecution(ctx, ticket.ID, execRow.ID)
+	if current != nil && current.Status == "stopped" {
+		msg := "manually stopped"
+		result.errMsg = &msg
+		if current.InterruptionReason != nil {
+			result.interruptionReason = *current.InterruptionReason
+		}
+		if current.OutcomeConfidence != nil {
+			result.outcomeConfidence = *current.OutcomeConfidence
+		}
+	} else if current != nil && current.Status == "failed" {
+		result.errMsg = current.ErrorMsg
+		result.durationMs = current.DurationMs
+		if current.InterruptionReason != nil {
+			result.interruptionReason = *current.InterruptionReason
+		}
+		if current.OutcomeConfidence != nil {
+			result.outcomeConfidence = *current.OutcomeConfidence
+		}
+	} else {
+		if execErr != nil {
+			if result.outcomeConfidence == ticketExecutionOutcomeNotSent || result.outcomeConfidence == ticketExecutionOutcomeUnknown {
+				result.durationMs = nil
+			}
+			_ = h.tickets.MarkExecutionFailedWithOutcome(ctx, execRow.ID, result.durationMs, *result.errMsg, result.interruptionReason, result.outcomeConfidence)
+		} else {
+			result.outcomeConfidence = ticketExecutionOutcomeCompleted
+			_ = h.tickets.MarkExecutionDone(ctx, execRow.ID, result.rowsAffected, result.durationMs, result.errMsg)
+		}
+	}
+	if manual {
+		actionType := "ticket_statement_execute_complete"
+		if result.errMsg != nil {
+			actionType = "ticket_statement_execute_failed"
+		}
+		details := map[string]any{"execution_id": execRow.ID, "seq": execRow.Seq, "sql": execRow.SQLStmt}
+		if result.durationMs != nil {
+			details["duration_ms"] = *result.durationMs
+		}
+		if result.rowsAffected != nil {
+			details["rows_affected"] = *result.rowsAffected
+		}
+		if result.errMsg != nil {
+			details["error"] = *result.errMsg
+		}
+		addTicketStatementOutcomeAuditDetails(details, result)
+		h.audit.Log(ctx, repository.AuditEntry{
+			ActorID:      &executorID,
+			ActorName:    h.auditActorName(ctx, &executorID, ""),
+			ActionType:   actionType,
+			ResourceType: "ticket",
+			ResourceID:   &ticket.ID,
+			Details:      h.ticketAuditDetails(ctx, ticket, details),
+		})
+	}
+	h.refreshTicketStatusFromExecutions(ctx, ticket.ID)
+	h.publishTicketUpdateByID(ctx, ticket.ID, ticket, &executorID)
+	return result
+}
+
+func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *model.Ticket, execRow model.TicketExecution, executorID uint64) (*int64, *int64, bool, error) {
+	execDB, cleanup, resolvedConn, err := h.openTicketSQLDBWithConnection(ctx, *ticket.DBConnectionID, model.DBCredentialRoleReadwrite, ticket.DatabaseName)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	defer cleanup()
+
+	cancelOpener := func(cancelCtx context.Context) (*sql.DB, string, func(), error) {
+		db, cleanup, err := h.openTicketSQLDB(cancelCtx, *ticket.DBConnectionID, model.DBCredentialRoleReadwrite, ticket.DatabaseName)
+		return db, model.DBCredentialRoleReadwrite, cleanup, err
+	}
+
+	pinnedConn, err := execDB.Conn(ctx)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	defer pinnedConn.Close()
+
+	if resolvedConn.DBType == "postgres" || resolvedConn.DBType == "postgresql" {
+		if ticket.SchemaName != nil && strings.TrimSpace(*ticket.SchemaName) != "" {
+			schemaName := strings.ReplaceAll(strings.TrimSpace(*ticket.SchemaName), `"`, `""`)
+			if _, err := pinnedConn.ExecContext(ctx, fmt.Sprintf(`SET search_path TO "%s"`, schemaName)); err != nil {
+				return nil, nil, false, err
+			}
+		}
+		var backendPID uint64
+		_ = pinnedConn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&backendPID)
+		if backendPID != 0 {
+			_ = h.tickets.MarkExecutionSentToDB(ctx, execRow.ID, "postgres_pid", backendPID)
+		}
+		return h.execRegisteredTicketStatement(ctx, pinnedConn, execRow, activeSQLQuery{
+			UserID:         executorID,
+			ConnectionID:   resolvedConn.ID,
+			TicketID:       ticket.ID,
+			DBType:         resolvedConn.DBType,
+			PostgresPID:    backendPID,
+			Statement:      execRow.SQLStmt,
+			Conn:           resolvedConn,
+			CancelDBOpener: cancelOpener,
+			RegisteredAt:   time.Now(),
+		})
+	}
+
+	if ticket.DatabaseName != nil && strings.TrimSpace(*ticket.DatabaseName) != "" {
+		if _, err := pinnedConn.ExecContext(ctx, fmt.Sprintf("USE %s", quoteMySQLIdentifier(*ticket.DatabaseName))); err != nil {
+			return nil, nil, false, err
+		}
+	}
+	threadID := currentMySQLConnectionID(ctx, pinnedConn)
+	if threadID != 0 {
+		_ = h.tickets.MarkExecutionSentToDB(ctx, execRow.ID, "mysql_thread_id", threadID)
+	}
+	return h.execRegisteredTicketStatement(ctx, pinnedConn, execRow, activeSQLQuery{
+		UserID:         executorID,
+		ConnectionID:   resolvedConn.ID,
+		TicketID:       ticket.ID,
+		DBType:         resolvedConn.DBType,
+		MySQLThreadID:  threadID,
+		Statement:      execRow.SQLStmt,
+		Conn:           resolvedConn,
+		CancelDBOpener: cancelOpener,
+		RegisteredAt:   time.Now(),
+	})
+}
+
+func (h *TicketHandler) execRegisteredTicketStatement(ctx context.Context, pinnedConn *sql.Conn, execRow model.TicketExecution, query activeSQLQuery) (*int64, *int64, bool, error) {
+	statementCtx, cancel := context.WithCancel(ctx)
+	query.Cancel = cancel
+	queryID := ticketExecutionQueryID(execRow.ID)
+	if canceled := h.activeExecutions.register(queryID, query); canceled {
+		cancel()
+		return nil, nil, false, context.Canceled
+	}
+	defer func() {
+		h.activeExecutions.remove(queryID)
+		cancel()
+	}()
+
+	startedAt := time.Now()
+	res, err := pinnedConn.ExecContext(statementCtx, execRow.SQLStmt)
+	durationMs := time.Since(startedAt).Milliseconds()
+	if err != nil {
+		return nil, &durationMs, true, err
+	}
+	value, err := res.RowsAffected()
+	if err != nil {
+		return nil, &durationMs, true, nil
+	}
+	return &value, &durationMs, true, nil
+}
+
+func classifyTicketStatementExecutionError(err error, sentToDB bool) (string, string) {
+	if err == nil {
+		return "", ticketExecutionOutcomeCompleted
+	}
+	if !sentToDB {
+		return ticketExecutionOutcomeNotSent, ticketExecutionOutcomeNotSent
+	}
+	if isExplicitDatabaseExecutionError(err) {
+		return "", ticketExecutionOutcomeFailed
+	}
+	return "connection_interrupted", ticketExecutionOutcomeUnknown
+}
+
+func isExplicitDatabaseExecutionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return true
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, driver.ErrBadConn) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	connectionMarkers := []string{
+		"bad connection",
+		"broken pipe",
+		"connection refused",
+		"connection reset",
+		"connection was killed",
+		"server closed the connection",
+		"unexpected eof",
+	}
+	for _, marker := range connectionMarkers {
+		if strings.Contains(msg, marker) {
+			return false
+		}
+	}
+	return true
+}
+
+func (h *TicketHandler) CancelActiveExecutionsForShutdown(ctx context.Context) int {
+	if h == nil || h.activeExecutions == nil {
+		return 0
+	}
+	queries := h.activeExecutions.cancelAll()
+	if len(queries) == 0 {
+		return 0
+	}
+
+	slog.Info("ticket graceful shutdown cancellation started", "active_executions", len(queries))
+	var wg sync.WaitGroup
+	for queryID, query := range queries {
+		executionID, ok := ticketExecutionIDFromQueryID(queryID)
+		if !ok {
+			continue
+		}
+		wg.Add(1)
+		go func(queryID string, executionID uint64, query activeSQLQuery) {
+			defer wg.Done()
+			if query.Cancel != nil {
+				query.Cancel()
+			}
+			err := cancelActiveSQLQuery(ctx, query)
+			message := "service shutdown during execution; database query cancellation completed"
+			if err != nil {
+				message = "service shutdown during execution; database query cancellation failed; database outcome unknown: " + err.Error()
+				slog.Warn("ticket graceful shutdown query cancellation failed",
+					"query_id", queryID,
+					"ticket_id", query.TicketID,
+					"execution_id", executionID,
+					"connection_id", query.ConnectionID,
+					"err", err,
+					"sql", truncate(query.Statement, 500),
+				)
+			} else {
+				slog.Info("ticket graceful shutdown query cancellation completed",
+					"query_id", queryID,
+					"ticket_id", query.TicketID,
+					"execution_id", executionID,
+					"connection_id", query.ConnectionID,
+					"sql", truncate(query.Statement, 500),
+				)
+			}
+			if h.tickets != nil {
+				outcomeConfidence := ticketExecutionOutcomeServiceShutdown
+				if err != nil {
+					outcomeConfidence = ticketExecutionOutcomeUnknown
+				}
+				_ = h.tickets.MarkExecutionInterrupted(ctx, executionID, message, "service_shutdown", outcomeConfidence)
+				if query.TicketID != 0 {
+					h.refreshTicketStatusFromExecutions(ctx, query.TicketID)
+					if h.broker != nil {
+						h.publishTicketUpdateByID(ctx, query.TicketID, nil, nil)
+					}
+				}
+			}
+		}(queryID, executionID, query)
+	}
+	wg.Wait()
+	slog.Info("ticket graceful shutdown cancellation finished", "active_executions", len(queries))
+	return len(queries)
+}
+
+func (h *TicketHandler) refreshTicketStatusFromExecutions(ctx context.Context, ticketID uint64) {
+	executions, err := h.tickets.ListExecutions(ctx, ticketID)
+	if err != nil || len(executions) == 0 {
+		return
+	}
+	pending, running, completed, failed := 0, 0, 0, 0
+	for _, execRow := range executions {
+		switch execRow.Status {
+		case "pending":
+			pending++
+		case "running":
+			running++
+		case "completed":
+			completed++
+		case "failed", "stopped":
+			failed++
+		}
+	}
+	status := model.TicketStatusExecuting
+	switch {
+	case pending == len(executions):
+		status = model.TicketStatusPendingExecution
+	case running > 0:
+		status = model.TicketStatusExecuting
+	case pending > 0 && completed+failed > 0:
+		status = model.TicketStatusExecuting
+	case completed == len(executions):
+		status = model.TicketStatusCompleted
+	case completed+failed == len(executions) && failed > 0:
+		status = model.TicketStatusFailed
+	}
+	_ = h.tickets.SetExecutionAggregateStatus(ctx, ticketID, status)
+}
+
 func (h *TicketHandler) finishTicket(ctx context.Context, id uint64, status model.TicketStatus, _ string) {
 	_ = h.tickets.MarkCompleted(ctx, id, status)
 }
@@ -2512,7 +3203,7 @@ func (h *TicketHandler) finishTicketExecutionStartFailure(ctx context.Context, t
 
 // RunScheduledTicket is the public entry point for the background scheduler.
 func (h *TicketHandler) RunScheduledTicket(ticket *model.Ticket, executorID uint64) {
-	h.runTicketExecution(ticket, executorID)
+	h.runTicketExecutionSafely(ticket, executorID, ticketExecutionRunOptions{})
 }
 
 func (h *TicketHandler) Revoke(w http.ResponseWriter, r *http.Request) {
@@ -2663,7 +3354,8 @@ func (h *TicketHandler) canAdminOverrideTicketReview(ctx context.Context, userID
 }
 
 func (h *TicketHandler) canExecuteTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
-	if ticket == nil || !isExecutableTicketType(ticket.TicketType) || ticket.Status != model.TicketStatusPendingExecution {
+	if ticket == nil || !isExecutableTicketType(ticket.TicketType) ||
+		(ticket.Status != model.TicketStatusPendingExecution && ticket.Status != model.TicketStatusExecuting) {
 		return false, nil
 	}
 	if ticket.SubmitterID == userID {

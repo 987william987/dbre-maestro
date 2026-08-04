@@ -81,6 +81,8 @@ func TestIsLongRunningRequestMatchesExecutionRoutes(t *testing.T) {
 		httptest.NewRequest(http.MethodPost, "/api/query/", nil),
 		httptest.NewRequest(http.MethodPost, "/api/tickets/42/execute", nil),
 		httptest.NewRequest(http.MethodPost, "/api/tickets/TK-20260729-123456000-ABCDEF/execute", nil),
+		httptest.NewRequest(http.MethodPost, "/api/tickets/42/executions/7/execute", nil),
+		httptest.NewRequest(http.MethodPost, "/api/tickets/TK-20260729-123456000-ABCDEF/executions/7/execute", nil),
 	} {
 		if !isLongRunningRequest(req) {
 			t.Fatalf("isLongRunningRequest(%s %s) = false, want true", req.Method, req.URL.Path)
@@ -93,6 +95,7 @@ func TestIsLongRunningRequestMatchesExecutionRoutes(t *testing.T) {
 		httptest.NewRequest(http.MethodPost, "/api/query-access", nil),
 		httptest.NewRequest(http.MethodPost, "/api/tickets/42/stop", nil),
 		httptest.NewRequest(http.MethodGet, "/api/tickets/42/execute", nil),
+		httptest.NewRequest(http.MethodPost, "/api/tickets/42/executions/execute", nil),
 	} {
 		if isLongRunningRequest(req) {
 			t.Fatalf("isLongRunningRequest(%s %s) = true, want false", req.Method, req.URL.Path)

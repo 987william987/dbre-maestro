@@ -526,6 +526,26 @@ func TestActiveSQLQueryRegistryCancelReturnsActiveQuery(t *testing.T) {
 	}
 }
 
+func TestActiveSQLQueryRegistryCancelAllReturnsAndRemovesActiveQueries(t *testing.T) {
+	registry := newActiveSQLQueryRegistry()
+	registry.register("query-1", activeSQLQuery{UserID: 42, Statement: "SELECT 1"})
+	registry.register("query-2", activeSQLQuery{UserID: 43, Statement: "SELECT 2"})
+
+	queries := registry.cancelAll()
+	if len(queries) != 2 {
+		t.Fatalf("cancelAll returned %d queries, want 2", len(queries))
+	}
+	if queries["query-1"].Statement != "SELECT 1" || queries["query-2"].Statement != "SELECT 2" {
+		t.Fatalf("cancelAll returned unexpected queries: %#v", queries)
+	}
+	if query, ok := registry.cancelAny("query-1"); ok {
+		t.Fatalf("query-1 should be removed after cancelAll, got %#v", query)
+	}
+	if query, ok := registry.cancelAny("query-2"); ok {
+		t.Fatalf("query-2 should be removed after cancelAll, got %#v", query)
+	}
+}
+
 func TestQueryHandlerExecuteAuditsQueryAccessPolicyBlock(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

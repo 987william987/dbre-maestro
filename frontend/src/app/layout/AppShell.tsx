@@ -382,6 +382,7 @@ export function AppShell() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [notificationSummary, setNotificationSummary] = useState<NotificationSummary>({ pending: 0, review_required: 0, execution_required: 0 })
   const [unreadCount, setUnreadCount] = useState(0)
+  const notificationActionCount = notificationSummary.pending + notificationSummary.review_required + notificationSummary.execution_required
   const menuRef = useRef<HTMLDivElement | null>(null)
   const notificationRef = useRef<HTMLDivElement | null>(null)
   const bootstrappedNotificationsRef = useRef(false)
@@ -469,6 +470,8 @@ export function AppShell() {
         window.dispatchEvent(new CustomEvent(MAESTRO_REALTIME_EVENT, { detail: message }))
         if (message.event === 'notification.created') {
           void loadNotifications(true)
+        } else if (message.event === 'ticket.updated') {
+          void listNotificationSummary().then(setNotificationSummary).catch(() => undefined)
         }
       },
     })
@@ -829,12 +832,12 @@ export function AppShell() {
                   'relative inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-panel text-muted transition-colors',
                   notificationOpen ? 'bg-panel-soft text-ink' : 'hover:bg-panel-soft hover:text-ink',
                 )}
-                aria-label="Notifications"
+                aria-label={`Notifications${notificationActionCount > 0 ? `, ${notificationActionCount} pending actions` : ''}`}
               >
                 <Bell className="h-4 w-4" />
-                {unreadCount > 0 ? (
+                {notificationActionCount > 0 ? (
                   <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
-                    {unreadCount > 99 ? '99+' : unreadCount}
+                    {notificationActionCount > 99 ? '99+' : notificationActionCount}
                   </span>
                 ) : null}
               </button>

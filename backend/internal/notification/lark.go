@@ -34,6 +34,28 @@ type Message struct {
 	Title    string
 	Body     string
 	TicketNo string // optional, included in body when set
+	Card     *Card
+}
+
+type Card struct {
+	Title          string
+	Template       string
+	Fields         []CardField
+	MarkdownBlocks []string
+	Actions        []CardAction
+}
+
+type CardField struct {
+	Label string
+	Value string
+}
+
+type CardAction struct {
+	Action string
+	Text   string
+	Type   string
+	URL    string
+	Value  map[string]any
 }
 
 // Client sends Lark notifications with retry logic.
@@ -325,13 +347,18 @@ func (c *Client) postAppMessage(ctx context.Context, receiveIDType, receiveID st
 		return 0, err
 	}
 
+	msgType := "text"
 	content, err := json.Marshal(larkContent{Text: c.buildText(msg)})
+	if msg.Card != nil {
+		msgType = "interactive"
+		content, err = json.Marshal(BuildCardContent(*msg.Card))
+	}
 	if err != nil {
 		return 0, err
 	}
 	payload, err := json.Marshal(larkSendMessageRequest{
 		ReceiveID: receiveID,
-		MsgType:   "text",
+		MsgType:   msgType,
 		Content:   string(content),
 	})
 	if err != nil {
@@ -391,6 +418,109 @@ func (c *Client) postAppMessage(ctx context.Context, receiveIDType, receiveID st
 		}
 	}
 	return resp.StatusCode, nil
+}
+
+func BuildCardContent(card Card) map[string]any {
+	title := strings.TrimSpace(card.Title)
+	if title == "" {
+		title = "DBRE Maestro"
+	}
+	template := strings.TrimSpace(card.Template)
+	if template == "" {
+		template = "blue"
+	}
+
+	elements := make([]any, 0, 3)
+	fieldLines := make([]string, 0, len(card.Fields))
+	for _, field := range card.Fields {
+		label := strings.TrimSpace(field.Label)
+		value := strings.TrimSpace(field.Value)
+		if label == "" || value == "" {
+			continue
+		}
+		fieldLines = append(fieldLines, fmt.Sprintf("**%s：** %s", escapeLarkMarkdown(label), escapeLarkMarkdown(value)))
+	}
+	if len(fieldLines) > 0 {
+		elements = append(elements, map[string]any{
+			"tag": "div",
+			"text": map[string]string{
+				"tag":     "lark_md",
+				"content": strings.Join(fieldLines, "\n"),
+			},
+		})
+	}
+	for _, block := range card.MarkdownBlocks {
+		block = strings.TrimSpace(block)
+		if block == "" {
+			continue
+		}
+		elements = append(elements, map[string]any{
+			"tag": "div",
+			"text": map[string]string{
+				"tag":     "lark_md",
+				"content": block,
+			},
+		})
+	}
+	if len(card.Actions) > 0 {
+		actions := make([]any, 0, len(card.Actions))
+		for _, action := range card.Actions {
+			text := strings.TrimSpace(action.Text)
+			if text == "" {
+				continue
+			}
+			button := map[string]any{
+				"tag": "button",
+				"text": map[string]string{
+					"tag":     "plain_text",
+					"content": text,
+				},
+			}
+			if action.URL != "" {
+				button["url"] = action.URL
+			}
+			if action.Type != "" {
+				button["type"] = action.Type
+			}
+			value := map[string]any{}
+			for key, item := range action.Value {
+				value[key] = item
+			}
+			if action.Action != "" {
+				value["action"] = action.Action
+			}
+			if len(value) > 0 {
+				button["value"] = value
+			}
+			actions = append(actions, button)
+		}
+		if len(actions) > 0 {
+			elements = append(elements, map[string]any{
+				"tag":     "action",
+				"actions": actions,
+			})
+		}
+	}
+	return map[string]any{
+		"config": map[string]any{
+			"wide_screen_mode": true,
+		},
+		"header": map[string]any{
+			"template": template,
+			"title": map[string]string{
+				"tag":     "plain_text",
+				"content": title,
+			},
+		},
+		"elements": elements,
+	}
+}
+
+func escapeLarkMarkdown(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "*", "\\*")
+	value = strings.ReplaceAll(value, "`", "\\`")
+	return value
 }
 
 func (c *Client) uploadFile(ctx context.Context, filename string, data []byte) (string, error) {

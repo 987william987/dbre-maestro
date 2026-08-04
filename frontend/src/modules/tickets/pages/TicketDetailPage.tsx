@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Check, ChevronDown, Download, Loader2, Minus, Play, Plus, RotateCcw, ShieldCheck, ShieldX, X } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, Download, Loader2, Minus, Play, Plus, RotateCcw, ShieldCheck, ShieldX, Square, X } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { format as formatSQL } from 'sql-formatter'
 import { cn } from '@/lib/utils'
@@ -8,6 +8,7 @@ import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
 import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants, TicketWorkflowTrace } from '@/shared/types/ticket'
+import type { TicketStatus } from '@/shared/types/ticket'
 import type { CurrentUser } from '@/shared/types/auth'
 import type { AuditLog } from '@/shared/types/audit'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
@@ -17,7 +18,7 @@ import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useToast } from '@/shared/ui/ToastContext'
-import { approveTicket, downloadTicketExport, executeTicket, getTicket, rejectTicket, retryWorkflowResolution, revokeTicket, withdrawTicket } from '@/modules/tickets/api'
+import { approveTicket, downloadTicketExport, executeTicket, executeTicketStatement, getTicket, rejectTicket, retryWorkflowResolution, revokeTicket, stopTicketStatement, withdrawTicket } from '@/modules/tickets/api'
 
 function DetailTable({
   headers,
@@ -62,6 +63,17 @@ function formatTicketActor(name: string | null | undefined, id: number | null | 
     return String(id)
   }
   return '—'
+}
+
+function formatTicketDatabaseScope(ticket: Ticket, fallback: string) {
+  if (ticket.ticket_type === 'query_access') {
+    return fallback
+  }
+  const database = ticket.database_name || '—'
+  if (!ticket.schema_name) {
+    return database
+  }
+  return `${database} / ${ticket.schema_name}`
 }
 
 function isAdminUser(user: CurrentUser) {
@@ -203,19 +215,32 @@ function formatExecutionDuration(startedAt?: string | null, completedAt?: string
   return `${((end - start) / 1000).toFixed(3)}s`
 }
 
-function formatExecutionStage(status: string) {
+function statementStatusToTicketStatus(status: string): TicketStatus | null {
   switch (status) {
     case 'pending':
-      return 'Pending'
+      return 'pending_execution'
     case 'running':
-      return 'Running'
+      return 'executing'
     case 'completed':
-      return 'Execute Successfully'
+      return 'completed'
     case 'failed':
-      return 'Execute Failed'
+      return 'failed'
+    case 'stopped':
+      return 'stopped'
     default:
-      return status
+      return null
   }
+}
+
+function StatementExecutionBadge({ status }: { status: string | null }) {
+  if (!status) {
+    return <span className="text-muted">—</span>
+  }
+  const badgeStatus = statementStatusToTicketStatus(status)
+  if (!badgeStatus) {
+    return <span className="text-muted">{status}</span>
+  }
+  return <StatusBadge status={badgeStatus} className="px-2 py-0.5 text-[10px] leading-4 tracking-normal" />
 }
 
 function formatTicketTypeLabel(ticketType: string) {
@@ -333,6 +358,8 @@ function formatActivityAction(actionType: string) {
       return 'Access Revoked'
     case 'ticket_schedule':
       return 'Execution Scheduled'
+    case 'ticket_execution_recovered':
+      return 'Execution Recovered'
     default:
       return actionType
     }
@@ -363,7 +390,9 @@ function formatActivityDetail(log: AuditLog) {
         ? `Withdraw reason: ${details.reason.trim()}`
         : 'Ticket withdrawn by submitter.'
     case 'ticket_execute_start':
-      return 'Ticket execution started.'
+      return typeof details?.comment === 'string' && details.comment.trim()
+        ? `Execution started. Comment: ${details.comment.trim()}`
+        : 'Ticket execution started.'
     case 'ticket_execute_complete':
       return 'Execution result: completed successfully.'
     case 'ticket_execute_failed':
@@ -372,6 +401,18 @@ function formatActivityDetail(log: AuditLog) {
       return 'Access was revoked early.'
     case 'ticket_schedule':
       return 'Ticket was scheduled for execution.'
+    case 'ticket_execution_recovered': {
+      const reason = typeof details?.reason === 'string' && details.reason.trim()
+        ? details.reason.trim()
+        : 'Service restarted while the ticket was executing.'
+      const failedIDs = Array.isArray(details?.failed_execution_ids)
+        ? details.failed_execution_ids.filter((id) => typeof id === 'number' || typeof id === 'string')
+        : []
+      if (failedIDs.length > 0) {
+        return `${reason} Affected statement execution IDs: ${failedIDs.join(', ')}.`
+      }
+      return reason
+    }
     default:
       return details ? JSON.stringify(details) : '—'
   }
@@ -413,6 +454,7 @@ function extractRealtimeTicketID(detail: unknown): string | null {
 }
 
 type StatementResultRow = {
+  executionID: number | null
   seq: number
   sql: string
   scanRows: number | null
@@ -420,9 +462,13 @@ type StatementResultRow = {
   reviewMessage: string | null
   rowsAffected: number | null
   executionStatus: string | null
-  currentStage: string | null
   duration: string | null
   errorMessage: string | null
+  sentToDBAt: string | null
+  dbProcessType: string | null
+  dbProcessID: number | null
+  interruptionReason: string | null
+  outcomeConfidence: string | null
 }
 
 function statementResultKey(row: StatementResultRow) {
@@ -431,6 +477,7 @@ function statementResultKey(row: StatementResultRow) {
 
 function buildStatementResults(detail: TicketDetail) {
   const rows = new Map<number, StatementResultRow>()
+  const hidePendingExecutionStatus = detail.ticket.status === 'rejected' || detail.ticket.status === 'withdrawn'
 
   detail.review_results.forEach((result) => {
     if (result.phase && result.phase !== 'validation') {
@@ -441,6 +488,7 @@ function buildStatementResults(detail: TicketDetail) {
       .filter((item): item is string => Boolean(item && item.trim()))
       .join(' | ')
     rows.set(result.seq, {
+      executionID: existing?.executionID ?? null,
       seq: result.seq,
       sql: result.sql_stmt,
       scanRows: Math.max(existing?.scanRows ?? 0, result.scan_rows),
@@ -448,31 +496,81 @@ function buildStatementResults(detail: TicketDetail) {
       reviewMessage: nextMessage || null,
       rowsAffected: existing?.rowsAffected ?? null,
       executionStatus: existing?.executionStatus ?? null,
-      currentStage: existing?.currentStage ?? null,
       duration: existing?.duration ?? null,
       errorMessage: existing?.errorMessage ?? null,
+      sentToDBAt: existing?.sentToDBAt ?? null,
+      dbProcessType: existing?.dbProcessType ?? null,
+      dbProcessID: existing?.dbProcessID ?? null,
+      interruptionReason: existing?.interruptionReason ?? null,
+      outcomeConfidence: existing?.outcomeConfidence ?? null,
     })
   })
 
   detail.executions.forEach((execution) => {
     const existing = rows.get(execution.seq)
     rows.set(execution.seq, {
+      executionID: execution.id,
       seq: execution.seq,
       sql: existing?.sql || execution.sql_stmt,
       scanRows: existing?.scanRows ?? null,
       reviewStatus: existing?.reviewStatus ?? null,
       reviewMessage: existing?.reviewMessage ?? null,
       rowsAffected: execution.rows_affected ?? 0,
-      executionStatus: execution.status,
-      currentStage: formatExecutionStage(execution.status),
-      duration: typeof execution.duration_ms === 'number'
-        ? `${(execution.duration_ms / 1000).toFixed(3)}s`
-        : formatExecutionDuration(execution.started_at, execution.completed_at),
-      errorMessage: execution.error_msg ?? null,
+      executionStatus: hidePendingExecutionStatus && execution.status === 'pending' ? null : execution.status,
+      duration: execution.status === 'stopped' || Boolean(execution.interruption_reason)
+        ? null
+        : typeof execution.duration_ms === 'number'
+          ? `${(execution.duration_ms / 1000).toFixed(3)}s`
+          : formatExecutionDuration(execution.started_at, execution.completed_at),
+      errorMessage: formatExecutionOutcomeMessage(execution.outcome_confidence, execution.interruption_reason, execution.error_msg),
+      sentToDBAt: execution.sent_to_db_at ?? null,
+      dbProcessType: execution.db_process_type ?? null,
+      dbProcessID: execution.db_process_id ?? null,
+      interruptionReason: execution.interruption_reason ?? null,
+      outcomeConfidence: execution.outcome_confidence ?? null,
     })
   })
 
   return Array.from(rows.values()).sort((a, b) => a.seq - b.seq)
+}
+
+function formatExecutionOutcomeMessage(outcome?: string | null, reason?: string | null, errorMessage?: string | null) {
+  if (outcome === 'not_sent') {
+    return errorMessage
+      ? `SQL was not sent to DB. Connection/setup failed before execution: ${errorMessage}`
+      : 'SQL was not sent to DB. Connection/setup failed before execution.'
+  }
+  if (outcome === 'outcome_unknown') {
+    return errorMessage
+      ? `SQL was sent to DB, then the connection was interrupted. DB outcome is unknown; verify on target DB: ${errorMessage}`
+      : 'SQL was sent to DB, then the connection was interrupted. DB outcome is unknown; verify on target DB.'
+  }
+  if (outcome === 'manually_stopped' || reason === 'manually_stopped') {
+    return 'Manually stopped.'
+  }
+  if (outcome === 'service_shutdown' || reason === 'service_shutdown') {
+    return errorMessage
+      ? `Service shutdown during execution: ${errorMessage}`
+      : 'Service shutdown during execution.'
+  }
+  if (reason === 'service_restart') {
+    return errorMessage
+      ? `Service restarted during execution. DB outcome may require verification: ${errorMessage}`
+      : 'Service restarted during execution. DB outcome may require verification.'
+  }
+  if (reason === 'execution_panic') {
+    return errorMessage
+      ? `Platform execution process failed: ${errorMessage}`
+      : 'Platform execution process failed.'
+  }
+  return errorMessage ?? null
+}
+
+function formatExecutionRuntimeProcess(row: StatementResultRow) {
+  if (!row.dbProcessType || row.dbProcessID == null) {
+    return '—'
+  }
+  return `${row.dbProcessType}: ${row.dbProcessID}`
 }
 
 type WorkflowStepTone = 'done' | 'current' | 'upcoming' | 'failed'
@@ -482,7 +580,7 @@ type WorkflowStep = {
   title: string
   actor: string
   tone: WorkflowStepTone
-  detail: string
+  running?: boolean
 }
 
 function joinParticipantNames(names: string[], fallback: string) {
@@ -493,7 +591,7 @@ function joinParticipantNames(names: string[], fallback: string) {
   return normalized.join(', ')
 }
 
-function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflowParticipants): WorkflowStep[] {
+function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflowParticipants, activityLogs: AuditLog[] = []): WorkflowStep[] {
   const submitter = formatTicketActor(ticket.submitter_name, ticket.submitter_id)
   const reviewer = ticket.reviewer_id != null || ticket.reviewer_name
     ? formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null)
@@ -502,31 +600,24 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
     ? formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)
     : joinParticipantNames(workflowParticipants.executors, 'Pending executor assignment')
   const usesExecutor = ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml' || ticket.ticket_type === 'redis_command'
+  const rejectedAfterReview = usesExecutor && ticket.status === 'rejected' && (
+    ticket.executor_id != null ||
+    Boolean(ticket.executor_name) ||
+    activityLogs.some((log) => log.action_type === 'ticket_approve')
+  )
 
   const reviewerTone: WorkflowStepTone =
     ticket.status === 'pending_review' ? 'current'
-      : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
+      : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? rejectedAfterReview ? 'done' : 'failed'
       : 'done'
-  const reviewerDetail =
-    reviewerTone === 'current' ? 'Waiting for review'
-      : ticket.status === 'withdrawn' ? 'Withdrawn by submitter'
-      : reviewerTone === 'failed' ? 'Rejected at review stage'
-      : 'Review completed'
-
   const executorTone: WorkflowStepTone = !usesExecutor
     ? 'upcoming'
-    : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'upcoming'
+    : rejectedAfterReview ? 'failed'
+      : ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'upcoming'
       : ticket.status === 'approved' || ticket.status === 'pending_execution' || ticket.status === 'executing' ? 'current'
         : ticket.status === 'completed' ? 'done'
           : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' ? 'failed'
             : 'upcoming'
-  const executorDetail = !usesExecutor
-    ? 'No execution stage for this ticket type'
-    : executorTone === 'current' ? 'Waiting for DBA execution'
-      : executorTone === 'done' ? 'Execution completed'
-        : executorTone === 'failed' ? 'Execution ended with an exception'
-          : 'Will enter execution after approval'
-
   const completionTone: WorkflowStepTone = usesExecutor
     ? ticket.status === 'completed' ? 'done'
       : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' || ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
@@ -534,33 +625,18 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
     : ticket.status === 'approved' || ticket.status === 'completed' ? 'done'
       : ticket.status === 'failed' || ticket.status === 'stopped' || ticket.status === 'interrupted' || ticket.status === 'rejected' || ticket.status === 'withdrawn' ? 'failed'
         : 'upcoming'
-  const completionDetail = usesExecutor
-    ? completionTone === 'done' ? 'Ticket closed successfully'
-      : completionTone === 'failed' ? 'Ticket closed unsuccessfully'
-        : 'Waiting for execution to finish'
-    : completionTone === 'done' ? 'Ticket completed after approval'
-      : completionTone === 'failed'
-        ? (ticket.ticket_type === 'sensitive_query_access' || ticket.ticket_type === 'query_access') && ticket.status === 'stopped'
-          ? ticket.ticket_type === 'query_access'
-            ? 'Query access was revoked and the ticket is closed'
-            : 'Sensitive access was revoked and the ticket is closed'
-          : 'Ticket closed unsuccessfully'
-        : 'Waiting for approval to complete the request'
-
   const steps: WorkflowStep[] = [
     {
       key: 'submitter',
       title: 'Submitted',
       actor: submitter,
       tone: 'done',
-      detail: 'Ticket has been created',
     },
     {
       key: 'reviewer',
       title: 'Review',
       actor: reviewer,
       tone: reviewerTone,
-      detail: reviewerDetail,
     },
   ]
 
@@ -570,7 +646,7 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
       title: 'Execution',
       actor: executor,
       tone: executorTone,
-      detail: executorDetail,
+      running: ticket.status === 'executing',
     })
   }
 
@@ -579,34 +655,40 @@ function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflow
     title: 'Complete',
     actor: usesExecutor ? 'System status update' : 'Approval outcome',
     tone: completionTone,
-    detail: completionDetail,
   })
 
   return steps
 }
 
-function WorkflowStepIcon({ tone }: { tone: WorkflowStepTone }) {
+function WorkflowStepIcon({ tone, running, label }: { tone: WorkflowStepTone; running?: boolean; label: string }) {
+  if (running) {
+    return (
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-slate-700" aria-label={`${label}: executing`}>
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </span>
+    )
+  }
   if (tone === 'done') {
     return (
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-white">
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-white" aria-label={`${label}: completed`}>
         <Check className="h-5 w-5" />
       </span>
     )
   }
   if (tone === 'current') {
     return (
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border-[6px] border-accent bg-white text-accent" />
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border-[6px] border-accent bg-white text-accent" aria-label={`${label}: current`} />
     )
   }
   if (tone === 'failed') {
     return (
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-500 text-white">
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-500 text-white" aria-label={`${label}: failed`}>
         <X className="h-5 w-5" />
       </span>
     )
   }
   return (
-    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-300 text-white text-sm font-bold">
+    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-300 text-white text-sm font-bold" aria-label={`${label}: upcoming`}>
       •
     </span>
   )
@@ -615,15 +697,15 @@ function WorkflowStepIcon({ tone }: { tone: WorkflowStepTone }) {
 function WorkflowTimeline({
   ticket,
   workflowParticipants,
+  activityLogs,
   highlight,
-  refreshing,
 }: {
   ticket: Ticket
   workflowParticipants: TicketWorkflowParticipants
+  activityLogs?: AuditLog[]
   highlight?: boolean
-  refreshing?: boolean
 }) {
-  const steps = buildWorkflowSteps(ticket, workflowParticipants)
+  const steps = buildWorkflowSteps(ticket, workflowParticipants, activityLogs)
 
   return (
     <section
@@ -635,12 +717,6 @@ function WorkflowTimeline({
       <div className="border-b border-border/80 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <p className="text-[13px] font-semibold text-ink">Approval Flow</p>
-          {refreshing ? (
-            <span className="inline-flex items-center gap-2 text-[11px] font-medium text-muted">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-              Syncing status...
-            </span>
-          ) : null}
         </div>
       </div>
 
@@ -652,11 +728,10 @@ function WorkflowTimeline({
                 <span className="absolute left-[44px] right-0 top-[18px] h-px bg-border" aria-hidden="true" />
               ) : null}
               <div className="relative">
-                <WorkflowStepIcon tone={step.tone} />
+                <WorkflowStepIcon tone={step.tone} running={step.running} label={step.title} />
                 <div className="mt-3">
                   <p className="text-[13px] font-semibold text-ink">{step.title}</p>
                   <p className="mt-1 text-[12px] font-medium text-ink">{step.actor}</p>
-                  <p className="mt-1 text-[11px] text-muted">{step.detail}</p>
                 </div>
               </div>
             </div>
@@ -678,11 +753,11 @@ export function TicketDetailPage() {
   const [comment, setComment] = useState('')
   const [reason, setReason] = useState('')
   const [acting, setActing] = useState<'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke' | 'retry_workflow' | null>(null)
+  const [actingExecutionID, setActingExecutionID] = useState<number | null>(null)
   const [confirmAction, setConfirmAction] = useState<'withdraw' | 'execute' | 'revoke' | null>(null)
   const [downloadingExport, setDownloadingExport] = useState(false)
   const [otherDetailsOpen, setOtherDetailsOpen] = useState(false)
   const [debugTraceOpen, setDebugTraceOpen] = useState(false)
-  const [isRefreshing, setIsRefreshing] = useState(false)
   const [statusTransitioning, setStatusTransitioning] = useState(false)
   const [expandedStatementSQLs, setExpandedStatementSQLs] = useState<Set<string>>(() => new Set())
   const previousStatusRef = useRef<string | null>(null)
@@ -791,6 +866,16 @@ export function TicketDetailPage() {
     ...row,
     sql: formatTicketSQLForDisplay(row.sql, ticket?.ticket_type ?? 'dml'),
   }))
+  const showReviewMessageColumn = displayStatementResults.some((row) => Boolean(row.reviewMessage?.trim()))
+  const showErrorMessageColumn = displayStatementResults.some((row) => Boolean(row.errorMessage?.trim()))
+  const executionRuntimeRows = displayStatementResults.filter((row) => (
+    row.executionID != null ||
+    row.sentToDBAt ||
+    row.outcomeConfidence ||
+    row.interruptionReason ||
+    row.dbProcessType ||
+    row.dbProcessID != null
+  ))
   const expandableStatementKeys = displayStatementResults
     .filter((row) => isExpandableSql(row.sql))
     .map(statementResultKey)
@@ -812,24 +897,14 @@ export function TicketDetailPage() {
     user.permissions.includes('tickets.apply'),
   )
 
-  async function reloadTicket(options?: { background?: boolean }) {
+  async function reloadTicket(_options?: { background?: boolean }) {
     if (!id) {
       return
     }
-    const background = options?.background === true
-    if (background) {
-      setIsRefreshing(true)
-    }
-    try {
-      const nextDetail = await getTicket(id)
-      startTransition(() => {
-        setDetail(nextDetail)
-      })
-    } finally {
-      if (background) {
-        setIsRefreshing(false)
-      }
-    }
+    const nextDetail = await getTicket(id)
+    startTransition(() => {
+      setDetail(nextDetail)
+    })
   }
 
   function setStatementSQLExpanded(key: string, expanded: boolean) {
@@ -871,6 +946,19 @@ export function TicketDetailPage() {
       setError(actionError instanceof ApiError ? actionError.message : 'Action failed. Please try again later.')
     } finally {
       setActing(null)
+    }
+  }
+
+  async function runStatementAction(executionID: number, action: () => Promise<Ticket | void>) {
+    setActingExecutionID(executionID)
+    setError('')
+    try {
+      await action()
+      await reloadTicket({ background: true })
+    } catch (actionError) {
+      setError(actionError instanceof ApiError ? actionError.message : 'Statement action failed. Please try again later.')
+    } finally {
+      setActingExecutionID(null)
     }
   }
 
@@ -921,15 +1009,8 @@ export function TicketDetailPage() {
                 status={ticket.status}
                 className={cn(
                   statusTransitioning ? 'scale-[1.03] ring-4 ring-accent/15' : '',
-                  isRefreshing ? 'opacity-80' : '',
                 )}
               />
-            ) : null}
-            {isRefreshing ? (
-              <span className="inline-flex items-center gap-2 text-[11px] font-medium text-muted">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-                Updating...
-              </span>
             ) : null}
           </div>
           {ticket ? <p className="mt-1 truncate font-mono text-[12px] font-semibold text-accent">{ticket.ticket_no}</p> : null}
@@ -962,23 +1043,22 @@ export function TicketDetailPage() {
       ) : !ticket || !detail ? (
         <div className="rounded-xl border border-border bg-panel p-6 text-sm text-muted shadow-soft">Ticket not found.</div>
       ) : (
-        <div className={cn('space-y-3 transition-opacity duration-300', isRefreshing ? 'opacity-95' : 'opacity-100')}>
+        <div className="space-y-3">
           <WorkflowTimeline
             ticket={ticket}
             workflowParticipants={detail.workflow_participants}
+            activityLogs={detail.activity_logs}
             highlight={statusTransitioning}
-            refreshing={isRefreshing}
           />
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="px-4 py-4">
               <p className="text-[12px] font-semibold text-faint">Overview</p>
               <DetailTable
-                headers={['Ticket Type', 'DB Connection', 'Database', 'Schema', 'Submitter', 'Reviewer', 'Executor', 'Description', 'Current Status']}
+                headers={['Ticket Type', 'DB Connection', 'Database / Schema', 'Submitter', 'Reviewer', 'Executor', 'Description', 'Current Status']}
                 rows={[[
                   formatTicketTypeLabel(ticket.ticket_type),
                   ticket.ticket_type === 'query_access' ? queryAccessConnections : ticket.db_connection_name || ticket.db_connection_id || 'Not specified',
-                  ticket.ticket_type === 'query_access' ? queryAccessScopeSummary : ticket.database_name || '—',
-                  ticket.schema_name || '—',
+                  formatTicketDatabaseScope(ticket, queryAccessScopeSummary),
                   formatTicketActor(ticket.submitter_name, ticket.submitter_id),
                   formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null),
                   formatTicketActor(ticket.executor_name, ticket.executor_id ?? null),
@@ -1066,12 +1146,12 @@ export function TicketDetailPage() {
                       <col className="w-auto" />
                       <col className="w-[160px]" />
                       <col className="w-[140px]" />
-                      <col className="w-[180px]" />
+                      {showReviewMessageColumn ? <col className="w-[180px]" /> : null}
                       <col className="w-[150px]" />
-                      <col className="w-[160px]" />
                       <col className="w-[150px]" />
                       <col className="w-[90px]" />
-                      <col className="w-[220px]" />
+                      {showErrorMessageColumn ? <col className="w-[220px]" /> : null}
+                      <col className="w-[120px]" />
                     </colgroup>
                     <DataTableHead>
                       <tr>
@@ -1080,12 +1160,12 @@ export function TicketDetailPage() {
                         <DataTableHeaderCell className="pl-1 pr-2">SQL</DataTableHeaderCell>
                         <DataTableHeaderCell>Scan Rows</DataTableHeaderCell>
                         <DataTableHeaderCell>Review Status</DataTableHeaderCell>
-                        <DataTableHeaderCell>Review Message</DataTableHeaderCell>
+                        {showReviewMessageColumn ? <DataTableHeaderCell>Review Message</DataTableHeaderCell> : null}
                         <DataTableHeaderCell>Rows Affected</DataTableHeaderCell>
                         <DataTableHeaderCell>Execution Status</DataTableHeaderCell>
-                        <DataTableHeaderCell>Current Stage</DataTableHeaderCell>
                         <DataTableHeaderCell>Duration</DataTableHeaderCell>
-                        <DataTableHeaderCell>Error Message</DataTableHeaderCell>
+                        {showErrorMessageColumn ? <DataTableHeaderCell>Error Message</DataTableHeaderCell> : null}
+                        <DataTableHeaderCell>Action</DataTableHeaderCell>
                       </tr>
                     </DataTableHead>
                     <DataTableBody>
@@ -1093,8 +1173,17 @@ export function TicketDetailPage() {
                         const rowKey = statementResultKey(row)
                         const rowExpanded = expandedStatementSQLs.has(rowKey)
                         const rowExpandable = isExpandableSql(row.sql)
+                        const rowActionBusy = actingExecutionID === row.executionID
+                        const rowCanExecute = Boolean(canExecute && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
+                        const rowCanStop = Boolean(canExecute && row.executionID && row.executionStatus === 'running')
                         return (
-                          <DataTableRow key={rowKey}>
+                          <DataTableRow
+                            key={rowKey}
+                            className={cn(
+                              'transition-colors duration-500',
+                              row.executionStatus === 'running' ? 'bg-blue-50/35 hover:bg-blue-50/60' : '',
+                            )}
+                          >
                             <DataTableCell className="pl-2 pr-1 align-middle">
                               {rowExpandable ? (
                                 <button
@@ -1124,12 +1213,40 @@ export function TicketDetailPage() {
                             </DataTableCell>
                             <DataTableCell className="break-words align-middle leading-6">{row.scanRows ?? '—'}</DataTableCell>
                             <DataTableCell className="break-words align-middle leading-6">{row.reviewStatus ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-middle leading-6 text-muted">{row.reviewMessage || '—'}</DataTableCell>
+                            {showReviewMessageColumn ? (
+                              <DataTableCell className="break-words align-middle leading-6 text-muted">{row.reviewMessage || '—'}</DataTableCell>
+                            ) : null}
                             <DataTableCell className="break-words align-middle leading-6">{row.rowsAffected ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-middle leading-6">{row.executionStatus ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-middle leading-6">{row.currentStage ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-middle leading-6"><StatementExecutionBadge status={row.executionStatus} /></DataTableCell>
                             <DataTableCell className="break-words align-middle leading-6">{row.duration ?? '—'}</DataTableCell>
-                            <DataTableCell className="break-words align-middle leading-6 text-muted">{row.errorMessage || '—'}</DataTableCell>
+                            {showErrorMessageColumn ? (
+                              <DataTableCell className="break-words align-middle leading-6 text-muted">{row.errorMessage || '—'}</DataTableCell>
+                            ) : null}
+                            <DataTableCell className="align-middle">
+                              {rowCanExecute && row.executionID ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void runStatementAction(row.executionID!, () => executeTicketStatement(ticket.ticket_no, row.executionID!))}
+                                  disabled={rowActionBusy}
+                                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {rowActionBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                                  Execute
+                                </button>
+                              ) : rowCanStop && row.executionID ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void runStatementAction(row.executionID!, () => stopTicketStatement(ticket.ticket_no, row.executionID!))}
+                                  disabled={rowActionBusy}
+                                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-2.5 text-[12px] font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {rowActionBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+                                  Stop
+                                </button>
+                              ) : (
+                                <span className="text-muted">—</span>
+                              )}
+                            </DataTableCell>
                           </DataTableRow>
                         )
                       })}
@@ -1229,7 +1346,7 @@ export function TicketDetailPage() {
                                 value={reason}
                                 onChange={(event) => setReason(event.target.value)}
                                 className="min-h-[96px] rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                                placeholder="Execution rejection reason (required)"
+                                placeholder="Execution comment or rejection reason"
                                 disabled={acting !== null}
                               />
                             </label>
@@ -1254,7 +1371,7 @@ export function TicketDetailPage() {
                                 className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
-                                Reject at Execution Stage
+                                Reject
                               </button>
                             ) : null}
                           </div>
@@ -1310,15 +1427,35 @@ export function TicketDetailPage() {
                 <ChevronDown className={`h-4 w-4 text-muted transition-transform ${otherDetailsOpen ? 'rotate-180' : ''}`} />
               </button>
               {otherDetailsOpen ? (
-                <DetailTable
-                  headers={['Action', 'Actor', 'Timestamp', 'Detail']}
-                  rows={detail.activity_logs.map((log) => [
-                    formatActivityAction(log.action_type),
-                    log.actor_name?.trim() ? log.actor_name : log.actor_id ? String(log.actor_id) : 'System',
-                    formatDateTime(log.created_at, true),
-                    formatActivityDetail(log),
-                  ])}
-                />
+                <div className="space-y-4">
+                  {executionRuntimeRows.length > 0 ? (
+                    <div>
+                      <p className="mt-3 text-[12px] font-semibold text-faint">Statement Runtime</p>
+                      <DetailTable
+                        headers={['ID', 'Sent To DB', 'DB Process', 'Outcome', 'Reason']}
+                        rows={executionRuntimeRows.map((row) => [
+                          row.seq,
+                          row.sentToDBAt ? formatDateTime(row.sentToDBAt, true) : '—',
+                          formatExecutionRuntimeProcess(row),
+                          row.outcomeConfidence || '—',
+                          row.interruptionReason || '—',
+                        ])}
+                      />
+                    </div>
+                  ) : null}
+                  <div>
+                    <p className="mt-3 text-[12px] font-semibold text-faint">Activity Log</p>
+                    <DetailTable
+                      headers={['Action', 'Actor', 'Timestamp', 'Detail']}
+                      rows={detail.activity_logs.map((log) => [
+                        formatActivityAction(log.action_type),
+                        log.actor_name?.trim() ? log.actor_name : log.actor_id ? String(log.actor_id) : 'System',
+                        formatDateTime(log.created_at, true),
+                        formatActivityDetail(log),
+                      ])}
+                    />
+                  </div>
+                </div>
               ) : null}
             </div>
 
@@ -1361,7 +1498,7 @@ export function TicketDetailPage() {
           confirmAction === 'withdraw'
             ? 'Withdraw this ticket now? Reviewers will no longer process it.'
             : confirmAction === 'execute'
-              ? 'Trigger execution for this ticket? This will call the backend execute API.'
+              ? 'Execute statements in submission order. Execution stops if any statement fails.'
               : ticket?.ticket_type === 'query_access'
                 ? 'Revoke this query access ticket early? The granted query scope will be invalidated from the next query onwards.'
                 : 'Revoke this sensitive access ticket early? Access will be invalidated from the next query onwards.'
@@ -1381,7 +1518,7 @@ export function TicketDetailPage() {
             void runAction('withdraw', () => withdrawTicket(ticket.ticket_no, comment.trim())).finally(() => setConfirmAction(null))
           }
           if (confirmAction === 'execute') {
-            void runAction('execute', () => executeTicket(ticket.ticket_no)).finally(() => setConfirmAction(null))
+            void runAction('execute', () => executeTicket(ticket.ticket_no, reason)).finally(() => setConfirmAction(null))
           }
           if (confirmAction === 'revoke') {
             void runAction('revoke', () => revokeTicket(ticket.ticket_no)).finally(() => setConfirmAction(null))

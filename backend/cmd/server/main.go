@@ -75,7 +75,11 @@ func isTicketExecutionRequest(method, path string) bool {
 		return false
 	}
 	ticketRef := strings.TrimSuffix(strings.TrimPrefix(path, "/api/tickets/"), "/execute")
-	return ticketRef != "" && !strings.Contains(ticketRef, "/")
+	if ticketRef != "" && !strings.Contains(ticketRef, "/") {
+		return true
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "/api/tickets/"), "/")
+	return len(parts) == 4 && parts[0] != "" && parts[1] == "executions" && parts[2] != "" && parts[3] == "execute"
 }
 
 func isExportDownloadPath(path string) bool {
@@ -219,21 +223,44 @@ func main() {
 	defer shadowValidationRawDB.Close()
 	shadowValidationDB := dbxFromStdlib(shadowValidationRawDB)
 
-	// Crash recovery: mark any executing tickets as interrupted
 	ticketRepo := repository.NewTicketRepo(metaDB)
+	auditRepo := repository.NewAuditRepo(metaDB)
 	queryAccessRepo := repository.NewQueryAccessRepo(metaDB)
-	n, err := ticketRepo.MarkInterruptedAll(context.Background())
+	recoveries, err := ticketRepo.RecoverExecutingTickets(context.Background())
 	if err != nil {
 		slog.Warn("crash recovery scan failed", "err", err)
-	} else if n > 0 {
-		slog.Warn("crash recovery: marked tickets as interrupted", "count", n)
+	} else if len(recoveries) > 0 {
+		slog.Warn("crash recovery: recovered executing tickets", "count", len(recoveries))
+		for _, recovery := range recoveries {
+			ticketID := recovery.TicketID
+			slog.Warn("crash recovery: ticket execution state recovered",
+				"ticket_id", ticketID,
+				"status", recovery.Status,
+				"reason", recovery.Reason,
+				"failed_execution_ids", recovery.FailedExecutionIDs,
+				"failed_executions", recovery.FailedExecutions,
+			)
+			if err := auditRepo.Log(context.Background(), repository.AuditEntry{
+				ActorName:    "System",
+				ActionType:   "ticket_execution_recovered",
+				ResourceType: "ticket",
+				ResourceID:   &ticketID,
+				Details: map[string]any{
+					"status":               string(recovery.Status),
+					"reason":               recovery.Reason,
+					"failed_execution_ids": recovery.FailedExecutionIDs,
+					"failed_executions":    recovery.FailedExecutions,
+				},
+			}); err != nil {
+				slog.Warn("crash recovery audit log failed", "ticket_id", ticketID, "err", err)
+			}
+		}
 	}
 
 	userRepo := repository.NewUserRepo(metaDB, cfg.EncryptionKey)
 	sessionRepo := repository.NewSessionRepo(metaDB)
 	larkLoginRepo := repository.NewLarkLoginRepo(metaDB)
 	ssoLoginRepo := repository.NewSSOLoginRepo(metaDB)
-	auditRepo := repository.NewAuditRepo(metaDB)
 	mfaChallengeRepo := repository.NewMFAChallengeRepo(metaDB)
 	if strings.TrimSpace(*resetMFAUsername) != "" {
 		if err := resetMFABreakGlass(context.Background(), userRepo, sessionRepo, auditRepo, strings.TrimSpace(*resetMFAUsername)); err != nil {
@@ -313,6 +340,7 @@ func main() {
 
 		r.Get("/setup/status", authH.SetupStatus)
 		r.Post("/setup", authH.Setup)
+		r.Post("/lark/cards/callback", ticketH.LarkCardCallback)
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/login", authH.Login)
 			r.Get("/lark/login/start", authH.StartLarkLogin)
@@ -545,6 +573,8 @@ func main() {
 				r.With(requireSensitiveReview).Post("/revoke", ticketH.Revoke)
 				r.With(requireTicketsExecute).Post("/execute", ticketH.Execute)
 				r.With(requireTicketsExecute).Post("/stop", ticketH.Stop)
+				r.With(requireTicketsExecute).Post("/executions/{executionID}/execute", ticketH.ExecuteStatement)
+				r.With(requireTicketsExecute).Post("/executions/{executionID}/stop", ticketH.StopStatement)
 				r.With(requireSettingsWrite).Post("/retry-workflow-resolution", ticketH.RetryWorkflowResolution)
 			})
 		})
@@ -590,7 +620,14 @@ func main() {
 	slog.Info("shutting down")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	srv.Shutdown(ctx)
+	shutdownErr := make(chan error, 1)
+	go func() {
+		shutdownErr <- srv.Shutdown(ctx)
+	}()
+	ticketH.CancelActiveExecutionsForShutdown(ctx)
+	if err := <-shutdownErr; err != nil {
+		slog.Warn("server shutdown failed", "err", err)
+	}
 }
 
 func dbxFromStdlib(raw *sql.DB) *sqlx.DB {

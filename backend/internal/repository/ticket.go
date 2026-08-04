@@ -49,6 +49,24 @@ type WorkflowDashboardSummary struct {
 	ByWorkflowError     []WorkflowDashboardErrorCount `json:"by_workflow_error"`
 }
 
+type TicketExecutionRecovery struct {
+	TicketID           uint64
+	Status             model.TicketStatus
+	Reason             string
+	FailedExecutionIDs []uint64
+	FailedExecutions   []TicketExecutionRecoveryDetail
+}
+
+type TicketExecutionRecoveryDetail struct {
+	ExecutionID        uint64     `json:"execution_id"`
+	Seq                int        `json:"seq"`
+	SentToDBAt         *time.Time `json:"sent_to_db_at,omitempty"`
+	DBProcessType      *string    `json:"db_process_type,omitempty"`
+	DBProcessID        *uint64    `json:"db_process_id,omitempty"`
+	InterruptionReason string     `json:"interruption_reason"`
+	OutcomeConfidence  string     `json:"outcome_confidence"`
+}
+
 type TicketTodoSummary struct {
 	Pending           int64 `json:"pending"`
 	ReviewRequired    int64 `json:"review_required"`
@@ -623,22 +641,210 @@ func (r *TicketRepo) CreateExecution(ctx context.Context, e *model.TicketExecuti
 	return uint64(id), nil
 }
 
+func (r *TicketRepo) EnsureExecutions(ctx context.Context, ticketID uint64, statements []model.TicketExecution) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin ensure ticket executions tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var existing int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM ticket_executions WHERE ticket_id = ? FOR UPDATE`, ticketID).Scan(&existing); err != nil {
+		return fmt.Errorf("count ticket executions: %w", err)
+	}
+	if existing > 0 {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit ensure ticket executions tx: %w", err)
+		}
+		tx = nil
+		return nil
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO ticket_executions (ticket_id, seq, sql_stmt, status, started_at) VALUES (?, ?, ?, 'pending', NULL)`,
+			ticketID, statement.Seq, statement.SQLStmt,
+		); err != nil {
+			return fmt.Errorf("create pending ticket execution: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit ensure ticket executions tx: %w", err)
+	}
+	tx = nil
+	return nil
+}
+
+func (r *TicketRepo) GetExecution(ctx context.Context, ticketID uint64, executionID uint64) (*model.TicketExecution, error) {
+	var exec model.TicketExecution
+	err := r.db.GetContext(ctx, &exec, `SELECT * FROM ticket_executions WHERE id = ? AND ticket_id = ?`, executionID, ticketID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &exec, err
+}
+
+func (r *TicketRepo) MarkTicketExecuting(ctx context.Context, ticketID uint64, executorID uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tickets
+		 SET status = CASE WHEN status = 'pending_execution' THEN 'executing' ELSE status END,
+		     executor_id = COALESCE(executor_id, ?),
+		     started_at = COALESCE(started_at, ?),
+		     updated_at = ?
+		 WHERE id = ? AND status IN ('pending_execution', 'executing')`,
+		executorID, timeutil.NowUTC(), timeutil.NowUTC(), ticketID,
+	)
+	return err
+}
+
+func (r *TicketRepo) SetExecutorIfEmpty(ctx context.Context, ticketID uint64, executorID uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tickets SET executor_id = COALESCE(executor_id, ?), updated_at = ? WHERE id = ?`,
+		executorID, timeutil.NowUTC(), ticketID,
+	)
+	return err
+}
+
+func (r *TicketRepo) SetExecutionAggregateStatus(ctx context.Context, ticketID uint64, status model.TicketStatus) error {
+	now := timeutil.NowUTC()
+	if status == model.TicketStatusCompleted || status == model.TicketStatusFailed || status == model.TicketStatusStopped {
+		_, err := r.db.ExecContext(ctx,
+			`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
+			status, now, now, ticketID,
+		)
+		return err
+	}
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?`,
+		status, now, ticketID,
+	)
+	return err
+}
+
+func (r *TicketRepo) MarkExecutionRunningIfPending(ctx context.Context, id uint64) (bool, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE ticket_executions
+		 SET status = 'running',
+		     started_at = ?,
+		     completed_at = NULL,
+		     error_msg = NULL,
+		     duration_ms = NULL,
+		     sent_to_db_at = NULL,
+		     db_process_type = NULL,
+		     db_process_id = NULL,
+		     interruption_reason = NULL,
+		     outcome_confidence = NULL
+		 WHERE id = ? AND status = 'pending'`,
+		timeutil.NowUTC(), id,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 func (r *TicketRepo) MarkExecutionRunning(ctx context.Context, id uint64) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE ticket_executions SET status = 'running', started_at = ? WHERE id = ?`,
+		`UPDATE ticket_executions
+		 SET status = 'running',
+		     started_at = ?,
+		     sent_to_db_at = NULL,
+		     db_process_type = NULL,
+		     db_process_id = NULL,
+		     interruption_reason = NULL,
+		     outcome_confidence = NULL
+		 WHERE id = ?`,
 		timeutil.NowUTC(), id,
 	)
 	return err
 }
 
-func (r *TicketRepo) MarkExecutionDone(ctx context.Context, id uint64, rowsAffected *int64, durationMs int64, errMsg *string) error {
+func (r *TicketRepo) MarkExecutionSentToDB(ctx context.Context, id uint64, processType string, processID uint64) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE ticket_executions
+		 SET sent_to_db_at = COALESCE(sent_to_db_at, ?),
+		     db_process_type = ?,
+		     db_process_id = ?,
+		     outcome_confidence = ?
+		 WHERE id = ? AND status = 'running'`,
+		timeutil.NowUTC(), processType, processID, "sent_to_db", id,
+	)
+	return err
+}
+
+func (r *TicketRepo) MarkExecutionStopped(ctx context.Context, id uint64, message string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE ticket_executions
+		 SET status = 'stopped',
+		     error_msg = ?,
+		     completed_at = ?,
+		     duration_ms = NULL,
+		     interruption_reason = ?,
+		     outcome_confidence = ?
+		 WHERE id = ?`,
+		message, timeutil.NowUTC(), "manually_stopped", "manually_stopped", id,
+	)
+	return err
+}
+
+func (r *TicketRepo) MarkExecutionDone(ctx context.Context, id uint64, rowsAffected *int64, durationMs *int64, errMsg *string) error {
 	status := "completed"
+	confidence := "completed"
 	if errMsg != nil {
 		status = "failed"
+		confidence = "failed"
 	}
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE ticket_executions SET status = ?, rows_affected = ?, error_msg = ?, completed_at = ?, duration_ms = ? WHERE id = ?`,
-		status, rowsAffected, errMsg, timeutil.NowUTC(), durationMs, id,
+		`UPDATE ticket_executions
+		 SET status = ?,
+		     rows_affected = ?,
+		     error_msg = ?,
+		     completed_at = ?,
+		     duration_ms = ?,
+		     interruption_reason = NULL,
+		     outcome_confidence = ?
+		 WHERE id = ?`,
+		status, rowsAffected, errMsg, timeutil.NowUTC(), durationMs, confidence, id,
+	)
+	return err
+}
+
+func (r *TicketRepo) MarkExecutionFailedWithOutcome(ctx context.Context, id uint64, durationMs *int64, errMsg, interruptionReason, outcomeConfidence string) error {
+	var reason any
+	if strings.TrimSpace(interruptionReason) != "" {
+		reason = interruptionReason
+	}
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE ticket_executions
+		 SET status = 'failed',
+		     rows_affected = NULL,
+		     error_msg = ?,
+		     completed_at = ?,
+		     duration_ms = ?,
+		     interruption_reason = ?,
+		     outcome_confidence = ?
+		 WHERE id = ?`,
+		errMsg, timeutil.NowUTC(), durationMs, reason, outcomeConfidence, id,
+	)
+	return err
+}
+
+func (r *TicketRepo) MarkExecutionInterrupted(ctx context.Context, id uint64, message, reason, outcomeConfidence string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE ticket_executions
+		 SET status = 'failed',
+		     rows_affected = NULL,
+		     error_msg = ?,
+		     completed_at = ?,
+		     duration_ms = NULL,
+		     interruption_reason = ?,
+		     outcome_confidence = ?
+		 WHERE id = ?`,
+		message, timeutil.NowUTC(), reason, outcomeConfidence, id,
 	)
 	return err
 }
@@ -748,15 +954,163 @@ func (r *TicketRepo) GetDueScheduled(ctx context.Context) ([]model.Ticket, error
 	return tickets, err
 }
 
-// Crash recovery: on startup, scan executing → mark interrupted
-func (r *TicketRepo) MarkInterruptedAll(ctx context.Context) (int64, error) {
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE tickets SET status = 'interrupted', updated_at = ? WHERE status = 'executing'`,
-		timeutil.NowUTC(),
-	)
+// RecoverExecutingTickets reconciles tickets left in executing state after a service restart.
+func (r *TicketRepo) RecoverExecutingTickets(ctx context.Context) ([]TicketExecutionRecovery, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return nil, fmt.Errorf("begin ticket recovery tx: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	return n, nil
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var ticketIDs []uint64
+	if err := tx.SelectContext(ctx, &ticketIDs, `SELECT id FROM tickets WHERE status = ? FOR UPDATE`, model.TicketStatusExecuting); err != nil {
+		return nil, fmt.Errorf("list executing tickets for recovery: %w", err)
+	}
+
+	recoveries := make([]TicketExecutionRecovery, 0, len(ticketIDs))
+	now := timeutil.NowUTC()
+	const restartReason = "service restarted during execution; database outcome unknown"
+	for _, ticketID := range ticketIDs {
+		var executions []model.TicketExecution
+		if err := tx.SelectContext(ctx, &executions, `SELECT * FROM ticket_executions WHERE ticket_id = ? ORDER BY seq`, ticketID); err != nil {
+			return nil, fmt.Errorf("list ticket executions for recovery: %w", err)
+		}
+
+		if len(executions) == 0 {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
+				model.TicketStatusFailed, now, now, ticketID,
+			); err != nil {
+				return nil, fmt.Errorf("mark legacy executing ticket failed: %w", err)
+			}
+			recoveries = append(recoveries, TicketExecutionRecovery{
+				TicketID: ticketID,
+				Status:   model.TicketStatusFailed,
+				Reason:   "service restarted during legacy execution; execution progress unknown",
+			})
+			continue
+		}
+
+		failedExecutionIDs := make([]uint64, 0)
+		failedExecutions := make([]TicketExecutionRecoveryDetail, 0)
+		pending, running, completed, failed := 0, 0, 0, 0
+		for _, execRow := range executions {
+			switch execRow.Status {
+			case "pending":
+				pending++
+			case "running":
+				running++
+				failed++
+				failedExecutionIDs = append(failedExecutionIDs, execRow.ID)
+				failedExecutions = append(failedExecutions, TicketExecutionRecoveryDetail{
+					ExecutionID:        execRow.ID,
+					Seq:                execRow.Seq,
+					SentToDBAt:         execRow.SentToDBAt,
+					DBProcessType:      execRow.DBProcessType,
+					DBProcessID:        execRow.DBProcessID,
+					InterruptionReason: "service_restart",
+					OutcomeConfidence:  "outcome_unknown",
+				})
+			case "completed":
+				completed++
+			case "failed", "stopped":
+				failed++
+			}
+		}
+
+		if len(failedExecutionIDs) > 0 {
+			for _, execRow := range executions {
+				if execRow.Status != "running" {
+					continue
+				}
+				message := ticketExecutionRestartMessage(execRow)
+				if _, err := tx.ExecContext(ctx,
+					`UPDATE ticket_executions
+					 SET status = 'failed',
+					     error_msg = ?,
+					     completed_at = ?,
+					     duration_ms = NULL,
+					     interruption_reason = ?,
+					     outcome_confidence = ?
+					 WHERE id = ?`,
+					message, now, "service_restart", "outcome_unknown", execRow.ID,
+				); err != nil {
+					return nil, fmt.Errorf("mark running ticket execution failed: %w", err)
+				}
+			}
+			running = 0
+		}
+
+		status := aggregateTicketStatusFromCounts(len(executions), pending, running, completed, failed)
+		if status == model.TicketStatusCompleted || status == model.TicketStatusFailed || status == model.TicketStatusStopped {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
+				status, now, now, ticketID,
+			); err != nil {
+				return nil, fmt.Errorf("mark recovered ticket terminal: %w", err)
+			}
+		} else {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?`,
+				status, now, ticketID,
+			); err != nil {
+				return nil, fmt.Errorf("mark recovered ticket resumable: %w", err)
+			}
+		}
+
+		reason := "service restarted during execution; ticket execution state recovered"
+		if len(failedExecutionIDs) > 0 {
+			reason = restartReason
+		}
+		recoveries = append(recoveries, TicketExecutionRecovery{
+			TicketID:           ticketID,
+			Status:             status,
+			Reason:             reason,
+			FailedExecutionIDs: failedExecutionIDs,
+			FailedExecutions:   failedExecutions,
+		})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit ticket recovery tx: %w", err)
+	}
+	tx = nil
+	return recoveries, nil
+}
+
+func ticketExecutionRestartMessage(execRow model.TicketExecution) string {
+	if execRow.SentToDBAt == nil {
+		return "service restarted while statement was running; database send state unknown"
+	}
+	if execRow.DBProcessType != nil && strings.TrimSpace(*execRow.DBProcessType) != "" && execRow.DBProcessID != nil && *execRow.DBProcessID != 0 {
+		return fmt.Sprintf(
+			"service restarted during execution; database outcome unknown; last known %s=%d",
+			strings.TrimSpace(*execRow.DBProcessType),
+			*execRow.DBProcessID,
+		)
+	}
+	return "service restarted after statement was sent to database; database outcome unknown"
+}
+
+func aggregateTicketStatusFromCounts(total, pending, running, completed, failed int) model.TicketStatus {
+	switch {
+	case total == 0:
+		return model.TicketStatusFailed
+	case pending == total:
+		return model.TicketStatusPendingExecution
+	case running > 0:
+		return model.TicketStatusExecuting
+	case pending > 0 && completed+failed > 0:
+		return model.TicketStatusExecuting
+	case completed == total:
+		return model.TicketStatusCompleted
+	case completed+failed == total && failed > 0:
+		return model.TicketStatusFailed
+	default:
+		return model.TicketStatusExecuting
+	}
 }

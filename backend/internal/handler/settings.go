@@ -304,6 +304,29 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "lark_app_secret is required when configuring lark for the first time")
 		return
 	}
+	larkCardTokenConfigured, larkCardTokenRequired := resolveSecretState(
+		req.LarkAppID,
+		req.LarkCardVerificationToken,
+		req.LarkCardVerificationTokenConfigured,
+		currentSettings.LarkCardVerificationTokenConfigured,
+	)
+	req.LarkCardVerificationTokenConfigured = larkCardTokenConfigured
+	if req.LarkInteractiveCardsEnabled && strings.TrimSpace(req.LarkAppID) == "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "lark_app_id is required when lark interactive cards are enabled")
+		return
+	}
+	if req.LarkInteractiveCardsEnabled && !req.LarkAppSecretConfigured {
+		jsonErr(w, http.StatusUnprocessableEntity, "lark_app_secret is required when lark interactive cards are enabled")
+		return
+	}
+	if req.LarkInteractiveCardsEnabled && !req.LarkCardVerificationTokenConfigured {
+		jsonErr(w, http.StatusUnprocessableEntity, "lark_card_verification_token is required when lark interactive cards are enabled")
+		return
+	}
+	if req.LarkInteractiveCardsEnabled && larkCardTokenRequired {
+		jsonErr(w, http.StatusUnprocessableEntity, "lark_card_verification_token is required when configuring lark interactive cards for the first time")
+		return
+	}
 	req.LarkOAuthSite = normalizeLarkOAuthSite(req.LarkOAuthSite)
 	req.LarkOAuthRedirectURL = strings.TrimSpace(req.LarkOAuthRedirectURL)
 	if req.LarkOAuthEnabled && strings.TrimSpace(req.LarkAppID) == "" {
@@ -432,6 +455,8 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			"require_non_sensitive_export_review":         req.RequireNonSensitiveExportReview,
 			"lark_app_id":                                 req.LarkAppID,
 			"lark_app_secret_configured":                  req.LarkAppSecretConfigured || req.LarkAppSecret != "",
+			"lark_interactive_cards_enabled":              req.LarkInteractiveCardsEnabled,
+			"lark_card_verification_token_configured":     req.LarkCardVerificationTokenConfigured || req.LarkCardVerificationToken != "",
 			"lark_oauth_enabled":                          req.LarkOAuthEnabled,
 			"lark_oauth_site":                             req.LarkOAuthSite,
 			"lark_oauth_redirect_url_configured":          req.LarkOAuthRedirectURL != "",

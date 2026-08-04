@@ -1,5 +1,6 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { CheckCircle2, Info, XCircle } from 'lucide-react'
+import { configureApiTransientFailureHandler } from '@/shared/api/client'
 
 type ToastTone = 'success' | 'error' | 'info'
 
@@ -45,6 +46,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       }, options?.durationMs ?? 2600)
     },
   }), [])
+
+  useEffect(() => {
+    configureApiTransientFailureHandler((message) => {
+      value.pushToast(message, 'error', { placement: 'center', durationMs: 4200 })
+    })
+    return () => {
+      configureApiTransientFailureHandler(null)
+    }
+  }, [value])
 
   const centerToasts = toasts.filter((toast) => toast.placement === 'center')
   const cornerToasts = toasts.filter((toast) => toast.placement === 'bottom-right')

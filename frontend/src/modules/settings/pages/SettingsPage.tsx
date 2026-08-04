@@ -18,6 +18,9 @@ type SettingsForm = {
   larkAppID: string
   larkAppSecret: string
   larkAppSecretConfigured: boolean
+  larkInteractiveCardsEnabled: boolean
+  larkCardVerificationToken: string
+  larkCardVerificationTokenConfigured: boolean
   larkOAuthEnabled: boolean
   larkOAuthSite: 'lark' | 'feishu'
   larkOAuthRedirectURL: string
@@ -248,6 +251,21 @@ export function SettingsPage() {
                 value={form.larkAppSecret}
                 onChange={(value) => setForm((current) => current ? { ...current, larkAppSecret: value } : current)}
                 placeholder={form.larkAppSecretConfigured ? 'Leave blank to keep existing secret' : 'Enter app secret'}
+                type="password"
+              />
+              <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
+                <Switch
+                  ariaLabel="Enable Lark interactive ticket cards"
+                  checked={form.larkInteractiveCardsEnabled}
+                  onChange={(checked) => setForm((current) => current ? { ...current, larkInteractiveCardsEnabled: checked } : current)}
+                />
+                Enable interactive ticket cards
+              </label>
+              <Field
+                label={`Card Verification Token${form.larkCardVerificationTokenConfigured ? ' (Configured)' : ''}`}
+                value={form.larkCardVerificationToken}
+                onChange={(value) => setForm((current) => current ? { ...current, larkCardVerificationToken: value } : current)}
+                placeholder={form.larkCardVerificationTokenConfigured ? 'Leave blank to keep existing token' : 'Enter Lark card callback token'}
                 type="password"
               />
               <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
@@ -960,6 +978,9 @@ function toForm(settings: PlatformSettings): SettingsForm {
     larkAppID: settings.lark_app_id,
     larkAppSecret: '',
     larkAppSecretConfigured: settings.lark_app_secret_configured,
+    larkInteractiveCardsEnabled: settings.lark_interactive_cards_enabled,
+    larkCardVerificationToken: '',
+    larkCardVerificationTokenConfigured: settings.lark_card_verification_token_configured,
     larkOAuthEnabled: settings.lark_oauth_enabled,
     larkOAuthSite: settings.lark_oauth_site === 'feishu' ? 'feishu' : 'lark',
     larkOAuthRedirectURL: settings.lark_oauth_redirect_url,
@@ -1007,6 +1028,9 @@ function toPayload(
     lark_app_id: form.larkAppID.trim(),
     lark_app_secret: form.larkAppSecret,
     lark_app_secret_configured: form.larkAppSecretConfigured,
+    lark_interactive_cards_enabled: form.larkInteractiveCardsEnabled,
+    lark_card_verification_token: form.larkCardVerificationToken,
+    lark_card_verification_token_configured: form.larkCardVerificationTokenConfigured,
     lark_oauth_enabled: form.larkOAuthEnabled,
     lark_oauth_site: form.larkOAuthSite,
     lark_oauth_redirect_url: form.larkOAuthRedirectURL.trim(),

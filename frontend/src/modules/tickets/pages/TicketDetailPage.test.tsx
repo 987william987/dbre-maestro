@@ -135,7 +135,7 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('Approval Flow')).toBeInTheDocument()
     expect(screen.getByText('reviewer.bob')).toBeInTheDocument()
     expect(screen.getByText('dba.cindy')).toBeInTheDocument()
-    expect(screen.getByText('Waiting for review')).toBeInTheDocument()
+    expect(screen.queryByText('Waiting for review')).not.toBeInTheDocument()
     expect(screen.getByText('Reject')).toBeInTheDocument()
     expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
   })
@@ -167,10 +167,10 @@ describe('TicketDetailPage role visibility', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByText('Waiting for DBA execution')).toBeInTheDocument())
-    expect(screen.getByText('Review completed')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('dba.cindy, dba.edgar')).toBeInTheDocument())
+    expect(screen.queryByText('Review completed')).not.toBeInTheDocument()
     expect(screen.getByText('dba.cindy, dba.edgar')).toBeInTheDocument()
-    expect(screen.getByText('Waiting for DBA execution')).toBeInTheDocument()
+    expect(screen.queryByText('Waiting for DBA execution')).not.toBeInTheDocument()
     expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
     expect(screen.queryByText('Execute')).not.toBeInTheDocument()
   })
@@ -200,7 +200,7 @@ describe('TicketDetailPage role visibility', () => {
 
     await waitFor(() => expect(screen.getByText('Execute')).toBeInTheDocument())
     expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
-    expect(screen.getByText('Reject at Execution Stage')).toBeInTheDocument()
+    expect(screen.getByText('Reject')).toBeInTheDocument()
   })
 
   it('submitter 在 pending_review 狀態可填寫原因並 withdraw', async () => {
@@ -578,7 +578,8 @@ describe('TicketDetailPage role visibility', () => {
     renderPage()
 
     expect(await screen.findByText('Approval Flow')).toBeInTheDocument()
-    expect(screen.getByText('Sensitive access was revoked and the ticket is closed')).toBeInTheDocument()
+    expect(screen.getByText('Approval outcome')).toBeInTheDocument()
+    expect(screen.queryByText('Sensitive access was revoked and the ticket is closed')).not.toBeInTheDocument()
     expect(screen.queryByText('Waiting for approval to complete the request')).not.toBeInTheDocument()
   })
 
@@ -773,7 +774,97 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('analytics_app')).toBeInTheDocument()
     expect(screen.getAllByText('dba.cindy').length).toBeGreaterThan(0)
     expect(screen.getByText('Statement Results')).toBeInTheDocument()
-    expect(screen.getByText('Execute Successfully')).toBeInTheDocument()
+    expect(screen.getAllByText('Completed').length).toBeGreaterThan(0)
     expect(screen.getByText('1.250s')).toBeInTheDocument()
+  })
+
+  it('rejected 工單不把未執行 statement 顯示成 Pending Execution', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      status: 'rejected',
+      rejection_reason: 'reject at execution stage',
+    }, {
+      executions: [
+        {
+          id: 21,
+          ticket_id: 12,
+          seq: 1,
+          sql_stmt: 'CREATE TABLE test_i (id int);',
+          status: 'pending',
+          rows_affected: 0,
+          error_msg: null,
+          started_at: null,
+          completed_at: null,
+        },
+      ],
+    }))
+
+    renderPage()
+
+    expect(await screen.findByText('Statement Results')).toBeInTheDocument()
+    expect(screen.queryByText('Pending Execution')).not.toBeInTheDocument()
+  })
+
+  it('執行階段 reject 的 Approval Flow 會顯示 review completed 且 execution failed', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      ticket_type: 'ddl',
+      status: 'rejected',
+      reviewer_id: 2,
+      reviewer_name: 'reviewer.bob',
+      rejection_reason: 'reject at execution stage',
+    }, {
+      workflow_participants: {
+        reviewers: ['reviewer.bob'],
+        executors: ['dba.cindy'],
+      },
+      activity_logs: [
+        {
+          id: 1,
+          actor_id: 2,
+          actor_name: 'reviewer.bob',
+          action_type: 'ticket_approve',
+          resource_type: 'ticket',
+          resource_id: 12,
+          details: null,
+          ip_address: null,
+          created_at: '2026-06-09T10:01:00Z',
+        },
+        {
+          id: 2,
+          actor_id: 3,
+          actor_name: 'dba.cindy',
+          action_type: 'ticket_reject',
+          resource_type: 'ticket',
+          resource_id: 12,
+          details: { reason: 'reject at execution stage' },
+          ip_address: null,
+          created_at: '2026-06-09T10:02:00Z',
+        },
+      ],
+    }))
+
+    renderPage()
+
+    expect(await screen.findByLabelText('Review: completed')).toBeInTheDocument()
+    expect(screen.getByLabelText('Execution: failed')).toBeInTheDocument()
   })
 })

@@ -314,6 +314,17 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			NotifType:    "ticket_needs_admin_attention",
 			Title:        "工單需要管理員處理",
 			Body:         body,
+			LarkCard: buildLarkTicketCard(
+				r.Context(),
+				h.settings,
+				h.dbConns,
+				h.users,
+				h.appBaseURL,
+				ticket,
+				"工單需要管理員處理",
+				"ticket_needs_admin_attention",
+				exportTicketStateLabel(ticket.Status),
+			),
 		})
 		publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
 		jsonCreated(w, map[string]any{
@@ -391,6 +402,17 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			NotifType:    "ticket_submitted",
 			Title:        fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo),
 			Body:         body,
+			LarkCard: buildLarkTicketCard(
+				r.Context(),
+				h.settings,
+				h.dbConns,
+				h.users,
+				h.appBaseURL,
+				ticket,
+				fmt.Sprintf("匯出工單已建立：%s", ticket.TicketNo),
+				"ticket_submitted",
+				exportTicketStateLabel(ticket.Status),
+			),
 		})
 		h.notifications.SendTicket(r.Context(), ticket, NotificationRoute{
 			RecipientIDs: resolution.ApprovalUserIDs,
@@ -398,6 +420,17 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			NotifType:    "ticket_pending_review",
 			Title:        exportPendingReviewTitle(),
 			Body:         body,
+			LarkCard: buildLarkTicketCard(
+				r.Context(),
+				h.settings,
+				h.dbConns,
+				h.users,
+				h.appBaseURL,
+				ticket,
+				exportPendingReviewTitle(),
+				"ticket_pending_review",
+				exportTicketStateLabel(ticket.Status),
+			),
 		})
 	} else {
 		body := buildTicketNotificationBody(
@@ -414,6 +447,17 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 			NotifType:    "ticket_auto_approved",
 			Title:        fmt.Sprintf("普通匯出已建立：%s", ticket.TicketNo),
 			Body:         body,
+			LarkCard: buildLarkTicketCard(
+				r.Context(),
+				h.settings,
+				h.dbConns,
+				h.users,
+				h.appBaseURL,
+				ticket,
+				fmt.Sprintf("普通匯出已建立：%s", ticket.TicketNo),
+				"ticket_auto_approved",
+				exportTicketStateLabel(ticket.Status),
+			),
 		})
 	}
 	publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)

@@ -4,6 +4,8 @@ type ApiClientConfig = {
   handleAuthFailure: () => void
 }
 
+type TransientFailureHandler = (message: string) => void
+
 type EventStreamMessage = {
   event: string
   data: JsonValue | null
@@ -19,8 +21,12 @@ const defaultConfig: ApiClientConfig = {
 }
 
 let config = defaultConfig
+let transientFailureHandler: TransientFailureHandler | null = null
+let lastTransientFailureNotifiedAt = 0
 
 export const API_PREFIX = '/api'
+const TRANSIENT_FAILURE_MESSAGE = 'Service temporarily unavailable. Please retry shortly.'
+const TRANSIENT_FAILURE_TOAST_INTERVAL_MS = 5000
 
 export function withApiPath(path: string) {
   if (path.startsWith(API_PREFIX)) {
@@ -44,6 +50,31 @@ export class ApiError extends Error {
 
 export function configureApiClient(nextConfig: Partial<ApiClientConfig>) {
   config = { ...defaultConfig, ...nextConfig }
+}
+
+export function configureApiTransientFailureHandler(handler: TransientFailureHandler | null) {
+  transientFailureHandler = handler
+  lastTransientFailureNotifiedAt = 0
+}
+
+function shouldNotifyTransientStatus(status: number) {
+  return status === 502 || status === 503 || status === 504
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
+function notifyTransientFailure() {
+  if (!transientFailureHandler) {
+    return
+  }
+  const now = Date.now()
+  if (now - lastTransientFailureNotifiedAt < TRANSIENT_FAILURE_TOAST_INTERVAL_MS) {
+    return
+  }
+  lastTransientFailureNotifiedAt = now
+  transientFailureHandler(TRANSIENT_FAILURE_MESSAGE)
 }
 
 async function parseResponse<T>(response: Response): Promise<T | undefined> {
@@ -72,11 +103,19 @@ async function request<T>(path: string, init: RequestInit = {}, canRetry = true,
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(apiPath, {
-    ...init,
-    headers,
-    credentials: 'same-origin',
-  })
+  let response: Response
+  try {
+    response = await fetch(apiPath, {
+      ...init,
+      headers,
+      credentials: 'same-origin',
+    })
+  } catch (error) {
+    if (!isAbortError(error)) {
+      notifyTransientFailure()
+    }
+    throw error
+  }
 
   if (response.status === 401 && canRetry) {
     const refreshedToken = await config.refreshAccessToken()
@@ -88,6 +127,9 @@ async function request<T>(path: string, init: RequestInit = {}, canRetry = true,
 
   const data = await parseResponse<JsonValue>(response)
   if (!response.ok) {
+    if (shouldNotifyTransientStatus(response.status)) {
+      notifyTransientFailure()
+    }
     const message =
       typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string'
         ? data.error
@@ -110,28 +152,46 @@ export const apiClient = {
       headers.set('Authorization', `Bearer ${token}`)
     }
 
-    let response = await fetch(apiPath, {
-      method: 'GET',
-      headers,
-      credentials: 'same-origin',
-    })
+    let response: Response
+    try {
+      response = await fetch(apiPath, {
+        method: 'GET',
+        headers,
+        credentials: 'same-origin',
+      })
+    } catch (error) {
+      if (!isAbortError(error)) {
+        notifyTransientFailure()
+      }
+      throw error
+    }
 
     if (response.status === 401) {
       const refreshedToken = await config.refreshAccessToken()
       if (refreshedToken) {
         const retryHeaders = new Headers()
         retryHeaders.set('Authorization', `Bearer ${refreshedToken}`)
-        response = await fetch(apiPath, {
-          method: 'GET',
-          headers: retryHeaders,
-          credentials: 'same-origin',
-        })
+        try {
+          response = await fetch(apiPath, {
+            method: 'GET',
+            headers: retryHeaders,
+            credentials: 'same-origin',
+          })
+        } catch (error) {
+          if (!isAbortError(error)) {
+            notifyTransientFailure()
+          }
+          throw error
+        }
       } else {
         config.handleAuthFailure()
       }
     }
 
     if (!response.ok) {
+      if (shouldNotifyTransientStatus(response.status)) {
+        notifyTransientFailure()
+      }
       const contentType = response.headers.get('content-type') ?? ''
       const data = contentType.includes('application/json')
         ? await response.json() as JsonValue

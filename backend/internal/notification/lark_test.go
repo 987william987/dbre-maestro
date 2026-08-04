@@ -2,6 +2,7 @@ package notification_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -137,5 +138,27 @@ func TestSend5xxThenSuccess(t *testing.T) {
 	}
 	if res.Attempts != 3 {
 		t.Errorf("expected 3 attempts, got %d", res.Attempts)
+	}
+}
+
+func TestBuildCardContentRendersFieldsInCompactBlock(t *testing.T) {
+	content := notification.BuildCardContent(notification.Card{
+		Title: "工單待審批",
+		Fields: []notification.CardField{
+			{Label: "工單號", Value: "TK-1"},
+			{Label: "工單類型", Value: "DDL"},
+			{Label: "目前狀態", Value: "待審核"},
+		},
+	})
+	raw, err := json.Marshal(content)
+	if err != nil {
+		t.Fatalf("marshal card content: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `**工單號：** TK-1\n**工單類型：** DDL\n**目前狀態：** 待審核`) {
+		t.Fatalf("card fields should be rendered in one compact markdown block: %s", text)
+	}
+	if strings.Count(text, `"tag":"div"`) != 1 {
+		t.Fatalf("card fields should use one div, got: %s", text)
 	}
 }

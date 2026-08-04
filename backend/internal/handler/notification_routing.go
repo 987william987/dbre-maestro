@@ -29,6 +29,7 @@ type NotificationRoute struct {
 	ResourceID   uint64
 	ResourceRef  string
 	TicketNo     string
+	LarkCard     *notification.Card
 }
 
 func NewNotificationRouter(notifs *repository.NotificationRepo, audit *repository.AuditRepo, users *repository.UserRepo, broker *realtime.Broker, lark *notification.Dispatcher) *NotificationRouter {
@@ -66,7 +67,7 @@ func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) 
 		larkSkippedReason = "no_recipients"
 	}
 	if r.lark != nil && len(recipients) > 0 {
-		result := r.lark.NotifyUsers(ctx, recipients, notification.Message{Title: route.Title, Body: route.Body, TicketNo: route.TicketNo})
+		result := r.lark.NotifyUsers(ctx, recipients, notification.Message{Title: route.Title, Body: route.Body, TicketNo: route.TicketNo, Card: route.LarkCard})
 		larkAttempts = result.Attempts
 		if result.Err != nil {
 			larkStatus = "failed"

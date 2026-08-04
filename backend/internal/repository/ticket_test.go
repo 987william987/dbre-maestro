@@ -251,6 +251,129 @@ func TestTicketUpdateStatusStoresWithdrawReason(t *testing.T) {
 	}
 }
 
+func TestTicketSetExecutorIfEmptyDoesNotOverwriteExistingExecutor(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET executor_id = COALESCE(executor_id, ?), updated_at = ? WHERE id = ?`)).
+		WithArgs(uint64(7), sqlmock.AnyArg(), uint64(12)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := repo.SetExecutorIfEmpty(context.Background(), 12, 7); err != nil {
+		t.Fatalf("SetExecutorIfEmpty() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
+func TestTicketRecoverExecutingTicketsKeepsPartialManualTicketResumable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+	ticketID := uint64(42)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM tickets WHERE status = ? FOR UPDATE`)).
+		WithArgs(model.TicketStatusExecuting).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(ticketID))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM ticket_executions WHERE ticket_id = ? ORDER BY seq`)).
+		WithArgs(ticketID).
+		WillReturnRows(ticketExecutionRows().
+			AddRow(uint64(101), ticketID, 1, "ALTER TABLE a ADD COLUMN c INT", "completed", int64(0), nil, time.Now(), time.Now(), int64(12), time.Now(), "mysql_thread_id", uint64(123), nil, "completed").
+			AddRow(uint64(102), ticketID, 2, "ALTER TABLE b ADD COLUMN c INT", "pending", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?`)).
+		WithArgs(model.TicketStatusExecuting, sqlmock.AnyArg(), ticketID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	recoveries, err := repo.RecoverExecutingTickets(context.Background())
+	if err != nil {
+		t.Fatalf("RecoverExecutingTickets() error = %v", err)
+	}
+	if len(recoveries) != 1 {
+		t.Fatalf("recoveries len = %d, want 1", len(recoveries))
+	}
+	if recoveries[0].Status != model.TicketStatusExecuting {
+		t.Fatalf("status = %s, want executing", recoveries[0].Status)
+	}
+	if len(recoveries[0].FailedExecutionIDs) != 0 {
+		t.Fatalf("failed execution IDs = %#v, want empty", recoveries[0].FailedExecutionIDs)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
+func TestTicketRecoverExecutingTicketsFailsRunningStatements(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+	ticketID := uint64(43)
+	executionID := uint64(201)
+	sentToDBAt := time.Now()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM tickets WHERE status = ? FOR UPDATE`)).
+		WithArgs(model.TicketStatusExecuting).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(ticketID))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM ticket_executions WHERE ticket_id = ? ORDER BY seq`)).
+		WithArgs(ticketID).
+		WillReturnRows(ticketExecutionRows().
+			AddRow(executionID, ticketID, 1, "ALTER TABLE a ADD COLUMN c INT", "running", nil, nil, time.Now(), nil, nil, sentToDBAt, "postgres_pid", uint64(4567), nil, "sent_to_db"))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE ticket_executions
+					 SET status = 'failed',
+					     error_msg = ?,
+					     completed_at = ?,
+					     duration_ms = NULL,
+					     interruption_reason = ?,
+					     outcome_confidence = ?
+					 WHERE id = ?`)).
+		WithArgs("service restarted during execution; database outcome unknown; last known postgres_pid=4567", sqlmock.AnyArg(), "service_restart", "outcome_unknown", executionID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`)).
+		WithArgs(model.TicketStatusFailed, sqlmock.AnyArg(), sqlmock.AnyArg(), ticketID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	recoveries, err := repo.RecoverExecutingTickets(context.Background())
+	if err != nil {
+		t.Fatalf("RecoverExecutingTickets() error = %v", err)
+	}
+	if len(recoveries) != 1 {
+		t.Fatalf("recoveries len = %d, want 1", len(recoveries))
+	}
+	if recoveries[0].Status != model.TicketStatusFailed {
+		t.Fatalf("status = %s, want failed", recoveries[0].Status)
+	}
+	if len(recoveries[0].FailedExecutionIDs) != 1 || recoveries[0].FailedExecutionIDs[0] != executionID {
+		t.Fatalf("failed execution IDs = %#v, want [%d]", recoveries[0].FailedExecutionIDs, executionID)
+	}
+	if len(recoveries[0].FailedExecutions) != 1 {
+		t.Fatalf("failed execution details = %#v, want one detail", recoveries[0].FailedExecutions)
+	}
+	detail := recoveries[0].FailedExecutions[0]
+	if detail.DBProcessType == nil || *detail.DBProcessType != "postgres_pid" || detail.DBProcessID == nil || *detail.DBProcessID != 4567 {
+		t.Fatalf("failed execution runtime detail = %#v, want postgres pid 4567", detail)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
 func ticketRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id",
@@ -277,5 +400,25 @@ func ticketRows() *sqlmock.Rows {
 		"revoked_by",
 		"created_at",
 		"updated_at",
+	})
+}
+
+func ticketExecutionRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"id",
+		"ticket_id",
+		"seq",
+		"sql_stmt",
+		"status",
+		"rows_affected",
+		"error_msg",
+		"started_at",
+		"completed_at",
+		"duration_ms",
+		"sent_to_db_at",
+		"db_process_type",
+		"db_process_id",
+		"interruption_reason",
+		"outcome_confidence",
 	})
 }

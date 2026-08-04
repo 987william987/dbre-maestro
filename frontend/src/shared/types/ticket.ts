@@ -92,6 +92,11 @@ export type TicketExecution = {
   started_at?: string | null
   completed_at?: string | null
   duration_ms?: number | null
+  sent_to_db_at?: string | null
+  db_process_type?: string | null
+  db_process_id?: number | null
+  interruption_reason?: string | null
+  outcome_confidence?: string | null
 }
 
 export type TicketReviewResult = {
@@ -103,6 +108,13 @@ export type TicketReviewResult = {
   validation_stage?: string | null
   statement_kind?: string | null
   object_type?: string | null
+  tables?: Array<{
+    database_name?: string | null
+    schema_name?: string | null
+    table_name: string
+    row_count?: number | null
+    data_size_bytes?: number | null
+  }>
   validation_method?: string | null
   scan_rows: number
   status: 'pass' | 'error' | string

@@ -112,6 +112,7 @@ type sqlQueryExecutionOptions struct {
 type activeSQLQuery struct {
 	UserID         uint64
 	ConnectionID   uint64
+	TicketID       uint64
 	DBType         string
 	MySQLThreadID  uint64
 	PostgresPID    uint64
@@ -147,7 +148,7 @@ func (r *activeSQLQueryRegistry) register(queryID string, query activeSQLQuery) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pruneLocked(time.Now())
-	if pending, ok := r.pendingCancels[queryID]; ok && pending.UserID == query.UserID {
+	if pending, ok := r.pendingCancels[queryID]; ok && (pending.UserID == 0 || pending.UserID == query.UserID) {
 		delete(r.pendingCancels, queryID)
 		return true
 	}
@@ -180,6 +181,51 @@ func (r *activeSQLQueryRegistry) cancel(queryID string, userID uint64) (activeSQ
 		r.pendingCancels[queryID] = pendingSQLQueryCancel{UserID: userID, CreatedAt: time.Now()}
 	}
 	return activeSQLQuery{}, false
+}
+
+func (r *activeSQLQueryRegistry) cancelAny(queryID string) (activeSQLQuery, bool) {
+	if r == nil || strings.TrimSpace(queryID) == "" {
+		return activeSQLQuery{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(time.Now())
+	query, ok := r.queries[queryID]
+	if ok {
+		delete(r.queries, queryID)
+	}
+	return query, ok
+}
+
+func (r *activeSQLQueryRegistry) cancelAnyOrPending(queryID string) (activeSQLQuery, bool) {
+	if r == nil || strings.TrimSpace(queryID) == "" {
+		return activeSQLQuery{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(time.Now())
+	query, ok := r.queries[queryID]
+	if ok {
+		delete(r.queries, queryID)
+		return query, true
+	}
+	r.pendingCancels[queryID] = pendingSQLQueryCancel{UserID: 0, CreatedAt: time.Now()}
+	return activeSQLQuery{}, false
+}
+
+func (r *activeSQLQueryRegistry) cancelAll() map[string]activeSQLQuery {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(time.Now())
+	queries := make(map[string]activeSQLQuery, len(r.queries))
+	for queryID, query := range r.queries {
+		queries[queryID] = query
+	}
+	r.queries = make(map[string]activeSQLQuery)
+	return queries
 }
 
 func (r *activeSQLQueryRegistry) pruneLocked(now time.Time) {
@@ -656,6 +702,17 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 			NotifType:    "ticket_needs_admin_attention",
 			Title:        "工單需要管理員處理",
 			Body:         body,
+			LarkCard: buildLarkTicketCard(
+				r.Context(),
+				h.settings,
+				h.dbConns,
+				h.users,
+				h.appBaseURL,
+				ticket,
+				"工單需要管理員處理",
+				"ticket_needs_admin_attention",
+				exportTicketStateLabel(ticket.Status),
+			),
 		})
 		publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
 		jsonCreated(w, map[string]any{
@@ -698,6 +755,17 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		NotifType:    "ticket_pending_review",
 		Title:        exportPendingReviewTitle(),
 		Body:         body,
+		LarkCard: buildLarkTicketCard(
+			r.Context(),
+			h.settings,
+			h.dbConns,
+			h.users,
+			h.appBaseURL,
+			ticket,
+			exportPendingReviewTitle(),
+			"ticket_pending_review",
+			exportTicketStateLabel(model.TicketStatusPendingReview),
+		),
 	})
 	publishTicketRealtimeEvent(r.Context(), h.broker, ticket, resolution, &userID)
 

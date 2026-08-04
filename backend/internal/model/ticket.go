@@ -71,16 +71,21 @@ type TicketScope struct {
 }
 
 type TicketExecution struct {
-	ID           uint64     `db:"id"            json:"id"`
-	TicketID     uint64     `db:"ticket_id"     json:"ticket_id"`
-	Seq          int        `db:"seq"           json:"seq"`
-	SQLStmt      string     `db:"sql_stmt"      json:"sql_stmt"`
-	Status       string     `db:"status"        json:"status"`
-	RowsAffected *int64     `db:"rows_affected" json:"rows_affected,omitempty"`
-	ErrorMsg     *string    `db:"error_msg"     json:"error_msg,omitempty"`
-	StartedAt    *time.Time `db:"started_at"    json:"started_at,omitempty"`
-	CompletedAt  *time.Time `db:"completed_at"  json:"completed_at,omitempty"`
-	DurationMs   *int64     `db:"duration_ms"   json:"duration_ms,omitempty"`
+	ID                 uint64     `db:"id"                  json:"id"`
+	TicketID           uint64     `db:"ticket_id"           json:"ticket_id"`
+	Seq                int        `db:"seq"                 json:"seq"`
+	SQLStmt            string     `db:"sql_stmt"            json:"sql_stmt"`
+	Status             string     `db:"status"              json:"status"`
+	RowsAffected       *int64     `db:"rows_affected"       json:"rows_affected,omitempty"`
+	ErrorMsg           *string    `db:"error_msg"           json:"error_msg,omitempty"`
+	StartedAt          *time.Time `db:"started_at"          json:"started_at,omitempty"`
+	CompletedAt        *time.Time `db:"completed_at"        json:"completed_at,omitempty"`
+	DurationMs         *int64     `db:"duration_ms"         json:"duration_ms,omitempty"`
+	SentToDBAt         *time.Time `db:"sent_to_db_at"       json:"sent_to_db_at,omitempty"`
+	DBProcessType      *string    `db:"db_process_type"     json:"db_process_type,omitempty"`
+	DBProcessID        *uint64    `db:"db_process_id"       json:"db_process_id,omitempty"`
+	InterruptionReason *string    `db:"interruption_reason" json:"interruption_reason,omitempty"`
+	OutcomeConfidence  *string    `db:"outcome_confidence"  json:"outcome_confidence,omitempty"`
 }
 
 type TicketReviewResult struct {
