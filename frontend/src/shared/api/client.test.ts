@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apiClient, configureApiClient } from '@/shared/api/client'
+import { apiClient, configureApiClient, configureApiTransientFailureHandler } from '@/shared/api/client'
 
 describe('apiClient', () => {
   afterEach(() => {
@@ -9,6 +9,7 @@ describe('apiClient', () => {
       refreshAccessToken: async () => null,
       handleAuthFailure: () => undefined,
     })
+    configureApiTransientFailureHandler(null)
   })
 
   it('在 401 後 refresh 成功會重試原請求', async () => {
@@ -88,5 +89,69 @@ describe('apiClient', () => {
 
     await expect(apiClient.get('/tickets')).rejects.toThrow()
     expect(handleAuthFailure).toHaveBeenCalledTimes(1)
+  })
+
+  it('遇到 transient server error 時會觸發通用提示', async () => {
+    const handleTransientFailure = vi.fn()
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'bad gateway' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+    configureApiTransientFailureHandler(handleTransientFailure)
+
+    await expect(apiClient.get('/tickets')).rejects.toThrow('bad gateway')
+
+    expect(handleTransientFailure).toHaveBeenCalledTimes(1)
+    expect(handleTransientFailure).toHaveBeenCalledWith('Service temporarily unavailable. Please retry shortly.')
+  })
+
+  it('遇到 network error 時會觸發通用提示', async () => {
+    const handleTransientFailure = vi.fn()
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    configureApiTransientFailureHandler(handleTransientFailure)
+
+    await expect(apiClient.get('/tickets')).rejects.toThrow('Failed to fetch')
+
+    expect(handleTransientFailure).toHaveBeenCalledTimes(1)
+  })
+
+  it('request 被主動 abort 時不顯示暫不可用提示', async () => {
+    const handleTransientFailure = vi.fn()
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError')))
+    configureApiTransientFailureHandler(handleTransientFailure)
+
+    await expect(apiClient.get('/tickets')).rejects.toThrow('The operation was aborted.')
+
+    expect(handleTransientFailure).not.toHaveBeenCalled()
+  })
+
+  it('transient failure toast 會節流避免連續提示', async () => {
+    const handleTransientFailure = vi.fn()
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ error: 'gateway timeout' }), {
+            status: 504,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+      ),
+    )
+    configureApiTransientFailureHandler(handleTransientFailure)
+
+    await expect(apiClient.get('/tickets')).rejects.toThrow('gateway timeout')
+    await expect(apiClient.get('/tickets')).rejects.toThrow('gateway timeout')
+
+    expect(handleTransientFailure).toHaveBeenCalledTimes(1)
   })
 })

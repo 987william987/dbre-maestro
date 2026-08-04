@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/masking"
@@ -2581,6 +2582,15 @@ func ticketExecutionQueryID(executionID uint64) string {
 	return fmt.Sprintf("ticket-execution-%d", executionID)
 }
 
+func ticketExecutionIDFromQueryID(queryID string) (uint64, bool) {
+	value := strings.TrimPrefix(queryID, "ticket-execution-")
+	if value == queryID || value == "" {
+		return 0, false
+	}
+	id, err := strconv.ParseUint(value, 10, 64)
+	return id, err == nil && id != 0
+}
+
 func trimOptionalString(value *string) *string {
 	if value == nil {
 		return nil
@@ -2788,6 +2798,9 @@ func (h *TicketHandler) runTicketStatementExecution(ticket *model.Ticket, execRo
 	if current != nil && current.Status == "stopped" {
 		msg := "manually stopped"
 		result.errMsg = &msg
+	} else if current != nil && current.Status == "failed" {
+		result.errMsg = current.ErrorMsg
+		result.durationMs = current.DurationMs
 	} else {
 		_ = h.tickets.MarkExecutionDone(ctx, execRow.ID, result.rowsAffected, result.durationMs, result.errMsg)
 	}
@@ -2850,6 +2863,7 @@ func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *m
 		return h.execRegisteredTicketStatement(ctx, pinnedConn, execRow, activeSQLQuery{
 			UserID:         executorID,
 			ConnectionID:   resolvedConn.ID,
+			TicketID:       ticket.ID,
 			DBType:         resolvedConn.DBType,
 			PostgresPID:    backendPID,
 			Statement:      execRow.SQLStmt,
@@ -2868,6 +2882,7 @@ func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *m
 	return h.execRegisteredTicketStatement(ctx, pinnedConn, execRow, activeSQLQuery{
 		UserID:         executorID,
 		ConnectionID:   resolvedConn.ID,
+		TicketID:       ticket.ID,
 		DBType:         resolvedConn.DBType,
 		MySQLThreadID:  threadID,
 		Statement:      execRow.SQLStmt,
@@ -2901,6 +2916,65 @@ func (h *TicketHandler) execRegisteredTicketStatement(ctx context.Context, pinne
 		return nil, &durationMs, nil
 	}
 	return &value, &durationMs, nil
+}
+
+func (h *TicketHandler) CancelActiveExecutionsForShutdown(ctx context.Context) int {
+	if h == nil || h.activeExecutions == nil {
+		return 0
+	}
+	queries := h.activeExecutions.cancelAll()
+	if len(queries) == 0 {
+		return 0
+	}
+
+	slog.Info("ticket graceful shutdown cancellation started", "active_executions", len(queries))
+	var wg sync.WaitGroup
+	for queryID, query := range queries {
+		executionID, ok := ticketExecutionIDFromQueryID(queryID)
+		if !ok {
+			continue
+		}
+		wg.Add(1)
+		go func(queryID string, executionID uint64, query activeSQLQuery) {
+			defer wg.Done()
+			if query.Cancel != nil {
+				query.Cancel()
+			}
+			err := cancelActiveSQLQuery(ctx, query)
+			message := "service shutdown during execution; database query cancellation completed"
+			if err != nil {
+				message = "service shutdown during execution; database query cancellation failed; database outcome unknown: " + err.Error()
+				slog.Warn("ticket graceful shutdown query cancellation failed",
+					"query_id", queryID,
+					"ticket_id", query.TicketID,
+					"execution_id", executionID,
+					"connection_id", query.ConnectionID,
+					"err", err,
+					"sql", truncate(query.Statement, 500),
+				)
+			} else {
+				slog.Info("ticket graceful shutdown query cancellation completed",
+					"query_id", queryID,
+					"ticket_id", query.TicketID,
+					"execution_id", executionID,
+					"connection_id", query.ConnectionID,
+					"sql", truncate(query.Statement, 500),
+				)
+			}
+			if h.tickets != nil {
+				_ = h.tickets.MarkExecutionDone(ctx, executionID, nil, nil, &message)
+				if query.TicketID != 0 {
+					h.refreshTicketStatusFromExecutions(ctx, query.TicketID)
+					if h.broker != nil {
+						h.publishTicketUpdateByID(ctx, query.TicketID, nil, nil)
+					}
+				}
+			}
+		}(queryID, executionID, query)
+	}
+	wg.Wait()
+	slog.Info("ticket graceful shutdown cancellation finished", "active_executions", len(queries))
+	return len(queries)
 }
 
 func (h *TicketHandler) refreshTicketStatusFromExecutions(ctx context.Context, ticketID uint64) {

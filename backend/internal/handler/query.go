@@ -112,6 +112,7 @@ type sqlQueryExecutionOptions struct {
 type activeSQLQuery struct {
 	UserID         uint64
 	ConnectionID   uint64
+	TicketID       uint64
 	DBType         string
 	MySQLThreadID  uint64
 	PostgresPID    uint64
@@ -210,6 +211,21 @@ func (r *activeSQLQueryRegistry) cancelAnyOrPending(queryID string) (activeSQLQu
 	}
 	r.pendingCancels[queryID] = pendingSQLQueryCancel{UserID: 0, CreatedAt: time.Now()}
 	return activeSQLQuery{}, false
+}
+
+func (r *activeSQLQueryRegistry) cancelAll() map[string]activeSQLQuery {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(time.Now())
+	queries := make(map[string]activeSQLQuery, len(r.queries))
+	for queryID, query := range r.queries {
+		queries[queryID] = query
+	}
+	r.queries = make(map[string]activeSQLQuery)
+	return queries
 }
 
 func (r *activeSQLQueryRegistry) pruneLocked(now time.Time) {
