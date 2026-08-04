@@ -75,7 +75,11 @@ func isTicketExecutionRequest(method, path string) bool {
 		return false
 	}
 	ticketRef := strings.TrimSuffix(strings.TrimPrefix(path, "/api/tickets/"), "/execute")
-	return ticketRef != "" && !strings.Contains(ticketRef, "/")
+	if ticketRef != "" && !strings.Contains(ticketRef, "/") {
+		return true
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "/api/tickets/"), "/")
+	return len(parts) == 4 && parts[0] != "" && parts[1] == "executions" && parts[2] != "" && parts[3] == "execute"
 }
 
 func isExportDownloadPath(path string) bool {
