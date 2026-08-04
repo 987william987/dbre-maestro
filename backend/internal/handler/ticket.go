@@ -99,16 +99,25 @@ type ticketWorkflowTrace struct {
 }
 
 type ticketReviewItem struct {
-	Seq              int     `json:"seq"`
-	SQLStmt          string  `json:"sql_stmt"`
-	Phase            string  `json:"phase"`
-	ValidationStage  *string `json:"validation_stage,omitempty"`
-	StatementKind    *string `json:"statement_kind,omitempty"`
-	ObjectType       *string `json:"object_type,omitempty"`
-	ValidationMethod *string `json:"validation_method,omitempty"`
-	ScanRows         int64   `json:"scan_rows"`
-	Status           string  `json:"status"`
-	Message          *string `json:"message,omitempty"`
+	Seq              int                         `json:"seq"`
+	SQLStmt          string                      `json:"sql_stmt"`
+	Phase            string                      `json:"phase"`
+	ValidationStage  *string                     `json:"validation_stage,omitempty"`
+	StatementKind    *string                     `json:"statement_kind,omitempty"`
+	ObjectType       *string                     `json:"object_type,omitempty"`
+	Tables           []ticketReviewTableMetadata `json:"tables,omitempty"`
+	ValidationMethod *string                     `json:"validation_method,omitempty"`
+	ScanRows         int64                       `json:"scan_rows"`
+	Status           string                      `json:"status"`
+	Message          *string                     `json:"message,omitempty"`
+}
+
+type ticketReviewTableMetadata struct {
+	DatabaseName  string `json:"database_name,omitempty"`
+	SchemaName    string `json:"schema_name,omitempty"`
+	TableName     string `json:"table_name"`
+	RowCount      *int64 `json:"row_count,omitempty"`
+	DataSizeBytes *int64 `json:"data_size_bytes,omitempty"`
 }
 
 type ticketDatabaseOption struct {

@@ -148,6 +148,38 @@ func (r *DBMetadataRepo) ListObjectSnapshots(ctx context.Context, connectionID u
 	return items, nil
 }
 
+func (r *DBMetadataRepo) FindObjectSnapshot(ctx context.Context, connectionID uint64, databaseName, schemaName, tableName string) (*model.DBObjectSnapshot, error) {
+	var item model.DBObjectSnapshot
+	err := r.db.GetContext(ctx, &item, `SELECT
+		id,
+		snapshot_at,
+		db_connection_id,
+		connection_name_snapshot,
+		engine,
+		cluster_name,
+		node_name,
+		database_name,
+		schema_name,
+		table_name,
+		row_count,
+		data_size_bytes,
+		index_size_bytes
+	FROM db_object_snapshots
+	WHERE db_connection_id = ?
+	  AND database_name = ?
+	  AND schema_name = ?
+	  AND table_name = ?
+	ORDER BY snapshot_at DESC, id DESC
+	LIMIT 1`, connectionID, databaseName, schemaName, tableName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find db_object_snapshot %d %s.%s.%s: %w", connectionID, databaseName, schemaName, tableName, err)
+	}
+	return &item, nil
+}
+
 func (r *DBMetadataRepo) DeleteObjectSnapshotsForConnection(ctx context.Context, connectionID uint64) error {
 	if connectionID == 0 {
 		return nil

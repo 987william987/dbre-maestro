@@ -273,6 +273,111 @@ describe('NewTicketPage', () => {
     expect(screen.getByRole('button', { name: /Collapse SQL statement 1/i })).toBeInTheDocument()
   })
 
+  it('shows concise review summary and keeps detailed checks collapsed by default', async () => {
+    mockedReviewTicketSQL.mockResolvedValueOnce({
+      passed: false,
+      results: [
+        {
+          id: 1,
+          ticket_id: 0,
+          seq: 1,
+          sql_stmt: 'ALTER TABLE orders ADD INDEX idx_status (status)',
+          phase: 'parser',
+          statement_kind: 'alter',
+          object_type: 'table',
+          tables: [{ table_name: 'orders', row_count: 123456, data_size_bytes: 2147483648 }],
+          scan_rows: 0,
+          status: 'pass',
+          message: null,
+        },
+        {
+          id: 2,
+          ticket_id: 0,
+          seq: 1,
+          sql_stmt: 'ALTER TABLE orders ADD INDEX idx_status (status)',
+          phase: 'validation',
+          validation_method: 'shadow_mysql',
+          validation_stage: 'execute',
+          statement_kind: 'alter',
+          object_type: 'table',
+          tables: [{ table_name: 'orders', row_count: 123456, data_size_bytes: 2147483648 }],
+          scan_rows: 0,
+          status: 'error',
+          message: 'table "orders" already exists',
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <NewTicketPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Ticket Info')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/Title/i), { target: { value: 'Add index' } })
+    fireEvent.change(screen.getByLabelText('SQL Content'), { target: { value: 'ALTER TABLE orders ADD INDEX idx_status (status);' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Target Instance' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'orders-primary' }))
+    await waitFor(() => expect(mockedListTicketDatabases).toHaveBeenCalledWith(1))
+    fireEvent.click(screen.getByRole('button', { name: 'SQL Review' }))
+
+    expect(await screen.findByText('Summary')).toBeInTheDocument()
+    expect(screen.getByText('123,456')).toBeInTheDocument()
+    expect(screen.getByText('2.00 GB')).toBeInTheDocument()
+    expect(screen.getByText('error: table "orders" already exists')).toBeInTheDocument()
+    expect(screen.queryByText('Scan Rows')).not.toBeInTheDocument()
+    expect(screen.queryByText('Parser Results')).not.toBeInTheDocument()
+    expect(screen.queryByText('Validation Results')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show detailed checks' }))
+
+    expect(screen.getByText('Parser Results')).toBeInTheDocument()
+    expect(screen.getByText('Validation Results')).toBeInTheDocument()
+  })
+
+  it('shows scan rows in the review summary for DML tickets', async () => {
+    mockedReviewTicketSQL.mockResolvedValueOnce({
+      passed: true,
+      results: [
+        {
+          id: 1,
+          ticket_id: 0,
+          seq: 1,
+          sql_stmt: 'UPDATE orders SET status = "closed" WHERE id = 1',
+          phase: 'validation',
+          statement_kind: 'update',
+          object_type: 'table',
+          tables: [{ table_name: 'orders', row_count: 10, data_size_bytes: 1024 }],
+          validation_method: 'explain_mysql',
+          scan_rows: 42,
+          status: 'pass',
+          message: null,
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <NewTicketPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Ticket Info')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Ticket Type' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'DML' }))
+    fireEvent.change(screen.getByLabelText(/Title/i), { target: { value: 'Update order' } })
+    fireEvent.change(screen.getByLabelText('SQL Content'), { target: { value: 'UPDATE orders SET status = "closed" WHERE id = 1;' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Target Instance' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'orders-primary' }))
+    await waitFor(() => expect(mockedListTicketDatabases).toHaveBeenCalledWith(1))
+    fireEvent.click(screen.getByRole('button', { name: 'SQL Review' }))
+
+    expect(await screen.findByText('Scan Rows')).toBeInTheDocument()
+    expect(screen.getByText('42')).toBeInTheDocument()
+  })
+
   it('submits the selected connection id and database name', async () => {
     render(
       <MemoryRouter>

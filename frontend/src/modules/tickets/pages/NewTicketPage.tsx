@@ -163,8 +163,149 @@ function ReviewResultColumnGroup() {
   )
 }
 
+function ReviewSummaryColumnGroup({ showScanRows }: { showScanRows: boolean }) {
+  return (
+    <colgroup>
+      <col className="w-9" />
+      <col className="w-12" />
+      <col className="w-[360px]" />
+      <col className="w-28" />
+      <col className="w-28" />
+      {showScanRows ? <col className="w-28" /> : null}
+      <col className="w-24" />
+      <col className="w-56" />
+    </colgroup>
+  )
+}
+
+type ReviewSummaryRow = {
+  seq: number
+  sqlStmt: string
+  status: string
+  messages: string[]
+  tables: ReviewSummaryTable[]
+  scanRows: number | null
+}
+
+type ReviewSummaryTable = {
+  key: string
+  label: string
+  rowCount: number | null
+  dataSizeBytes: number | null
+}
+
 function reviewResultKey(section: string, result: TicketReviewResult, index: number) {
   return `${section}-${result.seq}-${index}`
+}
+
+function buildReviewSummaryRows(results: TicketReviewResult[]): ReviewSummaryRow[] {
+  const rows = new Map<number, ReviewSummaryRow>()
+  results.forEach((result) => {
+    const current = rows.get(result.seq)
+    const next: ReviewSummaryRow = current ?? {
+      seq: result.seq,
+      sqlStmt: result.sql_stmt,
+      status: 'pass',
+      messages: [],
+      tables: [],
+      scanRows: null,
+    }
+
+    if (!next.sqlStmt && result.sql_stmt) {
+      next.sqlStmt = result.sql_stmt
+    }
+    if (Array.isArray(result.tables)) {
+      result.tables.forEach((table) => {
+        const label = reviewTableLabel(table)
+        const key = `${table.database_name ?? ''}:${table.schema_name ?? ''}:${table.table_name}`
+        if (next.tables.some((item) => item.key === key)) {
+          return
+        }
+        next.tables.push({
+          key,
+          label,
+          rowCount: typeof table.row_count === 'number' ? table.row_count : null,
+          dataSizeBytes: typeof table.data_size_bytes === 'number' ? table.data_size_bytes : null,
+        })
+      })
+    }
+    if (typeof result.scan_rows === 'number') {
+      next.scanRows = Math.max(next.scanRows ?? 0, result.scan_rows)
+    }
+    if (result.status !== 'pass') {
+      if (result.status === 'error') {
+        next.status = 'error'
+      } else if (next.status !== 'error') {
+        next.status = result.status || 'warn'
+      }
+      if (result.message?.trim()) {
+        next.messages.push(`${result.status || 'warn'}: ${result.message.trim()}`)
+      }
+    }
+    rows.set(result.seq, next)
+  })
+  return Array.from(rows.values()).sort((left, right) => left.seq - right.seq)
+}
+
+function reviewTableLabel(table: { database_name?: string | null; schema_name?: string | null; table_name: string }) {
+  const databaseName = table.database_name?.trim() ?? ''
+  const schemaName = table.schema_name?.trim() ?? ''
+  const tableName = table.table_name.trim()
+  if (schemaName && databaseName && schemaName !== databaseName) {
+    return `${schemaName}.${tableName}`
+  }
+  return tableName
+}
+
+function formatReviewRows(rows: number | null) {
+  if (rows == null || !Number.isFinite(rows)) {
+    return '—'
+  }
+  return Math.round(rows).toLocaleString()
+}
+
+function formatReviewBytes(bytes: number | null) {
+  if (bytes == null || !Number.isFinite(bytes)) {
+    return '—'
+  }
+  if (bytes <= 0) {
+    return '0.00 GB'
+  }
+  const gb = bytes / 1024 / 1024 / 1024
+  return `${gb.toLocaleString(undefined, {
+    minimumFractionDigits: gb < 10 ? 2 : 1,
+    maximumFractionDigits: gb < 10 ? 2 : 1,
+  })} GB`
+}
+
+function formatReviewTableRows(tables: ReviewSummaryTable[]) {
+  if (tables.length === 0) {
+    return '—'
+  }
+  if (tables.length === 1) {
+    return formatReviewRows(tables[0].rowCount)
+  }
+  return tables.map((table) => `${table.label}: ${formatReviewRows(table.rowCount)}`).join('\n')
+}
+
+function formatReviewTableSizes(tables: ReviewSummaryTable[]) {
+  if (tables.length === 0) {
+    return '—'
+  }
+  if (tables.length === 1) {
+    return formatReviewBytes(tables[0].dataSizeBytes)
+  }
+  return tables.map((table) => `${table.label}: ${formatReviewBytes(table.dataSizeBytes)}`).join('\n')
+}
+
+function reviewSummaryStatusClass(status: string) {
+  if (status === 'pass') {
+    return 'bg-emerald-50 text-emerald-700'
+  }
+  if (status === 'warn') {
+    return 'bg-amber-50 text-amber-700'
+  }
+  return 'bg-red-50 text-danger'
 }
 
 function parseQueryAccessDuration(rawValue: string) {
@@ -199,6 +340,7 @@ export function NewTicketPage() {
   const [reviewResults, setReviewResults] = useState<TicketReviewResult[]>([])
   const [reviewPassed, setReviewPassed] = useState(false)
   const [expandedReviewResultSQLs, setExpandedReviewResultSQLs] = useState<Set<string>>(() => new Set())
+  const [showDetailedReviewChecks, setShowDetailedReviewChecks] = useState(false)
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [databases, setDatabases] = useState<string[]>([])
   const [queryAccessDuration, setQueryAccessDuration] = useState(String(24 * 60))
@@ -236,6 +378,8 @@ export function NewTicketPage() {
   const groupedConnectionOptions = useMemo(() => groupConnectionOptions(filteredConnections), [filteredConnections])
   const parserResults = useMemo(() => reviewResults.filter((result) => result.phase === 'parser'), [reviewResults])
   const validationResults = useMemo(() => reviewResults.filter((result) => !result.phase || result.phase === 'validation'), [reviewResults])
+  const reviewSummaryRows = useMemo(() => buildReviewSummaryRows(reviewResults), [reviewResults])
+  const showReviewScanRows = ticketType === 'dml'
   const requiresDatabaseSelection = !isQueryAccessTicket
   const hasValidQueryAccessScope = isQueryAccessTicket && (
     queryAccessRules.length > 0 &&
@@ -284,6 +428,7 @@ export function NewTicketPage() {
   useEffect(() => {
     setReviewResults([])
     setReviewPassed(false)
+    setShowDetailedReviewChecks(false)
     setError('')
   }, [dbConnectionId, databaseName, sqlContent, ticketType])
 
@@ -500,6 +645,7 @@ export function NewTicketPage() {
       setReviewResults(response.results)
       setReviewPassed(response.passed)
       setExpandedReviewResultSQLs(new Set())
+      setShowDetailedReviewChecks(false)
       if (!response.passed) {
         setError('SQL review did not pass. Fix the issues before submitting.')
       }
@@ -507,6 +653,7 @@ export function NewTicketPage() {
       setReviewResults([])
       setReviewPassed(false)
       setExpandedReviewResultSQLs(new Set())
+      setShowDetailedReviewChecks(false)
       setError(reviewError instanceof ApiError ? reviewError.message : 'Failed to review SQL.')
     } finally {
       setReviewing(false)
@@ -872,7 +1019,85 @@ export function NewTicketPage() {
                   </span>
                 </div>
               </div>
-              {parserResults.length > 0 ? (
+              <div className="px-4 py-4">
+                <p className="text-[12px] font-semibold text-ink">Summary</p>
+                <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+                  <DataTable className={`${showReviewScanRows ? 'min-w-[1040px]' : 'min-w-[920px]'} w-full table-fixed`}>
+                    <ReviewSummaryColumnGroup showScanRows={showReviewScanRows} />
+                    <DataTableHead>
+                      <tr>
+                        <DataTableHeaderCell className="pl-2 pr-1" aria-label={`Expand ${ticketType === 'redis_command' ? 'command' : 'SQL'}`} />
+                        <DataTableHeaderCell className="pl-1 pr-2">ID</DataTableHeaderCell>
+                        <DataTableHeaderCell className="pl-1 pr-2">{ticketType === 'redis_command' ? 'Command' : 'SQL'}</DataTableHeaderCell>
+                        <DataTableHeaderCell>Table Rows</DataTableHeaderCell>
+                        <DataTableHeaderCell>Table Size</DataTableHeaderCell>
+                        {showReviewScanRows ? <DataTableHeaderCell>Scan Rows</DataTableHeaderCell> : null}
+                        <DataTableHeaderCell>Result</DataTableHeaderCell>
+                        <DataTableHeaderCell>Message</DataTableHeaderCell>
+                      </tr>
+                    </DataTableHead>
+                    <DataTableBody>
+                      {reviewSummaryRows.map((result) => {
+                        const rowKey = `summary-${result.seq}`
+                        const rowExpanded = expandedReviewResultSQLs.has(rowKey)
+                        const rowExpandable = isExpandableSql(result.sqlStmt)
+                        return (
+                          <DataTableRow key={rowKey}>
+                            <DataTableCell className="pl-2 pr-1 align-top">
+                              {rowExpandable ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setReviewResultSQLExpanded(rowKey, !rowExpanded)}
+                                  className="inline-flex h-6 w-5 shrink-0 items-center justify-center rounded-md text-primary transition hover:bg-panel-soft focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                  aria-expanded={rowExpanded}
+                                  aria-label={`${rowExpanded ? 'Collapse' : 'Show full'} ${ticketType === 'redis_command' ? 'command' : 'SQL'} statement ${result.seq}`}
+                                >
+                                  {rowExpanded ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                                </button>
+                              ) : null}
+                            </DataTableCell>
+                            <DataTableCell className="pl-1 pr-2 align-top">{result.seq}</DataTableCell>
+                            <DataTableCell className="min-w-0 pl-1 pr-2 align-top">
+                              <ExpandableSql
+                                value={result.sqlStmt}
+                                label={ticketType === 'redis_command' ? 'command' : 'SQL'}
+                                expanded={rowExpanded}
+                                onExpandedChange={(expanded) => setReviewResultSQLExpanded(rowKey, expanded)}
+                                showToggle={false}
+                              />
+                            </DataTableCell>
+                            <DataTableCell className="align-top tabular-nums whitespace-pre-line">{formatReviewTableRows(result.tables)}</DataTableCell>
+                            <DataTableCell className="align-top whitespace-pre-line">{formatReviewTableSizes(result.tables)}</DataTableCell>
+                            {showReviewScanRows ? (
+                              <DataTableCell className="align-top tabular-nums">{formatReviewRows(result.scanRows)}</DataTableCell>
+                            ) : null}
+                            <DataTableCell className="align-top">
+                              <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${reviewSummaryStatusClass(result.status)}`}>
+                                {result.status}
+                              </span>
+                            </DataTableCell>
+                            <DataTableCell className="align-top"><ExpandableText value={result.messages.join('\n')} empty="" /></DataTableCell>
+                          </DataTableRow>
+                        )
+                      })}
+                    </DataTableBody>
+                  </DataTable>
+                </div>
+              </div>
+
+              <div className="border-t border-border/80 px-4 py-3">
+                <button
+                  type="button"
+                  onClick={() => setShowDetailedReviewChecks((current) => !current)}
+                  className="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] font-semibold text-primary transition hover:bg-panel-soft"
+                  aria-expanded={showDetailedReviewChecks}
+                >
+                  {showDetailedReviewChecks ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                  {showDetailedReviewChecks ? 'Hide detailed checks' : 'Show detailed checks'}
+                </button>
+              </div>
+
+              {showDetailedReviewChecks && parserResults.length > 0 ? (
                 <div className="px-4 pt-4">
                   <p className="text-[12px] font-semibold text-ink">Parser Results</p>
                   <div className="mt-3 overflow-x-auto rounded-xl border border-border">
@@ -944,7 +1169,7 @@ export function NewTicketPage() {
                 </div>
               ) : null}
 
-              {validationResults.length > 0 ? (
+              {showDetailedReviewChecks && validationResults.length > 0 ? (
                 <div className="px-4 py-4">
                   <p className="text-[12px] font-semibold text-ink">Validation Results</p>
                   <div className="mt-3 overflow-x-auto rounded-xl border border-border">

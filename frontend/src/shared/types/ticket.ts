@@ -108,6 +108,13 @@ export type TicketReviewResult = {
   validation_stage?: string | null
   statement_kind?: string | null
   object_type?: string | null
+  tables?: Array<{
+    database_name?: string | null
+    schema_name?: string | null
+    table_name: string
+    row_count?: number | null
+    data_size_bytes?: number | null
+  }>
   validation_method?: string | null
   scan_rows: number
   status: 'pass' | 'error' | string

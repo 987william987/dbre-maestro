@@ -16,6 +16,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/sqlpolicy"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
 	"github.com/jmoiron/sqlx"
+	pg_query "github.com/pganalyze/pg_query_go/v6"
 	tidbast "github.com/pingcap/tidb/pkg/parser/ast"
 	tidbformat "github.com/pingcap/tidb/pkg/parser/format"
 	"github.com/redis/go-redis/v9"
@@ -60,6 +61,20 @@ type mysqlDDLTableExistenceCheck struct {
 	optional    bool
 }
 
+type reviewTableTarget struct {
+	database string
+	schema   string
+	table    string
+}
+
+type reviewTableMetadata struct {
+	databaseName  string
+	schemaName    string
+	tableName     string
+	rowCount      *int64
+	dataSizeBytes *int64
+}
+
 func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64, sqlContent string, databaseName *string) []ticketReviewItem {
 	return h.runTicketSQLReviewWithType(ctx, dbConnID, model.TicketTypeDDL, sqlContent, databaseName)
 }
@@ -81,10 +96,11 @@ func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID
 	}
 
 	results := buildParserReviewItems(parsedStatements)
+	tableMetadataBySeq := h.loadReviewTableMetadata(ctx, dbConnID, dialect, parsedStatements, nullableStringValue(databaseName))
 
 	if ticketType == model.TicketTypeDDL || ticketType == model.TicketTypeDML {
 		if err := sqlpolicy.CheckTicketStatementKinds(ticketType, parsedStatements); err != nil {
-			return append(results, buildTicketKindReviewItems(parsedStatements, err)...)
+			return applyReviewTableMetadata(append(results, buildTicketKindReviewItems(parsedStatements, err)...), tableMetadataBySeq)
 		}
 	}
 
@@ -111,7 +127,337 @@ func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID
 		results = append(results, h.runMySQLDDLShadowValidation(ctx, dbConnID, parsedStatements, databaseName)...)
 	}
 
-	return results
+	return applyReviewTableMetadata(results, tableMetadataBySeq)
+}
+
+func (h *TicketHandler) loadReviewTableMetadata(ctx context.Context, dbConnID uint64, dialect sqlparse.Dialect, statements []sqlparse.ParsedStatement, selectedDatabase string) map[int][]reviewTableMetadata {
+	if len(statements) == 0 || h.tickets == nil {
+		return nil
+	}
+	repo := repository.NewDBMetadataRepo(h.tickets.DB())
+	items := make(map[int][]reviewTableMetadata)
+	for _, stmt := range statements {
+		for _, target := range reviewTableTargetsForStatement(dialect, stmt, selectedDatabase) {
+			if strings.TrimSpace(target.database) == "" || strings.TrimSpace(target.schema) == "" || strings.TrimSpace(target.table) == "" {
+				continue
+			}
+			metadata := reviewTableMetadata{
+				databaseName: target.database,
+				schemaName:   target.schema,
+				tableName:    target.table,
+			}
+			snapshot, err := repo.FindObjectSnapshot(ctx, dbConnID, target.database, target.schema, target.table)
+			if err != nil {
+				slog.Warn("load sql review table metadata failed",
+					"connection_id", dbConnID,
+					"database", target.database,
+					"schema", target.schema,
+					"table", target.table,
+					"err", err,
+				)
+			} else if snapshot != nil {
+				rowCount := snapshot.RowCount
+				dataSizeBytes := snapshot.DataSizeBytes
+				metadata.tableName = snapshot.TableName
+				metadata.rowCount = &rowCount
+				metadata.dataSizeBytes = &dataSizeBytes
+			}
+			items[stmt.Seq] = append(items[stmt.Seq], metadata)
+		}
+	}
+	return items
+}
+
+func applyReviewTableMetadata(items []ticketReviewItem, metadataBySeq map[int][]reviewTableMetadata) []ticketReviewItem {
+	if len(metadataBySeq) == 0 {
+		return items
+	}
+	for index := range items {
+		metadataItems, ok := metadataBySeq[items[index].Seq]
+		if !ok {
+			continue
+		}
+		items[index].Tables = make([]ticketReviewTableMetadata, 0, len(metadataItems))
+		for _, metadata := range metadataItems {
+			items[index].Tables = append(items[index].Tables, ticketReviewTableMetadata{
+				DatabaseName:  metadata.databaseName,
+				SchemaName:    metadata.schemaName,
+				TableName:     metadata.tableName,
+				RowCount:      metadata.rowCount,
+				DataSizeBytes: metadata.dataSizeBytes,
+			})
+		}
+	}
+	return items
+}
+
+func reviewTableTargetsForStatement(dialect sqlparse.Dialect, stmt sqlparse.ParsedStatement, selectedDatabase string) []reviewTableTarget {
+	var targets []reviewTableTarget
+	switch dialect {
+	case sqlparse.DialectMySQL:
+		targets = mysqlReviewTableTargets(stmt, selectedDatabase)
+	case sqlparse.DialectPostgres:
+		targets = postgresReviewTableTargets(stmt, selectedDatabase)
+	default:
+		return nil
+	}
+	return dedupeReviewTableTargets(targets)
+}
+
+func dedupeReviewTableTargets(targets []reviewTableTarget) []reviewTableTarget {
+	items := make([]reviewTableTarget, 0, len(targets))
+	seen := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		databaseName := strings.TrimSpace(target.database)
+		schemaName := strings.TrimSpace(target.schema)
+		tableName := strings.TrimSpace(target.table)
+		if databaseName == "" || schemaName == "" || tableName == "" {
+			continue
+		}
+		key := strings.ToLower(databaseName + "\x00" + schemaName + "\x00" + tableName)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		items = append(items, reviewTableTarget{database: databaseName, schema: schemaName, table: tableName})
+	}
+	return items
+}
+
+func mysqlReviewTableTargets(stmt sqlparse.ParsedStatement, selectedDatabase string) []reviewTableTarget {
+	tables := make([]*tidbast.TableName, 0, 1)
+	switch node := stmt.AST.(type) {
+	case *tidbast.CreateTableStmt:
+		tables = append(tables, node.Table)
+	case *tidbast.AlterTableStmt:
+		tables = append(tables, node.Table)
+	case *tidbast.DropTableStmt:
+		tables = append(tables, node.Tables...)
+	case *tidbast.TruncateTableStmt:
+		tables = append(tables, node.Table)
+	case *tidbast.RenameTableStmt:
+		for _, pair := range node.TableToTables {
+			if pair != nil {
+				tables = append(tables, pair.OldTable)
+			}
+		}
+	case *tidbast.InsertStmt:
+		tables = append(tables, firstMySQLTableNameFromTableRefs(node.Table))
+	case *tidbast.UpdateStmt:
+		tables = append(tables, mysqlUpdateTargetTables(node)...)
+	case *tidbast.DeleteStmt:
+		tables = append(tables, mysqlDeleteTargetTables(node)...)
+	default:
+		return nil
+	}
+	targets := make([]reviewTableTarget, 0, len(tables))
+	for _, table := range tables {
+		if target := mysqlReviewTargetForTable(table, selectedDatabase); target != nil {
+			targets = append(targets, *target)
+		}
+	}
+	return targets
+}
+
+func mysqlReviewTargetForTable(table *tidbast.TableName, selectedDatabase string) *reviewTableTarget {
+	if table == nil {
+		return nil
+	}
+	databaseName := strings.TrimSpace(table.Schema.O)
+	if databaseName == "" {
+		databaseName = strings.TrimSpace(selectedDatabase)
+	}
+	tableName := strings.TrimSpace(table.Name.O)
+	if databaseName == "" || tableName == "" {
+		return nil
+	}
+	return &reviewTableTarget{database: databaseName, schema: databaseName, table: tableName}
+}
+
+func mysqlUpdateTargetTables(stmt *tidbast.UpdateStmt) []*tidbast.TableName {
+	if stmt == nil {
+		return nil
+	}
+	aliases := mysqlTableAliasMap(stmt.TableRefs)
+	targets := make([]*tidbast.TableName, 0)
+	for _, assignment := range stmt.List {
+		if assignment == nil || assignment.Column == nil || strings.TrimSpace(assignment.Column.Table.O) == "" {
+			continue
+		}
+		targets = append(targets, resolveMySQLTableName(&tidbast.TableName{
+			Schema: tidbast.NewCIStr(assignment.Column.Schema.O),
+			Name:   tidbast.NewCIStr(assignment.Column.Table.O),
+		}, aliases))
+	}
+	if len(targets) > 0 {
+		return targets
+	}
+	return []*tidbast.TableName{firstMySQLTableNameFromTableRefs(stmt.TableRefs)}
+}
+
+func mysqlDeleteTargetTables(stmt *tidbast.DeleteStmt) []*tidbast.TableName {
+	if stmt == nil {
+		return nil
+	}
+	if stmt.Tables != nil && len(stmt.Tables.Tables) > 0 {
+		aliases := mysqlTableAliasMap(stmt.TableRefs)
+		targets := make([]*tidbast.TableName, 0, len(stmt.Tables.Tables))
+		for _, table := range stmt.Tables.Tables {
+			targets = append(targets, resolveMySQLTableName(table, aliases))
+		}
+		return targets
+	}
+	return []*tidbast.TableName{firstMySQLTableNameFromTableRefs(stmt.TableRefs)}
+}
+
+func mysqlTableAliasMap(refs *tidbast.TableRefsClause) map[string]*tidbast.TableName {
+	aliases := make(map[string]*tidbast.TableName)
+	if refs == nil {
+		return aliases
+	}
+	collectMySQLTableAliases(refs.TableRefs, aliases)
+	return aliases
+}
+
+func collectMySQLTableAliases(node tidbast.ResultSetNode, aliases map[string]*tidbast.TableName) {
+	switch typed := node.(type) {
+	case *tidbast.TableName:
+		if strings.TrimSpace(typed.Name.O) != "" {
+			aliases[strings.ToLower(typed.Name.O)] = typed
+		}
+	case *tidbast.TableSource:
+		if table, ok := typed.Source.(*tidbast.TableName); ok {
+			if strings.TrimSpace(table.Name.O) != "" {
+				aliases[strings.ToLower(table.Name.O)] = table
+			}
+			if strings.TrimSpace(typed.AsName.O) != "" {
+				aliases[strings.ToLower(typed.AsName.O)] = table
+			}
+			return
+		}
+		collectMySQLTableAliases(typed.Source, aliases)
+	case *tidbast.Join:
+		collectMySQLTableAliases(typed.Left, aliases)
+		collectMySQLTableAliases(typed.Right, aliases)
+	}
+}
+
+func resolveMySQLTableName(table *tidbast.TableName, aliases map[string]*tidbast.TableName) *tidbast.TableName {
+	if table == nil || strings.TrimSpace(table.Schema.O) != "" {
+		return table
+	}
+	if resolved, ok := aliases[strings.ToLower(table.Name.O)]; ok {
+		return resolved
+	}
+	return table
+}
+
+func firstMySQLTableNameFromTableRefs(refs *tidbast.TableRefsClause) *tidbast.TableName {
+	if refs == nil {
+		return nil
+	}
+	return firstMySQLTableNameFromResultSet(refs.TableRefs)
+}
+
+func firstMySQLTableNameFromResultSet(node tidbast.ResultSetNode) *tidbast.TableName {
+	switch typed := node.(type) {
+	case *tidbast.TableName:
+		return typed
+	case *tidbast.TableSource:
+		return firstMySQLTableNameFromResultSet(typed.Source)
+	case *tidbast.Join:
+		if table := firstMySQLTableNameFromResultSet(typed.Left); table != nil {
+			return table
+		}
+		return firstMySQLTableNameFromResultSet(typed.Right)
+	default:
+		return nil
+	}
+}
+
+func postgresReviewTableTargets(stmt sqlparse.ParsedStatement, selectedDatabase string) []reviewTableTarget {
+	node, ok := stmt.AST.(*pg_query.Node)
+	if !ok || node == nil {
+		return nil
+	}
+	relations := make([]*pg_query.RangeVar, 0, 1)
+	switch {
+	case node.GetInsertStmt() != nil:
+		relations = append(relations, node.GetInsertStmt().Relation)
+	case node.GetUpdateStmt() != nil:
+		relations = append(relations, node.GetUpdateStmt().Relation)
+	case node.GetDeleteStmt() != nil:
+		relations = append(relations, node.GetDeleteStmt().Relation)
+	case node.GetCreateStmt() != nil:
+		relations = append(relations, node.GetCreateStmt().Relation)
+	case node.GetAlterTableStmt() != nil:
+		relations = append(relations, node.GetAlterTableStmt().Relation)
+	case node.GetTruncateStmt() != nil:
+		for _, relation := range node.GetTruncateStmt().Relations {
+			relations = append(relations, relation.GetRangeVar())
+		}
+	case node.GetDropStmt() != nil:
+		relations = append(relations, postgresDropRelations(node.GetDropStmt())...)
+	default:
+		return nil
+	}
+	targets := make([]reviewTableTarget, 0, len(relations))
+	for _, relation := range relations {
+		if target := postgresRangeVarReviewTableTarget(relation, selectedDatabase); target != nil {
+			targets = append(targets, *target)
+		}
+	}
+	return targets
+}
+
+func postgresRangeVarReviewTableTarget(relation *pg_query.RangeVar, selectedDatabase string) *reviewTableTarget {
+	if relation == nil {
+		return nil
+	}
+	databaseName := strings.TrimSpace(relation.Catalogname)
+	if databaseName == "" {
+		databaseName = strings.TrimSpace(selectedDatabase)
+	}
+	schemaName := strings.TrimSpace(relation.Schemaname)
+	if schemaName == "" {
+		schemaName = "public"
+	}
+	tableName := strings.TrimSpace(relation.Relname)
+	if databaseName == "" || tableName == "" {
+		return nil
+	}
+	return &reviewTableTarget{database: databaseName, schema: schemaName, table: tableName}
+}
+
+func postgresDropRelations(stmt *pg_query.DropStmt) []*pg_query.RangeVar {
+	if stmt == nil || len(stmt.Objects) == 0 {
+		return nil
+	}
+	relations := make([]*pg_query.RangeVar, 0, len(stmt.Objects))
+	for _, object := range stmt.Objects {
+		list := object.GetList()
+		if list == nil || len(list.Items) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(list.Items))
+		for _, item := range list.Items {
+			if item.GetString_() != nil {
+				names = append(names, item.GetString_().Sval)
+			}
+		}
+		if len(names) == 0 {
+			continue
+		}
+		relation := &pg_query.RangeVar{Relname: names[len(names)-1]}
+		if len(names) >= 2 {
+			relation.Schemaname = names[len(names)-2]
+		}
+		if len(names) >= 3 {
+			relation.Catalogname = names[len(names)-3]
+		}
+		relations = append(relations, relation)
+	}
+	return relations
 }
 
 func (h *TicketHandler) runRedisCommandTicketReview(sqlContent string, _ int) []ticketReviewItem {

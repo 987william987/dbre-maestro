@@ -59,6 +59,97 @@ func TestRewriteMySQLDDLForShadowSupportsRenameTable(t *testing.T) {
 	}
 }
 
+func TestReviewTableTargetForStatement(t *testing.T) {
+	tests := []struct {
+		name             string
+		dialect          sqlparse.Dialect
+		sql              string
+		selectedDatabase string
+		want             []reviewTableTarget
+	}{
+		{
+			name:             "mysql dml uses selected database as schema",
+			dialect:          sqlparse.DialectMySQL,
+			sql:              "UPDATE orders SET status = 'closed' WHERE id = 1",
+			selectedDatabase: "app",
+			want:             []reviewTableTarget{{database: "app", schema: "app", table: "orders"}},
+		},
+		{
+			name:             "mysql insert select uses insert target only",
+			dialect:          sqlparse.DialectMySQL,
+			sql:              "INSERT INTO a SELECT * FROM b",
+			selectedDatabase: "app",
+			want:             []reviewTableTarget{{database: "app", schema: "app", table: "a"}},
+		},
+		{
+			name:             "mysql create table like uses create target only",
+			dialect:          sqlparse.DialectMySQL,
+			sql:              "CREATE TABLE a LIKE b",
+			selectedDatabase: "app",
+			want:             []reviewTableTarget{{database: "app", schema: "app", table: "a"}},
+		},
+		{
+			name:             "mysql multi table delete returns explicit delete targets",
+			dialect:          sqlparse.DialectMySQL,
+			sql:              "DELETE a, b FROM a JOIN b ON a.id = b.a_id",
+			selectedDatabase: "app",
+			want: []reviewTableTarget{
+				{database: "app", schema: "app", table: "a"},
+				{database: "app", schema: "app", table: "b"},
+			},
+		},
+		{
+			name:             "mysql update alias resolves to base table",
+			dialect:          sqlparse.DialectMySQL,
+			sql:              "UPDATE orders AS o JOIN users AS u ON o.user_id = u.id SET o.status = 'closed'",
+			selectedDatabase: "app",
+			want:             []reviewTableTarget{{database: "app", schema: "app", table: "orders"}},
+		},
+		{
+			name:             "mysql delete alias resolves to base table",
+			dialect:          sqlparse.DialectMySQL,
+			sql:              "DELETE o FROM orders AS o JOIN users AS u ON o.user_id = u.id",
+			selectedDatabase: "app",
+			want:             []reviewTableTarget{{database: "app", schema: "app", table: "orders"}},
+		},
+		{
+			name:             "postgres ddl keeps explicit schema",
+			dialect:          sqlparse.DialectPostgres,
+			sql:              "ALTER TABLE audit.orders ADD COLUMN note text",
+			selectedDatabase: "maestro",
+			want:             []reviewTableTarget{{database: "maestro", schema: "audit", table: "orders"}},
+		},
+		{
+			name:             "postgres drop returns all target tables",
+			dialect:          sqlparse.DialectPostgres,
+			sql:              "DROP TABLE audit.orders, public.events",
+			selectedDatabase: "maestro",
+			want: []reviewTableTarget{
+				{database: "maestro", schema: "audit", table: "orders"},
+				{database: "maestro", schema: "public", table: "events"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, err := sqlparse.ParseSQL(tt.dialect, tt.sql)
+			if err != nil {
+				t.Fatalf("parse SQL: %v", err)
+			}
+			got := reviewTableTargetsForStatement(tt.dialect, parsed.Statements[0], tt.selectedDatabase)
+			if len(got) != len(tt.want) {
+				t.Fatalf("len(targets) = %d, want %d; got = %#v", len(got), len(tt.want), got)
+			}
+			for index := range tt.want {
+				if got[index] != tt.want[index] {
+					t.Fatalf("target[%d] = %#v, want %#v", index, got[index], tt.want[index])
+				}
+			}
+		})
+	}
+}
+
 func TestMySQLDDLShadowCloneTablesUsesStatementScope(t *testing.T) {
 	tests := []struct {
 		name string
