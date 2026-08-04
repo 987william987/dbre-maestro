@@ -390,7 +390,9 @@ function formatActivityDetail(log: AuditLog) {
         ? `Withdraw reason: ${details.reason.trim()}`
         : 'Ticket withdrawn by submitter.'
     case 'ticket_execute_start':
-      return 'Ticket execution started.'
+      return typeof details?.comment === 'string' && details.comment.trim()
+        ? `Execution started. Comment: ${details.comment.trim()}`
+        : 'Ticket execution started.'
     case 'ticket_execute_complete':
       return 'Execution result: completed successfully.'
     case 'ticket_execute_failed':
@@ -1284,7 +1286,7 @@ export function TicketDetailPage() {
                                 value={reason}
                                 onChange={(event) => setReason(event.target.value)}
                                 className="min-h-[96px] rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-                                placeholder="Execution rejection reason (required)"
+                                placeholder="Execution comment or rejection reason"
                                 disabled={acting !== null}
                               />
                             </label>
@@ -1309,7 +1311,7 @@ export function TicketDetailPage() {
                                 className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
-                                Reject at Execution Stage
+                                Reject
                               </button>
                             ) : null}
                           </div>
@@ -1416,7 +1418,7 @@ export function TicketDetailPage() {
           confirmAction === 'withdraw'
             ? 'Withdraw this ticket now? Reviewers will no longer process it.'
             : confirmAction === 'execute'
-              ? 'Trigger execution for this ticket? This will call the backend execute API.'
+              ? 'Execute statements in submission order. Execution stops if any statement fails.'
               : ticket?.ticket_type === 'query_access'
                 ? 'Revoke this query access ticket early? The granted query scope will be invalidated from the next query onwards.'
                 : 'Revoke this sensitive access ticket early? Access will be invalidated from the next query onwards.'
@@ -1436,7 +1438,7 @@ export function TicketDetailPage() {
             void runAction('withdraw', () => withdrawTicket(ticket.ticket_no, comment.trim())).finally(() => setConfirmAction(null))
           }
           if (confirmAction === 'execute') {
-            void runAction('execute', () => executeTicket(ticket.ticket_no)).finally(() => setConfirmAction(null))
+            void runAction('execute', () => executeTicket(ticket.ticket_no, reason)).finally(() => setConfirmAction(null))
           }
           if (confirmAction === 'revoke') {
             void runAction('revoke', () => revokeTicket(ticket.ticket_no)).finally(() => setConfirmAction(null))

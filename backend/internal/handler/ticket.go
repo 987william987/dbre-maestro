@@ -1845,6 +1845,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		Comment *string `json:"comment"`
 	}
 	bindJSON(r, &req)
+	comment := trimOptionalString(req.Comment)
 
 	userID := middleware.UserIDFromCtx(r.Context())
 	allowed, err := h.canRejectTicket(r.Context(), ticket, userID)
@@ -1881,11 +1882,11 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 			value := time.Now().UTC().Add(time.Duration(*ticket.ApprovedDurationMinutes) * time.Minute)
 			expiresAt = &value
 		}
-		ok, err = h.queryAccess.ApproveTicket(r.Context(), id, ticket.Status, userID, req.Comment, ticket.SubmitterID, expiresAt)
+		ok, err = h.queryAccess.ApproveTicket(r.Context(), id, ticket.Status, userID, comment, ticket.SubmitterID, expiresAt)
 	} else {
 		ok, err = h.tickets.UpdateStatus(r.Context(), id,
 			ticket.Status, model.TicketStatusApproved,
-			&userID, req.Comment, nil,
+			&userID, comment, nil,
 		)
 	}
 	if err != nil {
@@ -1898,8 +1899,8 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	auditDetails := h.ticketAuditDetails(r.Context(), ticket, nil)
-	if req.Comment != nil && *req.Comment != "" {
-		auditDetails["comment"] = *req.Comment
+	if comment != nil {
+		auditDetails["comment"] = *comment
 	}
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
@@ -1912,8 +1913,8 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	})
 
 	body := fmt.Sprintf("Ticket %s has been approved", ticket.TicketNo)
-	if req.Comment != nil && *req.Comment != "" {
-		body += " — " + *req.Comment
+	if comment != nil {
+		body += " — " + *comment
 	}
 	if ticket.TicketType == model.TicketTypeSQLExport {
 		if _, err := h.ensureReadyExportRequest(r.Context(), ticket, &userID); err != nil {
@@ -1924,7 +1925,7 @@ func (h *TicketHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	if targetStatus == model.TicketStatusPendingExecution {
 		ok, err = h.tickets.UpdateStatus(r.Context(), id,
 			model.TicketStatusApproved, model.TicketStatusPendingExecution,
-			&userID, req.Comment, nil,
+			&userID, comment, nil,
 		)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "move to pending execution failed")
@@ -2235,7 +2236,7 @@ func (h *TicketHandler) Stop(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /tickets/{id}/execute — T9: OCC protected; runs SQL on target DB
-// Body (optional): { "scheduled_at": "2026-06-11T10:00:00Z" }
+// Body (optional): { "scheduled_at": "2026-06-11T10:00:00Z", "comment": "..." }
 func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	ticket, resolved := h.resolveTicketRef(w, r)
 	if !resolved {
@@ -2249,8 +2250,10 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		ScheduledAt *time.Time `json:"scheduled_at"`
+		Comment     *string    `json:"comment"`
 	}
 	bindJSON(r, &req) // optional body; ignore parse errors
+	comment := trimOptionalString(req.Comment)
 
 	if ticket.Status != model.TicketStatusPendingExecution {
 		jsonErr(w, http.StatusUnprocessableEntity, "ticket is not pending execution")
@@ -2289,7 +2292,7 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 			ActionType:   "ticket_schedule",
 			ResourceType: "ticket",
 			ResourceID:   &id,
-			Details:      map[string]any{"scheduled_at": req.ScheduledAt},
+			Details:      executionAuditDetails(h.ticketAuditDetails(r.Context(), ticket, map[string]any{"scheduled_at": req.ScheduledAt}), comment),
 			IPAddress:    clientIP(r),
 		})
 		updated, _ := h.tickets.GetByID(r.Context(), id)
@@ -2314,6 +2317,7 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		ActionType:   "ticket_execute_start",
 		ResourceType: "ticket",
 		ResourceID:   &id,
+		Details:      executionAuditDetails(h.ticketAuditDetails(r.Context(), ticket, nil), comment),
 		IPAddress:    clientIP(r),
 	})
 
@@ -2466,6 +2470,27 @@ func (h *TicketHandler) runTicketExecutionWithOptions(ticket *model.Ticket, exec
 
 func ticketExecutionQueryID(executionID uint64) string {
 	return fmt.Sprintf("ticket-execution-%d", executionID)
+}
+
+func trimOptionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func executionAuditDetails(details map[string]any, comment *string) map[string]any {
+	if details == nil {
+		details = map[string]any{}
+	}
+	if comment != nil {
+		details["comment"] = *comment
+	}
+	return details
 }
 
 func (h *TicketHandler) ensureTicketExecutionRows(ctx context.Context, ticket *model.Ticket) error {

@@ -164,8 +164,10 @@ export async function withdrawTicket(ticketRef: string | number, reason?: string
   })
 }
 
-export async function executeTicket(ticketRef: string | number) {
-  return apiClient.post<Ticket>(`/tickets/${ticketRef}/execute`)
+export async function executeTicket(ticketRef: string | number, comment?: string) {
+  return apiClient.post<Ticket>(`/tickets/${ticketRef}/execute`, {
+    comment: comment?.trim() ? comment.trim() : null,
+  })
 }
 
 export async function executeTicketStatement(ticketRef: string | number, executionID: number) {

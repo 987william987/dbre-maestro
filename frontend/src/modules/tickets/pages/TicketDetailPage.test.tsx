@@ -200,7 +200,7 @@ describe('TicketDetailPage role visibility', () => {
 
     await waitFor(() => expect(screen.getByText('Execute')).toBeInTheDocument())
     expect(screen.queryByText('Request Execution')).not.toBeInTheDocument()
-    expect(screen.getByText('Reject at Execution Stage')).toBeInTheDocument()
+    expect(screen.getByText('Reject')).toBeInTheDocument()
   })
 
   it('submitter 在 pending_review 狀態可填寫原因並 withdraw', async () => {
