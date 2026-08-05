@@ -457,6 +457,7 @@ type StatementResultRow = {
   executionID: number | null
   seq: number
   sql: string
+  tables: ReviewStatementTable[]
   scanRows: number | null
   reviewStatus: string | null
   reviewMessage: string | null
@@ -471,8 +472,89 @@ type StatementResultRow = {
   outcomeConfidence: string | null
 }
 
+type ReviewStatementTable = {
+  key: string
+  label: string
+  rowCount: number | null
+  dataSizeBytes: number | null
+}
+
 function statementResultKey(row: StatementResultRow) {
   return `${row.seq}:${row.sql}`
+}
+
+function reviewTableLabel(table: { database_name?: string | null; schema_name?: string | null; table_name: string }) {
+  const databaseName = table.database_name?.trim() ?? ''
+  const schemaName = table.schema_name?.trim() ?? ''
+  const tableName = table.table_name.trim()
+  if (schemaName && databaseName && schemaName !== databaseName) {
+    return `${schemaName}.${tableName}`
+  }
+  return tableName
+}
+
+function mergeReviewTables(
+  current: ReviewStatementTable[] | undefined,
+  tables: Array<{ database_name?: string | null; schema_name?: string | null; table_name: string; row_count?: number | null; data_size_bytes?: number | null }> | undefined,
+) {
+  const next = [...(current ?? [])]
+  if (!Array.isArray(tables)) {
+    return next
+  }
+  tables.forEach((table) => {
+    const key = `${table.database_name ?? ''}:${table.schema_name ?? ''}:${table.table_name}`
+    if (next.some((item) => item.key === key)) {
+      return
+    }
+    next.push({
+      key,
+      label: reviewTableLabel(table),
+      rowCount: typeof table.row_count === 'number' ? table.row_count : null,
+      dataSizeBytes: typeof table.data_size_bytes === 'number' ? table.data_size_bytes : null,
+    })
+  })
+  return next
+}
+
+function formatReviewRows(rows: number | null) {
+  if (rows == null || !Number.isFinite(rows)) {
+    return '—'
+  }
+  return Math.round(rows).toLocaleString()
+}
+
+function formatReviewBytes(bytes: number | null) {
+  if (bytes == null || !Number.isFinite(bytes)) {
+    return '—'
+  }
+  if (bytes <= 0) {
+    return '0.00 GB'
+  }
+  const gb = bytes / 1024 / 1024 / 1024
+  return `${gb.toLocaleString(undefined, {
+    minimumFractionDigits: gb < 10 ? 2 : 1,
+    maximumFractionDigits: gb < 10 ? 2 : 1,
+  })} GB`
+}
+
+function formatReviewTableRows(tables: ReviewStatementTable[]) {
+  if (tables.length === 0) {
+    return '—'
+  }
+  if (tables.length === 1) {
+    return formatReviewRows(tables[0].rowCount)
+  }
+  return tables.map((table) => `${table.label}: ${formatReviewRows(table.rowCount)}`).join('\n')
+}
+
+function formatReviewTableSizes(tables: ReviewStatementTable[]) {
+  if (tables.length === 0) {
+    return '—'
+  }
+  if (tables.length === 1) {
+    return formatReviewBytes(tables[0].dataSizeBytes)
+  }
+  return tables.map((table) => `${table.label}: ${formatReviewBytes(table.dataSizeBytes)}`).join('\n')
 }
 
 function buildStatementResults(detail: TicketDetail) {
@@ -491,6 +573,7 @@ function buildStatementResults(detail: TicketDetail) {
       executionID: existing?.executionID ?? null,
       seq: result.seq,
       sql: result.sql_stmt,
+      tables: mergeReviewTables(existing?.tables, result.tables),
       scanRows: Math.max(existing?.scanRows ?? 0, result.scan_rows),
       reviewStatus: existing?.reviewStatus === 'error' || result.status === 'error' ? 'error' : result.status,
       reviewMessage: nextMessage || null,
@@ -512,6 +595,7 @@ function buildStatementResults(detail: TicketDetail) {
       executionID: execution.id,
       seq: execution.seq,
       sql: existing?.sql || execution.sql_stmt,
+      tables: existing?.tables ?? [],
       scanRows: existing?.scanRows ?? null,
       reviewStatus: existing?.reviewStatus ?? null,
       reviewMessage: existing?.reviewMessage ?? null,
@@ -868,6 +952,9 @@ export function TicketDetailPage() {
   }))
   const showReviewMessageColumn = displayStatementResults.some((row) => Boolean(row.reviewMessage?.trim()))
   const showErrorMessageColumn = displayStatementResults.some((row) => Boolean(row.errorMessage?.trim()))
+  const showStatementTableMetadata = ticket?.ticket_type === 'ddl' || ticket?.ticket_type === 'dml'
+  const showStatementScanRows = ticket?.ticket_type === 'dml'
+  const showStatementRowsAffected = ticket?.ticket_type !== 'ddl'
   const executionRuntimeRows = displayStatementResults.filter((row) => (
     row.executionID != null ||
     row.sentToDBAt ||
@@ -1144,10 +1231,12 @@ export function TicketDetailPage() {
                       <col className="w-[28px]" />
                       <col className="w-[36px]" />
                       <col className="w-auto" />
-                      <col className="w-[160px]" />
+                      {showStatementTableMetadata ? <col className="w-[150px]" /> : null}
+                      {showStatementTableMetadata ? <col className="w-[150px]" /> : null}
+                      {showStatementScanRows ? <col className="w-[140px]" /> : null}
                       <col className="w-[140px]" />
                       {showReviewMessageColumn ? <col className="w-[180px]" /> : null}
-                      <col className="w-[150px]" />
+                      {showStatementRowsAffected ? <col className="w-[150px]" /> : null}
                       <col className="w-[150px]" />
                       <col className="w-[90px]" />
                       {showErrorMessageColumn ? <col className="w-[220px]" /> : null}
@@ -1158,10 +1247,12 @@ export function TicketDetailPage() {
                         <DataTableHeaderCell className="pl-2 pr-1" aria-label="Expand SQL" />
                         <DataTableHeaderCell className="pl-1 pr-2">ID</DataTableHeaderCell>
                         <DataTableHeaderCell className="pl-1 pr-2">SQL</DataTableHeaderCell>
-                        <DataTableHeaderCell>Scan Rows</DataTableHeaderCell>
+                        {showStatementTableMetadata ? <DataTableHeaderCell>Table Rows</DataTableHeaderCell> : null}
+                        {showStatementTableMetadata ? <DataTableHeaderCell>Table Size</DataTableHeaderCell> : null}
+                        {showStatementScanRows ? <DataTableHeaderCell>Scan Rows</DataTableHeaderCell> : null}
                         <DataTableHeaderCell>Review Status</DataTableHeaderCell>
                         {showReviewMessageColumn ? <DataTableHeaderCell>Review Message</DataTableHeaderCell> : null}
-                        <DataTableHeaderCell>Rows Affected</DataTableHeaderCell>
+                        {showStatementRowsAffected ? <DataTableHeaderCell>Rows Affected</DataTableHeaderCell> : null}
                         <DataTableHeaderCell>Execution Status</DataTableHeaderCell>
                         <DataTableHeaderCell>Duration</DataTableHeaderCell>
                         {showErrorMessageColumn ? <DataTableHeaderCell>Error Message</DataTableHeaderCell> : null}
@@ -1211,12 +1302,22 @@ export function TicketDetailPage() {
                                 />
                               </div>
                             </DataTableCell>
-                            <DataTableCell className="break-words align-middle leading-6">{row.scanRows ?? '—'}</DataTableCell>
+                            {showStatementTableMetadata ? (
+                              <DataTableCell className="break-words whitespace-pre-line align-middle leading-6 tabular-nums">{formatReviewTableRows(row.tables)}</DataTableCell>
+                            ) : null}
+                            {showStatementTableMetadata ? (
+                              <DataTableCell className="break-words whitespace-pre-line align-middle leading-6">{formatReviewTableSizes(row.tables)}</DataTableCell>
+                            ) : null}
+                            {showStatementScanRows ? (
+                              <DataTableCell className="break-words align-middle leading-6">{formatReviewRows(row.scanRows)}</DataTableCell>
+                            ) : null}
                             <DataTableCell className="break-words align-middle leading-6">{row.reviewStatus ?? '—'}</DataTableCell>
                             {showReviewMessageColumn ? (
                               <DataTableCell className="break-words align-middle leading-6 text-muted">{row.reviewMessage || '—'}</DataTableCell>
                             ) : null}
-                            <DataTableCell className="break-words align-middle leading-6">{row.rowsAffected ?? '—'}</DataTableCell>
+                            {showStatementRowsAffected ? (
+                              <DataTableCell className="break-words align-middle leading-6">{row.rowsAffected ?? '—'}</DataTableCell>
+                            ) : null}
                             <DataTableCell className="break-words align-middle leading-6"><StatementExecutionBadge status={row.executionStatus} /></DataTableCell>
                             <DataTableCell className="break-words align-middle leading-6">{row.duration ?? '—'}</DataTableCell>
                             {showErrorMessageColumn ? (

@@ -931,6 +931,16 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if len(reviewResults) > 0 {
 		persistedResults := make([]model.TicketReviewResult, 0, len(reviewResults))
 		for _, result := range reviewResults {
+			tables := make(model.TicketReviewTables, 0, len(result.Tables))
+			for _, table := range result.Tables {
+				tables = append(tables, model.TicketReviewTable{
+					DatabaseName:  table.DatabaseName,
+					SchemaName:    table.SchemaName,
+					TableName:     table.TableName,
+					RowCount:      table.RowCount,
+					DataSizeBytes: table.DataSizeBytes,
+				})
+			}
 			persistedResults = append(persistedResults, model.TicketReviewResult{
 				TicketID:         created.ID,
 				Seq:              result.Seq,
@@ -939,6 +949,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 				ValidationStage:  result.ValidationStage,
 				StatementKind:    result.StatementKind,
 				ObjectType:       result.ObjectType,
+				Tables:           tables,
 				ValidationMethod: result.ValidationMethod,
 				ScanRows:         result.ScanRows,
 				Status:           result.Status,

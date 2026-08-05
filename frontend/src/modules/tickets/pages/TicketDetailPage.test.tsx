@@ -682,6 +682,47 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('pass')).toBeInTheDocument()
   })
 
+  it('DDL 工單詳情顯示表行數與大小且隱藏 Scan Rows', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      ticket_type: 'ddl',
+      sql_content: 'ALTER TABLE orders ADD COLUMN note VARCHAR(255);',
+    }, {
+      review_results: [
+        {
+          id: 1,
+          ticket_id: 12,
+          seq: 1,
+          sql_stmt: 'ALTER TABLE orders ADD COLUMN note VARCHAR(255);',
+          phase: 'validation',
+          tables: [{ table_name: 'orders', row_count: 123456, data_size_bytes: 2147483648 }],
+          scan_rows: 0,
+          status: 'pass',
+          message: null,
+        },
+      ],
+    }))
+
+    renderPage()
+
+    expect(await screen.findByText('Statement Results')).toBeInTheDocument()
+    expect(screen.getByText('Table Rows')).toBeInTheDocument()
+    expect(screen.getByText('Table Size')).toBeInTheDocument()
+    expect(screen.getByText('123,456')).toBeInTheDocument()
+    expect(screen.getByText('2.00 GB')).toBeInTheDocument()
+    expect(screen.queryByText('Scan Rows')).not.toBeInTheDocument()
+    expect(screen.queryByText('Rows Affected')).not.toBeInTheDocument()
+  })
+
   it('可一次展開與收合所有長 SQL，且逐列 SQL 仍可獨立控制', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',

@@ -876,8 +876,8 @@ func (r *TicketRepo) ReplaceReviewResults(ctx context.Context, ticketID uint64, 
 	for _, result := range results {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO ticket_review_results
-			 (ticket_id, seq, sql_stmt, phase, validation_stage, statement_kind, object_type, validation_method, scan_rows, status, message, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 (ticket_id, seq, sql_stmt, phase, validation_stage, statement_kind, object_type, tables_json, validation_method, scan_rows, status, message, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			ticketID,
 			result.Seq,
 			result.SQLStmt,
@@ -885,6 +885,7 @@ func (r *TicketRepo) ReplaceReviewResults(ctx context.Context, ticketID uint64, 
 			result.ValidationStage,
 			result.StatementKind,
 			result.ObjectType,
+			result.Tables,
 			result.ValidationMethod,
 			result.ScanRows,
 			result.Status,
@@ -905,7 +906,7 @@ func (r *TicketRepo) ReplaceReviewResults(ctx context.Context, ticketID uint64, 
 func (r *TicketRepo) ListReviewResults(ctx context.Context, ticketID uint64) ([]model.TicketReviewResult, error) {
 	results := []model.TicketReviewResult{}
 	if err := r.db.SelectContext(ctx, &results,
-		`SELECT id, ticket_id, seq, sql_stmt, phase, validation_stage, statement_kind, object_type, validation_method, scan_rows, status, message, created_at
+		`SELECT id, ticket_id, seq, sql_stmt, phase, validation_stage, statement_kind, object_type, tables_json, validation_method, scan_rows, status, message, created_at
 		 FROM ticket_review_results
 		 WHERE ticket_id = ?
 		 ORDER BY seq ASC, id ASC`,
