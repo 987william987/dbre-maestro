@@ -1,6 +1,11 @@
 package model
 
-import "time"
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 type TicketStatus string
 
@@ -89,19 +94,65 @@ type TicketExecution struct {
 }
 
 type TicketReviewResult struct {
-	ID               uint64    `db:"id"                json:"id"`
-	TicketID         uint64    `db:"ticket_id"         json:"ticket_id"`
-	Seq              int       `db:"seq"               json:"seq"`
-	SQLStmt          string    `db:"sql_stmt"          json:"sql_stmt"`
-	Phase            string    `db:"phase"             json:"phase"`
-	ValidationStage  *string   `db:"validation_stage"  json:"validation_stage,omitempty"`
-	StatementKind    *string   `db:"statement_kind"    json:"statement_kind,omitempty"`
-	ObjectType       *string   `db:"object_type"       json:"object_type,omitempty"`
-	ValidationMethod *string   `db:"validation_method" json:"validation_method,omitempty"`
-	ScanRows         int64     `db:"scan_rows"         json:"scan_rows"`
-	Status           string    `db:"status"            json:"status"`
-	Message          *string   `db:"message"           json:"message,omitempty"`
-	CreatedAt        time.Time `db:"created_at"        json:"created_at"`
+	ID               uint64             `db:"id"                json:"id"`
+	TicketID         uint64             `db:"ticket_id"         json:"ticket_id"`
+	Seq              int                `db:"seq"               json:"seq"`
+	SQLStmt          string             `db:"sql_stmt"          json:"sql_stmt"`
+	Phase            string             `db:"phase"             json:"phase"`
+	ValidationStage  *string            `db:"validation_stage"  json:"validation_stage,omitempty"`
+	StatementKind    *string            `db:"statement_kind"    json:"statement_kind,omitempty"`
+	ObjectType       *string            `db:"object_type"       json:"object_type,omitempty"`
+	Tables           TicketReviewTables `db:"tables_json"      json:"tables,omitempty"`
+	ValidationMethod *string            `db:"validation_method" json:"validation_method,omitempty"`
+	ScanRows         int64              `db:"scan_rows"         json:"scan_rows"`
+	Status           string             `db:"status"            json:"status"`
+	Message          *string            `db:"message"           json:"message,omitempty"`
+	CreatedAt        time.Time          `db:"created_at"        json:"created_at"`
+}
+
+type TicketReviewTable struct {
+	DatabaseName  string `json:"database_name,omitempty"`
+	SchemaName    string `json:"schema_name,omitempty"`
+	TableName     string `json:"table_name"`
+	RowCount      *int64 `json:"row_count,omitempty"`
+	DataSizeBytes *int64 `json:"data_size_bytes,omitempty"`
+}
+
+type TicketReviewTables []TicketReviewTable
+
+func (tables TicketReviewTables) Value() (driver.Value, error) {
+	if len(tables) == 0 {
+		return nil, nil
+	}
+	data, err := json.Marshal(tables)
+	if err != nil {
+		return nil, err
+	}
+	return string(data), nil
+}
+
+func (tables *TicketReviewTables) Scan(value any) error {
+	if tables == nil {
+		return nil
+	}
+	if value == nil {
+		*tables = nil
+		return nil
+	}
+	var data []byte
+	switch typed := value.(type) {
+	case []byte:
+		data = typed
+	case string:
+		data = []byte(typed)
+	default:
+		return fmt.Errorf("scan ticket review tables: unsupported type %T", value)
+	}
+	if len(data) == 0 {
+		*tables = nil
+		return nil
+	}
+	return json.Unmarshal(data, tables)
 }
 
 type TicketWorkflowSnapshot struct {

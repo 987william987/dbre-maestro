@@ -19,6 +19,7 @@ type SettingsForm = {
   larkAppSecret: string
   larkAppSecretConfigured: boolean
   larkInteractiveCardsEnabled: boolean
+  larkCardCallbackMode: 'http' | 'long_connection'
   larkCardVerificationToken: string
   larkCardVerificationTokenConfigured: boolean
   larkOAuthEnabled: boolean
@@ -261,13 +262,32 @@ export function SettingsPage() {
                 />
                 Enable interactive ticket cards
               </label>
-              <Field
-                label={`Card Verification Token${form.larkCardVerificationTokenConfigured ? ' (Configured)' : ''}`}
-                value={form.larkCardVerificationToken}
-                onChange={(value) => setForm((current) => current ? { ...current, larkCardVerificationToken: value } : current)}
-                placeholder={form.larkCardVerificationTokenConfigured ? 'Leave blank to keep existing token' : 'Enter Lark card callback token'}
-                type="password"
-              />
+              <label className="grid gap-1.5">
+                <span className="text-[12px] font-semibold text-muted">Card Callback Mode</span>
+                <DropdownSelect
+                  ariaLabel="Lark card callback mode"
+                  value={form.larkCardCallbackMode}
+                  onChange={(value) => setForm((current) => current ? { ...current, larkCardCallbackMode: value === 'long_connection' ? 'long_connection' : 'http' } : current)}
+                  options={[
+                    { value: 'long_connection', label: 'Long connection' },
+                    { value: 'http', label: 'HTTP callback' },
+                  ]}
+                />
+                <span className="text-[12px] leading-5 text-muted">
+                  {form.larkCardCallbackMode === 'long_connection'
+                    ? 'Use Lark long connection. No public callback URL or encrypt key is required.'
+                    : 'Use the public /api/lark/cards/callback endpoint. Verification token is required.'}
+                </span>
+              </label>
+              {form.larkCardCallbackMode === 'http' ? (
+                <Field
+                  label={`Card Verification Token${form.larkCardVerificationTokenConfigured ? ' (Configured)' : ''}`}
+                  value={form.larkCardVerificationToken}
+                  onChange={(value) => setForm((current) => current ? { ...current, larkCardVerificationToken: value } : current)}
+                  placeholder={form.larkCardVerificationTokenConfigured ? 'Leave blank to keep existing token' : 'Enter Lark card callback token'}
+                  type="password"
+                />
+              ) : null}
               <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
                 <Switch
                   ariaLabel="Enable Lark OAuth login"
@@ -979,6 +999,7 @@ function toForm(settings: PlatformSettings): SettingsForm {
     larkAppSecret: '',
     larkAppSecretConfigured: settings.lark_app_secret_configured,
     larkInteractiveCardsEnabled: settings.lark_interactive_cards_enabled,
+    larkCardCallbackMode: settings.lark_card_callback_mode === 'long_connection' ? 'long_connection' : 'http',
     larkCardVerificationToken: '',
     larkCardVerificationTokenConfigured: settings.lark_card_verification_token_configured,
     larkOAuthEnabled: settings.lark_oauth_enabled,
@@ -1029,6 +1050,7 @@ function toPayload(
     lark_app_secret: form.larkAppSecret,
     lark_app_secret_configured: form.larkAppSecretConfigured,
     lark_interactive_cards_enabled: form.larkInteractiveCardsEnabled,
+    lark_card_callback_mode: form.larkCardCallbackMode,
     lark_card_verification_token: form.larkCardVerificationToken,
     lark_card_verification_token_configured: form.larkCardVerificationTokenConfigured,
     lark_oauth_enabled: form.larkOAuthEnabled,

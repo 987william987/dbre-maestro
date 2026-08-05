@@ -225,6 +225,72 @@ func TestTicketGetByTicketNo(t *testing.T) {
 	}
 }
 
+func TestActiveTicketsBySubmitterExcludesApproved(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+	submitterID := uint64(9)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM tickets WHERE submitter_id = ? AND status IN (?, ?, ?, ?) ORDER BY updated_at DESC LIMIT ?`)).
+		WithArgs(
+			submitterID,
+			model.TicketStatusPendingReview,
+			model.TicketStatusPendingExecution,
+			model.TicketStatusExecuting,
+			model.TicketStatusNeedsAdminAttention,
+			6,
+		).
+		WillReturnRows(ticketRows())
+
+	tickets, err := repo.ActiveTicketsBySubmitter(context.Background(), submitterID, 6)
+	if err != nil {
+		t.Fatalf("ActiveTicketsBySubmitter() error = %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets = %#v, want none", tickets)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
+func TestRecentTicketsBySubmitterPrioritizesOpenWorkflowStatuses(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+	submitterID := uint64(9)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM tickets WHERE submitter_id = ? ORDER BY CASE WHEN status IN (?, ?, ?, ?) THEN 0 ELSE 1 END, updated_at DESC LIMIT ?`)).
+		WithArgs(
+			submitterID,
+			model.TicketStatusPendingReview,
+			model.TicketStatusPendingExecution,
+			model.TicketStatusExecuting,
+			model.TicketStatusNeedsAdminAttention,
+			6,
+		).
+		WillReturnRows(ticketRows())
+
+	tickets, err := repo.RecentTicketsBySubmitter(context.Background(), submitterID, 6)
+	if err != nil {
+		t.Fatalf("RecentTicketsBySubmitter() error = %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets = %#v, want none", tickets)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
 func TestTicketUpdateStatusStoresWithdrawReason(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -368,6 +434,49 @@ func TestTicketRecoverExecutingTicketsFailsRunningStatements(t *testing.T) {
 	detail := recoveries[0].FailedExecutions[0]
 	if detail.DBProcessType == nil || *detail.DBProcessType != "postgres_pid" || detail.DBProcessID == nil || *detail.DBProcessID != 4567 {
 		t.Fatalf("failed execution runtime detail = %#v, want postgres pid 4567", detail)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
+func TestPlatformExecutionRiskStatsScansSnakeCaseColumns(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+	mock.ExpectQuery(`(?s)SELECT.*recent_failed.*FROM ticket_executions.*WHERE completed_at >= \?`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"recent_failed",
+			"manually_stopped",
+			"service_shutdown",
+			"outcome_unknown",
+			"not_sent",
+			"db_explicit_error",
+		}).AddRow(6, 1, 2, 3, 4, 5))
+	mock.ExpectQuery(`(?s)SELECT.*outcome_confidence.*FROM ticket_executions.*GROUP BY`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"key_name", "count"}).AddRow("outcome_unknown", 3))
+	mock.ExpectQuery(`(?s)SELECT.*interruption_reason.*FROM ticket_executions.*GROUP BY`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"key_name", "count"}).AddRow("service_shutdown", 2))
+
+	stats, err := repo.PlatformExecutionRiskStats(context.Background())
+	if err != nil {
+		t.Fatalf("PlatformExecutionRiskStats() error = %v", err)
+	}
+	if stats.RecentFailed != 6 || stats.ManuallyStopped != 1 || stats.ServiceShutdown != 2 || stats.OutcomeUnknown != 3 || stats.NotSent != 4 || stats.DBExplicitError != 5 {
+		t.Fatalf("stats = %#v, want snake_case columns scanned into execution risk fields", stats)
+	}
+	if len(stats.ByOutcome) != 1 || stats.ByOutcome[0].Key != "outcome_unknown" {
+		t.Fatalf("ByOutcome = %#v, want outcome_unknown", stats.ByOutcome)
+	}
+	if len(stats.ByInterruption) != 1 || stats.ByInterruption[0].Key != "service_shutdown" {
+		t.Fatalf("ByInterruption = %#v, want service_shutdown", stats.ByInterruption)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("mock expectations not met: %v", err)

@@ -299,7 +299,7 @@ func main() {
 	healthH := handler.NewHealthHandler(metaDB)
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret, cfg.RefreshCookieSecure, cfg.MFAEnforcement, mfaChallengeRepo, larkLoginRepo, ssoLoginRepo, cfg.LarkOAuth, cfg.OIDCSSO, settingsRepo, notifRepo, eventBroker, larkDispatcher)
 	frontendReloadH := handler.NewFrontendReloadHandler()
-	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL, handler.WithTicketHandlerAppEnv(cfg.AppEnv))
+	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL, handler.WithTicketHandlerAppEnv(cfg.AppEnv), handler.WithTicketHandlerDBMetadata(dbMetadataRepo))
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo, handler.WithDBConnectionHandlerHostPolicy(dbConnectionHostPolicy))
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL, cfg.JWTSecret)
 	auditH := handler.NewAuditHandler(auditRepo)
@@ -314,7 +314,19 @@ func main() {
 	notifH := handler.NewNotificationHandler(notifRepo, ticketRepo)
 	eventStreamH := handler.NewEventStreamHandler(eventBroker)
 	whitelistH := handler.NewMaskingWhitelistHandler(dbConnRepo, whitelistRepo, auditRepo)
-	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, authGroupRepo, dbConnRepo, auditRepo, handler.WithSettingsHandlerAppEnv(cfg.AppEnv))
+	larkCardCallbackManager := handler.NewLarkCardCallbackManager(settingsRepo, ticketH)
+	if err := larkCardCallbackManager.Reload(context.Background()); err != nil {
+		slog.Warn("lark card callback manager startup reload failed", "err", err)
+	}
+	settingsH := handler.NewSettingsHandler(
+		settingsRepo,
+		userRepo,
+		authGroupRepo,
+		dbConnRepo,
+		auditRepo,
+		handler.WithSettingsHandlerAppEnv(cfg.AppEnv),
+		handler.WithSettingsHandlerLarkCallbackReloader(larkCardCallbackManager),
+	)
 	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo, settingsRepo)
 	scheduledReportH := handler.NewScheduledSQLReportHandler(scheduledReportRepo, dbConnRepo, userRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, ticketRepo, maskingEngine, auditRepo, larkDispatcher)
 	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
@@ -341,6 +353,11 @@ func main() {
 		r.Get("/setup/status", authH.SetupStatus)
 		r.Post("/setup", authH.Setup)
 		r.Post("/lark/cards/callback", ticketH.LarkCardCallback)
+		r.With(
+			middleware.RequireAuth(cfg.JWTSecret),
+			middleware.RequireActiveUser(userRepo),
+			middleware.InjectPermissions(userRepo),
+		).Get("/dashboard", ticketH.Dashboard)
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/login", authH.Login)
 			r.Get("/lark/login/start", authH.StartLarkLogin)
@@ -624,6 +641,7 @@ func main() {
 	go func() {
 		shutdownErr <- srv.Shutdown(ctx)
 	}()
+	larkCardCallbackManager.Stop()
 	ticketH.CancelActiveExecutionsForShutdown(ctx)
 	if err := <-shutdownErr; err != nil {
 		slog.Warn("server shutdown failed", "err", err)

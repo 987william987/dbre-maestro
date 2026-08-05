@@ -158,7 +158,35 @@ func TestBuildCardContentRendersFieldsInCompactBlock(t *testing.T) {
 	if !strings.Contains(text, `**工單號：** TK-1\n**工單類型：** DDL\n**目前狀態：** 待審核`) {
 		t.Fatalf("card fields should be rendered in one compact markdown block: %s", text)
 	}
-	if strings.Count(text, `"tag":"div"`) != 1 {
-		t.Fatalf("card fields should use one div, got: %s", text)
+	if !strings.Contains(text, `"schema":"2.0"`) {
+		t.Fatalf("card should use v2 schema for long connection callbacks: %s", text)
+	}
+	if strings.Count(text, `"tag":"markdown"`) != 1 {
+		t.Fatalf("card fields should use one markdown block, got: %s", text)
+	}
+}
+
+func TestBuildCardContentRendersActionsInCompactRow(t *testing.T) {
+	content := notification.BuildCardContent(notification.Card{
+		Title: "工單待審批",
+		Actions: []notification.CardAction{
+			{Action: "approve", Text: "Approve", Type: "primary", Value: map[string]any{"ticket_no": "TK-1"}},
+			{Action: "reject", Text: "Reject", Type: "danger", Value: map[string]any{"ticket_no": "TK-1"}},
+			{URL: "https://example.com/tickets/TK-1", Text: "查看詳情", Type: "default"},
+		},
+	})
+	raw, err := json.Marshal(content)
+	if err != nil {
+		t.Fatalf("marshal card content: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"tag":"column_set"`) || !strings.Contains(text, `"horizontal_spacing":"8px"`) {
+		t.Fatalf("card actions should be rendered in one compact column_set row: %s", text)
+	}
+	if strings.Count(text, `"tag":"button"`) != 3 {
+		t.Fatalf("card actions should render three buttons, got: %s", text)
+	}
+	if strings.Count(text, `"width":"auto"`) != 3 {
+		t.Fatalf("card action columns should use auto width, got: %s", text)
 	}
 }

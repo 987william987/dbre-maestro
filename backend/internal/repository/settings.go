@@ -23,6 +23,7 @@ const (
 	settingLarkAppID                     = "lark_app_id"
 	settingLarkAppSecret                 = "lark_app_secret"
 	settingLarkInteractiveCardsEnabled   = "lark_interactive_cards_enabled"
+	settingLarkCardCallbackMode          = "lark_card_callback_mode"
 	settingLarkCardVerificationToken     = "lark_card_verification_token"
 	settingLarkOAuthEnabled              = "lark_oauth_enabled"
 	settingLarkOAuthSite                 = "lark_oauth_site"
@@ -82,6 +83,7 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 		DBMetadataObjectSyncIntervalMins:     60,
 		DBMetadataCronTimezone:               "Asia/Taipei",
 		LarkOAuthSite:                        "lark",
+		LarkCardCallbackMode:                 "http",
 		SSOOIDCDisplayName:                   "Authentik",
 		SSOOIDCScopes:                        []string{"openid", "profile", "email", "dbre"},
 	}
@@ -126,6 +128,13 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	}
 	if larkInteractiveCardsEnabled != nil {
 		settings.LarkInteractiveCardsEnabled = *larkInteractiveCardsEnabled
+	}
+	larkCardCallbackMode, err := r.getString(ctx, settingLarkCardCallbackMode)
+	if err != nil {
+		return nil, err
+	}
+	if larkCardCallbackMode != nil {
+		settings.LarkCardCallbackMode = normalizeLarkCardCallbackMode(*larkCardCallbackMode)
 	}
 	larkCardVerificationTokenConfigured, err := r.hasValue(ctx, settingLarkCardVerificationToken)
 	if err != nil {
@@ -361,6 +370,9 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 	if err := upsertBool(ctx, tx, settingLarkInteractiveCardsEnabled, settings.LarkInteractiveCardsEnabled); err != nil {
 		return err
 	}
+	if err := upsertString(ctx, tx, settingLarkCardCallbackMode, normalizeLarkCardCallbackMode(settings.LarkCardCallbackMode)); err != nil {
+		return err
+	}
 	if settings.LarkCardVerificationToken != "" {
 		if err := r.upsertEncryptedString(ctx, tx, settingLarkCardVerificationToken, settings.LarkCardVerificationToken); err != nil {
 			return err
@@ -561,6 +573,15 @@ func normalizeLarkOAuthSite(site string) string {
 		return "feishu"
 	default:
 		return "lark"
+	}
+}
+
+func normalizeLarkCardCallbackMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "long_connection":
+		return "long_connection"
+	default:
+		return "http"
 	}
 }
 

@@ -131,6 +131,7 @@ export async function getTicket(id: string): Promise<TicketDetail> {
       reviewers: Array.isArray(response.workflow_participants?.reviewers) ? response.workflow_participants.reviewers : [],
       executors: Array.isArray(response.workflow_participants?.executors) ? response.workflow_participants.executors : [],
     },
+    workflow_resolution: response.workflow_resolution ?? null,
     workflow_resolution_trace: response.workflow_resolution_trace ?? null,
   }))
 }

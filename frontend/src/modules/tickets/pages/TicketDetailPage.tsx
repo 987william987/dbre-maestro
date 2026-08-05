@@ -7,7 +7,7 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
-import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants, TicketWorkflowTrace } from '@/shared/types/ticket'
+import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants, TicketWorkflowResolution, TicketWorkflowTrace } from '@/shared/types/ticket'
 import type { TicketStatus } from '@/shared/types/ticket'
 import type { CurrentUser } from '@/shared/types/auth'
 import type { AuditLog } from '@/shared/types/audit'
@@ -59,10 +59,31 @@ function formatTicketActor(name: string | null | undefined, id: number | null | 
   if (name && name.trim()) {
     return name
   }
+  if (id === 0) {
+    return 'System'
+  }
   if (id != null) {
     return String(id)
   }
   return '—'
+}
+
+function ticketUsesExecutor(ticket: Ticket) {
+  return ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml' || ticket.ticket_type === 'redis_command'
+}
+
+function formatTicketReviewerActor(ticket: Ticket, workflowResolution?: TicketWorkflowResolution | null) {
+  if (workflowResolution && !workflowResolution.approval_enabled) {
+    return 'System'
+  }
+  return formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null)
+}
+
+function formatTicketExecutorActor(ticket: Ticket, workflowResolution?: TicketWorkflowResolution | null) {
+  if (ticketUsesExecutor(ticket) && workflowResolution?.execution_mode === 'auto_after_approval') {
+    return 'System'
+  }
+  return formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)
 }
 
 function formatTicketDatabaseScope(ticket: Ticket, fallback: string) {
@@ -457,6 +478,7 @@ type StatementResultRow = {
   executionID: number | null
   seq: number
   sql: string
+  tables: ReviewStatementTable[]
   scanRows: number | null
   reviewStatus: string | null
   reviewMessage: string | null
@@ -471,8 +493,89 @@ type StatementResultRow = {
   outcomeConfidence: string | null
 }
 
+type ReviewStatementTable = {
+  key: string
+  label: string
+  rowCount: number | null
+  dataSizeBytes: number | null
+}
+
 function statementResultKey(row: StatementResultRow) {
   return `${row.seq}:${row.sql}`
+}
+
+function reviewTableLabel(table: { database_name?: string | null; schema_name?: string | null; table_name: string }) {
+  const databaseName = table.database_name?.trim() ?? ''
+  const schemaName = table.schema_name?.trim() ?? ''
+  const tableName = table.table_name.trim()
+  if (schemaName && databaseName && schemaName !== databaseName) {
+    return `${schemaName}.${tableName}`
+  }
+  return tableName
+}
+
+function mergeReviewTables(
+  current: ReviewStatementTable[] | undefined,
+  tables: Array<{ database_name?: string | null; schema_name?: string | null; table_name: string; row_count?: number | null; data_size_bytes?: number | null }> | undefined,
+) {
+  const next = [...(current ?? [])]
+  if (!Array.isArray(tables)) {
+    return next
+  }
+  tables.forEach((table) => {
+    const key = `${table.database_name ?? ''}:${table.schema_name ?? ''}:${table.table_name}`
+    if (next.some((item) => item.key === key)) {
+      return
+    }
+    next.push({
+      key,
+      label: reviewTableLabel(table),
+      rowCount: typeof table.row_count === 'number' ? table.row_count : null,
+      dataSizeBytes: typeof table.data_size_bytes === 'number' ? table.data_size_bytes : null,
+    })
+  })
+  return next
+}
+
+function formatReviewRows(rows: number | null) {
+  if (rows == null || !Number.isFinite(rows)) {
+    return '—'
+  }
+  return Math.round(rows).toLocaleString()
+}
+
+function formatReviewBytes(bytes: number | null) {
+  if (bytes == null || !Number.isFinite(bytes)) {
+    return '—'
+  }
+  if (bytes <= 0) {
+    return '0.00 GB'
+  }
+  const gb = bytes / 1024 / 1024 / 1024
+  return `${gb.toLocaleString(undefined, {
+    minimumFractionDigits: gb < 10 ? 2 : 1,
+    maximumFractionDigits: gb < 10 ? 2 : 1,
+  })} GB`
+}
+
+function formatReviewTableRows(tables: ReviewStatementTable[]) {
+  if (tables.length === 0) {
+    return '—'
+  }
+  if (tables.length === 1) {
+    return formatReviewRows(tables[0].rowCount)
+  }
+  return tables.map((table) => `${table.label}: ${formatReviewRows(table.rowCount)}`).join('\n')
+}
+
+function formatReviewTableSizes(tables: ReviewStatementTable[]) {
+  if (tables.length === 0) {
+    return '—'
+  }
+  if (tables.length === 1) {
+    return formatReviewBytes(tables[0].dataSizeBytes)
+  }
+  return tables.map((table) => `${table.label}: ${formatReviewBytes(table.dataSizeBytes)}`).join('\n')
 }
 
 function buildStatementResults(detail: TicketDetail) {
@@ -491,6 +594,7 @@ function buildStatementResults(detail: TicketDetail) {
       executionID: existing?.executionID ?? null,
       seq: result.seq,
       sql: result.sql_stmt,
+      tables: mergeReviewTables(existing?.tables, result.tables),
       scanRows: Math.max(existing?.scanRows ?? 0, result.scan_rows),
       reviewStatus: existing?.reviewStatus === 'error' || result.status === 'error' ? 'error' : result.status,
       reviewMessage: nextMessage || null,
@@ -512,6 +616,7 @@ function buildStatementResults(detail: TicketDetail) {
       executionID: execution.id,
       seq: execution.seq,
       sql: existing?.sql || execution.sql_stmt,
+      tables: existing?.tables ?? [],
       scanRows: existing?.scanRows ?? null,
       reviewStatus: existing?.reviewStatus ?? null,
       reviewMessage: existing?.reviewMessage ?? null,
@@ -591,15 +696,24 @@ function joinParticipantNames(names: string[], fallback: string) {
   return normalized.join(', ')
 }
 
-function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflowParticipants, activityLogs: AuditLog[] = []): WorkflowStep[] {
+function buildWorkflowSteps(
+  ticket: Ticket,
+  workflowParticipants: TicketWorkflowParticipants,
+  workflowResolution?: TicketWorkflowResolution | null,
+  activityLogs: AuditLog[] = [],
+): WorkflowStep[] {
   const submitter = formatTicketActor(ticket.submitter_name, ticket.submitter_id)
-  const reviewer = ticket.reviewer_id != null || ticket.reviewer_name
-    ? formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null)
-    : joinParticipantNames(workflowParticipants.reviewers, 'Pending reviewer assignment')
-  const executor = ticket.executor_id != null || ticket.executor_name
-    ? formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)
-    : joinParticipantNames(workflowParticipants.executors, 'Pending executor assignment')
-  const usesExecutor = ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml' || ticket.ticket_type === 'redis_command'
+  const reviewer = workflowResolution && !workflowResolution.approval_enabled
+    ? 'System'
+    : (ticket.reviewer_id != null || ticket.reviewer_name)
+      ? formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null)
+      : joinParticipantNames(workflowParticipants.reviewers, 'Pending reviewer assignment')
+  const usesExecutor = ticketUsesExecutor(ticket)
+  const executor = usesExecutor && workflowResolution?.execution_mode === 'auto_after_approval'
+    ? 'System'
+    : (ticket.executor_id != null || ticket.executor_name)
+      ? formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)
+      : joinParticipantNames(workflowParticipants.executors, 'Pending executor assignment')
   const rejectedAfterReview = usesExecutor && ticket.status === 'rejected' && (
     ticket.executor_id != null ||
     Boolean(ticket.executor_name) ||
@@ -697,15 +811,17 @@ function WorkflowStepIcon({ tone, running, label }: { tone: WorkflowStepTone; ru
 function WorkflowTimeline({
   ticket,
   workflowParticipants,
+  workflowResolution,
   activityLogs,
   highlight,
 }: {
   ticket: Ticket
   workflowParticipants: TicketWorkflowParticipants
+  workflowResolution?: TicketWorkflowResolution | null
   activityLogs?: AuditLog[]
   highlight?: boolean
 }) {
-  const steps = buildWorkflowSteps(ticket, workflowParticipants, activityLogs)
+  const steps = buildWorkflowSteps(ticket, workflowParticipants, workflowResolution, activityLogs)
 
   return (
     <section
@@ -868,6 +984,9 @@ export function TicketDetailPage() {
   }))
   const showReviewMessageColumn = displayStatementResults.some((row) => Boolean(row.reviewMessage?.trim()))
   const showErrorMessageColumn = displayStatementResults.some((row) => Boolean(row.errorMessage?.trim()))
+  const showStatementTableMetadata = ticket?.ticket_type === 'ddl' || ticket?.ticket_type === 'dml'
+  const showStatementScanRows = ticket?.ticket_type === 'dml'
+  const showStatementRowsAffected = ticket?.ticket_type !== 'ddl'
   const executionRuntimeRows = displayStatementResults.filter((row) => (
     row.executionID != null ||
     row.sentToDBAt ||
@@ -892,7 +1011,7 @@ export function TicketDetailPage() {
   const canViewWorkflowTrace = isAdminUser(user) && ticket?.status === 'needs_admin_attention'
   const canReapplyTicket = Boolean(
     ticket &&
-    ticket.status === 'failed' &&
+    ['completed', 'failed', 'interrupted', 'rejected', 'withdrawn'].includes(ticket.status) &&
     (ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml' || ticket.ticket_type === 'redis_command') &&
     user.permissions.includes('tickets.apply'),
   )
@@ -1047,6 +1166,7 @@ export function TicketDetailPage() {
           <WorkflowTimeline
             ticket={ticket}
             workflowParticipants={detail.workflow_participants}
+            workflowResolution={detail.workflow_resolution}
             activityLogs={detail.activity_logs}
             highlight={statusTransitioning}
           />
@@ -1060,8 +1180,8 @@ export function TicketDetailPage() {
                   ticket.ticket_type === 'query_access' ? queryAccessConnections : ticket.db_connection_name || ticket.db_connection_id || 'Not specified',
                   formatTicketDatabaseScope(ticket, queryAccessScopeSummary),
                   formatTicketActor(ticket.submitter_name, ticket.submitter_id),
-                  formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null),
-                  formatTicketActor(ticket.executor_name, ticket.executor_id ?? null),
+                  formatTicketReviewerActor(ticket, detail.workflow_resolution),
+                  formatTicketExecutorActor(ticket, detail.workflow_resolution),
                   ticket.description || '—',
                   <StatusBadge status={ticket.status} />,
                 ]]}
@@ -1144,10 +1264,12 @@ export function TicketDetailPage() {
                       <col className="w-[28px]" />
                       <col className="w-[36px]" />
                       <col className="w-auto" />
-                      <col className="w-[160px]" />
+                      {showStatementTableMetadata ? <col className="w-[150px]" /> : null}
+                      {showStatementTableMetadata ? <col className="w-[150px]" /> : null}
+                      {showStatementScanRows ? <col className="w-[140px]" /> : null}
                       <col className="w-[140px]" />
                       {showReviewMessageColumn ? <col className="w-[180px]" /> : null}
-                      <col className="w-[150px]" />
+                      {showStatementRowsAffected ? <col className="w-[150px]" /> : null}
                       <col className="w-[150px]" />
                       <col className="w-[90px]" />
                       {showErrorMessageColumn ? <col className="w-[220px]" /> : null}
@@ -1158,10 +1280,12 @@ export function TicketDetailPage() {
                         <DataTableHeaderCell className="pl-2 pr-1" aria-label="Expand SQL" />
                         <DataTableHeaderCell className="pl-1 pr-2">ID</DataTableHeaderCell>
                         <DataTableHeaderCell className="pl-1 pr-2">SQL</DataTableHeaderCell>
-                        <DataTableHeaderCell>Scan Rows</DataTableHeaderCell>
+                        {showStatementTableMetadata ? <DataTableHeaderCell>Table Rows</DataTableHeaderCell> : null}
+                        {showStatementTableMetadata ? <DataTableHeaderCell>Table Size</DataTableHeaderCell> : null}
+                        {showStatementScanRows ? <DataTableHeaderCell>Scan Rows</DataTableHeaderCell> : null}
                         <DataTableHeaderCell>Review Status</DataTableHeaderCell>
                         {showReviewMessageColumn ? <DataTableHeaderCell>Review Message</DataTableHeaderCell> : null}
-                        <DataTableHeaderCell>Rows Affected</DataTableHeaderCell>
+                        {showStatementRowsAffected ? <DataTableHeaderCell>Rows Affected</DataTableHeaderCell> : null}
                         <DataTableHeaderCell>Execution Status</DataTableHeaderCell>
                         <DataTableHeaderCell>Duration</DataTableHeaderCell>
                         {showErrorMessageColumn ? <DataTableHeaderCell>Error Message</DataTableHeaderCell> : null}
@@ -1211,12 +1335,22 @@ export function TicketDetailPage() {
                                 />
                               </div>
                             </DataTableCell>
-                            <DataTableCell className="break-words align-middle leading-6">{row.scanRows ?? '—'}</DataTableCell>
+                            {showStatementTableMetadata ? (
+                              <DataTableCell className="break-words whitespace-pre-line align-middle leading-6 tabular-nums">{formatReviewTableRows(row.tables)}</DataTableCell>
+                            ) : null}
+                            {showStatementTableMetadata ? (
+                              <DataTableCell className="break-words whitespace-pre-line align-middle leading-6">{formatReviewTableSizes(row.tables)}</DataTableCell>
+                            ) : null}
+                            {showStatementScanRows ? (
+                              <DataTableCell className="break-words align-middle leading-6">{formatReviewRows(row.scanRows)}</DataTableCell>
+                            ) : null}
                             <DataTableCell className="break-words align-middle leading-6">{row.reviewStatus ?? '—'}</DataTableCell>
                             {showReviewMessageColumn ? (
                               <DataTableCell className="break-words align-middle leading-6 text-muted">{row.reviewMessage || '—'}</DataTableCell>
                             ) : null}
-                            <DataTableCell className="break-words align-middle leading-6">{row.rowsAffected ?? '—'}</DataTableCell>
+                            {showStatementRowsAffected ? (
+                              <DataTableCell className="break-words align-middle leading-6">{row.rowsAffected ?? '—'}</DataTableCell>
+                            ) : null}
                             <DataTableCell className="break-words align-middle leading-6"><StatementExecutionBadge status={row.executionStatus} /></DataTableCell>
                             <DataTableCell className="break-words align-middle leading-6">{row.duration ?? '—'}</DataTableCell>
                             {showErrorMessageColumn ? (

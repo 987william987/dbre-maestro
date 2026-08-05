@@ -39,6 +39,7 @@ type TicketHandler struct {
 	audit              *repository.AuditRepo
 	settings           *repository.SettingsRepo
 	dbConns            *repository.DBConnectionRepo
+	dbMetadata         *repository.DBMetadataRepo
 	users              *repository.UserRepo
 	authGroups         *repository.AuthGroupRepo
 	masking            *maskingRuntime
@@ -66,6 +67,11 @@ type ticketResponse struct {
 type ticketWorkflowParticipants struct {
 	Reviewers []string `json:"reviewers"`
 	Executors []string `json:"executors"`
+}
+
+type ticketWorkflowResolutionSummary struct {
+	ApprovalEnabled bool   `json:"approval_enabled"`
+	ExecutionMode   string `json:"execution_mode"`
 }
 
 type ticketStatementExecutionResult struct {
@@ -218,7 +224,7 @@ var ticketNotificationPolicies = map[ticketNotificationEvent]ticketNotificationP
 		Title:       "工單待執行",
 		NotifType:   "ticket_pending_execution",
 		Roles:       []ticketRecipientRole{ticketRoleExecutorPool},
-		NotifyActor: false,
+		NotifyActor: true,
 		Status:      model.TicketStatusPendingExecution,
 		NextAction:  "請執行此工單",
 	},
@@ -261,6 +267,12 @@ type TicketHandlerOption func(*TicketHandler)
 func WithTicketHandlerAppEnv(appEnv string) TicketHandlerOption {
 	return func(h *TicketHandler) {
 		h.appEnv = strings.TrimSpace(appEnv)
+	}
+}
+
+func WithTicketHandlerDBMetadata(repo *repository.DBMetadataRepo) TicketHandlerOption {
+	return func(h *TicketHandler) {
+		h.dbMetadata = repo
 	}
 }
 
@@ -931,6 +943,16 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if len(reviewResults) > 0 {
 		persistedResults := make([]model.TicketReviewResult, 0, len(reviewResults))
 		for _, result := range reviewResults {
+			tables := make(model.TicketReviewTables, 0, len(result.Tables))
+			for _, table := range result.Tables {
+				tables = append(tables, model.TicketReviewTable{
+					DatabaseName:  table.DatabaseName,
+					SchemaName:    table.SchemaName,
+					TableName:     table.TableName,
+					RowCount:      table.RowCount,
+					DataSizeBytes: table.DataSizeBytes,
+				})
+			}
 			persistedResults = append(persistedResults, model.TicketReviewResult{
 				TicketID:         created.ID,
 				Seq:              result.Seq,
@@ -939,6 +961,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 				ValidationStage:  result.ValidationStage,
 				StatementKind:    result.StatementKind,
 				ObjectType:       result.ObjectType,
+				Tables:           tables,
 				ValidationMethod: result.ValidationMethod,
 				ScanRows:         result.ScanRows,
 				Status:           result.Status,
@@ -1372,6 +1395,11 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "get ticket workflow failed")
 		return
 	}
+	workflowResolution, err := h.loadWorkflowResolutionSummary(r.Context(), ticket)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "get ticket workflow failed")
+		return
+	}
 	auditResourceType := "ticket"
 	auditLogs, _, err := h.audit.List(r.Context(), repository.AuditListFilter{
 		ResourceType: &auditResourceType,
@@ -1408,6 +1436,7 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"query_access_items":        h.mustListQueryAccessItems(r.Context(), id),
 		"export_request":            exportDetail,
 		"workflow_participants":     workflowParticipants,
+		"workflow_resolution":       workflowResolution,
 		"workflow_resolution_trace": workflowTrace,
 		"capabilities": map[string]any{
 			"can_review":   canReview,
@@ -1450,6 +1479,20 @@ func (h *TicketHandler) loadWorkflowParticipants(ctx context.Context, ticket *mo
 	}
 
 	return participants, nil
+}
+
+func (h *TicketHandler) loadWorkflowResolutionSummary(ctx context.Context, ticket *model.Ticket) (*ticketWorkflowResolutionSummary, error) {
+	resolution, err := h.ticketWorkflowResolution(ctx, ticket)
+	if err != nil {
+		return nil, err
+	}
+	if resolution == nil {
+		return nil, nil
+	}
+	return &ticketWorkflowResolutionSummary{
+		ApprovalEnabled: resolution.ApprovalEnabled,
+		ExecutionMode:   normalizeWorkflowExecutionMode(resolution.ExecutionMode),
+	}, nil
 }
 
 func (h *TicketHandler) canViewWorkflowTrace(ctx context.Context, userID uint64) (bool, error) {

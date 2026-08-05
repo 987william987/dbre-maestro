@@ -15,6 +15,16 @@ type QueryAccessRepo struct {
 	db *sqlx.DB
 }
 
+type AccessGovernanceStats struct {
+	ExpiringSoon        int64 `db:"expiring_soon" json:"expiring_soon"`
+	LongLived           int64 `db:"long_lived" json:"long_lived"`
+	NeverExpires        int64 `db:"never_expires" json:"never_expires"`
+	RecentlyRevoked     int64 `db:"recently_revoked" json:"recently_revoked"`
+	SensitiveRequests7d int64 `db:"sensitive_requests_7d" json:"sensitive_requests_7d"`
+	SQLExportRequests7d int64 `db:"sql_export_requests_7d" json:"sql_export_requests_7d"`
+	ActiveRules         int64 `db:"active_rules" json:"active_rules"`
+}
+
 func NewQueryAccessRepo(db *sqlx.DB) *QueryAccessRepo {
 	return &QueryAccessRepo{db: db}
 }
@@ -255,6 +265,39 @@ func (r *QueryAccessRepo) revokeGrantsByTicketTx(ctx context.Context, tx *sqlx.T
 	return rows > 0, nil
 }
 
+func (r *QueryAccessRepo) AccessGovernanceStats(ctx context.Context) (*AccessGovernanceStats, error) {
+	now := timeutil.NowUTC()
+	stats := &AccessGovernanceStats{}
+	if err := r.db.GetContext(ctx, stats,
+		`SELECT
+		 COALESCE(SUM(CASE WHEN revoked_at IS NULL AND expires_at IS NOT NULL AND expires_at > ? AND expires_at <= ? THEN 1 ELSE 0 END), 0) AS expiring_soon,
+		 COALESCE(SUM(CASE WHEN revoked_at IS NULL AND expires_at IS NOT NULL AND expires_at > ? THEN 1 ELSE 0 END), 0) AS long_lived,
+		 COALESCE(SUM(CASE WHEN revoked_at IS NULL AND expires_at IS NULL THEN 1 ELSE 0 END), 0) AS never_expires,
+		 COALESCE(SUM(CASE WHEN revoked_at IS NOT NULL AND revoked_at >= ? THEN 1 ELSE 0 END), 0) AS recently_revoked,
+		 COALESCE(SUM(CASE WHEN revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) THEN 1 ELSE 0 END), 0) AS active_rules
+		 FROM query_access_rules`,
+		now, now.Add(7*24*time.Hour),
+		now.Add(90*24*time.Hour),
+		now.Add(-7*24*time.Hour),
+		now,
+	); err != nil {
+		return nil, fmt.Errorf("load query access governance stats: %w", err)
+	}
+	if err := r.db.GetContext(ctx, &stats.SensitiveRequests7d,
+		`SELECT COUNT(*) FROM tickets WHERE ticket_type = ? AND created_at >= ?`,
+		model.TicketTypeSensitiveQueryAccess, now.Add(-7*24*time.Hour),
+	); err != nil {
+		return nil, fmt.Errorf("count sensitive access requests: %w", err)
+	}
+	if err := r.db.GetContext(ctx, &stats.SQLExportRequests7d,
+		`SELECT COUNT(*) FROM tickets WHERE ticket_type = ? AND created_at >= ?`,
+		model.TicketTypeSQLExport, now.Add(-7*24*time.Hour),
+	); err != nil {
+		return nil, fmt.Errorf("count sql export requests: %w", err)
+	}
+	return stats, nil
+}
+
 func (r *QueryAccessRepo) ListActiveRules(ctx context.Context, subjectID uint64, authGroupIDs []uint64, connectionID uint64) ([]model.QueryAccessRule, error) {
 	args := []any{subjectID}
 	authGroupClause := ""
@@ -283,6 +326,44 @@ func (r *QueryAccessRepo) ListActiveRules(ctx context.Context, subjectID uint64,
 	var rules []model.QueryAccessRule
 	if err := r.db.SelectContext(ctx, &rules, r.db.Rebind(query), args...); err != nil {
 		return nil, fmt.Errorf("list active query access rules: %w", err)
+	}
+	return rules, nil
+}
+
+func (r *QueryAccessRepo) ListActiveRulesForSubjects(ctx context.Context, subjectID uint64, authGroupIDs []uint64, limit int) ([]model.QueryAccessRule, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	args := []any{subjectID}
+	authGroupClause := ""
+	if len(authGroupIDs) > 0 {
+		query, inArgs, err := sqlx.In(` OR (qar.subject_type = 'auth_group' AND qar.subject_id IN (?))`, authGroupIDs)
+		if err != nil {
+			return nil, err
+		}
+		authGroupClause = query
+		args = append(args, inArgs...)
+	}
+	args = append(args, timeutil.NowUTC(), limit)
+
+	query := `
+		SELECT qar.id, qar.subject_type, qar.subject_id, qar.effect, qar.connection_id, qar.database_pattern, qar.table_pattern,
+		       qar.granted_via, qar.source_ticket_id, t.ticket_no AS source_ticket_no,
+		       qar.expires_at, qar.revoked_at, qar.revoked_by, qar.created_by, qar.updated_by, qar.created_at, qar.updated_at
+		FROM query_access_rules qar
+		LEFT JOIN tickets t ON t.id = qar.source_ticket_id
+		WHERE (qar.subject_type = 'user' AND qar.subject_id = ?` + authGroupClause + `)
+		  AND qar.revoked_at IS NULL
+		  AND (qar.expires_at IS NULL OR qar.expires_at > ?)
+		ORDER BY
+		  CASE WHEN qar.expires_at IS NULL THEN 1 ELSE 0 END,
+		  qar.expires_at ASC,
+		  qar.id DESC
+		LIMIT ?
+	`
+	rules := []model.QueryAccessRule{}
+	if err := r.db.SelectContext(ctx, &rules, r.db.Rebind(query), args...); err != nil {
+		return nil, fmt.Errorf("list active query access rules for subjects: %w", err)
 	}
 	return rules, nil
 }

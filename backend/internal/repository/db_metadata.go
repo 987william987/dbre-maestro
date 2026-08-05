@@ -18,6 +18,12 @@ type DBMetadataRepo struct {
 	db *sqlx.DB
 }
 
+type DBMetadataObjectHealthStats struct {
+	SnapshotConnectionCount int64 `db:"snapshot_connection_count" json:"snapshot_connection_count"`
+	StaleConnectionCount    int64 `db:"stale_connection_count" json:"stale_connection_count"`
+	ObjectCount             int64 `db:"object_count" json:"object_count"`
+}
+
 func NewDBMetadataRepo(db *sqlx.DB) *DBMetadataRepo {
 	return &DBMetadataRepo{db: db}
 }
@@ -70,6 +76,21 @@ func (r *DBMetadataRepo) MarkJobFinished(ctx context.Context, jobName string, su
 		return fmt.Errorf("mark db metadata job finished %s: %w", jobName, err)
 	}
 	return nil
+}
+
+func (r *DBMetadataRepo) ObjectHealthStats(ctx context.Context, staleBefore time.Time) (*DBMetadataObjectHealthStats, error) {
+	stats := &DBMetadataObjectHealthStats{}
+	if err := r.db.GetContext(ctx, stats,
+		`SELECT
+		 COUNT(DISTINCT db_connection_id) AS snapshot_connection_count,
+		 COUNT(DISTINCT CASE WHEN snapshot_at < ? THEN db_connection_id END) AS stale_connection_count,
+		 COUNT(*) AS object_count
+		 FROM db_object_snapshots`,
+		staleBefore,
+	); err != nil {
+		return nil, fmt.Errorf("load db metadata object health stats: %w", err)
+	}
+	return stats, nil
 }
 
 func (r *DBMetadataRepo) ListInventorySnapshots(ctx context.Context, engine string, limit int) ([]model.CloudDBInventorySnapshot, error) {
