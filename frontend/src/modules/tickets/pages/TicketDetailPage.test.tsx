@@ -203,6 +203,82 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('Reject')).toBeInTheDocument()
   })
 
+  it('免審批但人工執行的 DDL 工單，Review 顯示 System 且 Execution 顯示執行者', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      ticket_type: 'ddl',
+      status: 'completed',
+      reviewer_id: null,
+      reviewer_name: null,
+      executor_id: 3,
+      executor_name: 'william',
+      sql_content: 'ALTER TABLE users ADD COLUMN note VARCHAR(255);',
+    }, {
+      workflow_participants: {
+        reviewers: ['admin_sre_test', 'william', 'kirin'],
+        executors: ['william'],
+      },
+      workflow_resolution: {
+        approval_enabled: false,
+        execution_mode: 'manual',
+      },
+    }))
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Approval Flow')).toBeInTheDocument())
+    expect(screen.getAllByText('System').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('william').length).toBeGreaterThan(0)
+    expect(screen.queryByText('admin_sre_test, william, kirin')).not.toBeInTheDocument()
+  })
+
+  it('免審批且自動執行的 DML 工單，Review 和 Execution 都顯示 System', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      ticket_type: 'dml',
+      status: 'failed',
+      reviewer_id: null,
+      reviewer_name: null,
+      executor_id: 0,
+      executor_name: null,
+      sql_content: 'UPDATE users SET flagged = 1 WHERE id < 10;',
+    }, {
+      workflow_participants: {
+        reviewers: ['admin_sre_test', 'william', 'kirin'],
+        executors: [],
+      },
+      workflow_resolution: {
+        approval_enabled: false,
+        execution_mode: 'auto_after_approval',
+      },
+    }))
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('Approval Flow')).toBeInTheDocument())
+    expect(screen.getAllByText('System').length).toBeGreaterThanOrEqual(4)
+    expect(screen.queryByText(/^0$/)).not.toBeInTheDocument()
+    expect(screen.queryByText('admin_sre_test, william, kirin')).not.toBeInTheDocument()
+  })
+
   it('submitter 在 pending_review 狀態可填寫原因並 withdraw', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',

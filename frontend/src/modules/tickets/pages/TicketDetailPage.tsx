@@ -7,7 +7,7 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
-import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants, TicketWorkflowTrace } from '@/shared/types/ticket'
+import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants, TicketWorkflowResolution, TicketWorkflowTrace } from '@/shared/types/ticket'
 import type { TicketStatus } from '@/shared/types/ticket'
 import type { CurrentUser } from '@/shared/types/auth'
 import type { AuditLog } from '@/shared/types/audit'
@@ -59,10 +59,31 @@ function formatTicketActor(name: string | null | undefined, id: number | null | 
   if (name && name.trim()) {
     return name
   }
+  if (id === 0) {
+    return 'System'
+  }
   if (id != null) {
     return String(id)
   }
   return '—'
+}
+
+function ticketUsesExecutor(ticket: Ticket) {
+  return ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml' || ticket.ticket_type === 'redis_command'
+}
+
+function formatTicketReviewerActor(ticket: Ticket, workflowResolution?: TicketWorkflowResolution | null) {
+  if (workflowResolution && !workflowResolution.approval_enabled) {
+    return 'System'
+  }
+  return formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null)
+}
+
+function formatTicketExecutorActor(ticket: Ticket, workflowResolution?: TicketWorkflowResolution | null) {
+  if (ticketUsesExecutor(ticket) && workflowResolution?.execution_mode === 'auto_after_approval') {
+    return 'System'
+  }
+  return formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)
 }
 
 function formatTicketDatabaseScope(ticket: Ticket, fallback: string) {
@@ -675,15 +696,24 @@ function joinParticipantNames(names: string[], fallback: string) {
   return normalized.join(', ')
 }
 
-function buildWorkflowSteps(ticket: Ticket, workflowParticipants: TicketWorkflowParticipants, activityLogs: AuditLog[] = []): WorkflowStep[] {
+function buildWorkflowSteps(
+  ticket: Ticket,
+  workflowParticipants: TicketWorkflowParticipants,
+  workflowResolution?: TicketWorkflowResolution | null,
+  activityLogs: AuditLog[] = [],
+): WorkflowStep[] {
   const submitter = formatTicketActor(ticket.submitter_name, ticket.submitter_id)
-  const reviewer = ticket.reviewer_id != null || ticket.reviewer_name
-    ? formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null)
-    : joinParticipantNames(workflowParticipants.reviewers, 'Pending reviewer assignment')
-  const executor = ticket.executor_id != null || ticket.executor_name
-    ? formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)
-    : joinParticipantNames(workflowParticipants.executors, 'Pending executor assignment')
-  const usesExecutor = ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml' || ticket.ticket_type === 'redis_command'
+  const reviewer = workflowResolution && !workflowResolution.approval_enabled
+    ? 'System'
+    : (ticket.reviewer_id != null || ticket.reviewer_name)
+      ? formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null)
+      : joinParticipantNames(workflowParticipants.reviewers, 'Pending reviewer assignment')
+  const usesExecutor = ticketUsesExecutor(ticket)
+  const executor = usesExecutor && workflowResolution?.execution_mode === 'auto_after_approval'
+    ? 'System'
+    : (ticket.executor_id != null || ticket.executor_name)
+      ? formatTicketActor(ticket.executor_name, ticket.executor_id ?? null)
+      : joinParticipantNames(workflowParticipants.executors, 'Pending executor assignment')
   const rejectedAfterReview = usesExecutor && ticket.status === 'rejected' && (
     ticket.executor_id != null ||
     Boolean(ticket.executor_name) ||
@@ -781,15 +811,17 @@ function WorkflowStepIcon({ tone, running, label }: { tone: WorkflowStepTone; ru
 function WorkflowTimeline({
   ticket,
   workflowParticipants,
+  workflowResolution,
   activityLogs,
   highlight,
 }: {
   ticket: Ticket
   workflowParticipants: TicketWorkflowParticipants
+  workflowResolution?: TicketWorkflowResolution | null
   activityLogs?: AuditLog[]
   highlight?: boolean
 }) {
-  const steps = buildWorkflowSteps(ticket, workflowParticipants, activityLogs)
+  const steps = buildWorkflowSteps(ticket, workflowParticipants, workflowResolution, activityLogs)
 
   return (
     <section
@@ -1134,6 +1166,7 @@ export function TicketDetailPage() {
           <WorkflowTimeline
             ticket={ticket}
             workflowParticipants={detail.workflow_participants}
+            workflowResolution={detail.workflow_resolution}
             activityLogs={detail.activity_logs}
             highlight={statusTransitioning}
           />
@@ -1147,8 +1180,8 @@ export function TicketDetailPage() {
                   ticket.ticket_type === 'query_access' ? queryAccessConnections : ticket.db_connection_name || ticket.db_connection_id || 'Not specified',
                   formatTicketDatabaseScope(ticket, queryAccessScopeSummary),
                   formatTicketActor(ticket.submitter_name, ticket.submitter_id),
-                  formatTicketActor(ticket.reviewer_name, ticket.reviewer_id ?? null),
-                  formatTicketActor(ticket.executor_name, ticket.executor_id ?? null),
+                  formatTicketReviewerActor(ticket, detail.workflow_resolution),
+                  formatTicketExecutorActor(ticket, detail.workflow_resolution),
                   ticket.description || '—',
                   <StatusBadge status={ticket.status} />,
                 ]]}

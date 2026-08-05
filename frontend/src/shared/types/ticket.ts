@@ -136,6 +136,11 @@ export type TicketWorkflowParticipants = {
   executors: string[]
 }
 
+export type TicketWorkflowResolution = {
+  approval_enabled: boolean
+  execution_mode: 'manual' | 'auto_after_approval' | string
+}
+
 export type TicketWorkflowTrace = {
   workflow_rule_id?: number | null
   workflow_rule_name: string
@@ -170,6 +175,7 @@ export type TicketDetail = {
     download_url?: string | null
   } | null
   workflow_participants: TicketWorkflowParticipants
+  workflow_resolution?: TicketWorkflowResolution | null
   workflow_resolution_trace?: TicketWorkflowTrace | null
   capabilities: TicketCapabilities
 }

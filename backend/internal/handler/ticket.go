@@ -68,6 +68,11 @@ type ticketWorkflowParticipants struct {
 	Executors []string `json:"executors"`
 }
 
+type ticketWorkflowResolutionSummary struct {
+	ApprovalEnabled bool   `json:"approval_enabled"`
+	ExecutionMode   string `json:"execution_mode"`
+}
+
 type ticketStatementExecutionResult struct {
 	rowsAffected       *int64
 	durationMs         *int64
@@ -1383,6 +1388,11 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "get ticket workflow failed")
 		return
 	}
+	workflowResolution, err := h.loadWorkflowResolutionSummary(r.Context(), ticket)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "get ticket workflow failed")
+		return
+	}
 	auditResourceType := "ticket"
 	auditLogs, _, err := h.audit.List(r.Context(), repository.AuditListFilter{
 		ResourceType: &auditResourceType,
@@ -1419,6 +1429,7 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"query_access_items":        h.mustListQueryAccessItems(r.Context(), id),
 		"export_request":            exportDetail,
 		"workflow_participants":     workflowParticipants,
+		"workflow_resolution":       workflowResolution,
 		"workflow_resolution_trace": workflowTrace,
 		"capabilities": map[string]any{
 			"can_review":   canReview,
@@ -1461,6 +1472,20 @@ func (h *TicketHandler) loadWorkflowParticipants(ctx context.Context, ticket *mo
 	}
 
 	return participants, nil
+}
+
+func (h *TicketHandler) loadWorkflowResolutionSummary(ctx context.Context, ticket *model.Ticket) (*ticketWorkflowResolutionSummary, error) {
+	resolution, err := h.ticketWorkflowResolution(ctx, ticket)
+	if err != nil {
+		return nil, err
+	}
+	if resolution == nil {
+		return nil, nil
+	}
+	return &ticketWorkflowResolutionSummary{
+		ApprovalEnabled: resolution.ApprovalEnabled,
+		ExecutionMode:   normalizeWorkflowExecutionMode(resolution.ExecutionMode),
+	}, nil
 }
 
 func (h *TicketHandler) canViewWorkflowTrace(ctx context.Context, userID uint64) (bool, error) {
