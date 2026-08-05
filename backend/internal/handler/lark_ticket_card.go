@@ -319,7 +319,6 @@ func buildLarkTicketDetailCard(
 	appBaseURL string,
 	ticket *model.Ticket,
 	statusLabel string,
-	executions []model.TicketExecution,
 	cardStage string,
 	handled bool,
 ) *notification.Card {
@@ -356,9 +355,6 @@ func buildLarkTicketDetailCard(
 	}
 	if strings.TrimSpace(ticket.SQLContent) != "" {
 		blocks = append(blocks, "**SQL**\n```sql\n"+larkCardCodeBlock(ticket.SQLContent, 3000)+"\n```")
-	}
-	if len(executions) > 0 {
-		blocks = append(blocks, "**語句狀態**\n"+larkTicketExecutionSummary(executions))
 	}
 	return &notification.Card{
 		Title:          "工單詳情",
@@ -436,35 +432,6 @@ func larkTicketSubmitterName(ctx context.Context, users *repository.UserRepo, ti
 		return ""
 	}
 	return strings.TrimSpace(user.Username)
-}
-
-func larkTicketExecutionSummary(executions []model.TicketExecution) string {
-	lines := make([]string, 0, len(executions))
-	for _, execution := range executions {
-		stmt := strings.TrimSpace(execution.SQLStmt)
-		if stmt == "" {
-			stmt = "-"
-		}
-		lines = append(lines, fmt.Sprintf("%d. %s - %s", execution.Seq, larkTicketExecutionStatusLabel(execution.Status), escapeLarkCardText(truncate(stmt, 160))))
-	}
-	return strings.Join(lines, "\n")
-}
-
-func larkTicketExecutionStatusLabel(status string) string {
-	switch strings.TrimSpace(status) {
-	case "pending":
-		return "待執行"
-	case "running":
-		return "執行中"
-	case "completed":
-		return "已完成"
-	case "failed":
-		return "執行失敗"
-	case "stopped":
-		return "已停止"
-	default:
-		return status
-	}
 }
 
 func larkCardCodeBlock(value string, limit int) string {

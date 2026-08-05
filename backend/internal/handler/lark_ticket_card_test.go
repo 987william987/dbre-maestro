@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dbre-maestro/maestro/internal/model"
@@ -38,7 +39,7 @@ func TestBuildLarkTicketCardActionsForTerminalNotificationOnlyView(t *testing.T)
 
 func TestBuildLarkTicketDetailCardKeepsCurrentStatusActions(t *testing.T) {
 	ticket := &model.Ticket{ID: 10, TicketNo: "TK-10", TicketType: model.TicketTypeDDL, Status: model.TicketStatusPendingReview}
-	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "待審核", nil, larkTicketCardStageReview, false)
+	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "待審核", larkTicketCardStageReview, false)
 	if card == nil {
 		t.Fatal("detail card = nil")
 	}
@@ -49,12 +50,33 @@ func TestBuildLarkTicketDetailCardKeepsCurrentStatusActions(t *testing.T) {
 
 func TestBuildLarkTicketDetailCardForTerminalStatusOnlyShowsView(t *testing.T) {
 	ticket := &model.Ticket{ID: 11, TicketNo: "TK-11", TicketType: model.TicketTypeDDL, Status: model.TicketStatusCompleted}
-	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "已完成", nil, larkTicketCardStageResult, true)
+	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "已完成", larkTicketCardStageResult, true)
 	if card == nil {
 		t.Fatal("detail card = nil")
 	}
 	if len(card.Actions) != 1 || card.Actions[0].Action != larkTicketActionHideDetails {
 		t.Fatalf("detail card actions = %#v, want hide only", card.Actions)
+	}
+}
+
+func TestBuildLarkTicketDetailCardOmitsStatementStatusBlock(t *testing.T) {
+	ticket := &model.Ticket{
+		ID:         16,
+		TicketNo:   "TK-16",
+		TicketType: model.TicketTypeDDL,
+		Status:     model.TicketStatusCompleted,
+		SQLContent: "ALTER TABLE test_a ADD COLUMN note VARCHAR(255);",
+	}
+	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "已完成", larkTicketCardStageResult, true)
+	if card == nil {
+		t.Fatal("detail card = nil")
+	}
+	content := strings.Join(card.MarkdownBlocks, "\n")
+	if strings.Contains(content, "語句狀態") {
+		t.Fatalf("detail card markdown = %q, want no statement status block", content)
+	}
+	if !strings.Contains(content, "**SQL**") {
+		t.Fatalf("detail card markdown = %q, want SQL block", content)
 	}
 }
 
@@ -95,7 +117,7 @@ func TestLarkTicketCardContextMarksStaleReviewCardHandled(t *testing.T) {
 
 func TestBuildLarkTicketDetailCardKeepsOriginalReviewStageAfterTicketMovesForward(t *testing.T) {
 	ticket := &model.Ticket{ID: 13, TicketNo: "TK-13", TicketType: model.TicketTypeDDL, Status: model.TicketStatusPendingExecution}
-	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "待執行", nil, larkTicketCardStageReview, false)
+	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "待執行", larkTicketCardStageReview, false)
 	if card == nil {
 		t.Fatal("detail card = nil")
 	}
@@ -106,7 +128,7 @@ func TestBuildLarkTicketDetailCardKeepsOriginalReviewStageAfterTicketMovesForwar
 
 func TestBuildLarkTicketDetailCardHandledOnlyShowsHide(t *testing.T) {
 	ticket := &model.Ticket{ID: 14, TicketNo: "TK-14", TicketType: model.TicketTypeDDL, Status: model.TicketStatusPendingExecution}
-	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "待執行", nil, larkTicketCardStageReview, true)
+	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "待執行", larkTicketCardStageReview, true)
 	if card == nil {
 		t.Fatal("detail card = nil")
 	}

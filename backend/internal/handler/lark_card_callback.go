@@ -160,12 +160,8 @@ func (h *TicketHandler) larkTicketDetailsResponse(ctx context.Context, action la
 	if !canView {
 		return nil, fmt.Errorf("permission denied")
 	}
-	executions, err := h.tickets.ListExecutions(actionCtx, ticket.ID)
-	if err != nil {
-		return nil, fmt.Errorf("load statement results failed")
-	}
 	handled := larkTicketCardContextHandled(ticket, action.CardStage, action.Handled)
-	card := buildLarkTicketDetailCard(actionCtx, h.dbConns, h.users, h.appBaseURL, ticket, h.ticketStateLabel(ticket.Status), executions, action.CardStage, handled)
+	card := buildLarkTicketDetailCard(actionCtx, h.dbConns, h.users, h.appBaseURL, ticket, h.ticketStateLabel(ticket.Status), action.CardStage, handled)
 	resp := larkCardToast("success", "工單詳情已載入。")
 	if card != nil {
 		resp["card"] = notification.BuildCardContent(*card)
