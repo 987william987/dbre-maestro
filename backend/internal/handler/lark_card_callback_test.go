@@ -1,6 +1,11 @@
 package handler
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/dbre-maestro/maestro/internal/model"
+)
 
 func TestParseLarkCardActionSupportsEventPayload(t *testing.T) {
 	got := parseLarkCardAction(map[string]any{
@@ -54,5 +59,16 @@ func TestParseLarkCardActionSupportsViewDetails(t *testing.T) {
 	})
 	if got.Action != larkTicketActionViewDetails || got.Ticket != "TK-VIEW" || got.UnionID != "on_viewer" || got.CardStage != larkTicketCardStageResult || !got.Handled {
 		t.Fatalf("parseLarkCardAction() = %#v", got)
+	}
+}
+
+func TestValidateLarkTicketActionStageRejectsStaleReviewReject(t *testing.T) {
+	ticket := &model.Ticket{Status: model.TicketStatusPendingExecution}
+	err := validateLarkTicketActionStageForTicket(ticket, larkCardActionRequest{
+		Action:    larkTicketActionReject,
+		CardStage: larkTicketCardStageReview,
+	})
+	if err == nil || !strings.Contains(err.Error(), "no longer pending review") {
+		t.Fatalf("validateLarkTicketActionStageForTicket() error = %v, want stale review rejection", err)
 	}
 }

@@ -86,6 +86,13 @@ func TestBuildLarkTicketSummaryCardKeepsHandledReviewContext(t *testing.T) {
 	}
 }
 
+func TestLarkTicketCardContextMarksStaleReviewCardHandled(t *testing.T) {
+	ticket := &model.Ticket{Status: model.TicketStatusPendingExecution}
+	if !larkTicketCardContextHandled(ticket, larkTicketCardStageReview, false) {
+		t.Fatal("stale review card should be handled after ticket leaves pending review")
+	}
+}
+
 func TestBuildLarkTicketDetailCardKeepsOriginalReviewStageAfterTicketMovesForward(t *testing.T) {
 	ticket := &model.Ticket{ID: 13, TicketNo: "TK-13", TicketType: model.TicketTypeDDL, Status: model.TicketStatusPendingExecution}
 	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "待執行", nil, larkTicketCardStageReview, false)

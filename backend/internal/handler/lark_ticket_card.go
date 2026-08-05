@@ -268,6 +268,20 @@ func larkTicketCardHandledForNotification(notifType string) bool {
 	return larkTicketCardStageForNotification(notifType) == larkTicketCardStageResult
 }
 
+func larkTicketCardContextHandled(ticket *model.Ticket, cardStage string, handled bool) bool {
+	if handled || ticket == nil {
+		return true
+	}
+	switch normalizeLarkTicketCardStage(cardStage) {
+	case larkTicketCardStageReview:
+		return ticket.Status != model.TicketStatusPendingReview
+	case larkTicketCardStageExecution:
+		return ticket.Status != model.TicketStatusPendingExecution
+	default:
+		return true
+	}
+}
+
 func larkTicketCardStageForStatus(status model.TicketStatus) string {
 	switch status {
 	case model.TicketStatusPendingReview:

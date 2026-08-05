@@ -91,6 +91,9 @@ func (h *TicketHandler) HandleLarkCardAction(ctx context.Context, actionReq lark
 		return resp, nil
 	}
 
+	if err := h.validateLarkTicketActionStage(ctx, actionReq); err != nil {
+		return larkCardToast("error", err.Error()), err
+	}
 	updated, err := h.executeLarkTicketAction(ctx, actionReq, user.ID, user.Username)
 	if err != nil {
 		return larkCardToast("error", err.Error()), err
@@ -126,7 +129,8 @@ func (h *TicketHandler) larkTicketSummaryResponse(ctx context.Context, action la
 		return nil, fmt.Errorf("permission denied")
 	}
 
-	card := buildLarkTicketSummaryCard(actionCtx, h.dbConns, h.users, h.appBaseURL, ticket, h.ticketStateLabel(ticket.Status), action.CardStage, action.Handled)
+	handled := larkTicketCardContextHandled(ticket, action.CardStage, action.Handled)
+	card := buildLarkTicketSummaryCard(actionCtx, h.dbConns, h.users, h.appBaseURL, ticket, h.ticketStateLabel(ticket.Status), action.CardStage, handled)
 	resp := larkCardToast("success", "工單詳情已收起。")
 	if card != nil {
 		resp["card"] = notification.BuildCardContent(*card)
@@ -160,12 +164,54 @@ func (h *TicketHandler) larkTicketDetailsResponse(ctx context.Context, action la
 	if err != nil {
 		return nil, fmt.Errorf("load statement results failed")
 	}
-	card := buildLarkTicketDetailCard(actionCtx, h.dbConns, h.users, h.appBaseURL, ticket, h.ticketStateLabel(ticket.Status), executions, action.CardStage, action.Handled)
+	handled := larkTicketCardContextHandled(ticket, action.CardStage, action.Handled)
+	card := buildLarkTicketDetailCard(actionCtx, h.dbConns, h.users, h.appBaseURL, ticket, h.ticketStateLabel(ticket.Status), executions, action.CardStage, handled)
 	resp := larkCardToast("success", "工單詳情已載入。")
 	if card != nil {
 		resp["card"] = notification.BuildCardContent(*card)
 	}
 	return resp, nil
+}
+
+func (h *TicketHandler) validateLarkTicketActionStage(ctx context.Context, action larkCardActionRequest) error {
+	ticket, err := h.resolveTicketByRef(ctx, action.Ticket)
+	if err != nil {
+		return fmt.Errorf("load ticket failed")
+	}
+	if ticket == nil {
+		return fmt.Errorf("ticket not found")
+	}
+	return validateLarkTicketActionStageForTicket(ticket, action)
+}
+
+func validateLarkTicketActionStageForTicket(ticket *model.Ticket, action larkCardActionRequest) error {
+	if ticket == nil {
+		return fmt.Errorf("ticket not found")
+	}
+	switch action.Action {
+	case larkTicketActionApprove:
+		if normalizeLarkTicketCardStage(action.CardStage) != larkTicketCardStageReview || ticket.Status != model.TicketStatusPendingReview {
+			return fmt.Errorf("ticket is no longer pending review")
+		}
+	case larkTicketActionExecute:
+		if normalizeLarkTicketCardStage(action.CardStage) != larkTicketCardStageExecution || ticket.Status != model.TicketStatusPendingExecution {
+			return fmt.Errorf("ticket is no longer pending execution")
+		}
+	case larkTicketActionReject:
+		switch normalizeLarkTicketCardStage(action.CardStage) {
+		case larkTicketCardStageReview:
+			if ticket.Status != model.TicketStatusPendingReview {
+				return fmt.Errorf("ticket is no longer pending review")
+			}
+		case larkTicketCardStageExecution:
+			if ticket.Status != model.TicketStatusPendingExecution {
+				return fmt.Errorf("ticket is no longer pending execution")
+			}
+		default:
+			return fmt.Errorf("ticket action is no longer available")
+		}
+	}
+	return nil
 }
 
 func (h *TicketHandler) verifyLarkCardToken(ctx context.Context, payload map[string]any) bool {
