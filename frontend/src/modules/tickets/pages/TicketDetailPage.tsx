@@ -979,7 +979,7 @@ export function TicketDetailPage() {
   const canViewWorkflowTrace = isAdminUser(user) && ticket?.status === 'needs_admin_attention'
   const canReapplyTicket = Boolean(
     ticket &&
-    ticket.status === 'failed' &&
+    ['completed', 'failed', 'interrupted', 'rejected', 'withdrawn'].includes(ticket.status) &&
     (ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml' || ticket.ticket_type === 'redis_command') &&
     user.permissions.includes('tickets.apply'),
   )

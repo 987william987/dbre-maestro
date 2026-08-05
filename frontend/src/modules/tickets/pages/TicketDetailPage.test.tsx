@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Ticket, TicketDetail } from '@/shared/types/ticket'
+import type { Ticket, TicketDetail, TicketStatus, TicketType } from '@/shared/types/ticket'
 import { TicketDetailPage } from '@/modules/tickets/pages/TicketDetailPage'
 
 vi.mock('@/shared/auth/AuthContext', () => ({
@@ -254,7 +254,23 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.queryByText('執行流程')).not.toBeInTheDocument()
   })
 
-  it('failed 一般工單可一鍵重提到新建工單頁', async () => {
+  it.each([
+    ['completed', 'ddl'],
+    ['completed', 'dml'],
+    ['completed', 'redis_command'],
+    ['failed', 'ddl'],
+    ['failed', 'dml'],
+    ['failed', 'redis_command'],
+    ['interrupted', 'ddl'],
+    ['interrupted', 'dml'],
+    ['interrupted', 'redis_command'],
+    ['rejected', 'ddl'],
+    ['rejected', 'dml'],
+    ['rejected', 'redis_command'],
+    ['withdrawn', 'ddl'],
+    ['withdrawn', 'dml'],
+    ['withdrawn', 'redis_command'],
+  ] satisfies Array<[TicketStatus, TicketType]>)('%s %s 工單可一鍵重提到新建工單頁', async (status, ticketType) => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
       isAuthenticated: true,
@@ -266,15 +282,38 @@ describe('TicketDetailPage role visibility', () => {
     })
     mockedGetTicket.mockResolvedValue(buildDetail({
       ...baseTicket,
-      status: 'failed',
-      ticket_type: 'dml',
-      sql_content: 'UPDATE users SET flagged = 1 WHERE id < 10;',
+      status,
+      ticket_type: ticketType,
+      sql_content: ticketType === 'redis_command' ? 'SET user:1 active' : 'UPDATE users SET flagged = 1 WHERE id < 10;',
     }))
 
     renderPage()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Resubmit' }))
     expect(screen.getByText('new ticket page')).toBeInTheDocument()
+  })
+
+  it('非一般工單即使 rejected 也不顯示一鍵重提', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      status: 'rejected',
+      ticket_type: 'sql_export',
+      sql_content: 'SELECT * FROM users;',
+    }))
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByText('SQL Content')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Resubmit' })).not.toBeInTheDocument()
   })
 
   it('工單詳情 SQL 內容會以格式化後的形式顯示', async () => {
