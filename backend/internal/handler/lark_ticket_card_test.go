@@ -36,6 +36,78 @@ func TestBuildLarkTicketCardActionsForTerminalNotificationOnlyView(t *testing.T)
 	}
 }
 
+func TestBuildLarkTicketDetailCardKeepsCurrentStatusActions(t *testing.T) {
+	ticket := &model.Ticket{ID: 10, TicketNo: "TK-10", TicketType: model.TicketTypeDDL, Status: model.TicketStatusPendingReview}
+	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "待審核", nil, larkTicketCardStageReview, false)
+	if card == nil {
+		t.Fatal("detail card = nil")
+	}
+	if len(card.Actions) != 3 || card.Actions[0].Action != larkTicketActionApprove || card.Actions[1].Action != larkTicketActionReject || card.Actions[2].Action != larkTicketActionHideDetails || card.Actions[2].Text != "收起詳情" {
+		t.Fatalf("detail card actions = %#v, want approve/reject/hide", card.Actions)
+	}
+}
+
+func TestBuildLarkTicketDetailCardForTerminalStatusOnlyShowsView(t *testing.T) {
+	ticket := &model.Ticket{ID: 11, TicketNo: "TK-11", TicketType: model.TicketTypeDDL, Status: model.TicketStatusCompleted}
+	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "已完成", nil, larkTicketCardStageResult, true)
+	if card == nil {
+		t.Fatal("detail card = nil")
+	}
+	if len(card.Actions) != 1 || card.Actions[0].Action != larkTicketActionHideDetails {
+		t.Fatalf("detail card actions = %#v, want hide only", card.Actions)
+	}
+}
+
+func TestBuildLarkTicketSummaryCardRestoresViewDetailsAction(t *testing.T) {
+	ticket := &model.Ticket{ID: 12, TicketNo: "TK-12", TicketType: model.TicketTypeDDL, Status: model.TicketStatusPendingReview}
+	card := buildLarkTicketSummaryCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "待審核", larkTicketCardStageReview, false)
+	if card == nil {
+		t.Fatal("summary card = nil")
+	}
+	if card.Title != "工單待審核" {
+		t.Fatalf("summary card title = %q, want 工單待審核", card.Title)
+	}
+	if len(card.Actions) != 3 || card.Actions[0].Action != larkTicketActionApprove || card.Actions[1].Action != larkTicketActionReject || card.Actions[2].Action != larkTicketActionViewDetails || card.Actions[2].Text != "查看詳情" {
+		t.Fatalf("summary card actions = %#v, want approve/reject/view", card.Actions)
+	}
+}
+
+func TestBuildLarkTicketSummaryCardKeepsHandledReviewContext(t *testing.T) {
+	ticket := &model.Ticket{ID: 15, TicketNo: "TK-15", TicketType: model.TicketTypeDDL, Status: model.TicketStatusPendingExecution}
+	card := buildLarkTicketSummaryCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "待執行", larkTicketCardStageReview, true)
+	if card == nil {
+		t.Fatal("summary card = nil")
+	}
+	if card.Title != "審批已完成" {
+		t.Fatalf("summary card title = %q, want 審批已完成", card.Title)
+	}
+	if len(card.Actions) != 1 || card.Actions[0].Action != larkTicketActionViewDetails {
+		t.Fatalf("summary card actions = %#v, want view only", card.Actions)
+	}
+}
+
+func TestBuildLarkTicketDetailCardKeepsOriginalReviewStageAfterTicketMovesForward(t *testing.T) {
+	ticket := &model.Ticket{ID: 13, TicketNo: "TK-13", TicketType: model.TicketTypeDDL, Status: model.TicketStatusPendingExecution}
+	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "待執行", nil, larkTicketCardStageReview, false)
+	if card == nil {
+		t.Fatal("detail card = nil")
+	}
+	if len(card.Actions) != 3 || card.Actions[0].Action != larkTicketActionApprove || card.Actions[1].Action != larkTicketActionReject || card.Actions[2].Action != larkTicketActionHideDetails {
+		t.Fatalf("detail card actions = %#v, want original review-stage actions", card.Actions)
+	}
+}
+
+func TestBuildLarkTicketDetailCardHandledOnlyShowsHide(t *testing.T) {
+	ticket := &model.Ticket{ID: 14, TicketNo: "TK-14", TicketType: model.TicketTypeDDL, Status: model.TicketStatusPendingExecution}
+	card := buildLarkTicketDetailCard(t.Context(), nil, nil, "https://dbre.example.test", ticket, "待執行", nil, larkTicketCardStageReview, true)
+	if card == nil {
+		t.Fatal("detail card = nil")
+	}
+	if len(card.Actions) != 1 || card.Actions[0].Action != larkTicketActionHideDetails {
+		t.Fatalf("detail card actions = %#v, want hide only for handled card", card.Actions)
+	}
+}
+
 func TestAppendLarkTicketLinkFieldRendersFullURL(t *testing.T) {
 	fields := appendLarkTicketLinkField(nil, "https://dbre.example.test/tickets/TK-9")
 	if len(fields) != 1 || fields[0].Label != "工單連結" || fields[0].Value != "[https://dbre.example.test/tickets/TK-9](https://dbre.example.test/tickets/TK-9)" {

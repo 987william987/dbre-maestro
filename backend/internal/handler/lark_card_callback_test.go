@@ -11,13 +11,14 @@ func TestParseLarkCardActionSupportsEventPayload(t *testing.T) {
 			},
 			"action": map[string]any{
 				"value": map[string]any{
-					"action":    larkTicketActionApprove,
-					"ticket_no": "TK-1",
+					"action":     larkTicketActionApprove,
+					"ticket_no":  "TK-1",
+					"card_stage": larkTicketCardStageReview,
 				},
 			},
 		},
 	})
-	if got.Action != larkTicketActionApprove || got.Ticket != "TK-1" || got.OpenID != "ou_x" || got.UnionID != "on_y" {
+	if got.Action != larkTicketActionApprove || got.Ticket != "TK-1" || got.OpenID != "ou_x" || got.UnionID != "on_y" || got.CardStage != larkTicketCardStageReview {
 		t.Fatalf("parseLarkCardAction() = %#v", got)
 	}
 }
@@ -43,13 +44,15 @@ func TestParseLarkCardActionSupportsViewDetails(t *testing.T) {
 			"operator": map[string]any{"union_id": "on_viewer"},
 			"action": map[string]any{
 				"value": map[string]any{
-					"action":    larkTicketActionViewDetails,
-					"ticket_no": "TK-VIEW",
+					"action":     larkTicketActionViewDetails,
+					"ticket_no":  "TK-VIEW",
+					"card_stage": larkTicketCardStageResult,
+					"handled":    true,
 				},
 			},
 		},
 	})
-	if got.Action != larkTicketActionViewDetails || got.Ticket != "TK-VIEW" || got.UnionID != "on_viewer" {
+	if got.Action != larkTicketActionViewDetails || got.Ticket != "TK-VIEW" || got.UnionID != "on_viewer" || got.CardStage != larkTicketCardStageResult || !got.Handled {
 		t.Fatalf("parseLarkCardAction() = %#v", got)
 	}
 }

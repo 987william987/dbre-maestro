@@ -29,6 +29,7 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     lark_app_secret: typeof settings.lark_app_secret === 'string' ? settings.lark_app_secret : '',
     lark_app_secret_configured: typeof settings.lark_app_secret_configured === 'boolean' ? settings.lark_app_secret_configured : false,
     lark_interactive_cards_enabled: typeof settings.lark_interactive_cards_enabled === 'boolean' ? settings.lark_interactive_cards_enabled : false,
+    lark_card_callback_mode: settings.lark_card_callback_mode === 'long_connection' ? 'long_connection' : 'http',
     lark_card_verification_token: typeof settings.lark_card_verification_token === 'string' ? settings.lark_card_verification_token : '',
     lark_card_verification_token_configured: typeof settings.lark_card_verification_token_configured === 'boolean' ? settings.lark_card_verification_token_configured : false,
     lark_oauth_enabled: typeof settings.lark_oauth_enabled === 'boolean' ? settings.lark_oauth_enabled : false,

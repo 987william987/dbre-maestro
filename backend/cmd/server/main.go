@@ -314,7 +314,19 @@ func main() {
 	notifH := handler.NewNotificationHandler(notifRepo, ticketRepo)
 	eventStreamH := handler.NewEventStreamHandler(eventBroker)
 	whitelistH := handler.NewMaskingWhitelistHandler(dbConnRepo, whitelistRepo, auditRepo)
-	settingsH := handler.NewSettingsHandler(settingsRepo, userRepo, authGroupRepo, dbConnRepo, auditRepo, handler.WithSettingsHandlerAppEnv(cfg.AppEnv))
+	larkCardCallbackManager := handler.NewLarkCardCallbackManager(settingsRepo, ticketH)
+	if err := larkCardCallbackManager.Reload(context.Background()); err != nil {
+		slog.Warn("lark card callback manager startup reload failed", "err", err)
+	}
+	settingsH := handler.NewSettingsHandler(
+		settingsRepo,
+		userRepo,
+		authGroupRepo,
+		dbConnRepo,
+		auditRepo,
+		handler.WithSettingsHandlerAppEnv(cfg.AppEnv),
+		handler.WithSettingsHandlerLarkCallbackReloader(larkCardCallbackManager),
+	)
 	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo, settingsRepo)
 	scheduledReportH := handler.NewScheduledSQLReportHandler(scheduledReportRepo, dbConnRepo, userRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, ticketRepo, maskingEngine, auditRepo, larkDispatcher)
 	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
@@ -624,6 +636,7 @@ func main() {
 	go func() {
 		shutdownErr <- srv.Shutdown(ctx)
 	}()
+	larkCardCallbackManager.Stop()
 	ticketH.CancelActiveExecutionsForShutdown(ctx)
 	if err := <-shutdownErr; err != nil {
 		slog.Warn("server shutdown failed", "err", err)

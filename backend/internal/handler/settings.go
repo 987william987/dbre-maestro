@@ -16,19 +16,30 @@ import (
 )
 
 type SettingsHandler struct {
-	settings *repository.SettingsRepo
-	users    *repository.UserRepo
-	auths    *repository.AuthGroupRepo
-	dbConns  *repository.DBConnectionRepo
-	audit    *repository.AuditRepo
-	appEnv   string
+	settings             *repository.SettingsRepo
+	users                *repository.UserRepo
+	auths                *repository.AuthGroupRepo
+	dbConns              *repository.DBConnectionRepo
+	audit                *repository.AuditRepo
+	appEnv               string
+	larkCallbackReloader settingsRuntimeReloader
 }
 
 type SettingsHandlerOption func(*SettingsHandler)
 
+type settingsRuntimeReloader interface {
+	Reload(context.Context) error
+}
+
 func WithSettingsHandlerAppEnv(appEnv string) SettingsHandlerOption {
 	return func(h *SettingsHandler) {
 		h.appEnv = strings.TrimSpace(appEnv)
+	}
+}
+
+func WithSettingsHandlerLarkCallbackReloader(reloader settingsRuntimeReloader) SettingsHandlerOption {
+	return func(h *SettingsHandler) {
+		h.larkCallbackReloader = reloader
 	}
 }
 
@@ -50,6 +61,15 @@ func normalizeOIDCScopes(scopes []string) []string {
 		return []string{"openid", "profile", "email", "dbre"}
 	}
 	return next
+}
+
+func normalizeLarkCardCallbackMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "long_connection":
+		return "long_connection"
+	default:
+		return "http"
+	}
 }
 
 func NewSettingsHandler(settings *repository.SettingsRepo, users *repository.UserRepo, auths *repository.AuthGroupRepo, dbConns *repository.DBConnectionRepo, audit *repository.AuditRepo, opts ...SettingsHandlerOption) *SettingsHandler {
@@ -304,6 +324,7 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "lark_app_secret is required when configuring lark for the first time")
 		return
 	}
+	req.LarkCardCallbackMode = normalizeLarkCardCallbackMode(req.LarkCardCallbackMode)
 	larkCardTokenConfigured, larkCardTokenRequired := resolveSecretState(
 		req.LarkAppID,
 		req.LarkCardVerificationToken,
@@ -319,11 +340,11 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "lark_app_secret is required when lark interactive cards are enabled")
 		return
 	}
-	if req.LarkInteractiveCardsEnabled && !req.LarkCardVerificationTokenConfigured {
+	if req.LarkInteractiveCardsEnabled && req.LarkCardCallbackMode == "http" && !req.LarkCardVerificationTokenConfigured {
 		jsonErr(w, http.StatusUnprocessableEntity, "lark_card_verification_token is required when lark interactive cards are enabled")
 		return
 	}
-	if req.LarkInteractiveCardsEnabled && larkCardTokenRequired {
+	if req.LarkInteractiveCardsEnabled && req.LarkCardCallbackMode == "http" && larkCardTokenRequired {
 		jsonErr(w, http.StatusUnprocessableEntity, "lark_card_verification_token is required when configuring lark interactive cards for the first time")
 		return
 	}
@@ -440,6 +461,12 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "update settings failed")
 		return
 	}
+	if h.larkCallbackReloader != nil {
+		if err := h.larkCallbackReloader.Reload(r.Context()); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "reload lark card callback failed")
+			return
+		}
+	}
 	req.AppEnv = h.appEnv
 
 	actorID := middleware.UserIDFromCtx(r.Context())
@@ -456,6 +483,7 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			"lark_app_id":                                 req.LarkAppID,
 			"lark_app_secret_configured":                  req.LarkAppSecretConfigured || req.LarkAppSecret != "",
 			"lark_interactive_cards_enabled":              req.LarkInteractiveCardsEnabled,
+			"lark_card_callback_mode":                     req.LarkCardCallbackMode,
 			"lark_card_verification_token_configured":     req.LarkCardVerificationTokenConfigured || req.LarkCardVerificationToken != "",
 			"lark_oauth_enabled":                          req.LarkOAuthEnabled,
 			"lark_oauth_site":                             req.LarkOAuthSite,

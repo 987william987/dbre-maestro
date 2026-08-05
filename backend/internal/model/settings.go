@@ -13,6 +13,7 @@ type PlatformSettings struct {
 	LarkAppSecret                        string           `json:"lark_app_secret,omitempty"`
 	LarkAppSecretConfigured              bool             `json:"lark_app_secret_configured"`
 	LarkInteractiveCardsEnabled          bool             `json:"lark_interactive_cards_enabled"`
+	LarkCardCallbackMode                 string           `json:"lark_card_callback_mode"`
 	LarkCardVerificationToken            string           `json:"lark_card_verification_token,omitempty"`
 	LarkCardVerificationTokenConfigured  bool             `json:"lark_card_verification_token_configured"`
 	LarkOAuthEnabled                     bool             `json:"lark_oauth_enabled"`

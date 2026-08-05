@@ -19,10 +19,12 @@ import (
 )
 
 type larkCardActionRequest struct {
-	Action  string
-	Ticket  string
-	OpenID  string
-	UnionID string
+	Action    string
+	Ticket    string
+	OpenID    string
+	UnionID   string
+	CardStage string
+	Handled   bool
 }
 
 func (h *TicketHandler) LarkCardCallback(w http.ResponseWriter, r *http.Request) {
@@ -54,52 +56,82 @@ func (h *TicketHandler) LarkCardCallback(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusBadRequest, "invalid lark card action")
 		return
 	}
-	user, err := h.users.GetByLarkOperator(r.Context(), actionReq.OpenID, actionReq.UnionID)
+	resp, err := h.HandleLarkCardAction(r.Context(), actionReq)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "resolve lark operator failed")
-		return
-	}
-	if user == nil {
-		jsonOK(w, larkCardToast("error", "User is not linked to DBRE Maestro."))
-		return
-	}
-	if !user.IsActive {
-		jsonOK(w, larkCardToast("error", "User is disabled."))
-		return
-	}
-
-	if actionReq.Action == larkTicketActionViewDetails {
-		resp, err := h.larkTicketDetailsResponse(r.Context(), actionReq, user.ID)
-		if err != nil {
-			jsonOK(w, larkCardToast("error", err.Error()))
-			return
-		}
 		jsonOK(w, resp)
 		return
 	}
+	jsonOK(w, resp)
+}
 
-	updated, err := h.executeLarkTicketAction(r.Context(), actionReq, user.ID, user.Username)
+func (h *TicketHandler) HandleLarkCardAction(ctx context.Context, actionReq larkCardActionRequest) (map[string]any, error) {
+	user, err := h.users.GetByLarkOperator(ctx, actionReq.OpenID, actionReq.UnionID)
 	if err != nil {
-		jsonOK(w, larkCardToast("error", err.Error()))
-		return
+		return larkCardToast("error", "resolve lark operator failed"), err
+	}
+	if user == nil {
+		return larkCardToast("error", "User is not linked to DBRE Maestro."), fmt.Errorf("lark operator is not linked")
+	}
+	if !user.IsActive {
+		return larkCardToast("error", "User is disabled."), fmt.Errorf("lark operator user is disabled")
+	}
+
+	if actionReq.Action == larkTicketActionViewDetails {
+		resp, err := h.larkTicketDetailsResponse(ctx, actionReq, user.ID)
+		if err != nil {
+			return larkCardToast("error", err.Error()), err
+		}
+		return resp, nil
+	}
+	if actionReq.Action == larkTicketActionHideDetails {
+		resp, err := h.larkTicketSummaryResponse(ctx, actionReq, user.ID)
+		if err != nil {
+			return larkCardToast("error", err.Error()), err
+		}
+		return resp, nil
+	}
+
+	updated, err := h.executeLarkTicketAction(ctx, actionReq, user.ID, user.Username)
+	if err != nil {
+		return larkCardToast("error", err.Error()), err
 	}
 	resp := larkCardToast("success", "工單操作完成。")
 	if updated != nil {
-		if card := buildLarkTicketCard(
-			r.Context(),
-			h.settings,
-			h.dbConns,
-			h.users,
-			h.appBaseURL,
-			updated,
-			"工單操作完成",
-			"ticket_action_completed",
-			h.ticketStateLabel(updated.Status),
-		); card != nil {
-			resp["card"] = notification.BuildCardContent(*card)
-		}
+		card := buildLarkTicketSummaryCard(ctx, h.dbConns, h.users, h.appBaseURL, updated, h.ticketStateLabel(updated.Status), actionReq.CardStage, true)
+		resp["card"] = notification.BuildCardContent(*card)
 	}
-	jsonOK(w, resp)
+	return resp, nil
+}
+
+func (h *TicketHandler) larkTicketSummaryResponse(ctx context.Context, action larkCardActionRequest, userID uint64) (map[string]any, error) {
+	permissions, err := h.users.GetEffectivePermissionKeys(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("load user permissions failed")
+	}
+	actionCtx := context.WithValue(ctx, middleware.CtxUserID, userID)
+	actionCtx = context.WithValue(actionCtx, middleware.CtxPermissions, permissions)
+
+	ticket, err := h.resolveTicketByRef(actionCtx, action.Ticket)
+	if err != nil {
+		return nil, fmt.Errorf("load ticket failed")
+	}
+	if ticket == nil {
+		return nil, fmt.Errorf("ticket not found")
+	}
+	canView, err := h.canViewTicket(actionCtx, ticket, userID)
+	if err != nil {
+		return nil, fmt.Errorf("check ticket permission failed")
+	}
+	if !canView {
+		return nil, fmt.Errorf("permission denied")
+	}
+
+	card := buildLarkTicketSummaryCard(actionCtx, h.dbConns, h.users, h.appBaseURL, ticket, h.ticketStateLabel(ticket.Status), action.CardStage, action.Handled)
+	resp := larkCardToast("success", "工單詳情已收起。")
+	if card != nil {
+		resp["card"] = notification.BuildCardContent(*card)
+	}
+	return resp, nil
 }
 
 func (h *TicketHandler) larkTicketDetailsResponse(ctx context.Context, action larkCardActionRequest, userID uint64) (map[string]any, error) {
@@ -128,7 +160,7 @@ func (h *TicketHandler) larkTicketDetailsResponse(ctx context.Context, action la
 	if err != nil {
 		return nil, fmt.Errorf("load statement results failed")
 	}
-	card := buildLarkTicketDetailCard(actionCtx, h.dbConns, h.users, h.appBaseURL, ticket, h.ticketStateLabel(ticket.Status), executions)
+	card := buildLarkTicketDetailCard(actionCtx, h.dbConns, h.users, h.appBaseURL, ticket, h.ticketStateLabel(ticket.Status), executions, action.CardStage, action.Handled)
 	resp := larkCardToast("success", "工單詳情已載入。")
 	if card != nil {
 		resp["card"] = notification.BuildCardContent(*card)
@@ -177,6 +209,12 @@ func parseLarkCardAction(payload map[string]any) larkCardActionRequest {
 	return larkCardActionRequest{
 		Action: larkFirstNonEmptyString(stringAt(value, "action"), stringAt(action, "action"), stringAt(payload, "action")),
 		Ticket: ticket,
+		CardStage: larkFirstNonEmptyString(
+			stringAt(value, "card_stage"),
+			stringAt(action, "card_stage"),
+			stringAt(payload, "card_stage"),
+		),
+		Handled: boolAt(value, "handled") || boolAt(action, "handled") || boolAt(payload, "handled"),
 		OpenID: larkFirstNonEmptyString(
 			stringAt(operator, "open_id"),
 			stringAt(operator, "open_id_v2"),
@@ -283,6 +321,20 @@ func stringAt(values map[string]any, key string) string {
 		}
 	}
 	return ""
+}
+
+func boolAt(values map[string]any, key string) bool {
+	if values == nil {
+		return false
+	}
+	item := values[key]
+	switch value := item.(type) {
+	case bool:
+		return value
+	case string:
+		return strings.EqualFold(strings.TrimSpace(value), "true")
+	}
+	return false
 }
 
 func larkFirstNonEmptyString(values ...string) string {

@@ -218,7 +218,7 @@ var ticketNotificationPolicies = map[ticketNotificationEvent]ticketNotificationP
 		Title:       "工單待執行",
 		NotifType:   "ticket_pending_execution",
 		Roles:       []ticketRecipientRole{ticketRoleExecutorPool},
-		NotifyActor: false,
+		NotifyActor: true,
 		Status:      model.TicketStatusPendingExecution,
 		NextAction:  "請執行此工單",
 	},

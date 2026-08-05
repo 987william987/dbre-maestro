@@ -442,11 +442,8 @@ func BuildCardContent(card Card) map[string]any {
 	}
 	if len(fieldLines) > 0 {
 		elements = append(elements, map[string]any{
-			"tag": "div",
-			"text": map[string]string{
-				"tag":     "lark_md",
-				"content": strings.Join(fieldLines, "\n"),
-			},
+			"tag":     "markdown",
+			"content": strings.Join(fieldLines, "\n"),
 		})
 	}
 	for _, block := range card.MarkdownBlocks {
@@ -455,53 +452,35 @@ func BuildCardContent(card Card) map[string]any {
 			continue
 		}
 		elements = append(elements, map[string]any{
-			"tag": "div",
-			"text": map[string]string{
-				"tag":     "lark_md",
-				"content": block,
-			},
+			"tag":     "markdown",
+			"content": block,
 		})
 	}
 	if len(card.Actions) > 0 {
-		actions := make([]any, 0, len(card.Actions))
+		actionColumns := make([]any, 0, len(card.Actions))
 		for _, action := range card.Actions {
-			text := strings.TrimSpace(action.Text)
-			if text == "" {
+			button := buildCardButton(action)
+			if button == nil {
 				continue
 			}
-			button := map[string]any{
-				"tag": "button",
-				"text": map[string]string{
-					"tag":     "plain_text",
-					"content": text,
-				},
-			}
-			if action.URL != "" {
-				button["url"] = action.URL
-			}
-			if action.Type != "" {
-				button["type"] = action.Type
-			}
-			value := map[string]any{}
-			for key, item := range action.Value {
-				value[key] = item
-			}
-			if action.Action != "" {
-				value["action"] = action.Action
-			}
-			if len(value) > 0 {
-				button["value"] = value
-			}
-			actions = append(actions, button)
+			actionColumns = append(actionColumns, map[string]any{
+				"tag":      "column",
+				"width":    "auto",
+				"elements": []any{button},
+			})
 		}
-		if len(actions) > 0 {
+		if len(actionColumns) > 0 {
 			elements = append(elements, map[string]any{
-				"tag":     "action",
-				"actions": actions,
+				"tag":                "column_set",
+				"flex_mode":          "none",
+				"horizontal_align":   "left",
+				"horizontal_spacing": "8px",
+				"columns":            actionColumns,
 			})
 		}
 	}
 	return map[string]any{
+		"schema": "2.0",
 		"config": map[string]any{
 			"wide_screen_mode": true,
 		},
@@ -512,8 +491,49 @@ func BuildCardContent(card Card) map[string]any {
 				"content": title,
 			},
 		},
-		"elements": elements,
+		"body": map[string]any{
+			"elements": elements,
+		},
 	}
+}
+
+func buildCardButton(action CardAction) map[string]any {
+	text := strings.TrimSpace(action.Text)
+	if text == "" {
+		return nil
+	}
+	button := map[string]any{
+		"tag":  "button",
+		"type": strings.TrimSpace(action.Type),
+		"size": "medium",
+		"text": map[string]string{
+			"tag":     "plain_text",
+			"content": text,
+		},
+	}
+	if button["type"] == "" {
+		button["type"] = "default"
+	}
+	behavior := map[string]any{}
+	if action.URL != "" {
+		behavior["type"] = "open_url"
+		behavior["default_url"] = action.URL
+	} else {
+		value := map[string]any{}
+		for key, item := range action.Value {
+			value[key] = item
+		}
+		if action.Action != "" {
+			value["action"] = action.Action
+		}
+		if len(value) == 0 {
+			return nil
+		}
+		behavior["type"] = "callback"
+		behavior["value"] = value
+	}
+	button["behaviors"] = []any{behavior}
+	return button
 }
 
 func escapeLarkMarkdown(value string) string {
