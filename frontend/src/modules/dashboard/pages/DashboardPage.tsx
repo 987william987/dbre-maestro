@@ -9,7 +9,7 @@ import { DataTable, DataTableBody, DataTableCell, DataTableHead, DataTableHeader
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
-import { getDashboard, type DashboardCount, type DashboardQueryAccessScope, type DashboardResponse, type DashboardTicketSummary } from '@/modules/dashboard/api'
+import { getDashboard, type DashboardCount, type DashboardQueryAccessScope, type DashboardResponse, type DashboardTicketSummary, type DashboardUserCount } from '@/modules/dashboard/api'
 
 const TICKET_TYPE_LABELS: Record<TicketType, string> = {
   ddl: 'DDL',
@@ -38,6 +38,32 @@ function formatRemaining(scope: DashboardQueryAccessScope) {
     return '—'
   }
   return scope.remaining_days === 0 ? 'Today' : `${scope.remaining_days}d`
+}
+
+function formatMinutes(value?: number | null) {
+  if (value == null) {
+    return '—'
+  }
+  if (value < 60) {
+    return `${Math.round(value)}m`
+  }
+  if (value < 24 * 60) {
+    return `${(value / 60).toFixed(1)}h`
+  }
+  return `${(value / 1440).toFixed(1)}d`
+}
+
+function formatDurationMs(value?: number | null) {
+  if (value == null) {
+    return '—'
+  }
+  if (value < 1000) {
+    return `${Math.round(value)}ms`
+  }
+  if (value < 60_000) {
+    return `${(value / 1000).toFixed(1)}s`
+  }
+  return `${(value / 60_000).toFixed(1)}m`
 }
 
 function KpiCard({
@@ -72,6 +98,25 @@ function KpiCard({
         </span>
       </div>
     </section>
+  )
+}
+
+function MetricGrid({ items }: { items: Array<{ label: string; value: string | number; tone?: 'neutral' | 'warning' | 'danger' | 'success' }> }) {
+  const toneClass = {
+    neutral: 'bg-panel-soft text-ink',
+    warning: 'bg-amber-50 text-amber-800',
+    danger: 'bg-rose-50 text-rose-800',
+    success: 'bg-emerald-50 text-emerald-800',
+  }
+  return (
+    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+      {items.map((item) => (
+        <div key={item.label} className={`rounded-lg border border-border px-3 py-2 ${toneClass[item.tone ?? 'neutral']}`}>
+          <p className="text-[11px] font-medium text-muted">{item.label}</p>
+          <p className="mt-1 text-[20px] font-semibold tracking-normal">{typeof item.value === 'number' ? formatCount(item.value) : item.value}</p>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -110,6 +155,34 @@ function DistributionBar({ item, total }: { item: DashboardCount; total: number 
   )
 }
 
+function CountList({ items, empty = 'No data.' }: { items: DashboardCount[]; empty?: string }) {
+  const total = items.reduce((sum, item) => sum + item.count, 0)
+  if (items.length === 0) {
+    return <p className="text-[12px] text-muted">{empty}</p>
+  }
+  return (
+    <div className="grid gap-3">
+      {items.map((item) => <DistributionBar key={item.key} item={item} total={total} />)}
+    </div>
+  )
+}
+
+function UserCountList({ items, empty = 'No data.' }: { items: DashboardUserCount[]; empty?: string }) {
+  if (items.length === 0) {
+    return <p className="text-[12px] text-muted">{empty}</p>
+  }
+  return (
+    <div className="grid gap-2">
+      {items.map((item, index) => (
+        <div key={`${item.user_id ?? item.username ?? index}`} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px]">
+          <span className="truncate font-medium text-ink">{item.username || (item.user_id ? `User #${item.user_id}` : 'Unknown')}</span>
+          <span className="text-muted">{formatCount(item.count)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function TicketTable({ tickets, empty }: { tickets: Ticket[]; empty: string }) {
   if (tickets.length === 0) {
     return <div className="rounded-lg border border-dashed border-border bg-panel-soft p-5 text-center text-[12px] text-muted">{empty}</div>
@@ -141,6 +214,20 @@ function TicketTable({ tickets, empty }: { tickets: Ticket[]; empty: string }) {
           ))}
         </DataTableBody>
       </DataTable>
+    </div>
+  )
+}
+
+function MetadataJobRow({ label, status, updatedAt }: { label: string; status?: string; updatedAt?: string | null }) {
+  const normalizedStatus = status || 'idle'
+  const statusClass = normalizedStatus === 'failed' ? 'border-rose-200 bg-rose-50 text-rose-700' : normalizedStatus === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-border bg-white text-muted'
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px]">
+      <div className="min-w-0">
+        <p className="font-medium text-ink">{label}</p>
+        <p className="truncate text-[11px] text-muted">{updatedAt ? formatDateTime(updatedAt) : 'No run recorded'}</p>
+      </div>
+      <span className={`inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-semibold ${statusClass}`}>{normalizedStatus}</span>
     </div>
   )
 }
@@ -323,9 +410,77 @@ export function DashboardPage() {
             <KpiCard title="Platform Failed" value={platform.ticket_summary.failed} helper="Failed, stopped, or rejected" icon={AlertTriangle} tone="danger" />
             <KpiCard title="DB Health Issues" value={platform.db_connection_failures.length} helper="Connections with failed test status" icon={Database} tone={platform.db_connection_failures.length > 0 ? 'danger' : 'success'} />
           </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+            <DashboardPanel title="Platform Queue">
+              <MetricGrid
+                items={[
+                  { label: 'Pending Review', value: platform.queue.pending_review, tone: platform.queue.pending_review > 0 ? 'warning' : 'neutral' },
+                  { label: 'Pending Execution', value: platform.queue.pending_execution, tone: platform.queue.pending_execution > 0 ? 'warning' : 'neutral' },
+                  { label: 'Executing', value: platform.queue.executing, tone: platform.queue.executing > 0 ? 'warning' : 'neutral' },
+                  { label: 'Needs Admin Attention', value: platform.queue.needs_admin_attention, tone: platform.queue.needs_admin_attention > 0 ? 'danger' : 'neutral' },
+                  { label: 'Failed Today', value: platform.queue.failed_today, tone: platform.queue.failed_today > 0 ? 'danger' : 'neutral' },
+                  { label: 'Failed 7d', value: platform.queue.failed_7d, tone: platform.queue.failed_7d > 0 ? 'danger' : 'neutral' },
+                  { label: 'Long Pending >24h', value: platform.queue.long_pending, tone: platform.queue.long_pending > 0 ? 'warning' : 'neutral' },
+                ]}
+              />
+            </DashboardPanel>
+            <DashboardPanel title="SLA / Aging">
+              <MetricGrid
+                items={[
+                  { label: 'Avg Review Age', value: formatMinutes(platform.aging.avg_review_age_minutes) },
+                  { label: 'Max Review Age', value: formatMinutes(platform.aging.max_review_age_minutes) },
+                  { label: 'Avg Execution Wait', value: formatMinutes(platform.aging.avg_execution_wait_age_minutes) },
+                  { label: 'Max Execution Wait', value: formatMinutes(platform.aging.max_execution_wait_age_minutes) },
+                  { label: 'Avg Execution Duration 7d', value: formatDurationMs(platform.aging.avg_execution_duration_ms) },
+                ]}
+              />
+            </DashboardPanel>
+          </div>
+
           <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
             <DashboardPanel title="Recent Platform Attention">
               <TicketTable tickets={platform.recent_attention} empty="No active platform attention items." />
+            </DashboardPanel>
+            <DashboardPanel title="Long Pending Tickets">
+              <TicketTable tickets={platform.long_pending_tickets} empty="No tickets pending longer than 24 hours." />
+            </DashboardPanel>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+            <DashboardPanel title="Execution Risk / Failure">
+              <div className="grid gap-4">
+                <MetricGrid
+                  items={[
+                    { label: 'Recent Failed 7d', value: platform.execution_risk.recent_failed, tone: platform.execution_risk.recent_failed > 0 ? 'danger' : 'neutral' },
+                    { label: 'Manual Stop', value: platform.execution_risk.manually_stopped, tone: platform.execution_risk.manually_stopped > 0 ? 'warning' : 'neutral' },
+                    { label: 'Service Shutdown', value: platform.execution_risk.service_shutdown, tone: platform.execution_risk.service_shutdown > 0 ? 'danger' : 'neutral' },
+                    { label: 'Outcome Unknown', value: platform.execution_risk.outcome_unknown, tone: platform.execution_risk.outcome_unknown > 0 ? 'danger' : 'neutral' },
+                    { label: 'Not Sent', value: platform.execution_risk.not_sent },
+                    { label: 'DB Explicit Error', value: platform.execution_risk.db_explicit_error, tone: platform.execution_risk.db_explicit_error > 0 ? 'warning' : 'neutral' },
+                  ]}
+                />
+                <CountList items={platform.execution_risk.by_outcome} empty="No failed execution outcomes in the last 7 days." />
+              </div>
+            </DashboardPanel>
+            <DashboardPanel title="Recent Failed Tickets">
+              <TicketTable tickets={platform.recent_failed_tickets} empty="No recent failed execution tickets." />
+            </DashboardPanel>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+            <DashboardPanel title="Access Governance">
+              <MetricGrid
+                items={[
+                  { label: 'Active Query Rules', value: platform.access_governance.active_rules },
+                  { label: 'Expiring in 7d', value: platform.access_governance.expiring_soon, tone: platform.access_governance.expiring_soon > 0 ? 'warning' : 'neutral' },
+                  { label: 'Long-lived >90d', value: platform.access_governance.long_lived, tone: platform.access_governance.long_lived > 0 ? 'warning' : 'neutral' },
+                  { label: 'Never Expires', value: platform.access_governance.never_expires, tone: platform.access_governance.never_expires > 0 ? 'danger' : 'neutral' },
+                  { label: 'Recently Revoked 7d', value: platform.access_governance.recently_revoked },
+                  { label: 'Sensitive Access 7d', value: platform.access_governance.sensitive_requests_7d },
+                  { label: 'SQL Export 7d', value: platform.access_governance.sql_export_requests_7d },
+                ]}
+              />
             </DashboardPanel>
             <DashboardPanel title="DB Connection Health">
               {platform.db_connection_failures.length === 0 ? (
@@ -343,6 +498,55 @@ export function DashboardPage() {
                   ))}
                 </div>
               )}
+            </DashboardPanel>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+            <DashboardPanel title="DB Metadata Health">
+              <div className="grid gap-4">
+                <MetricGrid
+                  items={[
+                    { label: 'Metadata Enabled Connections', value: platform.db_metadata_health.enabled_metadata_connection_count },
+                    { label: 'Snapshot Connections', value: platform.db_metadata_health.object_snapshot_connection_count },
+                    { label: 'Stale Snapshot Connections', value: platform.db_metadata_health.stale_object_connection_count, tone: platform.db_metadata_health.stale_object_connection_count > 0 ? 'warning' : 'neutral' },
+                    { label: 'Metadata Objects', value: platform.db_metadata_health.object_count },
+                  ]}
+                />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <MetadataJobRow label="Inventory Sync" status={platform.db_metadata_health.inventory_job?.status} updatedAt={platform.db_metadata_health.inventory_job?.updated_at} />
+                  <MetadataJobRow label="Object Sync" status={platform.db_metadata_health.object_job?.status} updatedAt={platform.db_metadata_health.object_job?.updated_at} />
+                </div>
+                <CountList items={platform.db_metadata_health.db_type_counts} empty="No DB connections configured." />
+              </div>
+            </DashboardPanel>
+            <DashboardPanel title="Notification Health">
+              <div className="grid gap-4">
+                <MetricGrid
+                  items={[
+                    { label: 'Lark Failed 7d', value: platform.notification_health.lark_failed_7d, tone: platform.notification_health.lark_failed_7d > 0 ? 'danger' : 'neutral' },
+                    { label: 'Card Callback Failed 7d', value: platform.notification_health.interactive_callback_failed_7d, tone: platform.notification_health.interactive_callback_failed_7d > 0 ? 'danger' : 'neutral' },
+                    { label: 'Retry / Failure 7d', value: platform.notification_health.retry_or_failure_7d, tone: platform.notification_health.retry_or_failure_7d > 0 ? 'warning' : 'neutral' },
+                    { label: 'Missing Lark Recipient', value: platform.notification_health.missing_lark_recipient_7d, tone: platform.notification_health.missing_lark_recipient_7d > 0 ? 'warning' : 'neutral' },
+                    { label: 'Recipient Conflict', value: platform.notification_health.recipient_conflict_7d, tone: platform.notification_health.recipient_conflict_7d > 0 ? 'warning' : 'neutral' },
+                  ]}
+                />
+                <CountList items={platform.notification_health.by_type} empty="No notification delivery failures in the last 7 days." />
+              </div>
+            </DashboardPanel>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-4">
+            <DashboardPanel title="Top Submitters 30d">
+              <UserCountList items={platform.top_usage.submitters} />
+            </DashboardPanel>
+            <DashboardPanel title="Top DB Connections 30d">
+              <CountList items={platform.top_usage.db_connections_by_tickets} />
+            </DashboardPanel>
+            <DashboardPanel title="Top Failed DB 30d">
+              <CountList items={platform.top_usage.failed_db_connections} />
+            </DashboardPanel>
+            <DashboardPanel title="SQL Export Users 30d">
+              <UserCountList items={platform.top_usage.sql_exports_by_user} />
             </DashboardPanel>
           </div>
         </div>

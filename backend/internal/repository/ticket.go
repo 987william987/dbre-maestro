@@ -89,6 +89,42 @@ type WorkflowDashboardErrorCount struct {
 	Count     int64  `db:"count" json:"count"`
 }
 
+type PlatformQueueStats struct {
+	PendingReview       int64 `db:"pending_review" json:"pending_review"`
+	PendingExecution    int64 `db:"pending_execution" json:"pending_execution"`
+	Executing           int64 `db:"executing" json:"executing"`
+	NeedsAdminAttention int64 `db:"needs_admin_attention" json:"needs_admin_attention"`
+	FailedToday         int64 `db:"failed_today" json:"failed_today"`
+	Failed7d            int64 `db:"failed_7d" json:"failed_7d"`
+	LongPending         int64 `db:"long_pending" json:"long_pending"`
+}
+
+type PlatformAgingStats struct {
+	AvgReviewAgeMinutes        *float64 `json:"avg_review_age_minutes,omitempty"`
+	AvgExecutionWaitAgeMinutes *float64 `json:"avg_execution_wait_age_minutes,omitempty"`
+	AvgExecutionDurationMs     *float64 `json:"avg_execution_duration_ms,omitempty"`
+	MaxReviewAgeMinutes        *int64   `json:"max_review_age_minutes,omitempty"`
+	MaxExecutionWaitAgeMinutes *int64   `json:"max_execution_wait_age_minutes,omitempty"`
+}
+
+type PlatformExecutionRiskStats struct {
+	RecentFailed    int64                    `db:"recent_failed" json:"recent_failed"`
+	ManuallyStopped int64                    `db:"manually_stopped" json:"manually_stopped"`
+	ServiceShutdown int64                    `db:"service_shutdown" json:"service_shutdown"`
+	OutcomeUnknown  int64                    `db:"outcome_unknown" json:"outcome_unknown"`
+	NotSent         int64                    `db:"not_sent" json:"not_sent"`
+	DBExplicitError int64                    `db:"db_explicit_error" json:"db_explicit_error"`
+	ByOutcome       []WorkflowDashboardCount `json:"by_outcome"`
+	ByInterruption  []WorkflowDashboardCount `json:"by_interruption"`
+}
+
+type PlatformTopUsageStats struct {
+	Submitters             []WorkflowDashboardUserCount `json:"submitters"`
+	DBConnectionsByTickets []WorkflowDashboardCount     `json:"db_connections_by_tickets"`
+	FailedDBConnections    []WorkflowDashboardCount     `json:"failed_db_connections"`
+	SQLExportsByUser       []WorkflowDashboardUserCount `json:"sql_exports_by_user"`
+}
+
 type TicketDashboardSummary struct {
 	Total    int64                    `json:"total"`
 	ByType   []WorkflowDashboardCount `json:"by_type"`
@@ -608,6 +644,210 @@ func (r *TicketRepo) RecentPlatformAttentionTickets(ctx context.Context, limit i
 		return nil, fmt.Errorf("list recent platform tickets: %w", err)
 	}
 	return tickets, nil
+}
+
+func (r *TicketRepo) PlatformQueueStats(ctx context.Context, longPendingAfter time.Time) (*PlatformQueueStats, error) {
+	stats := &PlatformQueueStats{}
+	now := timeutil.NowUTC()
+	err := r.db.GetContext(ctx, stats,
+		`SELECT
+		 COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS pending_review,
+		 COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS pending_execution,
+		 COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS executing,
+		 COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS needs_admin_attention,
+		 COALESCE(SUM(CASE WHEN status IN (?, ?, ?) AND updated_at >= ? THEN 1 ELSE 0 END), 0) AS failed_today,
+		 COALESCE(SUM(CASE WHEN status IN (?, ?, ?) AND updated_at >= ? THEN 1 ELSE 0 END), 0) AS failed_7d,
+		 COALESCE(SUM(CASE WHEN status IN (?, ?) AND updated_at < ? THEN 1 ELSE 0 END), 0) AS long_pending
+		 FROM tickets`,
+		model.TicketStatusPendingReview,
+		model.TicketStatusPendingExecution,
+		model.TicketStatusExecuting,
+		model.TicketStatusNeedsAdminAttention,
+		model.TicketStatusFailed, model.TicketStatusStopped, model.TicketStatusInterrupted, now.Add(-24*time.Hour),
+		model.TicketStatusFailed, model.TicketStatusStopped, model.TicketStatusInterrupted, now.Add(-7*24*time.Hour),
+		model.TicketStatusPendingReview, model.TicketStatusPendingExecution, longPendingAfter,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load platform queue stats: %w", err)
+	}
+	return stats, nil
+}
+
+func (r *TicketRepo) LongPendingTickets(ctx context.Context, longPendingAfter time.Time, limit int) ([]model.Ticket, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 8
+	}
+	statuses := []model.TicketStatus{model.TicketStatusPendingReview, model.TicketStatusPendingExecution}
+	query, args, err := sqlx.In(
+		`SELECT * FROM tickets WHERE status IN (?) AND updated_at < ? ORDER BY updated_at ASC LIMIT ?`,
+		statuses,
+		longPendingAfter,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build long pending tickets query: %w", err)
+	}
+	query = r.db.Rebind(query)
+	var tickets []model.Ticket
+	if err := r.db.SelectContext(ctx, &tickets, query, args...); err != nil {
+		return nil, fmt.Errorf("list long pending tickets: %w", err)
+	}
+	return tickets, nil
+}
+
+func (r *TicketRepo) PlatformAgingStats(ctx context.Context) (*PlatformAgingStats, error) {
+	now := timeutil.NowUTC()
+	var row struct {
+		AvgReviewAge        sql.NullFloat64 `db:"avg_review_age"`
+		AvgExecutionWaitAge sql.NullFloat64 `db:"avg_execution_wait_age"`
+		MaxReviewAge        sql.NullInt64   `db:"max_review_age"`
+		MaxExecutionWaitAge sql.NullInt64   `db:"max_execution_wait_age"`
+	}
+	if err := r.db.GetContext(ctx, &row,
+		`SELECT
+		 AVG(CASE WHEN status = ? THEN TIMESTAMPDIFF(MINUTE, created_at, ?) END) AS avg_review_age,
+		 AVG(CASE WHEN status = ? THEN TIMESTAMPDIFF(MINUTE, updated_at, ?) END) AS avg_execution_wait_age,
+		 MAX(CASE WHEN status = ? THEN TIMESTAMPDIFF(MINUTE, created_at, ?) END) AS max_review_age,
+		 MAX(CASE WHEN status = ? THEN TIMESTAMPDIFF(MINUTE, updated_at, ?) END) AS max_execution_wait_age
+		 FROM tickets`,
+		model.TicketStatusPendingReview, now,
+		model.TicketStatusPendingExecution, now,
+		model.TicketStatusPendingReview, now,
+		model.TicketStatusPendingExecution, now,
+	); err != nil {
+		return nil, fmt.Errorf("load platform aging stats: %w", err)
+	}
+	stats := &PlatformAgingStats{}
+	if row.AvgReviewAge.Valid {
+		stats.AvgReviewAgeMinutes = &row.AvgReviewAge.Float64
+	}
+	if row.AvgExecutionWaitAge.Valid {
+		stats.AvgExecutionWaitAgeMinutes = &row.AvgExecutionWaitAge.Float64
+	}
+	if row.MaxReviewAge.Valid {
+		stats.MaxReviewAgeMinutes = &row.MaxReviewAge.Int64
+	}
+	if row.MaxExecutionWaitAge.Valid {
+		stats.MaxExecutionWaitAgeMinutes = &row.MaxExecutionWaitAge.Int64
+	}
+	var avgDuration sql.NullFloat64
+	if err := r.db.GetContext(ctx, &avgDuration,
+		`SELECT AVG(duration_ms) FROM ticket_executions WHERE status = 'completed' AND duration_ms IS NOT NULL AND completed_at >= ?`,
+		now.Add(-7*24*time.Hour),
+	); err != nil {
+		return nil, fmt.Errorf("load platform execution duration stats: %w", err)
+	}
+	if avgDuration.Valid {
+		stats.AvgExecutionDurationMs = &avgDuration.Float64
+	}
+	return stats, nil
+}
+
+func (r *TicketRepo) PlatformExecutionRiskStats(ctx context.Context) (*PlatformExecutionRiskStats, error) {
+	since := timeutil.NowUTC().Add(-7 * 24 * time.Hour)
+	stats := &PlatformExecutionRiskStats{}
+	if err := r.db.GetContext(ctx, stats,
+		`SELECT
+		 COALESCE(SUM(CASE WHEN status IN ('failed', 'stopped') THEN 1 ELSE 0 END), 0) AS recent_failed,
+		 COALESCE(SUM(CASE WHEN outcome_confidence = 'manually_stopped' THEN 1 ELSE 0 END), 0) AS manually_stopped,
+		 COALESCE(SUM(CASE WHEN interruption_reason = 'service_shutdown' THEN 1 ELSE 0 END), 0) AS service_shutdown,
+		 COALESCE(SUM(CASE WHEN outcome_confidence = 'outcome_unknown' THEN 1 ELSE 0 END), 0) AS outcome_unknown,
+		 COALESCE(SUM(CASE WHEN outcome_confidence = 'not_sent' THEN 1 ELSE 0 END), 0) AS not_sent,
+		 COALESCE(SUM(CASE WHEN outcome_confidence = 'failed' THEN 1 ELSE 0 END), 0) AS db_explicit_error
+		 FROM ticket_executions
+		 WHERE completed_at >= ?`,
+		since,
+	); err != nil {
+		return nil, fmt.Errorf("load execution risk stats: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &stats.ByOutcome,
+		`SELECT COALESCE(NULLIF(outcome_confidence, ''), 'unknown') AS key_name, COUNT(*) AS count
+		 FROM ticket_executions
+		 WHERE completed_at >= ? AND status IN ('failed', 'stopped')
+		 GROUP BY COALESCE(NULLIF(outcome_confidence, ''), 'unknown')
+		 ORDER BY count DESC`,
+		since,
+	); err != nil {
+		return nil, fmt.Errorf("count execution risk outcomes: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &stats.ByInterruption,
+		`SELECT COALESCE(NULLIF(interruption_reason, ''), 'db_explicit_error') AS key_name, COUNT(*) AS count
+		 FROM ticket_executions
+		 WHERE completed_at >= ? AND status IN ('failed', 'stopped')
+		 GROUP BY COALESCE(NULLIF(interruption_reason, ''), 'db_explicit_error')
+		 ORDER BY count DESC`,
+		since,
+	); err != nil {
+		return nil, fmt.Errorf("count execution risk interruptions: %w", err)
+	}
+	return stats, nil
+}
+
+func (r *TicketRepo) RecentFailedExecutionTickets(ctx context.Context, limit int) ([]model.Ticket, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 8
+	}
+	statuses := []model.TicketStatus{model.TicketStatusFailed, model.TicketStatusStopped, model.TicketStatusInterrupted}
+	query, args, err := sqlx.In(
+		`SELECT * FROM tickets WHERE status IN (?) ORDER BY updated_at DESC LIMIT ?`,
+		statuses,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build failed execution tickets query: %w", err)
+	}
+	query = r.db.Rebind(query)
+	var tickets []model.Ticket
+	if err := r.db.SelectContext(ctx, &tickets, query, args...); err != nil {
+		return nil, fmt.Errorf("list failed execution tickets: %w", err)
+	}
+	return tickets, nil
+}
+
+func (r *TicketRepo) PlatformTopUsageStats(ctx context.Context) (*PlatformTopUsageStats, error) {
+	since := timeutil.NowUTC().Add(-30 * 24 * time.Hour)
+	stats := &PlatformTopUsageStats{}
+	if err := r.db.SelectContext(ctx, &stats.Submitters,
+		`SELECT t.submitter_id AS user_id, u.username AS username, COUNT(*) AS count
+		 FROM tickets t LEFT JOIN users u ON u.id = t.submitter_id
+		 WHERE t.created_at >= ?
+		 GROUP BY t.submitter_id, u.username
+		 ORDER BY count DESC LIMIT 8`,
+		since,
+	); err != nil {
+		return nil, fmt.Errorf("count top submitters: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &stats.DBConnectionsByTickets,
+		`SELECT COALESCE(dc.name, CONCAT('#', t.db_connection_id)) AS key_name, COUNT(*) AS count
+		 FROM tickets t LEFT JOIN db_connections dc ON dc.id = t.db_connection_id
+		 WHERE t.created_at >= ? AND t.db_connection_id IS NOT NULL
+		 GROUP BY t.db_connection_id, dc.name
+		 ORDER BY count DESC LIMIT 8`,
+		since,
+	); err != nil {
+		return nil, fmt.Errorf("count top ticket db connections: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &stats.FailedDBConnections,
+		`SELECT COALESCE(dc.name, CONCAT('#', t.db_connection_id)) AS key_name, COUNT(*) AS count
+		 FROM tickets t LEFT JOIN db_connections dc ON dc.id = t.db_connection_id
+		 WHERE t.updated_at >= ? AND t.db_connection_id IS NOT NULL AND t.status IN (?, ?, ?)
+		 GROUP BY t.db_connection_id, dc.name
+		 ORDER BY count DESC LIMIT 8`,
+		since, model.TicketStatusFailed, model.TicketStatusStopped, model.TicketStatusInterrupted,
+	); err != nil {
+		return nil, fmt.Errorf("count top failed db connections: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &stats.SQLExportsByUser,
+		`SELECT t.submitter_id AS user_id, u.username AS username, COUNT(*) AS count
+		 FROM tickets t LEFT JOIN users u ON u.id = t.submitter_id
+		 WHERE t.created_at >= ? AND t.ticket_type = ?
+		 GROUP BY t.submitter_id, u.username
+		 ORDER BY count DESC LIMIT 8`,
+		since, model.TicketTypeSQLExport,
+	); err != nil {
+		return nil, fmt.Errorf("count top sql export users: %w", err)
+	}
+	return stats, nil
 }
 
 func ticketWorkflowCondition(workflowType model.ApprovalWorkflowType) (string, []any) {

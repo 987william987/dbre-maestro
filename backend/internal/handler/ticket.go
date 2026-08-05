@@ -39,6 +39,7 @@ type TicketHandler struct {
 	audit              *repository.AuditRepo
 	settings           *repository.SettingsRepo
 	dbConns            *repository.DBConnectionRepo
+	dbMetadata         *repository.DBMetadataRepo
 	users              *repository.UserRepo
 	authGroups         *repository.AuthGroupRepo
 	masking            *maskingRuntime
@@ -266,6 +267,12 @@ type TicketHandlerOption func(*TicketHandler)
 func WithTicketHandlerAppEnv(appEnv string) TicketHandlerOption {
 	return func(h *TicketHandler) {
 		h.appEnv = strings.TrimSpace(appEnv)
+	}
+}
+
+func WithTicketHandlerDBMetadata(repo *repository.DBMetadataRepo) TicketHandlerOption {
+	return func(h *TicketHandler) {
+		h.dbMetadata = repo
 	}
 }
 

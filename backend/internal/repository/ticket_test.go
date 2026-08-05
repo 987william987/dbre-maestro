@@ -440,6 +440,49 @@ func TestTicketRecoverExecutingTicketsFailsRunningStatements(t *testing.T) {
 	}
 }
 
+func TestPlatformExecutionRiskStatsScansSnakeCaseColumns(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+	mock.ExpectQuery(`(?s)SELECT.*recent_failed.*FROM ticket_executions.*WHERE completed_at >= \?`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"recent_failed",
+			"manually_stopped",
+			"service_shutdown",
+			"outcome_unknown",
+			"not_sent",
+			"db_explicit_error",
+		}).AddRow(6, 1, 2, 3, 4, 5))
+	mock.ExpectQuery(`(?s)SELECT.*outcome_confidence.*FROM ticket_executions.*GROUP BY`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"key_name", "count"}).AddRow("outcome_unknown", 3))
+	mock.ExpectQuery(`(?s)SELECT.*interruption_reason.*FROM ticket_executions.*GROUP BY`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"key_name", "count"}).AddRow("service_shutdown", 2))
+
+	stats, err := repo.PlatformExecutionRiskStats(context.Background())
+	if err != nil {
+		t.Fatalf("PlatformExecutionRiskStats() error = %v", err)
+	}
+	if stats.RecentFailed != 6 || stats.ManuallyStopped != 1 || stats.ServiceShutdown != 2 || stats.OutcomeUnknown != 3 || stats.NotSent != 4 || stats.DBExplicitError != 5 {
+		t.Fatalf("stats = %#v, want snake_case columns scanned into execution risk fields", stats)
+	}
+	if len(stats.ByOutcome) != 1 || stats.ByOutcome[0].Key != "outcome_unknown" {
+		t.Fatalf("ByOutcome = %#v, want outcome_unknown", stats.ByOutcome)
+	}
+	if len(stats.ByInterruption) != 1 || stats.ByInterruption[0].Key != "service_shutdown" {
+		t.Fatalf("ByInterruption = %#v, want service_shutdown", stats.ByInterruption)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
 func ticketRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id",

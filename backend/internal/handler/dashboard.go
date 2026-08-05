@@ -44,10 +44,30 @@ type dashboardDBScope struct {
 	DBType string `json:"db_type"`
 }
 
+type dashboardDBMetadataHealth struct {
+	DBTypeCounts                   []repository.WorkflowDashboardCount `json:"db_type_counts"`
+	EnabledMetadataConnectionCount int                                 `json:"enabled_metadata_connection_count"`
+	ObjectSnapshotConnectionCount  int64                               `json:"object_snapshot_connection_count"`
+	StaleObjectConnectionCount     int64                               `json:"stale_object_connection_count"`
+	ObjectCount                    int64                               `json:"object_count"`
+	InventoryJob                   *model.DBMetadataJobRun             `json:"inventory_job,omitempty"`
+	ObjectJob                      *model.DBMetadataJobRun             `json:"object_job,omitempty"`
+	ObjectSyncFailed               bool                                `json:"object_sync_failed"`
+}
+
 type dashboardPlatform struct {
-	TicketSummary        dashboardTicketSummary `json:"ticket_summary"`
-	RecentAttention      []ticketResponse       `json:"recent_attention"`
-	DBConnectionFailures []model.DBConnection   `json:"db_connection_failures"`
+	TicketSummary        dashboardTicketSummary                `json:"ticket_summary"`
+	Queue                repository.PlatformQueueStats         `json:"queue"`
+	Aging                repository.PlatformAgingStats         `json:"aging"`
+	ExecutionRisk        repository.PlatformExecutionRiskStats `json:"execution_risk"`
+	AccessGovernance     repository.AccessGovernanceStats      `json:"access_governance"`
+	DBMetadataHealth     dashboardDBMetadataHealth             `json:"db_metadata_health"`
+	NotificationHealth   repository.NotificationHealthStats    `json:"notification_health"`
+	TopUsage             repository.PlatformTopUsageStats      `json:"top_usage"`
+	RecentAttention      []ticketResponse                      `json:"recent_attention"`
+	LongPendingTickets   []ticketResponse                      `json:"long_pending_tickets"`
+	RecentFailedTickets  []ticketResponse                      `json:"recent_failed_tickets"`
+	DBConnectionFailures []model.DBConnection                  `json:"db_connection_failures"`
 }
 
 // GET /dashboard
@@ -102,6 +122,36 @@ func (h *TicketHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "load dashboard platform summary failed")
 			return
 		}
+		queueStats, err := h.tickets.PlatformQueueStats(r.Context(), timeutil.NowUTC().Add(-24*time.Hour))
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load dashboard platform queue failed")
+			return
+		}
+		agingStats, err := h.tickets.PlatformAgingStats(r.Context())
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load dashboard platform aging failed")
+			return
+		}
+		executionRisk, err := h.tickets.PlatformExecutionRiskStats(r.Context())
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load dashboard execution risk failed")
+			return
+		}
+		accessGovernance, err := h.dashboardAccessGovernance(r.Context())
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load dashboard access governance failed")
+			return
+		}
+		notificationHealth, err := h.dashboardNotificationHealth(r.Context())
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load dashboard notification health failed")
+			return
+		}
+		topUsage, err := h.tickets.PlatformTopUsageStats(r.Context())
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load dashboard top usage failed")
+			return
+		}
 		attentionTickets, err := h.tickets.RecentPlatformAttentionTickets(r.Context(), 8)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "load dashboard platform tickets failed")
@@ -112,14 +162,48 @@ func (h *TicketHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "load dashboard platform tickets failed")
 			return
 		}
+		longPendingTickets, err := h.tickets.LongPendingTickets(r.Context(), timeutil.NowUTC().Add(-24*time.Hour), 8)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load dashboard long pending tickets failed")
+			return
+		}
+		longPendingResponses, err := h.enrichDashboardTickets(r.Context(), longPendingTickets)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load dashboard long pending tickets failed")
+			return
+		}
+		failedTickets, err := h.tickets.RecentFailedExecutionTickets(r.Context(), 8)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load dashboard failed tickets failed")
+			return
+		}
+		failedTicketResponses, err := h.enrichDashboardTickets(r.Context(), failedTickets)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load dashboard failed tickets failed")
+			return
+		}
 		dbFailures, err := h.dashboardDBConnectionFailures(r.Context())
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "load dashboard db health failed")
 			return
 		}
+		dbMetadataHealth, err := h.dashboardDBMetadataHealth(r.Context())
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load dashboard metadata health failed")
+			return
+		}
 		platform = &dashboardPlatform{
 			TicketSummary:        platformSummary,
+			Queue:                *queueStats,
+			Aging:                *agingStats,
+			ExecutionRisk:        *executionRisk,
+			AccessGovernance:     *accessGovernance,
+			DBMetadataHealth:     dbMetadataHealth,
+			NotificationHealth:   *notificationHealth,
+			TopUsage:             *topUsage,
 			RecentAttention:      attentionTicketResponses,
+			LongPendingTickets:   longPendingResponses,
+			RecentFailedTickets:  failedTicketResponses,
 			DBConnectionFailures: dbFailures,
 		}
 	}
@@ -286,6 +370,78 @@ func (h *TicketHandler) dashboardDBConnectionFailures(ctx context.Context) ([]mo
 		}
 	}
 	return failures, nil
+}
+
+func (h *TicketHandler) dashboardAccessGovernance(ctx context.Context) (*repository.AccessGovernanceStats, error) {
+	if h.queryAccess == nil {
+		return &repository.AccessGovernanceStats{}, nil
+	}
+	return h.queryAccess.AccessGovernanceStats(ctx)
+}
+
+func (h *TicketHandler) dashboardNotificationHealth(ctx context.Context) (*repository.NotificationHealthStats, error) {
+	if h.notifRepo == nil {
+		return &repository.NotificationHealthStats{}, nil
+	}
+	return h.notifRepo.HealthStats(ctx)
+}
+
+func (h *TicketHandler) dashboardDBMetadataHealth(ctx context.Context) (dashboardDBMetadataHealth, error) {
+	health := dashboardDBMetadataHealth{DBTypeCounts: []repository.WorkflowDashboardCount{}}
+	conns := []model.DBConnection{}
+	if h.dbConns != nil {
+		loaded, err := h.dbConns.List(ctx)
+		if err != nil {
+			return health, err
+		}
+		conns = loaded
+		byType := map[string]int64{}
+		for _, conn := range conns {
+			byType[conn.DBType]++
+		}
+		for dbType, count := range byType {
+			health.DBTypeCounts = append(health.DBTypeCounts, repository.WorkflowDashboardCount{Key: dbType, Count: count})
+		}
+	}
+
+	staleBefore := timeutil.NowUTC().Add(-2 * time.Hour)
+	if h.settings != nil {
+		settings, err := h.settings.Get(ctx)
+		if err != nil {
+			return health, err
+		}
+		if settings.DBMetadataObjectEnabled {
+			health.EnabledMetadataConnectionCount = len(settings.DBMetadataObjectEnabledConnectionIDs)
+		}
+		interval := settings.DBMetadataObjectSyncIntervalMins
+		if interval <= 0 {
+			interval = 60
+		}
+		staleBefore = timeutil.NowUTC().Add(-2 * time.Duration(interval) * time.Minute)
+	}
+
+	if h.dbMetadata == nil {
+		return health, nil
+	}
+	objectStats, err := h.dbMetadata.ObjectHealthStats(ctx, staleBefore)
+	if err != nil {
+		return health, err
+	}
+	health.ObjectSnapshotConnectionCount = objectStats.SnapshotConnectionCount
+	health.StaleObjectConnectionCount = objectStats.StaleConnectionCount
+	health.ObjectCount = objectStats.ObjectCount
+	inventoryJob, err := h.dbMetadata.GetJobRun(ctx, "db_metadata_inventory")
+	if err != nil {
+		return health, err
+	}
+	objectJob, err := h.dbMetadata.GetJobRun(ctx, "db_metadata_object")
+	if err != nil {
+		return health, err
+	}
+	health.InventoryJob = inventoryJob
+	health.ObjectJob = objectJob
+	health.ObjectSyncFailed = objectJob != nil && objectJob.Status == "failed"
+	return health, nil
 }
 
 func dashboardRenewTicketPath(rule model.QueryAccessRule) string {
