@@ -287,6 +287,44 @@ func (r *QueryAccessRepo) ListActiveRules(ctx context.Context, subjectID uint64,
 	return rules, nil
 }
 
+func (r *QueryAccessRepo) ListActiveRulesForSubjects(ctx context.Context, subjectID uint64, authGroupIDs []uint64, limit int) ([]model.QueryAccessRule, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	args := []any{subjectID}
+	authGroupClause := ""
+	if len(authGroupIDs) > 0 {
+		query, inArgs, err := sqlx.In(` OR (qar.subject_type = 'auth_group' AND qar.subject_id IN (?))`, authGroupIDs)
+		if err != nil {
+			return nil, err
+		}
+		authGroupClause = query
+		args = append(args, inArgs...)
+	}
+	args = append(args, timeutil.NowUTC(), limit)
+
+	query := `
+		SELECT qar.id, qar.subject_type, qar.subject_id, qar.effect, qar.connection_id, qar.database_pattern, qar.table_pattern,
+		       qar.granted_via, qar.source_ticket_id, t.ticket_no AS source_ticket_no,
+		       qar.expires_at, qar.revoked_at, qar.revoked_by, qar.created_by, qar.updated_by, qar.created_at, qar.updated_at
+		FROM query_access_rules qar
+		LEFT JOIN tickets t ON t.id = qar.source_ticket_id
+		WHERE (qar.subject_type = 'user' AND qar.subject_id = ?` + authGroupClause + `)
+		  AND qar.revoked_at IS NULL
+		  AND (qar.expires_at IS NULL OR qar.expires_at > ?)
+		ORDER BY
+		  CASE WHEN qar.expires_at IS NULL THEN 1 ELSE 0 END,
+		  qar.expires_at ASC,
+		  qar.id DESC
+		LIMIT ?
+	`
+	rules := []model.QueryAccessRule{}
+	if err := r.db.SelectContext(ctx, &rules, r.db.Rebind(query), args...); err != nil {
+		return nil, fmt.Errorf("list active query access rules for subjects: %w", err)
+	}
+	return rules, nil
+}
+
 func (r *QueryAccessRepo) ListRules(ctx context.Context) ([]model.QueryAccessRule, error) {
 	rules := make([]model.QueryAccessRule, 0)
 	if err := r.db.SelectContext(ctx, &rules, `

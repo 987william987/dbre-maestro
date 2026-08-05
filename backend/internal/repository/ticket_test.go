@@ -225,6 +225,72 @@ func TestTicketGetByTicketNo(t *testing.T) {
 	}
 }
 
+func TestActiveTicketsBySubmitterExcludesApproved(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+	submitterID := uint64(9)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM tickets WHERE submitter_id = ? AND status IN (?, ?, ?, ?) ORDER BY updated_at DESC LIMIT ?`)).
+		WithArgs(
+			submitterID,
+			model.TicketStatusPendingReview,
+			model.TicketStatusPendingExecution,
+			model.TicketStatusExecuting,
+			model.TicketStatusNeedsAdminAttention,
+			6,
+		).
+		WillReturnRows(ticketRows())
+
+	tickets, err := repo.ActiveTicketsBySubmitter(context.Background(), submitterID, 6)
+	if err != nil {
+		t.Fatalf("ActiveTicketsBySubmitter() error = %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets = %#v, want none", tickets)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
+func TestRecentTicketsBySubmitterPrioritizesOpenWorkflowStatuses(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+	submitterID := uint64(9)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM tickets WHERE submitter_id = ? ORDER BY CASE WHEN status IN (?, ?, ?, ?) THEN 0 ELSE 1 END, updated_at DESC LIMIT ?`)).
+		WithArgs(
+			submitterID,
+			model.TicketStatusPendingReview,
+			model.TicketStatusPendingExecution,
+			model.TicketStatusExecuting,
+			model.TicketStatusNeedsAdminAttention,
+			6,
+		).
+		WillReturnRows(ticketRows())
+
+	tickets, err := repo.RecentTicketsBySubmitter(context.Background(), submitterID, 6)
+	if err != nil {
+		t.Fatalf("RecentTicketsBySubmitter() error = %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets = %#v, want none", tickets)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
 func TestTicketUpdateStatusStoresWithdrawReason(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

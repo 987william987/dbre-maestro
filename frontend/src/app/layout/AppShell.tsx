@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, LayoutDashboard, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, listNotificationSummary, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -27,6 +27,13 @@ type NavItem = {
 }
 
 const NAV_ITEMS: NavItem[] = [
+  {
+    key: 'dashboard',
+    label: 'Dashboard',
+    icon: LayoutDashboard,
+    allowed: () => true,
+    to: '/dashboard',
+  },
   {
     key: 'tickets',
     label: 'Tickets',
@@ -121,7 +128,7 @@ const NAV_ITEMS: NavItem[] = [
 const NAV_GROUPS = [
   {
     title: 'Workbench',
-    items: ['/tickets', '/tickets/new', '/sql-editor', '/scheduled-sql-reports'],
+    items: ['/dashboard', '/tickets', '/tickets/new', '/sql-editor', '/scheduled-sql-reports'],
   },
   {
     title: 'Governance',

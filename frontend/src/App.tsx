@@ -11,6 +11,7 @@ import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 
 const AuditLogsPage = lazy(() => import('@/modules/audit/pages/AuditLogsPage').then((module) => ({ default: module.AuditLogsPage })))
 const AccountSessionsPage = lazy(() => import('@/modules/account/pages/SessionsPage').then((module) => ({ default: module.SessionsPage })))
+const DashboardPage = lazy(() => import('@/modules/dashboard/pages/DashboardPage').then((module) => ({ default: module.DashboardPage })))
 const DBConnectionsPage = lazy(() => import('@/modules/db-connections/pages/DBConnectionsPage').then((module) => ({ default: module.DBConnectionsPage })))
 const DBMetadataInventoryPage = lazy(() => import('@/modules/db-metadata/pages/DBMetadataInventoryPage').then((module) => ({ default: module.DBMetadataInventoryPage })))
 const DBMetadataObjectsPage = lazy(() => import('@/modules/db-metadata/pages/DBMetadataObjectsPage').then((module) => ({ default: module.DBMetadataObjectsPage })))
@@ -27,6 +28,9 @@ const UsersPage = lazy(() => import('@/modules/users/pages/UsersPage').then((mod
 
 function HomeRedirect() {
   const { user } = useAuth()
+  if (user?.permissions?.length) {
+    return <Navigate to="/dashboard" replace />
+  }
   return <Navigate to={defaultRouteForPermissions(user?.permissions ?? [])} replace />
 }
 
@@ -48,6 +52,7 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<AppShell />}>
               <Route path="/" element={<HomeRedirect />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/account/sessions" element={<AccountSessionsPage />} />
               <Route element={<RoleRoute allowedPermissions={[...TICKET_WORKSPACE_PERMISSIONS]} />}>
                 <Route path="/tickets" element={<TicketsPage />} />

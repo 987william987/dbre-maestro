@@ -89,6 +89,12 @@ type WorkflowDashboardErrorCount struct {
 	Count     int64  `db:"count" json:"count"`
 }
 
+type TicketDashboardSummary struct {
+	Total    int64                    `json:"total"`
+	ByType   []WorkflowDashboardCount `json:"by_type"`
+	ByStatus []WorkflowDashboardCount `json:"by_status"`
+}
+
 func NewTicketRepo(db *sqlx.DB) *TicketRepo {
 	return &TicketRepo{db: db}
 }
@@ -507,6 +513,101 @@ func (r *TicketRepo) WorkflowDashboardSummary(ctx context.Context) (*WorkflowDas
 		return nil, fmt.Errorf("count workflow errors: %w", err)
 	}
 	return summary, nil
+}
+
+func (r *TicketRepo) TicketDashboardSummary(ctx context.Context, submitterID *uint64) (*TicketDashboardSummary, error) {
+	summary := &TicketDashboardSummary{}
+	where := ""
+	args := []any{}
+	if submitterID != nil {
+		where = " WHERE submitter_id = ?"
+		args = append(args, *submitterID)
+	}
+	if err := r.db.GetContext(ctx, &summary.Total, `SELECT COUNT(*) FROM tickets`+where, args...); err != nil {
+		return nil, fmt.Errorf("count dashboard tickets: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &summary.ByType, `SELECT ticket_type AS key_name, COUNT(*) AS count FROM tickets`+where+` GROUP BY ticket_type ORDER BY count DESC`, args...); err != nil {
+		return nil, fmt.Errorf("count dashboard tickets by type: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &summary.ByStatus, `SELECT status AS key_name, COUNT(*) AS count FROM tickets`+where+` GROUP BY status ORDER BY count DESC`, args...); err != nil {
+		return nil, fmt.Errorf("count dashboard tickets by status: %w", err)
+	}
+	return summary, nil
+}
+
+func (r *TicketRepo) RecentTicketsBySubmitter(ctx context.Context, submitterID uint64, limit int) ([]model.Ticket, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 5
+	}
+	var tickets []model.Ticket
+	if err := r.db.SelectContext(ctx, &tickets,
+		`SELECT * FROM tickets WHERE submitter_id = ? ORDER BY CASE WHEN status IN (?, ?, ?, ?) THEN 0 ELSE 1 END, updated_at DESC LIMIT ?`,
+		submitterID,
+		model.TicketStatusPendingReview,
+		model.TicketStatusPendingExecution,
+		model.TicketStatusExecuting,
+		model.TicketStatusNeedsAdminAttention,
+		limit,
+	); err != nil {
+		return nil, fmt.Errorf("list recent submitter tickets: %w", err)
+	}
+	return tickets, nil
+}
+
+func (r *TicketRepo) ActiveTicketsBySubmitter(ctx context.Context, submitterID uint64, limit int) ([]model.Ticket, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 6
+	}
+	statuses := []model.TicketStatus{
+		model.TicketStatusPendingReview,
+		model.TicketStatusPendingExecution,
+		model.TicketStatusExecuting,
+		model.TicketStatusNeedsAdminAttention,
+	}
+	query, args, err := sqlx.In(
+		`SELECT * FROM tickets WHERE submitter_id = ? AND status IN (?) ORDER BY updated_at DESC LIMIT ?`,
+		submitterID,
+		statuses,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build active submitter tickets query: %w", err)
+	}
+	query = r.db.Rebind(query)
+	var tickets []model.Ticket
+	if err := r.db.SelectContext(ctx, &tickets, query, args...); err != nil {
+		return nil, fmt.Errorf("list active submitter tickets: %w", err)
+	}
+	return tickets, nil
+}
+
+func (r *TicketRepo) RecentPlatformAttentionTickets(ctx context.Context, limit int) ([]model.Ticket, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 8
+	}
+	statuses := []model.TicketStatus{
+		model.TicketStatusNeedsAdminAttention,
+		model.TicketStatusExecuting,
+		model.TicketStatusPendingExecution,
+		model.TicketStatusFailed,
+		model.TicketStatusStopped,
+		model.TicketStatusInterrupted,
+		model.TicketStatusRejected,
+	}
+	query, args, err := sqlx.In(
+		`SELECT * FROM tickets WHERE status IN (?) ORDER BY updated_at DESC LIMIT ?`,
+		statuses,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build recent platform tickets query: %w", err)
+	}
+	query = r.db.Rebind(query)
+	var tickets []model.Ticket
+	if err := r.db.SelectContext(ctx, &tickets, query, args...); err != nil {
+		return nil, fmt.Errorf("list recent platform tickets: %w", err)
+	}
+	return tickets, nil
 }
 
 func ticketWorkflowCondition(workflowType model.ApprovalWorkflowType) (string, []any) {

@@ -353,6 +353,11 @@ func main() {
 		r.Get("/setup/status", authH.SetupStatus)
 		r.Post("/setup", authH.Setup)
 		r.Post("/lark/cards/callback", ticketH.LarkCardCallback)
+		r.With(
+			middleware.RequireAuth(cfg.JWTSecret),
+			middleware.RequireActiveUser(userRepo),
+			middleware.InjectPermissions(userRepo),
+		).Get("/dashboard", ticketH.Dashboard)
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/login", authH.Login)
 			r.Get("/lark/login/start", authH.StartLarkLogin)
