@@ -232,7 +232,11 @@ function MetadataJobRow({ label, status, updatedAt }: { label: string; status?: 
   )
 }
 
-function AccessTable({ scopes }: { scopes: DashboardQueryAccessScope[] }) {
+function isRenewableQueryScope(scope: DashboardQueryAccessScope, renewableConnectionIDs: Set<number>) {
+  return scope.effect === 'allow' && renewableConnectionIDs.has(scope.connection_id)
+}
+
+function AccessTable({ scopes, renewableConnectionIDs }: { scopes: DashboardQueryAccessScope[]; renewableConnectionIDs: Set<number> }) {
   if (scopes.length === 0) {
     return <div className="rounded-lg border border-dashed border-border bg-panel-soft p-5 text-center text-[12px] text-muted">No active query access scope.</div>
   }
@@ -263,10 +267,14 @@ function AccessTable({ scopes }: { scopes: DashboardQueryAccessScope[] }) {
                 <span className={scope.expiring_soon ? 'font-semibold text-warning' : 'text-muted'}>{formatRemaining(scope)}</span>
               </DataTableCell>
               <DataTableCell>
-                <Link to={scope.renew_ticket_path} className="inline-flex items-center gap-1 text-[12px] font-semibold text-ink hover:text-accent">
-                  Renew
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
+                {isRenewableQueryScope(scope, renewableConnectionIDs) ? (
+                  <Link to={scope.renew_ticket_path} className="inline-flex items-center gap-1 text-[12px] font-semibold text-ink hover:text-accent">
+                    Renew
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                ) : (
+                  <span className="text-[12px] text-muted">{scope.effect === 'deny' ? 'Deny rule' : 'Admin managed'}</span>
+                )}
               </DataTableCell>
             </DataTableRow>
           ))}
@@ -324,6 +332,10 @@ export function DashboardPage() {
   )
   const pendingTickets = useMemo(
     () => (data?.personal.active_tickets ?? []).filter((ticket) => ACTIVE_TICKET_STATUSES.has(ticket.status)),
+    [data],
+  )
+  const renewableConnectionIDs = useMemo(
+    () => new Set((data?.personal.db_scopes ?? []).map((scope) => scope.id)),
     [data],
   )
 
@@ -394,7 +406,7 @@ export function DashboardPage() {
         </DashboardPanel>
 
         <DashboardPanel title="Expiring Query Access" action={<Link to="/account/access-scopes" className="text-[12px] font-semibold text-muted hover:text-ink">View all access</Link>}>
-          <AccessTable scopes={expiringAccess.length > 0 ? expiringAccess : data.personal.query_access_scopes.slice(0, 5)} />
+          <AccessTable scopes={expiringAccess.length > 0 ? expiringAccess : data.personal.query_access_scopes.slice(0, 5)} renewableConnectionIDs={renewableConnectionIDs} />
         </DashboardPanel>
       </div>
 

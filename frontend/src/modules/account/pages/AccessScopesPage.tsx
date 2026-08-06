@@ -32,6 +32,10 @@ function matchesQueryScope(scope: DashboardQueryAccessScope, keyword: string) {
   return value.includes(keyword)
 }
 
+function isRenewableQueryScope(scope: DashboardQueryAccessScope, renewableConnectionIDs: Set<number>) {
+  return scope.effect === 'allow' && renewableConnectionIDs.has(scope.connection_id)
+}
+
 export function AccessScopesPage() {
   const [dbScopes, setDBScopes] = useState<DashboardDBScope[]>([])
   const [queryScopes, setQueryScopes] = useState<DashboardQueryAccessScope[]>([])
@@ -80,6 +84,7 @@ export function AccessScopesPage() {
   )
   const pagedDBScopes = filteredDBScopes.slice(dbOffset, dbOffset + PAGE_SIZE)
   const pagedQueryScopes = filteredQueryScopes.slice(queryOffset, queryOffset + PAGE_SIZE)
+  const renewableConnectionIDs = useMemo(() => new Set(dbScopes.map((scope) => scope.id)), [dbScopes])
 
   useEffect(() => {
     setDBOffset(0)
@@ -203,9 +208,13 @@ export function AccessScopesPage() {
                             {scope.expires_at ? <span className="ml-2 text-muted">{formatDateTime(scope.expires_at)}</span> : null}
                           </DataTableCell>
                           <DataTableCell className="whitespace-nowrap text-right">
-                            <Link to={scope.renew_ticket_path} className="inline-flex h-8 items-center rounded-md border border-border bg-white px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft">
-                              Renew
-                            </Link>
+                            {isRenewableQueryScope(scope, renewableConnectionIDs) ? (
+                              <Link to={scope.renew_ticket_path} className="inline-flex h-8 items-center rounded-md border border-border bg-white px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft">
+                                Renew
+                              </Link>
+                            ) : (
+                              <span className="text-[12px] text-muted">{scope.effect === 'deny' ? 'Deny rule' : 'Admin managed'}</span>
+                            )}
                           </DataTableCell>
                         </DataTableRow>
                       ))}
