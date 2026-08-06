@@ -52,8 +52,15 @@ type TicketHandler struct {
 	notifications      *NotificationRouter
 	forbiddenLimiter   requestRateLimiter
 	activeExecutions   *activeSQLQueryRegistry
+	rollbackJobsMu     sync.Mutex
+	rollbackJobs       map[uint64]*ticketRollbackJobLimiter
 	appBaseURL         string
 	appEnv             string
+}
+
+type ticketRollbackJobLimiter struct {
+	slots chan struct{}
+	refs  int
 }
 
 type ticketResponse struct {
@@ -339,6 +346,7 @@ func NewTicketHandler(
 		notifications:      NewNotificationRouter(notifRepo, audit, users, broker, lark),
 		forbiddenLimiter:   newRequestRateLimiter(20, time.Minute),
 		activeExecutions:   newActiveSQLQueryRegistry(),
+		rollbackJobs:       make(map[uint64]*ticketRollbackJobLimiter),
 		appBaseURL:         strings.TrimRight(appBaseURL, "/"),
 	}
 	for _, opt := range opts {

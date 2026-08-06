@@ -124,15 +124,73 @@ func (h *TicketHandler) finalizeMySQLRollback(ctx context.Context, ticket *model
 		slog.Warn("ticket rollback generation state update failed", "ticket_id", ticket.ID, "execution_id", execRow.ID, "err", err)
 		return
 	}
+	h.runMySQLRollbackGenerationAsync(ticket, execRow, settings, runtime, binlogRange, rowsAffected)
+}
 
-	generated, err := runMy2SQLRollback(ctx, settings, runtime.conn, runtime.password, binlogRange, ticket.DatabaseName, rowsAffected)
-	if err != nil {
-		_ = h.rollbacks.MarkFailed(ctx, execRow.ID, err.Error())
-		slog.Warn("ticket rollback generation failed", "ticket_id", ticket.ID, "execution_id", execRow.ID, "err", err)
+func (h *TicketHandler) runMySQLRollbackGenerationAsync(ticket *model.Ticket, execRow model.TicketExecution, settings *model.PlatformSettings, runtime mysqlRollbackRuntime, binlogRange repository.RollbackRange, rowsAffected *int64) {
+	if h == nil || h.rollbacks == nil || ticket == nil || settings == nil {
 		return
 	}
-	if err := h.rollbacks.MarkGenerated(ctx, execRow.ID, generated); err != nil {
-		slog.Warn("ticket rollback save failed", "ticket_id", ticket.ID, "execution_id", execRow.ID, "err", err)
+	ticketCopy := *ticket
+	settingsCopy := *settings
+	runtimeCopy := runtime
+	if runtime.conn != nil {
+		connCopy := *runtime.conn
+		runtimeCopy.conn = &connCopy
+	}
+	var rowsAffectedCopy *int64
+	if rowsAffected != nil {
+		value := *rowsAffected
+		rowsAffectedCopy = &value
+	}
+
+	go func() {
+		release := h.acquireTicketRollbackJobSlot(ticketCopy.ID)
+		defer release()
+
+		jobCtx := context.Background()
+		generated, err := runMy2SQLRollback(jobCtx, &settingsCopy, runtimeCopy.conn, runtimeCopy.password, binlogRange, ticketCopy.DatabaseName, rowsAffectedCopy)
+		if err != nil {
+			_ = h.rollbacks.MarkFailed(jobCtx, execRow.ID, err.Error())
+			slog.Warn("ticket rollback generation failed", "ticket_id", ticketCopy.ID, "execution_id", execRow.ID, "err", err)
+			h.publishTicketUpdate(jobCtx, &ticketCopy, nil)
+			return
+		}
+		if err := h.rollbacks.MarkGenerated(jobCtx, execRow.ID, generated); err != nil {
+			slog.Warn("ticket rollback save failed", "ticket_id", ticketCopy.ID, "execution_id", execRow.ID, "err", err)
+			h.publishTicketUpdate(jobCtx, &ticketCopy, nil)
+			return
+		}
+		slog.Info("ticket rollback generation completed", "ticket_id", ticketCopy.ID, "execution_id", execRow.ID, "seq", execRow.Seq, "statement_count", generated.StatementCount)
+		h.publishTicketUpdate(jobCtx, &ticketCopy, nil)
+	}()
+}
+
+func (h *TicketHandler) acquireTicketRollbackJobSlot(ticketID uint64) func() {
+	if h == nil || ticketID == 0 {
+		return func() {}
+	}
+	h.rollbackJobsMu.Lock()
+	if h.rollbackJobs == nil {
+		h.rollbackJobs = make(map[uint64]*ticketRollbackJobLimiter)
+	}
+	limiter := h.rollbackJobs[ticketID]
+	if limiter == nil {
+		limiter = &ticketRollbackJobLimiter{slots: make(chan struct{}, 2)}
+		h.rollbackJobs[ticketID] = limiter
+	}
+	limiter.refs++
+	h.rollbackJobsMu.Unlock()
+
+	limiter.slots <- struct{}{}
+	return func() {
+		<-limiter.slots
+		h.rollbackJobsMu.Lock()
+		limiter.refs--
+		if limiter.refs == 0 && len(limiter.slots) == 0 {
+			delete(h.rollbackJobs, ticketID)
+		}
+		h.rollbackJobsMu.Unlock()
 	}
 }
 
@@ -299,15 +357,10 @@ func collectMy2SQLOutput(outputDir string, stdout string, maxBytes int) (string,
 	}
 	sort.Strings(files)
 	var out strings.Builder
-	total := 0
 	for _, name := range files {
 		data, err := os.ReadFile(name)
 		if err != nil {
 			continue
-		}
-		total += len(data)
-		if total > maxBytes {
-			return "", fmt.Errorf("generated rollback sql exceeds size limit")
 		}
 		if out.Len() > 0 {
 			out.WriteString("\n")
@@ -315,12 +368,15 @@ func collectMy2SQLOutput(outputDir string, stdout string, maxBytes int) (string,
 		out.Write(data)
 	}
 	if sqlOnly := extractMy2SQLStatements(out.String()); sqlOnly != "" {
+		if len([]byte(sqlOnly)) > maxBytes {
+			return "", fmt.Errorf("generated rollback sql exceeds size limit")
+		}
 		return sqlOnly, nil
 	}
-	if len([]byte(stdout)) > maxBytes {
-		return "", fmt.Errorf("generated rollback sql exceeds size limit")
-	}
 	if sqlOnly := extractMy2SQLStatements(stdout); sqlOnly != "" {
+		if len([]byte(sqlOnly)) > maxBytes {
+			return "", fmt.Errorf("generated rollback sql exceeds size limit")
+		}
 		return sqlOnly, nil
 	}
 	return "", fmt.Errorf("my2sql produced no rollback sql statements")
