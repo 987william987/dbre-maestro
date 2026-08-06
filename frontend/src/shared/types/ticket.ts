@@ -99,6 +99,34 @@ export type TicketExecution = {
   outcome_confidence?: string | null
 }
 
+export type TicketExecutionRollback = {
+  id: number
+  ticket_id: number
+  execution_id: number
+  seq: number
+  status: 'unsupported' | 'generating' | 'generated' | 'failed' | 'submitted' | string
+  unsupported_reason?: string | null
+  failure_message?: string | null
+  generator?: string | null
+  generator_version?: string | null
+  source_connection_id: number
+  source_database_name?: string | null
+  source_schema_name?: string | null
+  binlog_start_file?: string | null
+  binlog_start_pos?: number | null
+  binlog_end_file?: string | null
+  binlog_end_pos?: number | null
+  rollback_sql_sha256?: string | null
+  rollback_sql_bytes?: number | null
+  statement_count?: number | null
+  confidence?: string | null
+  warning_message?: string | null
+  rollback_ticket_id?: number | null
+  generated_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type TicketReviewResult = {
   id: number
   ticket_id: number
@@ -163,6 +191,7 @@ export type TicketWorkflowTrace = {
 export type TicketDetail = {
   ticket: Ticket
   executions: TicketExecution[]
+  execution_rollbacks: TicketExecutionRollback[]
   review_results: TicketReviewResult[]
   activity_logs: AuditLog[]
   scopes: TicketScope[]

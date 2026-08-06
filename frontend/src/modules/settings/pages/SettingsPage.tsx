@@ -40,6 +40,10 @@ type SettingsForm = {
   sqlExportAppTimeoutSeconds: string
   sqlExportMySQLMaxExecutionTimeMs: string
   sqlExportPostgresStatementTimeoutMs: string
+  mysqlRollbackEnabled: boolean
+  mysqlRollbackMy2SQLPath: string
+  mysqlRollbackGenerationTimeoutSeconds: string
+  mysqlRollbackMaxSQLBytes: string
   inventoryEnabled: boolean
   inventoryRegions: string
   inventoryEngines: string
@@ -428,6 +432,39 @@ export function SettingsPage() {
                 label="PostgreSQL statement_timeout (ms)"
                 value={form.sqlExportPostgresStatementTimeoutMs}
                 onChange={(value) => setForm((current) => current ? { ...current, sqlExportPostgresStatementTimeoutMs: value } : current)}
+              />
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-border bg-panel shadow-soft">
+            <div className="border-b border-border/80 px-4 py-3">
+              <p className="text-[14px] font-semibold text-ink">MySQL Rollback</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Generate encrypted rollback SQL after successful MySQL DML statements using my2sql and the connection rollback credential.</p>
+            </div>
+            <div className="grid gap-4 px-4 py-4 md:grid-cols-3">
+              <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
+                <Switch
+                  ariaLabel="Enable MySQL rollback generation"
+                  checked={form.mysqlRollbackEnabled}
+                  onChange={(checked) => setForm((current) => current ? { ...current, mysqlRollbackEnabled: checked } : current)}
+                />
+                Enable MySQL rollback generation
+              </label>
+              <Field
+                label="my2sql path"
+                value={form.mysqlRollbackMy2SQLPath}
+                onChange={(value) => setForm((current) => current ? { ...current, mysqlRollbackMy2SQLPath: value } : current)}
+                placeholder="my2sql"
+              />
+              <Field
+                label="Generation timeout (seconds)"
+                value={form.mysqlRollbackGenerationTimeoutSeconds}
+                onChange={(value) => setForm((current) => current ? { ...current, mysqlRollbackGenerationTimeoutSeconds: value } : current)}
+              />
+              <Field
+                label="Max rollback SQL bytes"
+                value={form.mysqlRollbackMaxSQLBytes}
+                onChange={(value) => setForm((current) => current ? { ...current, mysqlRollbackMaxSQLBytes: value } : current)}
               />
             </div>
           </section>
@@ -1020,6 +1057,10 @@ function toForm(settings: PlatformSettings): SettingsForm {
     sqlExportAppTimeoutSeconds: String(settings.sql_export_app_timeout_seconds),
     sqlExportMySQLMaxExecutionTimeMs: String(settings.sql_export_mysql_max_execution_time_ms),
     sqlExportPostgresStatementTimeoutMs: String(settings.sql_export_postgres_statement_timeout_ms),
+    mysqlRollbackEnabled: settings.mysql_rollback_enabled,
+    mysqlRollbackMy2SQLPath: settings.mysql_rollback_my2sql_path || 'my2sql',
+    mysqlRollbackGenerationTimeoutSeconds: String(settings.mysql_rollback_generation_timeout_seconds || 30),
+    mysqlRollbackMaxSQLBytes: String(settings.mysql_rollback_max_sql_bytes || 5 * 1024 * 1024),
     inventoryEnabled: settings.db_metadata_inventory_enabled,
     inventoryRegions: settings.db_metadata_inventory_regions.join(', '),
     inventoryEngines: settings.db_metadata_inventory_engines.join(', '),
@@ -1071,6 +1112,10 @@ function toPayload(
     sql_export_app_timeout_seconds: parsePositiveInt(form.sqlExportAppTimeoutSeconds, 30),
     sql_export_mysql_max_execution_time_ms: parsePositiveInt(form.sqlExportMySQLMaxExecutionTimeMs, 25000),
     sql_export_postgres_statement_timeout_ms: parsePositiveInt(form.sqlExportPostgresStatementTimeoutMs, 25000),
+    mysql_rollback_enabled: form.mysqlRollbackEnabled,
+    mysql_rollback_my2sql_path: form.mysqlRollbackMy2SQLPath.trim() || 'my2sql',
+    mysql_rollback_generation_timeout_seconds: parsePositiveInt(form.mysqlRollbackGenerationTimeoutSeconds, 30),
+    mysql_rollback_max_sql_bytes: parsePositiveInt(form.mysqlRollbackMaxSQLBytes, 5 * 1024 * 1024),
     db_metadata_inventory_enabled: form.inventoryEnabled,
     db_metadata_inventory_regions: splitCSV(form.inventoryRegions),
     db_metadata_inventory_engines: splitCSV(form.inventoryEngines),

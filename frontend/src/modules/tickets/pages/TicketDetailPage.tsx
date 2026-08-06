@@ -18,7 +18,8 @@ import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useToast } from '@/shared/ui/ToastContext'
-import { approveTicket, downloadTicketExport, executeTicket, executeTicketStatement, getTicket, rejectTicket, retryWorkflowResolution, revokeTicket, stopTicketStatement, withdrawTicket } from '@/modules/tickets/api'
+import { approveTicket, createRollbackTicket, downloadTicketExport, executeTicket, executeTicketStatement, getTicket, previewRollbackTicket, rejectTicket, retryWorkflowResolution, revokeTicket, stopTicketStatement, withdrawTicket } from '@/modules/tickets/api'
+import type { RollbackPreviewItem } from '@/modules/tickets/api'
 
 function DetailTable({
   headers,
@@ -264,6 +265,41 @@ function StatementExecutionBadge({ status }: { status: string | null }) {
   return <StatusBadge status={badgeStatus} className="px-2 py-0.5 text-[10px] leading-4 tracking-normal" />
 }
 
+function RollbackStatusCell({
+  rollback,
+}: {
+  rollback: TicketDetail['execution_rollbacks'][number] | null
+}) {
+  if (!rollback) {
+    return <span className="text-muted">—</span>
+  }
+  const label = formatRollbackStatus(rollback.status)
+  if (rollback.status === 'generated') {
+    return <span className="text-[12px] font-semibold text-emerald-700">{label}</span>
+  }
+  if (rollback.status === 'submitted') {
+    return <span className="text-[12px] font-semibold text-primary">{label}</span>
+  }
+  return <span className="text-[12px] font-semibold text-muted">{label}</span>
+}
+
+function formatRollbackStatus(status: string) {
+  switch (status) {
+    case 'unsupported':
+      return 'Unavailable'
+    case 'generating':
+      return 'Generating'
+    case 'generated':
+      return 'Generated'
+    case 'failed':
+      return 'Generation Failed'
+    case 'submitted':
+      return 'Ticket Created'
+    default:
+      return status || '—'
+  }
+}
+
 function formatTicketTypeLabel(ticketType: string) {
   switch (ticketType) {
     case 'ddl':
@@ -491,6 +527,7 @@ type StatementResultRow = {
   dbProcessID: number | null
   interruptionReason: string | null
   outcomeConfidence: string | null
+  rollback: TicketDetail['execution_rollbacks'][number] | null
 }
 
 type ReviewStatementTable = {
@@ -607,9 +644,11 @@ function buildStatementResults(detail: TicketDetail) {
       dbProcessID: existing?.dbProcessID ?? null,
       interruptionReason: existing?.interruptionReason ?? null,
       outcomeConfidence: existing?.outcomeConfidence ?? null,
+      rollback: existing?.rollback ?? null,
     })
   })
 
+  const rollbacksByExecutionID = new Map(detail.execution_rollbacks.map((item) => [item.execution_id, item]))
   detail.executions.forEach((execution) => {
     const existing = rows.get(execution.seq)
     rows.set(execution.seq, {
@@ -633,6 +672,7 @@ function buildStatementResults(detail: TicketDetail) {
       dbProcessID: execution.db_process_id ?? null,
       interruptionReason: execution.interruption_reason ?? null,
       outcomeConfidence: execution.outcome_confidence ?? null,
+      rollback: rollbacksByExecutionID.get(execution.id) ?? existing?.rollback ?? null,
     })
   })
 
@@ -870,6 +910,11 @@ export function TicketDetailPage() {
   const [reason, setReason] = useState('')
   const [acting, setActing] = useState<'approve' | 'reject' | 'withdraw' | 'execute' | 'revoke' | 'retry_workflow' | null>(null)
   const [actingExecutionID, setActingExecutionID] = useState<number | null>(null)
+  const [rollbackPreviewOpen, setRollbackPreviewOpen] = useState(false)
+  const [rollbackPreviewItems, setRollbackPreviewItems] = useState<RollbackPreviewItem[]>([])
+  const [selectedRollbackIDs, setSelectedRollbackIDs] = useState<Set<number>>(() => new Set())
+  const [rollbackPreviewLoading, setRollbackPreviewLoading] = useState(false)
+  const [rollbackCreateLoading, setRollbackCreateLoading] = useState(false)
   const [confirmAction, setConfirmAction] = useState<'withdraw' | 'execute' | 'revoke' | null>(null)
   const [downloadingExport, setDownloadingExport] = useState(false)
   const [otherDetailsOpen, setOtherDetailsOpen] = useState(false)
@@ -987,6 +1032,7 @@ export function TicketDetailPage() {
   const showStatementTableMetadata = ticket?.ticket_type === 'ddl' || ticket?.ticket_type === 'dml'
   const showStatementScanRows = ticket?.ticket_type === 'dml'
   const showStatementRowsAffected = ticket?.ticket_type !== 'ddl'
+  const showStatementRollback = displayStatementResults.some((row) => row.rollback != null)
   const executionRuntimeRows = displayStatementResults.filter((row) => (
     row.executionID != null ||
     row.sentToDBAt ||
@@ -1015,6 +1061,8 @@ export function TicketDetailPage() {
     (ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml' || ticket.ticket_type === 'redis_command') &&
     user.permissions.includes('tickets.apply'),
   )
+  const generatedRollbacks = detail?.execution_rollbacks.filter((item) => item.status === 'generated') ?? []
+  const canCreateRollbackTicket = Boolean(ticket && generatedRollbacks.length > 0 && user.permissions.includes('tickets.apply'))
 
   async function reloadTicket(_options?: { background?: boolean }) {
     if (!id) {
@@ -1081,6 +1129,42 @@ export function TicketDetailPage() {
     }
   }
 
+  async function openRollbackPreview() {
+    if (!ticket) {
+      return
+    }
+    setRollbackPreviewLoading(true)
+    setError('')
+    try {
+      const response = await previewRollbackTicket(ticket.ticket_no)
+      setRollbackPreviewItems(response.items)
+      setSelectedRollbackIDs(new Set(response.items.map((item) => item.rollback.id)))
+      setRollbackPreviewOpen(true)
+    } catch (actionError) {
+      setError(actionError instanceof ApiError ? actionError.message : 'Load rollback preview failed. Please try again later.')
+    } finally {
+      setRollbackPreviewLoading(false)
+    }
+  }
+
+  async function runRollbackAction() {
+    if (!ticket || selectedRollbackIDs.size === 0) {
+      return
+    }
+    setRollbackCreateLoading(true)
+    setError('')
+    try {
+      const response = await createRollbackTicket(ticket.ticket_no, Array.from(selectedRollbackIDs))
+      await reloadTicket({ background: true })
+      setRollbackPreviewOpen(false)
+      pushToast(`Rollback ticket ${response.ticket.ticket_no} created`, 'success')
+    } catch (actionError) {
+      setError(actionError instanceof ApiError ? actionError.message : 'Create rollback ticket failed. Please try again later.')
+    } finally {
+      setRollbackCreateLoading(false)
+    }
+  }
+
   async function handleDownloadExport() {
     if (!exportDownloadURL || downloadingExport) {
       return
@@ -1135,6 +1219,17 @@ export function TicketDetailPage() {
           {ticket ? <p className="mt-1 truncate font-mono text-[12px] font-semibold text-accent">{ticket.ticket_no}</p> : null}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {canCreateRollbackTicket ? (
+            <button
+              type="button"
+              onClick={() => void openRollbackPreview()}
+              disabled={rollbackPreviewLoading}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {rollbackPreviewLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+              Rollback
+            </button>
+          ) : null}
           {canReapplyTicket ? (
             <button
               type="button"
@@ -1271,6 +1366,7 @@ export function TicketDetailPage() {
                       {showReviewMessageColumn ? <col className="w-[180px]" /> : null}
                       {showStatementRowsAffected ? <col className="w-[150px]" /> : null}
                       <col className="w-[150px]" />
+                      {showStatementRollback ? <col className="w-[210px]" /> : null}
                       <col className="w-[90px]" />
                       {showErrorMessageColumn ? <col className="w-[220px]" /> : null}
                       <col className="w-[120px]" />
@@ -1287,6 +1383,7 @@ export function TicketDetailPage() {
                         {showReviewMessageColumn ? <DataTableHeaderCell>Review Message</DataTableHeaderCell> : null}
                         {showStatementRowsAffected ? <DataTableHeaderCell>Rows Affected</DataTableHeaderCell> : null}
                         <DataTableHeaderCell>Execution Status</DataTableHeaderCell>
+                        {showStatementRollback ? <DataTableHeaderCell>Rollback</DataTableHeaderCell> : null}
                         <DataTableHeaderCell>Duration</DataTableHeaderCell>
                         {showErrorMessageColumn ? <DataTableHeaderCell>Error Message</DataTableHeaderCell> : null}
                         <DataTableHeaderCell>Action</DataTableHeaderCell>
@@ -1352,6 +1449,11 @@ export function TicketDetailPage() {
                               <DataTableCell className="break-words align-middle leading-6">{row.rowsAffected ?? '—'}</DataTableCell>
                             ) : null}
                             <DataTableCell className="break-words align-middle leading-6"><StatementExecutionBadge status={row.executionStatus} /></DataTableCell>
+                            {showStatementRollback ? (
+                              <DataTableCell className="align-middle leading-6">
+                                <RollbackStatusCell rollback={row.rollback} />
+                              </DataTableCell>
+                            ) : null}
                             <DataTableCell className="break-words align-middle leading-6">{row.duration ?? '—'}</DataTableCell>
                             {showErrorMessageColumn ? (
                               <DataTableCell className="break-words align-middle leading-6 text-muted">{row.errorMessage || '—'}</DataTableCell>
@@ -1616,6 +1718,73 @@ export function TicketDetailPage() {
           </section>
         </div>
       )}
+
+      <ConfirmDialog
+        open={rollbackPreviewOpen}
+        title="Create Rollback Ticket"
+        panelClassName="max-w-5xl"
+        description={(
+          <div className="grid max-h-[70vh] gap-3 overflow-y-auto pr-1">
+            <p className="text-[12px] leading-5 text-muted">
+              Review generated rollback SQL before creating a new DML ticket. Select one or more statements to include.
+            </p>
+            {rollbackPreviewItems.length === 0 ? (
+              <div className="rounded-lg border border-border bg-panel-soft px-3 py-4 text-[12px] text-muted">
+                No generated rollback SQL is available.
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {rollbackPreviewItems.map((item) => {
+                  const selected = selectedRollbackIDs.has(item.rollback.id)
+                  return (
+                    <div key={item.rollback.id} className="grid gap-2 rounded-lg border border-border bg-white p-3 text-left">
+                      <label className="flex cursor-pointer items-center gap-2 text-[12px] font-semibold text-ink">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={(event) => {
+                            setSelectedRollbackIDs((current) => {
+                              const next = new Set(current)
+                              if (event.target.checked) {
+                                next.add(item.rollback.id)
+                              } else {
+                                next.delete(item.rollback.id)
+                              }
+                              return next
+                            })
+                          }}
+                        />
+                        Statement #{item.rollback.seq}
+                      </label>
+                      <div className="grid gap-2 lg:grid-cols-2">
+                        <div>
+                          <p className="mb-1 text-[11px] font-semibold uppercase text-faint">Original SQL</p>
+                          <pre className="max-h-40 overflow-auto rounded-lg border border-border bg-panel-soft p-2 font-mono text-[11px] leading-5 text-ink">{item.original_sql || '—'}</pre>
+                        </div>
+                        <div>
+                          <p className="mb-1 text-[11px] font-semibold uppercase text-faint">Rollback SQL</p>
+                          <pre className="max-h-40 overflow-auto rounded-lg border border-border bg-panel-soft p-2 font-mono text-[11px] leading-5 text-ink">{item.rollback_sql}</pre>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+        confirmLabel="Create Ticket"
+        loading={rollbackCreateLoading}
+        confirmDisabled={rollbackPreviewItems.length === 0 || selectedRollbackIDs.size === 0}
+        onCancel={() => {
+          if (!rollbackCreateLoading) {
+            setRollbackPreviewOpen(false)
+          }
+        }}
+        onConfirm={() => {
+          void runRollbackAction()
+        }}
+      />
 
       <ConfirmDialog
         open={confirmAction !== null}

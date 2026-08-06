@@ -34,6 +34,7 @@ import (
 
 type TicketHandler struct {
 	tickets            *repository.TicketRepo
+	rollbacks          *repository.TicketRollbackRepo
 	queryAccess        *repository.QueryAccessRepo
 	exports            *repository.ExportRepo
 	audit              *repository.AuditRepo
@@ -67,6 +68,24 @@ type ticketResponse struct {
 type ticketWorkflowParticipants struct {
 	Reviewers []string `json:"reviewers"`
 	Executors []string `json:"executors"`
+}
+
+type rollbackPreviewItem struct {
+	Rollback    model.TicketExecutionRollback `json:"rollback"`
+	OriginalSQL string                        `json:"original_sql"`
+	RollbackSQL string                        `json:"rollback_sql"`
+}
+
+type createRollbackTicketRequest struct {
+	RollbackIDs []uint64 `json:"rollback_ids"`
+}
+
+func formatIntList(values []int) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, strconv.Itoa(value))
+	}
+	return strings.Join(parts, ", ")
 }
 
 type ticketWorkflowResolutionSummary struct {
@@ -273,6 +292,12 @@ func WithTicketHandlerAppEnv(appEnv string) TicketHandlerOption {
 func WithTicketHandlerDBMetadata(repo *repository.DBMetadataRepo) TicketHandlerOption {
 	return func(h *TicketHandler) {
 		h.dbMetadata = repo
+	}
+}
+
+func WithTicketHandlerRollbacks(repo *repository.TicketRollbackRepo) TicketHandlerOption {
+	return func(h *TicketHandler) {
+		h.rollbacks = repo
 	}
 }
 
@@ -1292,6 +1317,205 @@ func (h *TicketHandler) WorkflowDashboardSummary(w http.ResponseWriter, r *http.
 	jsonOK(w, map[string]any{"summary": summary})
 }
 
+// GET /tickets/{id}/rollbacks/preview
+func (h *TicketHandler) PreviewRollbackTicket(w http.ResponseWriter, r *http.Request) {
+	if h.rollbacks == nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "rollback is not configured")
+		return
+	}
+	sourceTicket, resolved := h.resolveTicketRef(w, r)
+	if !resolved {
+		return
+	}
+	if sourceTicket == nil {
+		jsonErr(w, http.StatusNotFound, "ticket not found")
+		return
+	}
+	userID := middleware.UserIDFromCtx(r.Context())
+	canView, err := h.canViewTicket(r.Context(), sourceTicket, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket access check failed")
+		return
+	}
+	if !canView {
+		h.forbidTicketAccess(w, r, sourceTicket, "create_rollback_ticket", "not_visible")
+		return
+	}
+	rollbackRecords, err := h.rollbacks.ListByTicket(r.Context(), sourceTicket.ID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load rollback failed")
+		return
+	}
+	executions, err := h.tickets.ListExecutions(r.Context(), sourceTicket.ID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load ticket executions failed")
+		return
+	}
+	executionSQL := map[uint64]string{}
+	for _, execRow := range executions {
+		executionSQL[execRow.ID] = execRow.SQLStmt
+	}
+	items := []rollbackPreviewItem{}
+	for _, rollbackRecord := range rollbackRecords {
+		if rollbackRecord.Status != repository.RollbackStatusGenerated {
+			continue
+		}
+		rollbackSQL, err := h.rollbacks.DecryptSQL(&rollbackRecord)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load rollback sql failed")
+			return
+		}
+		items = append(items, rollbackPreviewItem{
+			Rollback:    rollbackRecord,
+			OriginalSQL: executionSQL[rollbackRecord.ExecutionID],
+			RollbackSQL: rollbackSQL,
+		})
+	}
+	jsonOK(w, map[string]any{"items": items})
+}
+
+// POST /tickets/{id}/rollbacks/create-ticket
+func (h *TicketHandler) CreateRollbackTicketFromSelection(w http.ResponseWriter, r *http.Request) {
+	if h.rollbacks == nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "rollback is not configured")
+		return
+	}
+	var req createRollbackTicketRequest
+	if err := bindJSON(r, &req); err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	h.createRollbackTicket(w, r, req.RollbackIDs)
+}
+
+// POST /tickets/{id}/rollbacks/{rollbackID}/create-ticket
+func (h *TicketHandler) CreateRollbackTicket(w http.ResponseWriter, r *http.Request) {
+	rollbackID, err := strconv.ParseUint(chi.URLParam(r, "rollbackID"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid rollback id")
+		return
+	}
+	h.createRollbackTicket(w, r, []uint64{rollbackID})
+}
+
+func (h *TicketHandler) createRollbackTicket(w http.ResponseWriter, r *http.Request, rollbackIDs []uint64) {
+	if h.rollbacks == nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "rollback is not configured")
+		return
+	}
+	sourceTicket, resolved := h.resolveTicketRef(w, r)
+	if !resolved {
+		return
+	}
+	if sourceTicket == nil {
+		jsonErr(w, http.StatusNotFound, "ticket not found")
+		return
+	}
+	userID := middleware.UserIDFromCtx(r.Context())
+	canView, err := h.canViewTicket(r.Context(), sourceTicket, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket access check failed")
+		return
+	}
+	if !canView {
+		h.forbidTicketAccess(w, r, sourceTicket, "create_rollback_ticket", "not_visible")
+		return
+	}
+	if len(rollbackIDs) == 0 {
+		jsonErr(w, http.StatusBadRequest, "select at least one rollback statement")
+		return
+	}
+	rollbackRecords, err := h.rollbacks.ListByTicket(r.Context(), sourceTicket.ID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load rollback failed")
+		return
+	}
+	selectedIDs := map[uint64]bool{}
+	for _, id := range rollbackIDs {
+		selectedIDs[id] = true
+	}
+	selected := []model.TicketExecutionRollback{}
+	for _, rollbackRecord := range rollbackRecords {
+		if selectedIDs[rollbackRecord.ID] {
+			selected = append(selected, rollbackRecord)
+		}
+	}
+	if len(selected) != len(selectedIDs) {
+		jsonErr(w, http.StatusNotFound, "rollback not found")
+		return
+	}
+	var rollbackSQL strings.Builder
+	selectedSeqs := make([]int, 0, len(selected))
+	selectedIDsForAudit := make([]uint64, 0, len(selected))
+	for _, rollbackRecord := range selected {
+		if rollbackRecord.Status != repository.RollbackStatusGenerated {
+			jsonErr(w, http.StatusUnprocessableEntity, "rollback sql is not ready")
+			return
+		}
+		sqlText, err := h.rollbacks.DecryptSQL(&rollbackRecord)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load rollback sql failed")
+			return
+		}
+		if rollbackSQL.Len() > 0 {
+			rollbackSQL.WriteString("\n\n")
+		}
+		rollbackSQL.WriteString(strings.TrimSpace(sqlText))
+		selectedSeqs = append(selectedSeqs, rollbackRecord.Seq)
+		selectedIDsForAudit = append(selectedIDsForAudit, rollbackRecord.ID)
+	}
+	title := fmt.Sprintf("Rollback %s", sourceTicket.TicketNo)
+	if len(selected) == 1 {
+		title = fmt.Sprintf("Rollback %s seq %d", sourceTicket.TicketNo, selected[0].Seq)
+	}
+	description := fmt.Sprintf("Rollback ticket generated from %s statement(s) %s. Review generated SQL before execution.", sourceTicket.TicketNo, formatIntList(selectedSeqs))
+	created, err := h.tickets.Create(r.Context(), &model.Ticket{
+		Title:          title,
+		Description:    &description,
+		SQLContent:     strings.TrimSpace(rollbackSQL.String()),
+		TicketType:     model.TicketTypeDML,
+		DBConnectionID: sourceTicket.DBConnectionID,
+		DatabaseName:   sourceTicket.DatabaseName,
+		SchemaName:     sourceTicket.SchemaName,
+		SubmitterID:    userID,
+	})
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "create rollback ticket failed")
+		return
+	}
+	created, err = h.applyWorkflowAfterCreate(r.Context(), created, &userID, clientIP(r))
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "route rollback ticket failed")
+		return
+	}
+	for _, rollbackRecord := range selected {
+		if err := h.rollbacks.MarkSubmitted(r.Context(), rollbackRecord.ID, created.ID); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "link rollback ticket failed")
+			return
+		}
+	}
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &userID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "ticket_rollback_ticket_created",
+		ResourceType: "ticket",
+		ResourceID:   &sourceTicket.ID,
+		Details: h.ticketAuditDetails(r.Context(), sourceTicket, map[string]any{
+			"rollback_ids":       selectedIDsForAudit,
+			"seqs":               selectedSeqs,
+			"rollback_ticket_id": created.ID,
+			"rollback_ticket_no": created.TicketNo,
+		}),
+		IPAddress: clientIP(r),
+	})
+	enriched, err := h.buildTicketResponse(r.Context(), created)
+	if err != nil {
+		jsonOK(w, map[string]any{"ticket": created})
+		return
+	}
+	jsonCreated(w, map[string]any{"ticket": enriched})
+}
+
 // GET /tickets/{id}
 func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 	ticket, resolved := h.resolveTicketRef(w, r)
@@ -1332,6 +1556,13 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 	reviewResults, _ := h.tickets.ListReviewResults(r.Context(), id)
 	if reviewResults == nil {
 		reviewResults = []model.TicketReviewResult{}
+	}
+	rollbackRecords := []model.TicketExecutionRollback{}
+	if h.rollbacks != nil {
+		rollbackRecords, _ = h.rollbacks.ListByTicket(r.Context(), id)
+		if rollbackRecords == nil {
+			rollbackRecords = []model.TicketExecutionRollback{}
+		}
 	}
 	canReview, err := h.canReviewTicket(r.Context(), ticket, userID)
 	if err != nil {
@@ -1430,6 +1661,7 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{
 		"ticket":                    enrichedTicket,
 		"executions":                executions,
+		"execution_rollbacks":       rollbackRecords,
 		"review_results":            reviewResults,
 		"activity_logs":             auditLogs,
 		"scopes":                    scopes,
@@ -2888,6 +3120,7 @@ func (h *TicketHandler) runTicketStatementExecution(ticket *model.Ticket, execRo
 		})
 	}
 
+	rollbackRuntime := h.prepareMySQLRollbackRuntime(ctx, ticket, execRow)
 	rowsAffected, durationMs, sentToDB, execErr := h.executeTicketStatementSQL(ctx, ticket, execRow, executorID)
 	result.durationMs = durationMs
 	result.rowsAffected = rowsAffected
@@ -2926,6 +3159,7 @@ func (h *TicketHandler) runTicketStatementExecution(ticket *model.Ticket, execRo
 		} else {
 			result.outcomeConfidence = ticketExecutionOutcomeCompleted
 			_ = h.tickets.MarkExecutionDone(ctx, execRow.ID, result.rowsAffected, result.durationMs, result.errMsg)
+			h.finalizeMySQLRollback(ctx, ticket, execRow, rollbackRuntime, result.rowsAffected)
 		}
 	}
 	if manual {

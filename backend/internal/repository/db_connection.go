@@ -426,7 +426,7 @@ func collectConnectionIDs(conns []model.DBConnection) []uint64 {
 
 func applyConnectionEndpoint(conn *model.DBConnection, role string) {
 	switch strings.TrimSpace(role) {
-	case model.DBCredentialRoleReadwrite:
+	case model.DBCredentialRoleReadwrite, model.DBCredentialRoleRollback:
 		conn.Host = conn.EffectiveReadwriteHost()
 		conn.Port = conn.EffectiveReadwritePort()
 	default:

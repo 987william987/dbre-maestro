@@ -64,6 +64,7 @@ function buildDetail(ticket: Ticket, overrides?: Partial<TicketDetail>): TicketD
   return {
     ticket,
     executions: [],
+    execution_rollbacks: [],
     review_results: [],
     activity_logs: [],
     scopes: [],

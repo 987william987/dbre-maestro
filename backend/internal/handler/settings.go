@@ -422,6 +422,16 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "sql_export_postgres_statement_timeout_ms must be greater than 0")
 		return
 	}
+	req.MySQLRollbackMy2SQLPath = strings.TrimSpace(req.MySQLRollbackMy2SQLPath)
+	if req.MySQLRollbackMy2SQLPath == "" {
+		req.MySQLRollbackMy2SQLPath = "my2sql"
+	}
+	if req.MySQLRollbackGenerationTimeoutSeconds <= 0 {
+		req.MySQLRollbackGenerationTimeoutSeconds = 30
+	}
+	if req.MySQLRollbackMaxSQLBytes <= 0 {
+		req.MySQLRollbackMaxSQLBytes = 5 * 1024 * 1024
+	}
 	if req.DBMetadataInventorySyncIntervalMins <= 0 {
 		jsonErr(w, http.StatusUnprocessableEntity, "db_metadata_inventory_sync_interval_minutes must be greater than 0")
 		return

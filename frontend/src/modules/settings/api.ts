@@ -56,6 +56,12 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
       typeof settings.sql_export_mysql_max_execution_time_ms === 'number' ? settings.sql_export_mysql_max_execution_time_ms : 25000,
     sql_export_postgres_statement_timeout_ms:
       typeof settings.sql_export_postgres_statement_timeout_ms === 'number' ? settings.sql_export_postgres_statement_timeout_ms : 25000,
+    mysql_rollback_enabled: typeof settings.mysql_rollback_enabled === 'boolean' ? settings.mysql_rollback_enabled : false,
+    mysql_rollback_my2sql_path: typeof settings.mysql_rollback_my2sql_path === 'string' ? settings.mysql_rollback_my2sql_path : 'my2sql',
+    mysql_rollback_generation_timeout_seconds:
+      typeof settings.mysql_rollback_generation_timeout_seconds === 'number' ? settings.mysql_rollback_generation_timeout_seconds : 30,
+    mysql_rollback_max_sql_bytes:
+      typeof settings.mysql_rollback_max_sql_bytes === 'number' ? settings.mysql_rollback_max_sql_bytes : 5 * 1024 * 1024,
     db_metadata_inventory_enabled: typeof settings.db_metadata_inventory_enabled === 'boolean' ? settings.db_metadata_inventory_enabled : true,
     db_metadata_inventory_regions: Array.isArray(settings.db_metadata_inventory_regions) ? settings.db_metadata_inventory_regions : [],
     db_metadata_inventory_engines: Array.isArray(settings.db_metadata_inventory_engines) ? settings.db_metadata_inventory_engines : ['aurora-mysql', 'aurora-postgresql', 'redis'],

@@ -126,6 +126,35 @@ type TicketReviewTable struct {
 
 type TicketReviewTables []TicketReviewTable
 
+type TicketExecutionRollback struct {
+	ID                   uint64     `db:"id"                     json:"id"`
+	TicketID             uint64     `db:"ticket_id"              json:"ticket_id"`
+	ExecutionID          uint64     `db:"execution_id"           json:"execution_id"`
+	Seq                  int        `db:"seq"                    json:"seq"`
+	Status               string     `db:"status"                 json:"status"`
+	UnsupportedReason    *string    `db:"unsupported_reason"     json:"unsupported_reason,omitempty"`
+	FailureMessage       *string    `db:"failure_message"        json:"failure_message,omitempty"`
+	Generator            string     `db:"generator"              json:"generator,omitempty"`
+	GeneratorVersion     string     `db:"generator_version"      json:"generator_version,omitempty"`
+	SourceConnectionID   uint64     `db:"source_connection_id"   json:"source_connection_id"`
+	SourceDatabaseName   *string    `db:"source_database_name"   json:"source_database_name,omitempty"`
+	SourceSchemaName     *string    `db:"source_schema_name"     json:"source_schema_name,omitempty"`
+	BinlogStartFile      *string    `db:"binlog_start_file"      json:"binlog_start_file,omitempty"`
+	BinlogStartPos       *uint64    `db:"binlog_start_pos"       json:"binlog_start_pos,omitempty"`
+	BinlogEndFile        *string    `db:"binlog_end_file"        json:"binlog_end_file,omitempty"`
+	BinlogEndPos         *uint64    `db:"binlog_end_pos"         json:"binlog_end_pos,omitempty"`
+	RollbackSQLEncrypted []byte     `db:"rollback_sql_encrypted" json:"-"`
+	RollbackSQLSHA256    *string    `db:"rollback_sql_sha256"    json:"rollback_sql_sha256,omitempty"`
+	RollbackSQLBytes     *int64     `db:"rollback_sql_bytes"     json:"rollback_sql_bytes,omitempty"`
+	StatementCount       *int       `db:"statement_count"        json:"statement_count,omitempty"`
+	Confidence           *string    `db:"confidence"             json:"confidence,omitempty"`
+	WarningMessage       *string    `db:"warning_message"        json:"warning_message,omitempty"`
+	RollbackTicketID     *uint64    `db:"rollback_ticket_id"     json:"rollback_ticket_id,omitempty"`
+	GeneratedAt          *time.Time `db:"generated_at"           json:"generated_at,omitempty"`
+	CreatedAt            time.Time  `db:"created_at"             json:"created_at"`
+	UpdatedAt            time.Time  `db:"updated_at"             json:"updated_at"`
+}
+
 func (tables TicketReviewTables) Value() (driver.Value, error) {
 	if len(tables) == 0 {
 		return nil, nil

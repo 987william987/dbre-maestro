@@ -10,6 +10,7 @@ import type {
   TicketStatus,
   TicketType,
   WorkflowDashboardSummary,
+  TicketExecutionRollback,
 } from '@/shared/types/ticket'
 
 type TicketsResponse = {
@@ -60,6 +61,12 @@ type ReviewTicketPayload = {
 type ReviewTicketResponse = {
   passed: boolean
   results: TicketReviewResult[]
+}
+
+export type RollbackPreviewItem = {
+  rollback: TicketExecutionRollback
+  original_sql: string
+  rollback_sql: string
 }
 
 type ListTicketsParams = {
@@ -122,6 +129,7 @@ export async function getTicket(id: string): Promise<TicketDetail> {
   return apiClient.get<TicketDetail>(`/tickets/${id}`).then((response) => ({
     ...response,
     executions: Array.isArray(response.executions) ? response.executions : [],
+    execution_rollbacks: Array.isArray(response.execution_rollbacks) ? response.execution_rollbacks : [],
     review_results: Array.isArray(response.review_results) ? response.review_results : [],
     activity_logs: Array.isArray(response.activity_logs) ? response.activity_logs : [],
     scopes: Array.isArray(response.scopes) ? response.scopes : [],
@@ -177,6 +185,18 @@ export async function executeTicketStatement(ticketRef: string | number, executi
 
 export async function stopTicketStatement(ticketRef: string | number, executionID: number) {
   return apiClient.post<void>(`/tickets/${ticketRef}/executions/${executionID}/stop`)
+}
+
+export async function previewRollbackTicket(ticketRef: string | number) {
+  return apiClient.get<{ items: RollbackPreviewItem[] }>(`/tickets/${ticketRef}/rollbacks/preview`).then((response) => ({
+    items: Array.isArray(response.items) ? response.items : [],
+  }))
+}
+
+export async function createRollbackTicket(ticketRef: string | number, rollbackIDs: number[]) {
+  return apiClient.post<{ ticket: Ticket }>(`/tickets/${ticketRef}/rollbacks/create-ticket`, {
+    rollback_ids: rollbackIDs,
+  })
 }
 
 export async function revokeTicket(ticketRef: string | number) {
