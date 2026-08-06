@@ -103,6 +103,9 @@ type PlatformAgingStats struct {
 	AvgReviewAgeMinutes        *float64 `json:"avg_review_age_minutes,omitempty"`
 	AvgExecutionWaitAgeMinutes *float64 `json:"avg_execution_wait_age_minutes,omitempty"`
 	AvgExecutionDurationMs     *float64 `json:"avg_execution_duration_ms,omitempty"`
+	AvgReviewDuration7dMinutes *float64 `json:"avg_review_duration_7d_minutes,omitempty"`
+	AvgExecutionWait7dMinutes  *float64 `json:"avg_execution_wait_7d_minutes,omitempty"`
+	AvgCompletionTime7dMinutes *float64 `json:"avg_completion_time_7d_minutes,omitempty"`
 	MaxReviewAgeMinutes        *int64   `json:"max_review_age_minutes,omitempty"`
 	MaxExecutionWaitAgeMinutes *int64   `json:"max_execution_wait_age_minutes,omitempty"`
 }
@@ -592,7 +595,7 @@ func (r *TicketRepo) RecentTicketsBySubmitter(ctx context.Context, submitterID u
 
 func (r *TicketRepo) ActiveTicketsBySubmitter(ctx context.Context, submitterID uint64, limit int) ([]model.Ticket, error) {
 	if limit <= 0 || limit > 20 {
-		limit = 6
+		limit = 5
 	}
 	statuses := []model.TicketStatus{
 		model.TicketStatusPendingReview,
@@ -697,6 +700,7 @@ func (r *TicketRepo) LongPendingTickets(ctx context.Context, longPendingAfter ti
 
 func (r *TicketRepo) PlatformAgingStats(ctx context.Context) (*PlatformAgingStats, error) {
 	now := timeutil.NowUTC()
+	since7d := now.Add(-7 * 24 * time.Hour)
 	var row struct {
 		AvgReviewAge        sql.NullFloat64 `db:"avg_review_age"`
 		AvgExecutionWaitAge sql.NullFloat64 `db:"avg_execution_wait_age"`
@@ -706,9 +710,9 @@ func (r *TicketRepo) PlatformAgingStats(ctx context.Context) (*PlatformAgingStat
 	if err := r.db.GetContext(ctx, &row,
 		`SELECT
 		 AVG(CASE WHEN status = ? THEN TIMESTAMPDIFF(MINUTE, created_at, ?) END) AS avg_review_age,
-		 AVG(CASE WHEN status = ? THEN TIMESTAMPDIFF(MINUTE, updated_at, ?) END) AS avg_execution_wait_age,
+		 AVG(CASE WHEN status = ? THEN TIMESTAMPDIFF(MINUTE, COALESCE(pending_execution_at, updated_at), ?) END) AS avg_execution_wait_age,
 		 MAX(CASE WHEN status = ? THEN TIMESTAMPDIFF(MINUTE, created_at, ?) END) AS max_review_age,
-		 MAX(CASE WHEN status = ? THEN TIMESTAMPDIFF(MINUTE, updated_at, ?) END) AS max_execution_wait_age
+		 MAX(CASE WHEN status = ? THEN TIMESTAMPDIFF(MINUTE, COALESCE(pending_execution_at, updated_at), ?) END) AS max_execution_wait_age
 		 FROM tickets`,
 		model.TicketStatusPendingReview, now,
 		model.TicketStatusPendingExecution, now,
@@ -739,6 +743,53 @@ func (r *TicketRepo) PlatformAgingStats(ctx context.Context) (*PlatformAgingStat
 	}
 	if avgDuration.Valid {
 		stats.AvgExecutionDurationMs = &avgDuration.Float64
+	}
+	var historical struct {
+		AvgReviewDuration sql.NullFloat64 `db:"avg_review_duration"`
+		AvgExecutionWait  sql.NullFloat64 `db:"avg_execution_wait"`
+		AvgCompletionTime sql.NullFloat64 `db:"avg_completion_time"`
+	}
+	if err := r.db.GetContext(ctx, &historical,
+		`SELECT
+		 AVG(CASE
+		       WHEN COALESCE(approved_at, review_rejected_at) IS NOT NULL
+		        AND COALESCE(approved_at, review_rejected_at) >= ?
+		       THEN TIMESTAMPDIFF(MINUTE, created_at, COALESCE(approved_at, review_rejected_at))
+		     END) AS avg_review_duration,
+		 AVG(CASE
+		       WHEN pending_execution_at IS NOT NULL
+		        AND started_at IS NOT NULL
+		        AND started_at >= ?
+		       THEN TIMESTAMPDIFF(MINUTE, pending_execution_at, started_at)
+		     END) AS avg_execution_wait,
+		 AVG(CASE
+		       WHEN status IN (?, ?, ?, ?, ?, ?, ?)
+		        AND COALESCE(completed_at, execution_rejected_at, review_rejected_at, withdrawn_at, approved_at) IS NOT NULL
+		        AND COALESCE(completed_at, execution_rejected_at, review_rejected_at, withdrawn_at, approved_at) >= ?
+		       THEN TIMESTAMPDIFF(MINUTE, created_at, COALESCE(completed_at, execution_rejected_at, review_rejected_at, withdrawn_at, approved_at))
+		     END) AS avg_completion_time
+		 FROM tickets`,
+		since7d,
+		since7d,
+		model.TicketStatusCompleted,
+		model.TicketStatusFailed,
+		model.TicketStatusStopped,
+		model.TicketStatusInterrupted,
+		model.TicketStatusRejected,
+		model.TicketStatusWithdrawn,
+		model.TicketStatusApproved,
+		since7d,
+	); err != nil {
+		return nil, fmt.Errorf("load platform historical aging stats: %w", err)
+	}
+	if historical.AvgReviewDuration.Valid {
+		stats.AvgReviewDuration7dMinutes = &historical.AvgReviewDuration.Float64
+	}
+	if historical.AvgExecutionWait.Valid {
+		stats.AvgExecutionWait7dMinutes = &historical.AvgExecutionWait.Float64
+	}
+	if historical.AvgCompletionTime.Valid {
+		stats.AvgCompletionTime7dMinutes = &historical.AvgCompletionTime.Float64
 	}
 	return stats, nil
 }
@@ -873,7 +924,8 @@ func ticketWorkflowCondition(workflowType model.ApprovalWorkflowType) (string, [
 
 func (r *TicketRepo) UpdateStatus(ctx context.Context, id uint64, fromStatus, toStatus model.TicketStatus, reviewerID *uint64, comment *string, rejectionReason *string) (bool, error) {
 	query := `UPDATE tickets SET status = ?, updated_at = ?`
-	args := []any{toStatus, timeutil.NowUTC()}
+	now := timeutil.NowUTC()
+	args := []any{toStatus, now}
 
 	if reviewerID != nil {
 		query += `, reviewer_id = ?`
@@ -886,6 +938,24 @@ func (r *TicketRepo) UpdateStatus(ctx context.Context, id uint64, fromStatus, to
 	if rejectionReason != nil {
 		query += `, rejection_reason = ?`
 		args = append(args, *rejectionReason)
+	}
+	switch toStatus {
+	case model.TicketStatusApproved:
+		query += `, approved_at = ?`
+		args = append(args, now)
+	case model.TicketStatusPendingExecution:
+		query += `, pending_execution_at = ?`
+		args = append(args, now)
+	case model.TicketStatusRejected:
+		if fromStatus == model.TicketStatusApproved || fromStatus == model.TicketStatusPendingExecution {
+			query += `, execution_rejected_at = ?`
+		} else {
+			query += `, review_rejected_at = ?`
+		}
+		args = append(args, now)
+	case model.TicketStatusWithdrawn:
+		query += `, withdrawn_at = ?`
+		args = append(args, now)
 	}
 
 	query += ` WHERE id = ? AND status = ?`
@@ -900,11 +970,12 @@ func (r *TicketRepo) UpdateStatus(ctx context.Context, id uint64, fromStatus, to
 }
 
 func (r *TicketRepo) ApproveSensitiveAccess(ctx context.Context, id uint64, fromStatus model.TicketStatus, reviewerID uint64, approvedUntil time.Time) (bool, error) {
+	now := timeutil.NowUTC()
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE tickets
-		 SET status = ?, reviewer_id = ?, approved_until = ?, updated_at = ?
+		 SET status = ?, reviewer_id = ?, approved_at = ?, approved_until = ?, updated_at = ?
 		 WHERE id = ? AND status = ? AND ticket_type = ?`,
-		model.TicketStatusApproved, reviewerID, approvedUntil.UTC(), timeutil.NowUTC(), id, fromStatus, model.TicketTypeSensitiveQueryAccess,
+		model.TicketStatusApproved, reviewerID, now, approvedUntil.UTC(), now, id, fromStatus, model.TicketTypeSensitiveQueryAccess,
 	)
 	if err != nil {
 		return false, fmt.Errorf("approve sensitive access: %w", err)
@@ -950,10 +1021,11 @@ func (r *TicketRepo) ListActiveSensitiveAccessScopes(ctx context.Context, userID
 
 // T9: OCC — atomically transition to executing, returns false if already taken
 func (r *TicketRepo) StartExecution(ctx context.Context, id, executorID uint64) (bool, error) {
+	now := timeutil.NowUTC()
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE tickets SET status = 'executing', executor_id = ?, started_at = ?, updated_at = ?
+		`UPDATE tickets SET status = 'executing', executor_id = ?, execution_requested_at = COALESCE(execution_requested_at, ?), started_at = ?, updated_at = ?
          WHERE id = ? AND status = 'pending_execution'`,
-		executorID, timeutil.NowUTC(), timeutil.NowUTC(), id,
+		executorID, now, now, now, id,
 	)
 	if err != nil {
 		return false, fmt.Errorf("start execution OCC: %w", err)
@@ -963,9 +1035,10 @@ func (r *TicketRepo) StartExecution(ctx context.Context, id, executorID uint64) 
 }
 
 func (r *TicketRepo) MarkCompleted(ctx context.Context, id uint64, status model.TicketStatus) error {
+	now := timeutil.NowUTC()
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
-		status, timeutil.NowUTC(), timeutil.NowUTC(), id,
+		status, now, now, id,
 	)
 	return err
 }
@@ -1029,14 +1102,16 @@ func (r *TicketRepo) GetExecution(ctx context.Context, ticketID uint64, executio
 }
 
 func (r *TicketRepo) MarkTicketExecuting(ctx context.Context, ticketID uint64, executorID uint64) error {
+	now := timeutil.NowUTC()
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE tickets
 		 SET status = CASE WHEN status = 'pending_execution' THEN 'executing' ELSE status END,
 		     executor_id = COALESCE(executor_id, ?),
+		     execution_requested_at = COALESCE(execution_requested_at, ?),
 		     started_at = COALESCE(started_at, ?),
 		     updated_at = ?
 		 WHERE id = ? AND status IN ('pending_execution', 'executing')`,
-		executorID, timeutil.NowUTC(), timeutil.NowUTC(), ticketID,
+		executorID, now, now, now, ticketID,
 	)
 	return err
 }
@@ -1265,9 +1340,10 @@ func (r *TicketRepo) DB() *sqlx.DB {
 // MarkStopped transitions an executing ticket to stopped.
 // Returns false if the ticket was not in executing state (idempotent).
 func (r *TicketRepo) MarkStopped(ctx context.Context, id uint64) (bool, error) {
+	now := timeutil.NowUTC()
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE tickets SET status = 'stopped', updated_at = ? WHERE id = ? AND status = 'executing'`,
-		timeutil.NowUTC(), id,
+		`UPDATE tickets SET status = 'stopped', completed_at = ?, updated_at = ? WHERE id = ? AND status = 'executing'`,
+		now, now, id,
 	)
 	if err != nil {
 		return false, err
@@ -1279,9 +1355,10 @@ func (r *TicketRepo) MarkStopped(ctx context.Context, id uint64) (bool, error) {
 // SetScheduled stores executor_id and scheduled_at for deferred execution.
 // The ticket must be in pending_execution status.
 func (r *TicketRepo) SetScheduled(ctx context.Context, id, executorID uint64, scheduledAt time.Time) error {
+	now := timeutil.NowUTC()
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE tickets SET executor_id = ?, scheduled_at = ?, updated_at = ? WHERE id = ? AND status = 'pending_execution'`,
-		executorID, scheduledAt.UTC(), timeutil.NowUTC(), id,
+		`UPDATE tickets SET executor_id = ?, scheduled_at = ?, execution_requested_at = COALESCE(execution_requested_at, ?), updated_at = ? WHERE id = ? AND status = 'pending_execution'`,
+		executorID, scheduledAt.UTC(), now, now, id,
 	)
 	return err
 }

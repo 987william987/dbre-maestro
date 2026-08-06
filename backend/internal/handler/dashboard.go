@@ -139,12 +139,13 @@ func (h *TicketHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 
 	var platform *dashboardPlatform
 	if fullQueueVisible {
+		longPendingBefore := timeutil.NowUTC().Add(-1 * time.Hour)
 		platformSummary, err := h.dashboardTicketSummary(r.Context(), nil)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "load dashboard platform summary failed")
 			return
 		}
-		queueStats, err := h.tickets.PlatformQueueStats(r.Context(), timeutil.NowUTC().Add(-24*time.Hour))
+		queueStats, err := h.tickets.PlatformQueueStats(r.Context(), longPendingBefore)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "load dashboard platform queue failed")
 			return
@@ -184,7 +185,7 @@ func (h *TicketHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "load dashboard platform tickets failed")
 			return
 		}
-		longPendingTickets, err := h.tickets.LongPendingTickets(r.Context(), timeutil.NowUTC().Add(-24*time.Hour), 8)
+		longPendingTickets, err := h.tickets.LongPendingTickets(r.Context(), longPendingBefore, 8)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "load dashboard long pending tickets failed")
 			return

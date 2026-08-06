@@ -59,6 +59,9 @@ export type DashboardAgingStats = {
   avg_review_age_minutes?: number | null
   avg_execution_wait_age_minutes?: number | null
   avg_execution_duration_ms?: number | null
+  avg_review_duration_7d_minutes?: number | null
+  avg_execution_wait_7d_minutes?: number | null
+  avg_completion_time_7d_minutes?: number | null
   max_review_age_minutes?: number | null
   max_execution_wait_age_minutes?: number | null
 }

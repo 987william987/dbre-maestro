@@ -123,8 +123,9 @@ func (r *QueryAccessRepo) ApproveTicket(ctx context.Context, ticketID uint64, fr
 		}
 	}()
 
-	query := `UPDATE tickets SET status = ?, updated_at = ?, reviewer_id = ?`
-	args := []any{model.TicketStatusApproved, timeutil.NowUTC(), reviewerID}
+	now := timeutil.NowUTC()
+	query := `UPDATE tickets SET status = ?, updated_at = ?, reviewer_id = ?, approved_at = ?`
+	args := []any{model.TicketStatusApproved, now, reviewerID, now}
 	if comment != nil {
 		query += `, review_comment = ?`
 		args = append(args, *comment)

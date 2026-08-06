@@ -50,6 +50,12 @@ type Ticket struct {
 	ReviewerID              *uint64      `db:"reviewer_id"      json:"reviewer_id,omitempty"`
 	ExecutorID              *uint64      `db:"executor_id"      json:"executor_id,omitempty"`
 	ReviewComment           *string      `db:"review_comment"   json:"review_comment,omitempty"`
+	ApprovedAt              *time.Time   `db:"approved_at"      json:"approved_at,omitempty"`
+	ReviewRejectedAt        *time.Time   `db:"review_rejected_at" json:"review_rejected_at,omitempty"`
+	PendingExecutionAt      *time.Time   `db:"pending_execution_at" json:"pending_execution_at,omitempty"`
+	ExecutionRequestedAt    *time.Time   `db:"execution_requested_at" json:"execution_requested_at,omitempty"`
+	ExecutionRejectedAt     *time.Time   `db:"execution_rejected_at" json:"execution_rejected_at,omitempty"`
+	WithdrawnAt             *time.Time   `db:"withdrawn_at"     json:"withdrawn_at,omitempty"`
 	RejectionReason         *string      `db:"rejection_reason" json:"rejection_reason,omitempty"`
 	ScheduledAt             *time.Time   `db:"scheduled_at"     json:"scheduled_at,omitempty"`
 	StartedAt               *time.Time   `db:"started_at"       json:"started_at,omitempty"`
