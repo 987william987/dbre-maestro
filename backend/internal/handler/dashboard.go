@@ -74,7 +74,7 @@ type dashboardPlatform struct {
 // GET /account/access-scopes
 func (h *TicketHandler) AccountAccessScopes(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.UserIDFromCtx(r.Context())
-	dbScopes, err := h.dashboardDBScopes(r.Context(), userID)
+	dbScopes, err := h.dashboardDBScopes(r.Context(), userID, 0)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "load account db scopes failed")
 		return
@@ -106,7 +106,7 @@ func (h *TicketHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "load dashboard ticket summary failed")
 		return
 	}
-	recentTickets, err := h.tickets.RecentTicketsBySubmitter(r.Context(), userID, 6)
+	recentTickets, err := h.tickets.RecentTicketsBySubmitter(r.Context(), userID, 5)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "load dashboard tickets failed")
 		return
@@ -116,7 +116,7 @@ func (h *TicketHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "load dashboard tickets failed")
 		return
 	}
-	activeTickets, err := h.tickets.ActiveTicketsBySubmitter(r.Context(), userID, 6)
+	activeTickets, err := h.tickets.ActiveTicketsBySubmitter(r.Context(), userID, 5)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "load dashboard tickets failed")
 		return
@@ -126,7 +126,7 @@ func (h *TicketHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "load dashboard tickets failed")
 		return
 	}
-	dbScopes, err := h.dashboardDBScopes(r.Context(), userID)
+	dbScopes, err := h.dashboardDBScopes(r.Context(), userID, 8)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "load dashboard db scopes failed")
 		return
@@ -285,7 +285,7 @@ func (h *TicketHandler) enrichDashboardTickets(ctx context.Context, tickets []mo
 	return responses, nil
 }
 
-func (h *TicketHandler) dashboardDBScopes(ctx context.Context, userID uint64) ([]dashboardDBScope, error) {
+func (h *TicketHandler) dashboardDBScopes(ctx context.Context, userID uint64, limit int) ([]dashboardDBScope, error) {
 	if h.users == nil || h.dbConns == nil {
 		return []dashboardDBScope{}, nil
 	}
@@ -305,6 +305,9 @@ func (h *TicketHandler) dashboardDBScopes(ctx context.Context, userID uint64) ([
 	for _, conn := range conns {
 		if allowed[conn.ID] {
 			scopes = append(scopes, dashboardDBScope{ID: conn.ID, Name: conn.Name, DBType: conn.DBType})
+			if limit > 0 && len(scopes) >= limit {
+				break
+			}
 		}
 	}
 	return scopes, nil
