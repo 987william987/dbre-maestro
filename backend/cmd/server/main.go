@@ -392,6 +392,13 @@ func main() {
 			).Delete("/sessions/{id}", authH.RevokeSession)
 		})
 
+		r.Route("/account", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.Get("/access-scopes", ticketH.AccountAccessScopes)
+		})
+
 		r.Route("/exports", func(r chi.Router) {
 			r.With(
 				middleware.RequireAuth(cfg.JWTSecret),

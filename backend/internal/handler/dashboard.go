@@ -30,6 +30,7 @@ type dashboardAccessScope struct {
 	Effect          string     `json:"effect"`
 	DatabasePattern string     `json:"database_pattern"`
 	TablePattern    string     `json:"table_pattern"`
+	GrantedVia      string     `json:"granted_via"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 	RemainingDays   *int       `json:"remaining_days,omitempty"`
 	SourceTicketID  *uint64    `json:"source_ticket_id,omitempty"`
@@ -68,6 +69,27 @@ type dashboardPlatform struct {
 	LongPendingTickets   []ticketResponse                      `json:"long_pending_tickets"`
 	RecentFailedTickets  []ticketResponse                      `json:"recent_failed_tickets"`
 	DBConnectionFailures []model.DBConnection                  `json:"db_connection_failures"`
+}
+
+// GET /account/access-scopes
+func (h *TicketHandler) AccountAccessScopes(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromCtx(r.Context())
+	dbScopes, err := h.dashboardDBScopes(r.Context(), userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load account db scopes failed")
+		return
+	}
+	queryScopes, err := h.accountQueryAccessScopes(r.Context(), userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "load account query access scopes failed")
+		return
+	}
+	jsonOK(w, map[string]any{
+		"db_scopes":           dbScopes,
+		"query_access_scopes": queryScopes,
+		"db_scope_count":      len(dbScopes),
+		"query_scope_count":   len(queryScopes),
+	})
 }
 
 // GET /dashboard
@@ -329,6 +351,64 @@ func (h *TicketHandler) dashboardQueryAccessScopes(ctx context.Context, userID u
 			Effect:          string(rule.Effect),
 			DatabasePattern: rule.DatabasePattern,
 			TablePattern:    rule.TablePattern,
+			GrantedVia:      rule.GrantedVia,
+			ExpiresAt:       rule.ExpiresAt,
+			RemainingDays:   remainingDays,
+			SourceTicketID:  rule.SourceTicketID,
+			SourceTicketNo:  rule.SourceTicketNo,
+			ExpiringSoon:    expiringSoon,
+			RenewTicketPath: dashboardRenewTicketPath(rule),
+		})
+	}
+	return scopes, nil
+}
+
+func (h *TicketHandler) accountQueryAccessScopes(ctx context.Context, userID uint64) ([]dashboardAccessScope, error) {
+	if h.queryAccess == nil {
+		return []dashboardAccessScope{}, nil
+	}
+	authGroupIDs := []uint64{}
+	if h.users != nil {
+		ids, err := h.users.GetEffectiveAuthGroupIDs(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		authGroupIDs = ids
+	}
+	rules, err := h.queryAccess.ListAllActiveRulesForSubjects(ctx, userID, authGroupIDs)
+	if err != nil {
+		return nil, err
+	}
+	return h.dashboardAccessScopesFromRules(ctx, rules)
+}
+
+func (h *TicketHandler) dashboardAccessScopesFromRules(ctx context.Context, rules []model.QueryAccessRule) ([]dashboardAccessScope, error) {
+	connectionNames, err := h.dashboardConnectionNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+	now := timeutil.NowUTC()
+	scopes := make([]dashboardAccessScope, 0, len(rules))
+	for _, rule := range rules {
+		var remainingDays *int
+		expiringSoon := false
+		if rule.ExpiresAt != nil {
+			days := int(rule.ExpiresAt.Sub(now).Hours() / 24)
+			if days < 0 {
+				days = 0
+			}
+			remainingDays = &days
+			expiringSoon = rule.ExpiresAt.Before(now.Add(7 * 24 * time.Hour))
+		}
+		scopes = append(scopes, dashboardAccessScope{
+			ID:              rule.ID,
+			ConnectionID:    rule.ConnectionID,
+			ConnectionName:  connectionNames[rule.ConnectionID],
+			SubjectType:     string(rule.SubjectType),
+			Effect:          string(rule.Effect),
+			DatabasePattern: rule.DatabasePattern,
+			TablePattern:    rule.TablePattern,
+			GrantedVia:      rule.GrantedVia,
 			ExpiresAt:       rule.ExpiresAt,
 			RemainingDays:   remainingDays,
 			SourceTicketID:  rule.SourceTicketID,

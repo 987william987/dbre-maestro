@@ -36,6 +36,7 @@ export type DashboardQueryAccessScope = {
   effect: string
   database_pattern: string
   table_pattern: string
+  granted_via: string
   expires_at?: string | null
   remaining_days?: number | null
   source_ticket_id?: number | null

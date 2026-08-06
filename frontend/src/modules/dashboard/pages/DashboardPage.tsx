@@ -375,7 +375,7 @@ export function DashboardPage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-        <DashboardPanel title="Submission DB Scope">
+        <DashboardPanel title="Submission DB Scope" action={<Link to="/account/access-scopes" className="text-[12px] font-semibold text-muted hover:text-ink">View all</Link>}>
           {data.personal.db_scopes.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border bg-panel-soft p-5 text-center text-[12px] text-muted">No DB connection scope assigned.</div>
           ) : (
@@ -393,7 +393,7 @@ export function DashboardPage() {
           )}
         </DashboardPanel>
 
-        <DashboardPanel title="Expiring Query Access" action={<Link to="/tickets/new?ticket_type=query_access" className="text-[12px] font-semibold text-muted hover:text-ink">Request access</Link>}>
+        <DashboardPanel title="Expiring Query Access" action={<Link to="/account/access-scopes" className="text-[12px] font-semibold text-muted hover:text-ink">View all access</Link>}>
           <AccessTable scopes={expiringAccess.length > 0 ? expiringAccess : data.personal.query_access_scopes.slice(0, 5)} />
         </DashboardPanel>
       </div>
