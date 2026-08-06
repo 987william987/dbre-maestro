@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +23,7 @@ type DBConnectionHandler struct {
 	users      *repository.UserRepo
 	auths      *repository.AuthGroupRepo
 	audit      *repository.AuditRepo
+	settings   *repository.SettingsRepo
 	hostPolicy *netguard.Policy
 }
 
@@ -37,6 +40,24 @@ type dbConnectionEndpointTestResult struct {
 	CredentialRole string `json:"credential_role"`
 	OK             bool   `json:"ok"`
 	Error          string `json:"error,omitempty"`
+}
+
+type dbConnectionRollbackCapabilityResponse struct {
+	OK      bool                                      `json:"ok"`
+	Message string                                    `json:"message"`
+	Checks  []dbConnectionRollbackCapabilityCheck     `json:"checks"`
+	Binlog  *dbConnectionRollbackCapabilityBinlogInfo `json:"binlog,omitempty"`
+}
+
+type dbConnectionRollbackCapabilityCheck struct {
+	Name    string `json:"name"`
+	OK      bool   `json:"ok"`
+	Message string `json:"message,omitempty"`
+}
+
+type dbConnectionRollbackCapabilityBinlogInfo struct {
+	File string `json:"file"`
+	Pos  uint64 `json:"pos"`
 }
 
 type connectionCredentialPayload struct {
@@ -58,6 +79,12 @@ type DBConnectionHandlerOption func(*DBConnectionHandler)
 func WithDBConnectionHandlerHostPolicy(policy *netguard.Policy) DBConnectionHandlerOption {
 	return func(h *DBConnectionHandler) {
 		h.hostPolicy = policy
+	}
+}
+
+func WithDBConnectionHandlerSettings(settings *repository.SettingsRepo) DBConnectionHandlerOption {
+	return func(h *DBConnectionHandler) {
+		h.settings = settings
 	}
 }
 
@@ -235,6 +262,35 @@ func (h *DBConnectionHandler) Test(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeTestResult(w, r, conn.ID, overallOK, strings.Join(failures, "; "), results)
+}
+
+func (h *DBConnectionHandler) TestRollbackCapability(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	conn, err := h.repo.GetByID(r.Context(), id)
+	if err != nil || conn == nil {
+		jsonErr(w, http.StatusNotFound, "connection not found")
+		return
+	}
+	result := h.testRollbackCapability(r.Context(), conn)
+	actorID := middleware.UserIDFromCtx(r.Context())
+	h.audit.Log(r.Context(), repository.AuditEntry{
+		ActorID:      &actorID,
+		ActorName:    middleware.UsernameFromCtx(r.Context()),
+		ActionType:   "db_connection_rollback_capability_test",
+		ResourceType: "db_connection",
+		ResourceID:   &id,
+		Details: map[string]any{
+			"ok":      result.OK,
+			"message": truncate(result.Message, 300),
+			"checks":  result.Checks,
+		},
+		IPAddress: clientIP(r),
+	})
+	jsonOK(w, result)
 }
 
 // PATCH /db-connections/{id}
@@ -515,6 +571,80 @@ func (h *DBConnectionHandler) testConnectionByRole(ctx context.Context, conn *mo
 	}
 
 	return true, ""
+}
+
+func (h *DBConnectionHandler) testRollbackCapability(ctx context.Context, conn *model.DBConnection) dbConnectionRollbackCapabilityResponse {
+	result := dbConnectionRollbackCapabilityResponse{OK: true, Message: "rollback capability test passed"}
+	addCheck := func(name string, ok bool, message string) {
+		result.Checks = append(result.Checks, dbConnectionRollbackCapabilityCheck{Name: name, OK: ok, Message: message})
+		if !ok {
+			result.OK = false
+			if result.Message == "rollback capability test passed" {
+				result.Message = message
+			}
+		}
+	}
+	if conn.DBType != "mysql" {
+		addCheck("db_type", false, "only mysql connections are supported")
+		return result
+	}
+	addCheck("db_type", true, "")
+	if h.settings == nil {
+		addCheck("settings", false, "settings repository is not configured")
+		return result
+	}
+	settings, err := h.settings.Get(ctx)
+	if err != nil {
+		addCheck("settings", false, "load rollback settings failed")
+		return result
+	}
+	if settings == nil || !settings.MySQLRollbackEnabled {
+		addCheck("settings", false, "mysql rollback is disabled")
+		return result
+	}
+	addCheck("settings", true, "")
+	my2sqlPath := strings.TrimSpace(settings.MySQLRollbackMy2SQLPath)
+	if my2sqlPath == "" {
+		addCheck("my2sql", false, "my2sql path is not configured")
+		return result
+	}
+	if strings.Contains(my2sqlPath, "/") {
+		if info, err := os.Stat(my2sqlPath); err != nil || info.IsDir() {
+			addCheck("my2sql", false, "my2sql binary path is not valid")
+		} else {
+			addCheck("my2sql", true, "")
+		}
+	} else if _, err := exec.LookPath(my2sqlPath); err != nil {
+		addCheck("my2sql", false, "my2sql binary was not found in PATH")
+	} else {
+		addCheck("my2sql", true, "")
+	}
+	resolvedConn, password, err := h.repo.ResolveCredential(conn, model.DBCredentialRoleRollback)
+	if err != nil {
+		addCheck("rollback_credential", false, "rollback credential is not configured")
+		return result
+	}
+	addCheck("rollback_credential", true, "")
+	db, cleanup, err := openResolvedSQLDB(ctx, resolvedConn, password)
+	if err != nil {
+		addCheck("rollback_connection", false, "rollback credential connection failed")
+		return result
+	}
+	defer cleanup()
+	addCheck("rollback_connection", true, "")
+	if err := checkMySQLRollbackVariables(ctx, db); err != nil {
+		addCheck("mysql_binlog_settings", false, err.Error())
+		return result
+	}
+	addCheck("mysql_binlog_settings", true, "")
+	pos, err := readMySQLBinlogPosition(ctx, db)
+	if err != nil {
+		addCheck("mysql_binlog_position", false, "read mysql binlog position failed")
+		return result
+	}
+	result.Binlog = &dbConnectionRollbackCapabilityBinlogInfo{File: pos.File, Pos: pos.Pos}
+	addCheck("mysql_binlog_position", true, "")
+	return result
 }
 
 func (h *DBConnectionHandler) checkEndpointPolicy(w http.ResponseWriter, r *http.Request, resourceID *uint64, endpoint string, host string, port uint16) bool {

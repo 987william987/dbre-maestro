@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Pencil, Plus, ServerCog, Trash2, X } from 'lucide-react'
-import { createDBConnection, deleteDBConnection, getDBConnectionBindings, listDBConnections, patchDBConnection, testDBConnection } from '@/modules/db-connections/api'
+import { createDBConnection, deleteDBConnection, getDBConnectionBindings, listDBConnections, patchDBConnection, testDBConnection, testRollbackCapability } from '@/modules/db-connections/api'
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
@@ -42,6 +42,8 @@ type ConnectionForm = {
   readonlyPassword: string
   readwriteUsername: string
   readwritePassword: string
+  rollbackUsername: string
+  rollbackPassword: string
   sslMode: 'prefer' | 'disable' | 'require'
 }
 
@@ -62,6 +64,8 @@ const EMPTY_FORM: ConnectionForm = {
   readonlyPassword: '',
   readwriteUsername: '',
   readwritePassword: '',
+  rollbackUsername: '',
+  rollbackPassword: '',
   sslMode: 'prefer',
 }
 
@@ -149,6 +153,8 @@ export function DBConnectionsPage() {
       readonlyPassword: '',
       readwriteUsername: findCredentialUsername(connection, 'readwrite') ?? '',
       readwritePassword: '',
+      rollbackUsername: findCredentialUsername(connection, 'rollback') ?? '',
+      rollbackPassword: '',
       sslMode: normalizeSSLMode(connection.ssl_mode),
     })
     void loadBindings(connection.id)
@@ -238,6 +244,30 @@ export function DBConnectionsPage() {
     } catch (testError) {
       const message = testError instanceof ApiError ? testError.message : 'Connection test failed'
       pushToast(`${connectionName} connection test failed: ${message}`, 'error', { placement: 'center', durationMs: 3600 })
+    } finally {
+      setTestingId(null)
+    }
+  }
+
+  async function handleTestRollback(id: number) {
+    if (!canWrite) {
+      return
+    }
+    setTestingId(id)
+    setError('')
+    const targetConnection = connections.find((connection) => connection.id === id)
+    const connectionName = targetConnection?.name ?? `#${id}`
+    try {
+      const result = await testRollbackCapability(id)
+      if (result.ok) {
+        const binlog = result.binlog ? ` (${result.binlog.file}:${result.binlog.pos})` : ''
+        pushToast(`${connectionName} rollback capability test passed${binlog}`, 'success', { placement: 'center', durationMs: 4200 })
+      } else {
+        pushToast(`${connectionName} rollback capability test failed: ${result.message}`, 'error', { placement: 'center', durationMs: 5200 })
+      }
+    } catch (testError) {
+      const message = testError instanceof ApiError ? testError.message : 'Rollback capability test failed'
+      pushToast(`${connectionName} rollback capability test failed: ${message}`, 'error', { placement: 'center', durationMs: 4200 })
     } finally {
       setTestingId(null)
     }
@@ -413,6 +443,17 @@ export function DBConnectionsPage() {
                                 >
                                   {testingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
                                   Test
+                                </button>
+                              ) : null}
+                              {canWrite && connection.db_type === 'mysql' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleTestRollback(connection.id)}
+                                  disabled={testingId === connection.id}
+                                  className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2 text-[11px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
+                                >
+                                  {testingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                                  Test Rollback
                                 </button>
                               ) : null}
                               <button
@@ -616,9 +657,34 @@ export function DBConnectionsPage() {
                         </label>
                       </div>
 
+                      {form.dbType === 'mysql' ? (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                            Rollback Username
+                            <input
+                              value={form.rollbackUsername}
+                              onChange={(event) => setForm((current) => ({ ...current, rollbackUsername: event.target.value }))}
+                              className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                              disabled={submitting || drawerReadOnly}
+                            />
+                          </label>
+                          <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                            Rollback Password
+                            <input
+                              value={form.rollbackPassword}
+                              type="password"
+                              onChange={(event) => setForm((current) => ({ ...current, rollbackPassword: event.target.value }))}
+                              placeholder={drawerState.mode === 'edit' ? 'Leave blank to keep existing rollback password' : ''}
+                              className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                              disabled={submitting || drawerReadOnly}
+                            />
+                          </label>
+                        </div>
+                      ) : null}
+
                       <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
                         <p className="font-semibold text-ink">Credential Policy</p>
-                        <p className="mt-1">SQL Editor and DB Metadata use `readonly`; ticket execution uses `readwrite`. In edit mode, leaving a password blank keeps the current password only when the corresponding endpoint is unchanged.</p>
+                        <p className="mt-1">SQL Editor and DB Metadata use `readonly`; ticket execution uses `readwrite`; MySQL rollback generation uses `rollback` on the writer endpoint. In edit mode, leaving a password blank keeps the current password only when the corresponding endpoint is unchanged.</p>
                       </div>
 
                       <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
@@ -720,6 +786,7 @@ function toPayload(form: ConnectionForm) {
     credentials: [
       { credential_role: 'readonly', username: form.readonlyUsername.trim(), password: form.readonlyPassword },
       { credential_role: 'readwrite', username: form.readwriteUsername.trim(), password: form.readwritePassword },
+      { credential_role: 'rollback', username: form.rollbackUsername.trim(), password: form.rollbackPassword },
     ].filter((item) => item.username || item.password),
   }
 }
@@ -796,7 +863,7 @@ function formatDBType(dbType: string) {
   return 'MySQL'
 }
 
-function findCredentialUsername(connection: DBConnection, role: 'readonly' | 'readwrite') {
+function findCredentialUsername(connection: DBConnection, role: 'readonly' | 'readwrite' | 'rollback') {
   return connection.credentials?.find((item) => item.credential_role === role)?.username
 }
 

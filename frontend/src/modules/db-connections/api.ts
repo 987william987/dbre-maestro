@@ -18,6 +18,20 @@ type ConnectionTestResponse = {
   }>
 }
 
+type RollbackCapabilityResponse = {
+  ok: boolean
+  message: string
+  checks: Array<{
+    name: string
+    ok: boolean
+    message?: string
+  }>
+  binlog?: {
+    file: string
+    pos: number
+  }
+}
+
 type CreateConnectionPayload = {
   name: string
   db_type: string
@@ -55,6 +69,10 @@ export function createDBConnection(payload: CreateConnectionPayload) {
 export function testDBConnection(id: number, credentialRole?: 'readonly' | 'readwrite' | string) {
   const suffix = credentialRole ? `?credential_role=${encodeURIComponent(credentialRole)}` : ''
   return apiClient.post<ConnectionTestResponse>(`/db-connections/${id}/test${suffix}`)
+}
+
+export function testRollbackCapability(id: number) {
+  return apiClient.post<RollbackCapabilityResponse>(`/db-connections/${id}/test-rollback`)
 }
 
 export function deleteDBConnection(id: number) {

@@ -301,8 +301,8 @@ func TestTicketUpdateStatusStoresWithdrawReason(t *testing.T) {
 	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
 	reason := "需求改變，先撤回"
 
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = ?, updated_at = ?, rejection_reason = ? WHERE id = ? AND status = ?`)).
-		WithArgs(model.TicketStatusWithdrawn, sqlmock.AnyArg(), reason, uint64(12), model.TicketStatusPendingReview).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = ?, updated_at = ?, rejection_reason = ?, withdrawn_at = ? WHERE id = ? AND status = ?`)).
+		WithArgs(model.TicketStatusWithdrawn, sqlmock.AnyArg(), reason, sqlmock.AnyArg(), uint64(12), model.TicketStatusPendingReview).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	ok, err := repo.UpdateStatus(context.Background(), 12, model.TicketStatusPendingReview, model.TicketStatusWithdrawn, nil, nil, &reason)

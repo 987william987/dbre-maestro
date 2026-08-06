@@ -63,12 +63,14 @@ func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) 
 	larkAttempts := 0
 	larkError := ""
 	larkSkippedReason := ""
+	larkDeliveries := []notification.RecipientSendResult{}
 	if len(recipients) == 0 {
 		larkSkippedReason = "no_recipients"
 	}
 	if r.lark != nil && len(recipients) > 0 {
 		result := r.lark.NotifyUsers(ctx, recipients, notification.Message{Title: route.Title, Body: route.Body, TicketNo: route.TicketNo, Card: route.LarkCard})
 		larkAttempts = result.Attempts
+		larkDeliveries = result.Deliveries
 		if result.Err != nil {
 			larkStatus = "failed"
 			larkError = result.Err.Error()
@@ -114,12 +116,30 @@ func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) 
 		"lark_attempts", larkAttempts,
 		"lark_skipped_reason", larkSkippedReason,
 	)
-	for _, userID := range recipients {
-		errorMessage := larkError
-		if larkStatus == "skipped" {
-			errorMessage = larkSkippedReason
+	if len(larkDeliveries) > 0 {
+		for _, delivery := range larkDeliveries {
+			status := "sent"
+			errorMessage := ""
+			if delivery.Err != nil {
+				status = "failed"
+				errorMessage = delivery.Err.Error()
+			} else if delivery.Attempts == 0 {
+				status = "skipped"
+				errorMessage = delivery.SkippedReason
+				if errorMessage == "" {
+					errorMessage = larkSkippedReason
+				}
+			}
+			r.recordDelivery(ctx, route, delivery.UserID, "lark", status, delivery.Attempts, errorMessage)
 		}
-		r.recordDelivery(ctx, route, userID, "lark", larkStatus, larkAttempts, errorMessage)
+	} else {
+		for _, userID := range recipients {
+			errorMessage := larkError
+			if larkStatus == "skipped" {
+				errorMessage = larkSkippedReason
+			}
+			r.recordDelivery(ctx, route, userID, "lark", larkStatus, larkAttempts, errorMessage)
+		}
 	}
 
 	r.log(ctx, repository.AuditEntry{

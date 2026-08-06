@@ -9,7 +9,7 @@ import type { DropdownOptionGroup } from '@/shared/ui/DropdownSelect'
 import { ExpandableSql, ExpandableText, isExpandableSql } from '@/shared/ui/ExpandableSql'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataResponse } from '@/shared/types/sqlEditor'
-import type { QueryAccessEffect, TicketReviewResult, TicketType } from '@/shared/types/ticket'
+import type { TicketReviewResult, TicketType } from '@/shared/types/ticket'
 import { listMetadata } from '@/modules/sql-editor/api'
 import { createTicket, listConnections, listTicketDatabases, reviewTicketSQL } from '@/modules/tickets/api'
 
@@ -70,7 +70,6 @@ type QueryAccessTableOption = {
 
 type QueryAccessRuleDraft = {
   id: string
-  effect: QueryAccessEffect
   connectionId: string
   databasePattern: string
   tablePattern: string
@@ -110,7 +109,6 @@ const MAX_QUERY_ACCESS_DURATION_MINUTES = 3 * 365 * 24 * 60
 function createQueryAccessRuleDraft(overrides: Partial<QueryAccessRuleDraft> = {}): QueryAccessRuleDraft {
   return {
     id: `rule-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    effect: 'allow',
     connectionId: '',
     databasePattern: '*',
     tablePattern: '*',
@@ -696,7 +694,7 @@ export function NewTicketPage() {
         }
 
         const rules = queryAccessRules.map((rule) => ({
-          effect: rule.effect,
+          effect: 'allow' as const,
           connection_id: Number(rule.connectionId),
           database_pattern: rule.databasePattern.trim() || '*',
           table_pattern: rule.tablePattern.trim() || '*',
@@ -891,7 +889,7 @@ export function NewTicketPage() {
                             <p className="shrink-0 text-[12px] font-semibold text-ink">Rule {index + 1}</p>
                             {selectedRuleConnection ? (
                               <p className="truncate text-[11px] text-muted">
-                                {rule.effect === 'deny' ? 'Exclude' : 'Grant'} {selectedRuleConnection.name} / {rule.databasePattern === '*' ? 'all databases' : rule.databasePattern} / {rule.tablePattern === '*' ? 'all tables' : rule.tablePattern}
+                                Grant {selectedRuleConnection.name} / {rule.databasePattern === '*' ? 'all databases' : rule.databasePattern} / {rule.tablePattern === '*' ? 'all tables' : rule.tablePattern}
                               </p>
                             ) : null}
                           </div>
@@ -905,20 +903,7 @@ export function NewTicketPage() {
                             Remove
                           </button>
                         </div>
-                        <div className="grid gap-3 lg:grid-cols-[120px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
-                          <label className="flex flex-col gap-1.5">
-                            <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">Effect</span>
-                            <DropdownSelect
-                              ariaLabel={`Query Access Rule ${index + 1} Effect`}
-                              value={rule.effect}
-                              onChange={(value) => updateQueryAccessRule(rule.id, { effect: value as QueryAccessEffect })}
-                              disabled={submitting}
-                              options={[
-                                { value: 'allow', label: 'Allow' },
-                                { value: 'deny', label: 'Deny' },
-                              ]}
-                            />
-                          </label>
+                        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
                           <label className="flex flex-col gap-1.5">
                             <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">Instance</span>
                             <DropdownSelect

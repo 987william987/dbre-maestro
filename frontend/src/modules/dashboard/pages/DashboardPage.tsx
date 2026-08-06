@@ -232,7 +232,11 @@ function MetadataJobRow({ label, status, updatedAt }: { label: string; status?: 
   )
 }
 
-function AccessTable({ scopes }: { scopes: DashboardQueryAccessScope[] }) {
+function isRenewableQueryScope(scope: DashboardQueryAccessScope, renewableConnectionIDs: Set<number>) {
+  return scope.effect === 'allow' && renewableConnectionIDs.has(scope.connection_id)
+}
+
+function AccessTable({ scopes, renewableConnectionIDs }: { scopes: DashboardQueryAccessScope[]; renewableConnectionIDs: Set<number> }) {
   if (scopes.length === 0) {
     return <div className="rounded-lg border border-dashed border-border bg-panel-soft p-5 text-center text-[12px] text-muted">No active query access scope.</div>
   }
@@ -263,10 +267,14 @@ function AccessTable({ scopes }: { scopes: DashboardQueryAccessScope[] }) {
                 <span className={scope.expiring_soon ? 'font-semibold text-warning' : 'text-muted'}>{formatRemaining(scope)}</span>
               </DataTableCell>
               <DataTableCell>
-                <Link to={scope.renew_ticket_path} className="inline-flex items-center gap-1 text-[12px] font-semibold text-ink hover:text-accent">
-                  Renew
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
+                {isRenewableQueryScope(scope, renewableConnectionIDs) ? (
+                  <Link to={scope.renew_ticket_path} className="inline-flex items-center gap-1 text-[12px] font-semibold text-ink hover:text-accent">
+                    Renew
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                ) : (
+                  <span className="text-[12px] text-muted">{scope.effect === 'deny' ? 'Deny rule' : 'Admin managed'}</span>
+                )}
               </DataTableCell>
             </DataTableRow>
           ))}
@@ -326,6 +334,10 @@ export function DashboardPage() {
     () => (data?.personal.active_tickets ?? []).filter((ticket) => ACTIVE_TICKET_STATUSES.has(ticket.status)),
     [data],
   )
+  const renewableConnectionIDs = useMemo(
+    () => new Set((data?.personal.db_scopes ?? []).map((scope) => scope.id)),
+    [data],
+  )
 
   if (loading) {
     return <div className="p-3 sm:p-4"><LoadingBlock message="Loading dashboard..." className="min-h-[420px] rounded-xl border-border bg-panel" /></div>
@@ -374,28 +386,34 @@ export function DashboardPage() {
         </DashboardPanel>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-        <DashboardPanel title="Submission DB Scope">
-          {data.personal.db_scopes.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border bg-panel-soft p-5 text-center text-[12px] text-muted">No DB connection scope assigned.</div>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {data.personal.db_scopes.slice(0, 8).map((scope) => (
-                <div key={scope.id} className="flex items-center gap-3 rounded-lg border border-border bg-panel-soft px-3 py-2">
-                  <Database className="h-4 w-4 text-muted" />
-                  <div className="min-w-0">
-                    <p className="truncate text-[12px] font-semibold text-ink">{scope.name}</p>
-                    <p className="text-[11px] uppercase text-muted">{scope.db_type}</p>
+      <div className="grid gap-2">
+        <div className="flex items-center gap-2 px-1 text-[12px] text-muted">
+          <KeyRound className="h-4 w-4" />
+          Access scopes include both personal grants and group grants.
+        </div>
+        <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <DashboardPanel title="Submission DB Scope" action={<Link to="/account/access-scopes" className="text-[12px] font-semibold text-muted hover:text-ink">View all</Link>}>
+            {data.personal.db_scopes.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border bg-panel-soft p-5 text-center text-[12px] text-muted">No DB connection scope assigned.</div>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {data.personal.db_scopes.slice(0, 8).map((scope) => (
+                  <div key={scope.id} className="flex items-center gap-3 rounded-lg border border-border bg-panel-soft px-3 py-2">
+                    <Database className="h-4 w-4 text-muted" />
+                    <div className="min-w-0">
+                      <p className="truncate text-[12px] font-semibold text-ink">{scope.name}</p>
+                      <p className="text-[11px] uppercase text-muted">{scope.db_type}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </DashboardPanel>
+                ))}
+              </div>
+            )}
+          </DashboardPanel>
 
-        <DashboardPanel title="Expiring Query Access" action={<Link to="/tickets/new?ticket_type=query_access" className="text-[12px] font-semibold text-muted hover:text-ink">Request access</Link>}>
-          <AccessTable scopes={expiringAccess.length > 0 ? expiringAccess : data.personal.query_access_scopes.slice(0, 5)} />
-        </DashboardPanel>
+          <DashboardPanel title="Expiring Query Access" action={<Link to="/account/access-scopes" className="text-[12px] font-semibold text-muted hover:text-ink">View all access</Link>}>
+            <AccessTable scopes={expiringAccess.length > 0 ? expiringAccess : data.personal.query_access_scopes.slice(0, 5)} renewableConnectionIDs={renewableConnectionIDs} />
+          </DashboardPanel>
+        </div>
       </div>
 
       {platform ? (
@@ -421,7 +439,7 @@ export function DashboardPage() {
                   { label: 'Needs Admin Attention', value: platform.queue.needs_admin_attention, tone: platform.queue.needs_admin_attention > 0 ? 'danger' : 'neutral' },
                   { label: 'Failed Today', value: platform.queue.failed_today, tone: platform.queue.failed_today > 0 ? 'danger' : 'neutral' },
                   { label: 'Failed 7d', value: platform.queue.failed_7d, tone: platform.queue.failed_7d > 0 ? 'danger' : 'neutral' },
-                  { label: 'Long Pending >24h', value: platform.queue.long_pending, tone: platform.queue.long_pending > 0 ? 'warning' : 'neutral' },
+                  { label: 'Long Pending >1h', value: platform.queue.long_pending, tone: platform.queue.long_pending > 0 ? 'warning' : 'neutral' },
                 ]}
               />
             </DashboardPanel>
@@ -433,6 +451,9 @@ export function DashboardPage() {
                   { label: 'Avg Execution Wait', value: formatMinutes(platform.aging.avg_execution_wait_age_minutes) },
                   { label: 'Max Execution Wait', value: formatMinutes(platform.aging.max_execution_wait_age_minutes) },
                   { label: 'Avg Execution Duration 7d', value: formatDurationMs(platform.aging.avg_execution_duration_ms) },
+                  { label: 'Avg Review Duration 7d', value: formatMinutes(platform.aging.avg_review_duration_7d_minutes) },
+                  { label: 'Avg Execution Wait 7d', value: formatMinutes(platform.aging.avg_execution_wait_7d_minutes) },
+                  { label: 'Avg Completion Time 7d', value: formatMinutes(platform.aging.avg_completion_time_7d_minutes) },
                 ]}
               />
             </DashboardPanel>
@@ -443,7 +464,7 @@ export function DashboardPage() {
               <TicketTable tickets={platform.recent_attention} empty="No active platform attention items." />
             </DashboardPanel>
             <DashboardPanel title="Long Pending Tickets">
-              <TicketTable tickets={platform.long_pending_tickets} empty="No tickets pending longer than 24 hours." />
+              <TicketTable tickets={platform.long_pending_tickets} empty="No tickets pending longer than 1 hour." />
             </DashboardPanel>
           </div>
 
@@ -552,10 +573,6 @@ export function DashboardPage() {
         </div>
       ) : null}
 
-      <div className="flex items-center gap-2 rounded-xl border border-border bg-panel-soft px-4 py-3 text-[12px] text-muted">
-        <KeyRound className="h-4 w-4" />
-        Query access inherited from auth groups is included in active access scope.
-      </div>
     </div>
   )
 }

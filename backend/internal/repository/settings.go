@@ -42,6 +42,10 @@ const (
 	settingSQLExportAppTimeoutSeconds    = "sql_export_app_timeout_seconds"
 	settingSQLExportMySQLMaxExecTimeMs   = "sql_export_mysql_max_execution_time_ms"
 	settingSQLExportPGStatementTimeoutMs = "sql_export_postgres_statement_timeout_ms"
+	settingMySQLRollbackEnabled          = "mysql_rollback_enabled"
+	settingMySQLRollbackMy2SQLPath       = "mysql_rollback_my2sql_path"
+	settingMySQLRollbackTimeoutSeconds   = "mysql_rollback_generation_timeout_seconds"
+	settingMySQLRollbackMaxSQLBytes      = "mysql_rollback_max_sql_bytes"
 	settingDBMetadataInventoryEnabled    = "db_metadata_inventory_enabled"
 	settingDBMetadataInventoryRegions    = "db_metadata_inventory_regions"
 	settingDBMetadataInventoryEngines    = "db_metadata_inventory_engines"
@@ -65,27 +69,30 @@ func NewSettingsRepo(db *sqlx.DB, encKey []byte) *SettingsRepo {
 
 func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error) {
 	settings := &model.PlatformSettings{
-		SQLEditorAppTimeoutSeconds:           30,
-		RequireNonSensitiveExportReview:      true,
-		SQLEditorMySQLMaxExecutionTimeMs:     25000,
-		SQLEditorPostgresStatementTimeoutMs:  25000,
-		SQLExportAppTimeoutSeconds:           30,
-		SQLExportMySQLMaxExecutionTimeMs:     25000,
-		SQLExportPostgresStatementTimeoutMs:  25000,
-		DBMetadataInventoryEnabled:           true,
-		DBMetadataInventoryRegions:           []string{},
-		DBMetadataInventoryEngines:           []string{"aurora-mysql", "aurora-postgresql", "redis"},
-		DBMetadataInventoryCron:              "0 9 * * *",
-		DBMetadataInventorySyncIntervalMins:  5,
-		DBMetadataObjectEnabled:              true,
-		DBMetadataObjectEnabledConnectionIDs: []uint64{},
-		DBMetadataObjectCron:                 "0 10 * * *",
-		DBMetadataObjectSyncIntervalMins:     60,
-		DBMetadataCronTimezone:               "Asia/Taipei",
-		LarkOAuthSite:                        "lark",
-		LarkCardCallbackMode:                 "http",
-		SSOOIDCDisplayName:                   "Authentik",
-		SSOOIDCScopes:                        []string{"openid", "profile", "email", "dbre"},
+		SQLEditorAppTimeoutSeconds:            30,
+		RequireNonSensitiveExportReview:       true,
+		SQLEditorMySQLMaxExecutionTimeMs:      25000,
+		SQLEditorPostgresStatementTimeoutMs:   25000,
+		SQLExportAppTimeoutSeconds:            30,
+		SQLExportMySQLMaxExecutionTimeMs:      25000,
+		SQLExportPostgresStatementTimeoutMs:   25000,
+		MySQLRollbackMy2SQLPath:               "my2sql",
+		MySQLRollbackGenerationTimeoutSeconds: 30,
+		MySQLRollbackMaxSQLBytes:              5 * 1024 * 1024,
+		DBMetadataInventoryEnabled:            true,
+		DBMetadataInventoryRegions:            []string{},
+		DBMetadataInventoryEngines:            []string{"aurora-mysql", "aurora-postgresql", "redis"},
+		DBMetadataInventoryCron:               "0 9 * * *",
+		DBMetadataInventorySyncIntervalMins:   5,
+		DBMetadataObjectEnabled:               true,
+		DBMetadataObjectEnabledConnectionIDs:  []uint64{},
+		DBMetadataObjectCron:                  "0 10 * * *",
+		DBMetadataObjectSyncIntervalMins:      60,
+		DBMetadataCronTimezone:                "Asia/Taipei",
+		LarkOAuthSite:                         "lark",
+		LarkCardCallbackMode:                  "http",
+		SSOOIDCDisplayName:                    "Authentik",
+		SSOOIDCScopes:                         []string{"openid", "profile", "email", "dbre"},
 	}
 	exportReviewerIDs, err := r.getUint64List(ctx, settingSensitiveExportReviewers)
 	if err != nil {
@@ -261,6 +268,34 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	if sqlExportPGStatementTimeoutMs != nil {
 		settings.SQLExportPostgresStatementTimeoutMs = *sqlExportPGStatementTimeoutMs
 	}
+	mysqlRollbackEnabled, err := r.getBool(ctx, settingMySQLRollbackEnabled)
+	if err != nil {
+		return nil, err
+	}
+	if mysqlRollbackEnabled != nil {
+		settings.MySQLRollbackEnabled = *mysqlRollbackEnabled
+	}
+	mysqlRollbackMy2SQLPath, err := r.getString(ctx, settingMySQLRollbackMy2SQLPath)
+	if err != nil {
+		return nil, err
+	}
+	if mysqlRollbackMy2SQLPath != nil && strings.TrimSpace(*mysqlRollbackMy2SQLPath) != "" {
+		settings.MySQLRollbackMy2SQLPath = strings.TrimSpace(*mysqlRollbackMy2SQLPath)
+	}
+	mysqlRollbackTimeoutSeconds, err := r.getInt(ctx, settingMySQLRollbackTimeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
+	if mysqlRollbackTimeoutSeconds != nil {
+		settings.MySQLRollbackGenerationTimeoutSeconds = *mysqlRollbackTimeoutSeconds
+	}
+	mysqlRollbackMaxSQLBytes, err := r.getInt(ctx, settingMySQLRollbackMaxSQLBytes)
+	if err != nil {
+		return nil, err
+	}
+	if mysqlRollbackMaxSQLBytes != nil {
+		settings.MySQLRollbackMaxSQLBytes = *mysqlRollbackMaxSQLBytes
+	}
 
 	inventoryEnabled, err := r.getBool(ctx, settingDBMetadataInventoryEnabled)
 	if err != nil {
@@ -429,6 +464,18 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 		return err
 	}
 	if err := upsertInt(ctx, tx, settingSQLExportPGStatementTimeoutMs, settings.SQLExportPostgresStatementTimeoutMs); err != nil {
+		return err
+	}
+	if err := upsertBool(ctx, tx, settingMySQLRollbackEnabled, settings.MySQLRollbackEnabled); err != nil {
+		return err
+	}
+	if err := upsertString(ctx, tx, settingMySQLRollbackMy2SQLPath, strings.TrimSpace(settings.MySQLRollbackMy2SQLPath)); err != nil {
+		return err
+	}
+	if err := upsertInt(ctx, tx, settingMySQLRollbackTimeoutSeconds, settings.MySQLRollbackGenerationTimeoutSeconds); err != nil {
+		return err
+	}
+	if err := upsertInt(ctx, tx, settingMySQLRollbackMaxSQLBytes, settings.MySQLRollbackMaxSQLBytes); err != nil {
 		return err
 	}
 	if err := upsertBool(ctx, tx, settingDBMetadataInventoryEnabled, settings.DBMetadataInventoryEnabled); err != nil {

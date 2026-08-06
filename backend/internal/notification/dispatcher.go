@@ -19,6 +19,20 @@ type Dispatcher struct {
 	cachedClient *Client
 }
 
+type RecipientSendResult struct {
+	UserID        uint64
+	Attempts      int
+	Err           error
+	SkippedReason string
+}
+
+type BatchSendResult struct {
+	Attempts      int
+	Err           error
+	SkippedReason string
+	Deliveries    []RecipientSendResult
+}
+
 func NewDispatcher(settings *repository.SettingsRepo, users *repository.UserRepo, webhookURL string) *Dispatcher {
 	return &Dispatcher{
 		settings:   settings,
@@ -27,57 +41,82 @@ func NewDispatcher(settings *repository.SettingsRepo, users *repository.UserRepo
 	}
 }
 
-func (d *Dispatcher) NotifyUsers(ctx context.Context, userIDs []uint64, msg Message) SendResult {
+func (d *Dispatcher) NotifyUsers(ctx context.Context, userIDs []uint64, msg Message) BatchSendResult {
+	uniqueUserIDs := dedupeUserIDs(userIDs)
 	client, mode, err := d.resolveClient(ctx)
 	if err != nil {
-		return SendResult{Err: err}
+		return BatchSendResult{Err: err}
 	}
 	if client == nil {
-		return SendResult{SkippedReason: "lark_not_configured"}
+		return skippedBatchSendResult(uniqueUserIDs, "lark_not_configured")
 	}
 	if mode == ModeWebhook {
-		return client.Send(ctx, msg)
+		result := client.Send(ctx, msg)
+		return batchSendResultForUsers(uniqueUserIDs, result)
 	}
 
-	users, err := d.users.ListByIDs(ctx, dedupeUserIDs(userIDs))
+	users, err := d.users.ListByIDs(ctx, uniqueUserIDs)
 	if err != nil {
-		return SendResult{Err: fmt.Errorf("load lark recipients failed: %w", err)}
+		return BatchSendResult{Err: fmt.Errorf("load lark recipients failed: %w", err)}
 	}
 
-	recipients := make([]larkRecipient, 0, len(users))
-	seen := make(map[string]struct{}, len(users))
+	usersByID := make(map[uint64]model.User, len(users))
 	for _, user := range users {
+		usersByID[user.ID] = user
+	}
+
+	deliveries := make([]RecipientSendResult, 0, len(uniqueUserIDs))
+	recipients := make(map[string]larkRecipient, len(users))
+	usersByRecipient := make(map[string][]uint64, len(users))
+	for _, userID := range uniqueUserIDs {
+		user, ok := usersByID[userID]
+		if !ok {
+			deliveries = append(deliveries, RecipientSendResult{UserID: userID, SkippedReason: "user_not_found"})
+			continue
+		}
 		recipientType, recipient := larkRecipientForUser(user)
 		if recipient == "" {
+			deliveries = append(deliveries, RecipientSendResult{UserID: userID, SkippedReason: "no_lark_recipient"})
 			continue
 		}
 		key := strings.ToLower(recipientType + ":" + recipient)
-		if _, ok := seen[key]; ok {
-			continue
+		if _, ok := recipients[key]; !ok {
+			recipients[key] = larkRecipient{recipientType: recipientType, recipient: recipient}
 		}
-		seen[key] = struct{}{}
-		recipients = append(recipients, larkRecipient{recipientType: recipientType, recipient: recipient})
+		usersByRecipient[key] = append(usersByRecipient[key], userID)
 	}
 	if len(recipients) == 0 {
-		return SendResult{SkippedReason: "no_lark_recipient"}
+		return BatchSendResult{
+			SkippedReason: "no_lark_recipient",
+			Deliveries:    deliveries,
+		}
 	}
 
 	var failed []string
 	totalAttempts := 0
-	for _, recipient := range recipients {
+	for key, recipient := range recipients {
 		result := client.SendToRecipientType(ctx, recipient.recipientType, recipient.recipient, msg)
 		totalAttempts += result.Attempts
+		for _, userID := range usersByRecipient[key] {
+			deliveries = append(deliveries, RecipientSendResult{
+				UserID:        userID,
+				Attempts:      result.Attempts,
+				Err:           result.Err,
+				SkippedReason: result.SkippedReason,
+			})
+		}
 		if result.Err != nil {
 			failed = append(failed, fmt.Sprintf("%s:%s: %s", recipient.recipientType, recipient.recipient, result.Err.Error()))
 		}
 	}
 	if len(failed) > 0 {
-		return SendResult{
-			Attempts: totalAttempts,
-			Err:      fmt.Errorf("lark notify failed for %d recipient(s): %s", len(failed), strings.Join(failed, "; ")),
+		return BatchSendResult{
+			Attempts:   totalAttempts,
+			Err:        fmt.Errorf("lark notify failed for %d recipient(s): %s", len(failed), strings.Join(failed, "; ")),
+			Deliveries: deliveries,
 		}
 	}
-	return SendResult{Attempts: totalAttempts}
+	return BatchSendResult{Attempts: totalAttempts, Deliveries: deliveries}
 }
 
 func (d *Dispatcher) SendFileToUsers(ctx context.Context, userIDs []uint64, filename string, data []byte) SendResult {
@@ -212,4 +251,33 @@ func dedupeUserIDs(userIDs []uint64) []uint64 {
 		unique = append(unique, userID)
 	}
 	return unique
+}
+
+func batchSendResultForUsers(userIDs []uint64, result SendResult) BatchSendResult {
+	deliveries := make([]RecipientSendResult, 0, len(userIDs))
+	for _, userID := range userIDs {
+		deliveries = append(deliveries, RecipientSendResult{
+			UserID:        userID,
+			Attempts:      result.Attempts,
+			Err:           result.Err,
+			SkippedReason: result.SkippedReason,
+		})
+	}
+	return BatchSendResult{
+		Attempts:      result.Attempts,
+		Err:           result.Err,
+		SkippedReason: result.SkippedReason,
+		Deliveries:    deliveries,
+	}
+}
+
+func skippedBatchSendResult(userIDs []uint64, reason string) BatchSendResult {
+	deliveries := make([]RecipientSendResult, 0, len(userIDs))
+	for _, userID := range userIDs {
+		deliveries = append(deliveries, RecipientSendResult{UserID: userID, SkippedReason: reason})
+	}
+	return BatchSendResult{
+		SkippedReason: reason,
+		Deliveries:    deliveries,
+	}
 }

@@ -33,6 +33,7 @@ type DBConnection struct {
 const (
 	DBCredentialRoleReadonly  = "readonly"
 	DBCredentialRoleReadwrite = "readwrite"
+	DBCredentialRoleRollback  = "rollback"
 )
 
 type DBConnectionCredential struct {

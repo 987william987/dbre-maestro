@@ -1,4 +1,5 @@
 import { apiClient } from '@/shared/api/client'
+import type { DashboardDBScope, DashboardQueryAccessScope } from '@/modules/dashboard/api'
 
 export type AccountSession = {
   id: number
@@ -32,4 +33,20 @@ export async function revokeAccountSession(id: number) {
 
 export async function revokeAllAccountSessions() {
   return apiClient.delete<void>('/auth/sessions')
+}
+
+export type AccountAccessScopesResponse = {
+  db_scopes: DashboardDBScope[]
+  query_access_scopes: DashboardQueryAccessScope[]
+  db_scope_count: number
+  query_scope_count: number
+}
+
+export async function getAccountAccessScopes() {
+  return apiClient.get<AccountAccessScopesResponse>('/account/access-scopes').then((response) => ({
+    db_scopes: Array.isArray(response.db_scopes) ? response.db_scopes : [],
+    query_access_scopes: Array.isArray(response.query_access_scopes) ? response.query_access_scopes : [],
+    db_scope_count: response.db_scope_count ?? 0,
+    query_scope_count: response.query_scope_count ?? 0,
+  }))
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, LayoutDashboard, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, KeyRound, LayoutDashboard, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, listNotificationSummary, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -331,6 +331,16 @@ const PAGE_HELP = [
       'Revoke sessions you no longer recognize or no longer use.',
       'Revoking all other sessions keeps the current browser session active.',
       'Revoking the current session signs you out and returns you to login.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/account/access-scopes',
+    title: 'Access Scopes Guide',
+    items: [
+      'Submission DB Scope lists the database connections where you can submit workflow tickets.',
+      'Query Access Scope lists your active query permissions, including permissions inherited from auth groups.',
+      'Expiring access is highlighted so you can renew before it expires.',
+      'Use Request access to submit a query access ticket when a database or table is missing.',
     ],
   },
 ]
@@ -945,6 +955,18 @@ export function AppShell() {
                   </div>
 
                   <div className="my-1 h-px bg-border" />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      navigate('/account/access-scopes')
+                    }}
+                    className="flex h-8 w-full items-center justify-between rounded-md px-2 text-[12px] font-medium text-ink transition-colors hover:bg-panel-soft"
+                  >
+                    <span>Access Scopes</span>
+                    <KeyRound className="h-3.5 w-3.5 text-muted" />
+                  </button>
 
                   <button
                     type="button"
