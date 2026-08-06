@@ -7,7 +7,7 @@ COPY . .
 RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o maestro ./cmd/server
 
 FROM golang:1.25-alpine AS my2sql-builder
-ARG MY2SQL_REF=master
+ARG MY2SQL_REF=69b39554cb116d02fba389ff258ca9736dea7437
 RUN apk --no-cache add git
 WORKDIR /src/my2sql
 RUN git clone https://github.com/liuhr/my2sql.git . \
