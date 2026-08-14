@@ -1,5 +1,26 @@
 package model
 
+import "strings"
+
+const (
+	MySQLRollbackEngineMy2SQL      = "my2sql"
+	MySQLRollbackEnginePriorBackup = "prior_backup"
+	MySQLRollbackEngineHybrid      = "hybrid"
+)
+
+func NormalizeMySQLRollbackEngine(value string) string {
+	switch strings.TrimSpace(value) {
+	case MySQLRollbackEngineMy2SQL:
+		return MySQLRollbackEngineMy2SQL
+	case MySQLRollbackEnginePriorBackup:
+		return MySQLRollbackEnginePriorBackup
+	case MySQLRollbackEngineHybrid:
+		return MySQLRollbackEngineHybrid
+	default:
+		return MySQLRollbackEngineHybrid
+	}
+}
+
 type PlatformSettings struct {
 	AppEnv string `json:"app_env,omitempty"`
 	// Deprecated: reviewer routing is now controlled by ApprovalPolicies.
@@ -35,6 +56,7 @@ type PlatformSettings struct {
 	SQLExportMySQLMaxExecutionTimeMs      int              `json:"sql_export_mysql_max_execution_time_ms"`
 	SQLExportPostgresStatementTimeoutMs   int              `json:"sql_export_postgres_statement_timeout_ms"`
 	MySQLRollbackEnabled                  bool             `json:"mysql_rollback_enabled"`
+	MySQLRollbackEngine                   string           `json:"mysql_rollback_engine"`
 	MySQLRollbackMy2SQLPath               string           `json:"mysql_rollback_my2sql_path"`
 	MySQLRollbackGenerationTimeoutSeconds int              `json:"mysql_rollback_generation_timeout_seconds"`
 	MySQLRollbackMaxSQLBytes              int              `json:"mysql_rollback_max_sql_bytes"`

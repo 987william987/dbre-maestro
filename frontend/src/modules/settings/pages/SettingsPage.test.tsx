@@ -79,6 +79,7 @@ function makeSettings(overrides: Partial<PlatformSettings> = {}): PlatformSettin
     sql_export_mysql_max_execution_time_ms: 90000,
     sql_export_postgres_statement_timeout_ms: 90000,
     mysql_rollback_enabled: false,
+    mysql_rollback_engine: 'hybrid',
     mysql_rollback_my2sql_path: 'my2sql',
     mysql_rollback_generation_timeout_seconds: 30,
     mysql_rollback_max_sql_bytes: 5 * 1024 * 1024,

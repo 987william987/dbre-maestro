@@ -57,6 +57,10 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     sql_export_postgres_statement_timeout_ms:
       typeof settings.sql_export_postgres_statement_timeout_ms === 'number' ? settings.sql_export_postgres_statement_timeout_ms : 25000,
     mysql_rollback_enabled: typeof settings.mysql_rollback_enabled === 'boolean' ? settings.mysql_rollback_enabled : false,
+    mysql_rollback_engine:
+      settings.mysql_rollback_engine === 'my2sql' || settings.mysql_rollback_engine === 'prior_backup' || settings.mysql_rollback_engine === 'hybrid'
+        ? settings.mysql_rollback_engine
+        : 'hybrid',
     mysql_rollback_my2sql_path: typeof settings.mysql_rollback_my2sql_path === 'string' ? settings.mysql_rollback_my2sql_path : 'my2sql',
     mysql_rollback_generation_timeout_seconds:
       typeof settings.mysql_rollback_generation_timeout_seconds === 'number' ? settings.mysql_rollback_generation_timeout_seconds : 30,

@@ -3129,7 +3129,7 @@ func (h *TicketHandler) runTicketStatementExecution(ticket *model.Ticket, execRo
 	}
 
 	rollbackRuntime := h.prepareMySQLRollbackRuntime(ctx, ticket, execRow)
-	rowsAffected, durationMs, sentToDB, execErr := h.executeTicketStatementSQL(ctx, ticket, execRow, executorID)
+	rowsAffected, durationMs, sentToDB, execErr := h.executeTicketStatementSQL(ctx, ticket, execRow, executorID, rollbackRuntime)
 	result.durationMs = durationMs
 	result.rowsAffected = rowsAffected
 	result.sentToDB = sentToDB
@@ -3200,7 +3200,7 @@ func (h *TicketHandler) runTicketStatementExecution(ticket *model.Ticket, execRo
 	return result
 }
 
-func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *model.Ticket, execRow model.TicketExecution, executorID uint64) (*int64, *int64, bool, error) {
+func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *model.Ticket, execRow model.TicketExecution, executorID uint64, rollbackRuntime mysqlRollbackRuntime) (*int64, *int64, bool, error) {
 	execDB, cleanup, resolvedConn, err := h.openTicketSQLDBWithConnection(ctx, *ticket.DBConnectionID, model.DBCredentialRoleReadwrite, ticket.DatabaseName)
 	if err != nil {
 		return nil, nil, false, err
@@ -3251,6 +3251,12 @@ func (h *TicketHandler) executeTicketStatementSQL(ctx context.Context, ticket *m
 	threadID := currentMySQLConnectionID(ctx, pinnedConn)
 	if threadID != 0 {
 		_ = h.tickets.MarkExecutionSentToDB(ctx, execRow.ID, "mysql_thread_id", threadID)
+	}
+	if rollbackRuntime.method == "prior_backup" && rollbackRuntime.prior != nil {
+		if err := h.executeMySQLPriorBackup(ctx, pinnedConn, ticket, rollbackRuntime.prior); err != nil {
+			_ = h.rollbacks.MarkGenerationFailed(ctx, ticket, execRow, err.Error())
+			slog.Warn("ticket prior backup failed; continuing statement execution", "ticket_id", ticket.ID, "execution_id", execRow.ID, "seq", execRow.Seq, "err", err)
+		}
 	}
 	return h.execRegisteredTicketStatement(ctx, pinnedConn, execRow, activeSQLQuery{
 		UserID:         executorID,

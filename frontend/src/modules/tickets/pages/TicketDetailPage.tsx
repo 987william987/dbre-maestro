@@ -274,13 +274,19 @@ function RollbackStatusCell({
     return <span className="text-muted">—</span>
   }
   const label = formatRollbackStatus(rollback.status)
+  const title = [
+    rollback.generator ? `Generator: ${rollback.generator}` : '',
+    rollback.unsupported_reason ? `Reason: ${rollback.unsupported_reason}` : '',
+    rollback.failure_message ? `Failure: ${rollback.failure_message}` : '',
+    rollback.warning_message ? `Warning: ${rollback.warning_message}` : '',
+  ].filter(Boolean).join('\n') || label
   if (rollback.status === 'generated') {
-    return <span className="text-[12px] font-semibold text-emerald-700">{label}</span>
+    return <span className="text-[12px] font-semibold text-emerald-700" title={title}>{label}</span>
   }
   if (rollback.status === 'submitted') {
-    return <span className="text-[12px] font-semibold text-primary">{label}</span>
+    return <span className="text-[12px] font-semibold text-primary" title={title}>{label}</span>
   }
-  return <span className="text-[12px] font-semibold text-muted">{label}</span>
+  return <span className="text-[12px] font-semibold text-muted" title={title}>{label}</span>
 }
 
 function formatRollbackStatus(status: string) {

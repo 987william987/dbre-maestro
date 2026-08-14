@@ -422,6 +422,7 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "sql_export_postgres_statement_timeout_ms must be greater than 0")
 		return
 	}
+	req.MySQLRollbackEngine = model.NormalizeMySQLRollbackEngine(req.MySQLRollbackEngine)
 	req.MySQLRollbackMy2SQLPath = strings.TrimSpace(req.MySQLRollbackMy2SQLPath)
 	if req.MySQLRollbackMy2SQLPath == "" {
 		req.MySQLRollbackMy2SQLPath = "my2sql"

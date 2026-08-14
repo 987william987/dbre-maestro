@@ -41,6 +41,7 @@ type SettingsForm = {
   sqlExportMySQLMaxExecutionTimeMs: string
   sqlExportPostgresStatementTimeoutMs: string
   mysqlRollbackEnabled: boolean
+  mysqlRollbackEngine: PlatformSettings['mysql_rollback_engine']
   mysqlRollbackMy2SQLPath: string
   mysqlRollbackGenerationTimeoutSeconds: string
   mysqlRollbackMaxSQLBytes: string
@@ -82,6 +83,12 @@ const WORKFLOW_REVIEW_PERMISSIONS: Record<WorkflowRule['ticket_type'], string[]>
   sql_export: ['sql_editor.export_review'],
   sensitive_query_access: ['sql_editor.sensitive_review'],
 }
+
+const MYSQL_ROLLBACK_ENGINE_OPTIONS: Array<{ value: PlatformSettings['mysql_rollback_engine']; label: string }> = [
+  { value: 'hybrid', label: 'Hybrid: prior backup + my2sql fallback' },
+  { value: 'prior_backup', label: 'Prior backup parser only' },
+  { value: 'my2sql', label: 'my2sql only' },
+]
 
 export function SettingsPage() {
   const { user } = useAuth()
@@ -439,7 +446,9 @@ export function SettingsPage() {
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">MySQL Rollback</p>
-              <p className="mt-1 text-[12px] leading-5 text-muted">Generate encrypted rollback SQL after successful MySQL DML statements using my2sql and the connection rollback credential.</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">
+                Beta. Choose the rollback engine for MySQL DML. Hybrid uses prior backup parser first and falls back to my2sql when needed.
+              </p>
             </div>
             <div className="grid gap-4 px-4 py-4 md:grid-cols-3">
               <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
@@ -450,6 +459,25 @@ export function SettingsPage() {
                 />
                 Enable MySQL rollback generation
               </label>
+              <div className="min-w-0">
+                <DropdownSelect
+                  ariaLabel="Select MySQL rollback engine"
+                  value={form.mysqlRollbackEngine}
+                  onChange={(value) =>
+                    setForm((current) =>
+                      current
+                        ? {
+                            ...current,
+                            mysqlRollbackEngine:
+                              value === 'my2sql' || value === 'prior_backup' || value === 'hybrid' ? value : 'hybrid',
+                          }
+                        : current,
+                    )
+                  }
+                  options={MYSQL_ROLLBACK_ENGINE_OPTIONS}
+                  placeholder="Select rollback engine"
+                />
+              </div>
               <Field
                 label="my2sql path"
                 value={form.mysqlRollbackMy2SQLPath}
@@ -1058,6 +1086,7 @@ function toForm(settings: PlatformSettings): SettingsForm {
     sqlExportMySQLMaxExecutionTimeMs: String(settings.sql_export_mysql_max_execution_time_ms),
     sqlExportPostgresStatementTimeoutMs: String(settings.sql_export_postgres_statement_timeout_ms),
     mysqlRollbackEnabled: settings.mysql_rollback_enabled,
+    mysqlRollbackEngine: settings.mysql_rollback_engine || 'hybrid',
     mysqlRollbackMy2SQLPath: settings.mysql_rollback_my2sql_path || 'my2sql',
     mysqlRollbackGenerationTimeoutSeconds: String(settings.mysql_rollback_generation_timeout_seconds || 30),
     mysqlRollbackMaxSQLBytes: String(settings.mysql_rollback_max_sql_bytes || 5 * 1024 * 1024),
@@ -1113,6 +1142,7 @@ function toPayload(
     sql_export_mysql_max_execution_time_ms: parsePositiveInt(form.sqlExportMySQLMaxExecutionTimeMs, 25000),
     sql_export_postgres_statement_timeout_ms: parsePositiveInt(form.sqlExportPostgresStatementTimeoutMs, 25000),
     mysql_rollback_enabled: form.mysqlRollbackEnabled,
+    mysql_rollback_engine: form.mysqlRollbackEngine,
     mysql_rollback_my2sql_path: form.mysqlRollbackMy2SQLPath.trim() || 'my2sql',
     mysql_rollback_generation_timeout_seconds: parsePositiveInt(form.mysqlRollbackGenerationTimeoutSeconds, 30),
     mysql_rollback_max_sql_bytes: parsePositiveInt(form.mysqlRollbackMaxSQLBytes, 5 * 1024 * 1024),
