@@ -245,6 +245,21 @@ pending_review
   -> revoked
 ```
 
+## MySQL Rollback
+
+DML ticket execution 成功後，平台可依 Settings 嘗試產生 MySQL rollback SQL。
+
+重點：
+
+- 只支援 MySQL DML
+- DDL、Redis、PostgreSQL 目前不產生 rollback SQL
+- rollback generation 失敗不會阻塞原 ticket execution
+- Ticket Detail 右上角 `Rollback` 會載入所有已產生的 rollback SQL
+- 使用者可以選全部或部分 rollback SQL 建立新的 DML ticket
+- 新 rollback ticket 仍會重新走 Workflow Rules、通知與 audit log
+
+Rollback records 會出現在 Ticket Detail 的 Statement Results。可見狀態包含 `Unavailable`、`Generating`、`Generated`、`Generation Failed`、`Ticket Created`。
+
 ## 通知規則
 
 目前 Ticket 通知同時會走站內通知與 Lark；是否派送給自己，依事件策略決定。
@@ -382,6 +397,8 @@ Ticket number 不使用單純 auto increment 流水號，而改成較不易碰�
 ## 相關文件
 
 - [How to 建立與執行 Tickets](../how-to/create-and-execute-tickets.md)
+- [MySQL Rollback](mysql-rollback.md)
+- [How to 設定與使用 MySQL Rollback](../how-to/configure-and-use-mysql-rollback.md)
 - [Workflow Rules](workflow-rules.md)
 - [How to 設定 Workflow Rules](../how-to/configure-workflow-rules.md)
 - [後端 API 與權限對照](backend-api-and-permissions.md)

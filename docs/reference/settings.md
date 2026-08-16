@@ -14,6 +14,7 @@
 
 - Lark Notifications and OAuth
 - SQL Editor Timeout
+- MySQL Rollback
 - Workflow Rules
 - Inventory Scan
 - Object Scan
@@ -84,6 +85,27 @@ SQL Export timeout 作用於 export download query：
 - 這些值不影響 Ticket execute
 - SQL Editor 與 SQL Export 使用不同 timeout key
 - Export download 仍使用 DB connection 的 readonly endpoint 與 readonly credential
+
+## MySQL Rollback
+
+MySQL Rollback 是 DML ticket 的 beta 輔助功能，用來在 statement 執行成功後產生可預覽、可重新送審的 rollback SQL。
+
+| 欄位 | 對應 key | 預設值 | 用途 |
+|---|---|---|---|
+| Enable MySQL rollback generation | `mysql_rollback_enabled` | `false` | 是否啟用 MySQL DML rollback generation |
+| Rollback Engine | `mysql_rollback_engine` | `hybrid` | `hybrid`、`prior_backup` 或 `my2sql` |
+| my2sql path | `mysql_rollback_my2sql_path` | `my2sql` | `my2sql` binary 路徑或 PATH 中指令名 |
+| Generation timeout (seconds) | `mysql_rollback_generation_timeout_seconds` | `30` | `my2sql` 產生 rollback SQL 的 timeout |
+| Max rollback SQL bytes | `mysql_rollback_max_sql_bytes` | `5242880` | 可保存 rollback SQL 大小上限 |
+
+重點：
+
+- 目前只支援 MySQL DML ticket rollback
+- 這個功能仍是 beta，rollback SQL 必須先預覽，再建立新的 DML ticket
+- `hybrid` 會優先使用 prior backup parser，parser 不支援時 fallback 到 `my2sql`
+- `prior_backup` 不依賴 binlog，但需要 ticket execution user 能建立 `maestro_rollback` database/table
+- `my2sql` 需要 rollback credential、binlog ROW format 與 FULL row image
+- rollback generation 失敗不會阻塞原本的 ticket execution
 
 ## Workflow Rules
 
@@ -191,6 +213,7 @@ Settings 存在 Meta DB 的 `platform_settings` 表中，由 `SettingsRepo` 做�
 
 - [設定與環境變數](configuration.md)
 - [SQL Editor](sql-editor.md)
+- [MySQL Rollback](mysql-rollback.md)
 - [DB Metadata](db-metadata.md)
 - [Workflow Rules](workflow-rules.md)
 - [How to 設定 Workflow Rules](../how-to/configure-workflow-rules.md)

@@ -38,6 +38,8 @@ DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL / DML /
 - [SQL Editor 參考](docs/reference/sql-editor.md)
 - [Scheduled SQL Reports 參考](docs/reference/scheduled-sql-reports.md)
 - [Tickets 參考](docs/reference/tickets.md)
+- [MySQL Rollback 參考](docs/reference/mysql-rollback.md)
+- [MySQL Rollback 設定與使用](docs/how-to/configure-and-use-mysql-rollback.md)
 - [Workflow Rules 參考](docs/reference/workflow-rules.md)
 - [DB Connections 參考](docs/reference/db-connections.md)
 - [Users / RBAC 參考](docs/reference/users-and-rbac.md)

@@ -44,8 +44,11 @@ DB Connections 模組管理平台可使用的資料源。它不是單純保存�
 
 - `readonly`
 - `readwrite`
+- `rollback`
 
 MySQL / PostgreSQL 通常都需要 readonly credential；readwrite credential 則提供 ticket execute 使用。
+
+MySQL rollback generation 會使用 rollback credential 讀取 binlog 或產生 `my2sql` rollback SQL。若使用 `prior_backup` engine，備份表是在 ticket execution 的 readwrite connection 上建立，因此不依賴 rollback credential；但 `hybrid` fallback 到 `my2sql` 時仍需要 rollback credential。
 
 Redis 也可使用同樣的 role 概念，但實際命令能力仍由目標實例 ACL 決定。
 
@@ -93,6 +96,17 @@ Redis 也可使用同樣的 role 概念，但實際命令能力仍由目標實�
 - 回傳逐角色結果
 - 同時更新 `last_test_status`、`last_test_error`、`last_tested_at`
 
+### `POST /api/db-connections/{id}/test-rollback`
+
+測試 MySQL rollback capability。
+
+目前行為：
+
+- 只支援 MySQL connection
+- 需要 Settings 已啟用 `mysql_rollback_enabled`
+- `prior_backup` engine 只確認 parser 能力會在 ticket execution 時檢查
+- `my2sql` / `hybrid` 會檢查 my2sql path、rollback credential、rollback connection、binlog 設定與目前 binlog position
+
 ### `GET /api/db-connections/{id}/bindings`
 
 回傳資源綁定反查資訊：
@@ -126,4 +140,5 @@ DB Connections 頁目前除了列表，還會展示：
 - [Users / RBAC](users-and-rbac.md)
 - [SQL Editor](sql-editor.md)
 - [Tickets](tickets.md)
+- [MySQL Rollback](mysql-rollback.md)
 - [DB Metadata](db-metadata.md)

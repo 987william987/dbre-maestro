@@ -92,6 +92,7 @@ Ticket 流程中的通知規則如下：
 - `/tickets/:ticket_no` 詳情頁可看到 review results
 - 工單狀態從 `pending_review` 轉到下一階段
 - 執行後有 `started_at`、`completed_at` 或失敗狀態
+- 若是 MySQL DML 且已啟用 rollback，成功 statement 會顯示 rollback generation 狀態
 
 ## Troubleshooting
 
@@ -114,5 +115,6 @@ Ticket 流程中的通知規則如下：
 ## 相關文件
 
 - [Tickets 參考](../reference/tickets.md)
+- [How to 設定與使用 MySQL Rollback](configure-and-use-mysql-rollback.md)
 - [How to 設定 Workflow Rules](configure-workflow-rules.md)
 - [後端 API 與權限對照](../reference/backend-api-and-permissions.md)

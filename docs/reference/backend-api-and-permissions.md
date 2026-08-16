@@ -98,6 +98,9 @@
 | `POST /api/tickets/{id}/withdraw` | `requireTicketsApply` | 僅 submitter 可於 `pending_review` 收回 |
 | `POST /api/tickets/{id}/execute` | `requireTicketsExecute` | 只適用 DDL / DML / Redis |
 | `POST /api/tickets/{id}/stop` | `requireTicketsExecute` | 停止執行中 ticket |
+| `GET /api/tickets/{id}/rollbacks/preview` | `requireTicketsApply` | 預覽已產生的 MySQL DML rollback SQL |
+| `POST /api/tickets/{id}/rollbacks/create-ticket` | `requireTicketsApply` | 用選定 rollback SQL 建立新的 DML ticket |
+| `POST /api/tickets/{id}/rollbacks/{rollbackID}/create-ticket` | `requireTicketsApply` | legacy 單筆 rollback ticket 建立 API |
 | `POST /api/tickets/{id}/revoke` | `requireSensitiveReview` | 只適用 sensitive access |
 
 ### SQL Editor / Query
@@ -150,6 +153,7 @@
 | `POST /api/db-connections` | `requireDBConnectionsWrite` |
 | `PATCH /api/db-connections/{id}` | `requireDBConnectionsWrite` |
 | `POST /api/db-connections/{id}/test` | `requireDBConnectionsWrite` |
+| `POST /api/db-connections/{id}/test-rollback` | `requireDBConnectionsWrite` |
 | `DELETE /api/db-connections/{id}` | `requireDBConnectionsWrite` |
 
 ### DB Metadata
