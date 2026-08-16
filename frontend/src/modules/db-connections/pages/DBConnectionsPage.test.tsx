@@ -8,8 +8,8 @@ import { ToastProvider } from '@/shared/ui/ToastContext'
 vi.mock('@/modules/db-connections/api', () => ({
   listDBConnections: vi.fn(),
   createDBConnection: vi.fn(),
-  getDBConnectionBindings: vi.fn(),
   testDBConnection: vi.fn(),
+  testRollbackCapability: vi.fn(),
   deleteDBConnection: vi.fn(),
   patchDBConnection: vi.fn(),
 }))
@@ -19,11 +19,10 @@ vi.mock('@/shared/auth/AuthContext', () => ({
   }),
 }))
 
-import { createDBConnection, deleteDBConnection, getDBConnectionBindings, listDBConnections, patchDBConnection, testDBConnection } from '@/modules/db-connections/api'
+import { createDBConnection, deleteDBConnection, listDBConnections, patchDBConnection, testDBConnection } from '@/modules/db-connections/api'
 
 const mockedListDBConnections = vi.mocked(listDBConnections)
 const mockedCreateDBConnection = vi.mocked(createDBConnection)
-const mockedGetDBConnectionBindings = vi.mocked(getDBConnectionBindings)
 const mockedTestDBConnection = vi.mocked(testDBConnection)
 const mockedDeleteDBConnection = vi.mocked(deleteDBConnection)
 
@@ -70,12 +69,6 @@ describe('DBConnectionsPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     mockedListDBConnections.mockResolvedValue({ connections: [connection] })
-    mockedGetDBConnectionBindings.mockResolvedValue({
-      db_connection_id: 5,
-      direct_users: [],
-      effective_users: [],
-      auth_groups: [],
-    })
   })
 
   it('creates a connection from the new connection drawer and reloads the list', async () => {

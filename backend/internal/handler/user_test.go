@@ -42,7 +42,7 @@ func TestUserHandlerCreateRejectsDuplicateUsername(t *testing.T) {
 		WithArgs("william").
 		WillReturnRows(userCreateRows(7, "william", "old@example.com"))
 
-	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{"username":" william ","email":"william@edgex.exchange","password":"Secret123!"}`))
+	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{"username":" william ","email":"william@example.com","password":"Secret123!"}`))
 	rec := httptest.NewRecorder()
 	handler.Create(rec, req)
 
@@ -82,10 +82,10 @@ func TestUserHandlerCreateRejectsDuplicateEmail(t *testing.T) {
 			"updated_at",
 		}))
 	mock.ExpectQuery(`SELECT \* FROM users WHERE email = \?`).
-		WithArgs("william@edgex.exchange").
-		WillReturnRows(userCreateRows(8, "someone", "william@edgex.exchange"))
+		WithArgs("william@example.com").
+		WillReturnRows(userCreateRows(8, "someone", "william@example.com"))
 
-	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{"username":"william","email":" william@edgex.exchange ","password":"Secret123!"}`))
+	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{"username":"william","email":" william@example.com ","password":"Secret123!"}`))
 	rec := httptest.NewRecorder()
 	handler.Create(rec, req)
 

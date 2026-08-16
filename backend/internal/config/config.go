@@ -134,7 +134,7 @@ func Load() (*Config, error) {
 		RedirectURL:            strings.TrimSpace(os.Getenv("LARK_OAUTH_REDIRECT_URL")),
 		Scopes:                 splitCSV(getEnv("LARK_OAUTH_SCOPES", "directory:employee.base.enterprise_email:read")),
 		RequireEnterpriseEmail: truthyEnv(getEnv("LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL", "true")),
-		EnterpriseEmailDomains: splitCSV(getEnv("LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS", "edgex.exchange")),
+		EnterpriseEmailDomains: splitCSV(getEnv("LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS", "")),
 	}
 	c.OIDCSSO = OIDCSSOConfig{
 		Enabled:                truthyEnv(os.Getenv("SSO_OIDC_ENABLED")),
@@ -146,7 +146,7 @@ func Load() (*Config, error) {
 		Scopes:                 splitCSV(getEnv("SSO_OIDC_SCOPES", "openid,profile,email,dbre")),
 		TrustMFA:               truthyEnv(os.Getenv("SSO_OIDC_TRUST_MFA")),
 		RequireEnterpriseEmail: truthyEnv(getEnv("SSO_OIDC_REQUIRE_ENTERPRISE_EMAIL", "true")),
-		EnterpriseEmailDomains: splitCSV(getEnv("SSO_OIDC_ENTERPRISE_EMAIL_DOMAINS", "edgex.exchange")),
+		EnterpriseEmailDomains: splitCSV(getEnv("SSO_OIDC_ENTERPRISE_EMAIL_DOMAINS", "")),
 	}
 	if raw := os.Getenv("RUN_MIGRATIONS_ON_STARTUP"); raw != "" {
 		runMigrations, err := strconv.ParseBool(raw)

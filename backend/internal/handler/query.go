@@ -1194,6 +1194,8 @@ func currentMySQLConnectionID(ctx context.Context, pinnedConn *sql.Conn) uint64 
 
 func cancelActiveSQLQuery(ctx context.Context, query activeSQLQuery) error {
 	switch query.DBType {
+	case "redis":
+		return nil
 	case "postgres", "postgresql":
 		return cancelPostgresQuery(ctx, query.Conn, query.PostgresPID, query.Statement, query.CancelDBOpener)
 	default:

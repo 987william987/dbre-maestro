@@ -603,6 +603,12 @@ func (h *DBConnectionHandler) testRollbackCapability(ctx context.Context, conn *
 		return result
 	}
 	addCheck("settings", true, "")
+	engine := model.NormalizeMySQLRollbackEngine(settings.MySQLRollbackEngine)
+	addCheck("rollback_engine", true, engine+" (beta)")
+	if engine == model.MySQLRollbackEnginePriorBackup {
+		addCheck("prior_backup_parser", true, "prior backup parser is checked at ticket execution time")
+		return result
+	}
 	my2sqlPath := strings.TrimSpace(settings.MySQLRollbackMy2SQLPath)
 	if my2sqlPath == "" {
 		addCheck("my2sql", false, "my2sql path is not configured")

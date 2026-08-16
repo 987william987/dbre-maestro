@@ -24,7 +24,7 @@ func awsSMConfig() *config.Config {
 	return &config.Config{
 		AWSSecretsManagerEnabled:  true,
 		AWSSecretsManagerRegion:   "ap-northeast-1",
-		AWSSecretsManagerSecretID: "/sre-test/dbre-maestro",
+		AWSSecretsManagerSecretID: "/staging/maestro",
 		PoolProfiles: map[pool.Profile]pool.ProfileConfig{
 			pool.ProfileQuery: pool.DefaultConfigForProfile(pool.ProfileQuery),
 		},

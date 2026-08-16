@@ -125,7 +125,7 @@ func TestBuildRedisClientVariantsRequireUsesOnlyTLS(t *testing.T) {
 }
 
 func TestIsRedisClusterEndpoint(t *testing.T) {
-	if !isRedisClusterEndpoint("clustercfg.aws-jp-edgex-share-redis-nonprod.vobmfe.apne1.cache.amazonaws.com") {
+	if !isRedisClusterEndpoint("clustercfg.example-redis.cache.amazonaws.com") {
 		t.Fatalf("expected cluster endpoint to be detected")
 	}
 	if isRedisClusterEndpoint("master.redis.internal") {

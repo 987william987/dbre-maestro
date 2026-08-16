@@ -19,6 +19,7 @@
 - [How to 驗證安全審計修復](how-to/verify-security-audit-remediation.md)
 - [How to 使用 SQL Editor](how-to/use-sql-editor.md)
 - [How to 建立與執行 Tickets](how-to/create-and-execute-tickets.md)
+- [How to 設定與使用 MySQL Rollback](how-to/configure-and-use-mysql-rollback.md)
 - [How to 設定 Workflow Rules](how-to/configure-workflow-rules.md)
 - [How to 建立 Scheduled SQL Report](how-to/create-scheduled-sql-report.md)
 - [How to 部署到 AWS EKS](how-to/deploy-to-aws-eks.md)
@@ -36,6 +37,7 @@
 - [SQL Editor](reference/sql-editor.md)
 - [Scheduled SQL Reports](reference/scheduled-sql-reports.md)
 - [Tickets](reference/tickets.md)
+- [MySQL Rollback](reference/mysql-rollback.md)
 - [Workflow Rules](reference/workflow-rules.md)
 - [Users / RBAC](reference/users-and-rbac.md)
 - [Masking 與 DSL](reference/masking-and-dsl.md)
@@ -50,6 +52,7 @@
 - [架構總覽](explanation/architecture-overview.md)
 - [安全邊界說明](explanation/security-boundaries.md)
 - [SQL Editor 查詢取消機制](explanation/sql-editor-query-cancellation.md)
+- [MySQL Rollback 設計說明](explanation/mysql-rollback-design.md)
 - [權限模型](explanation/permission-model.md)
 - [通知與工單更新架構：REST 初始化 + SSE 即時更新](explanation/notification-architecture-rest-vs-sse.md)
 

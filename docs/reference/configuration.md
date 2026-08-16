@@ -44,7 +44,7 @@
 | `LARK_WEBHOOK_URL` | Lark webhook fallback | 僅在未配置 Settings 內的 Lark App 時使用 |
 | `LARK_OAUTH_SCOPES` | Lark OAuth 授權 URL 顯式要求的 scopes，逗號分隔 | `directory:employee.base.enterprise_email:read` |
 | `LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL` | Lark OAuth 是否要求企業信箱 | `true` |
-| `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | 允許登入的企業信箱 domain，逗號分隔 | `edgex.exchange` |
+| `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | 允許登入的企業信箱 domain，逗號分隔 | `example.com` |
 | `REFRESH_COOKIE_SECURE` | 非 production 環境強制 refresh cookie Secure | production 永遠強制 Secure |
 | `DB_CONNECTION_HOST_POLICY_ENFORCEMENT` | DB Connection host policy 模式 | `off`；可設 `warn` 或 `enforce` |
 | `DB_CONNECTION_HOST_ALLOWLIST` | 允許的 DB/Redis host pattern，逗號分隔 | 無；例如 `*.rds.amazonaws.com,*.cache.amazonaws.com` |
@@ -277,11 +277,11 @@ OAuth identity 寫入平台 user 時，只接受 Lark 回傳的 `enterprise_emai
 
 ```dotenv
 LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL=true
-LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
+LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=example.com
 LARK_OAUTH_SCOPES=directory:employee.base.enterprise_email:read
 ```
 
-`LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` 支援逗號分隔。設定 `edgex.exchange` 時，`<user>@edgex.exchange` 與 `<user>@staff.edgex.exchange` 會通過，其他 domain 會被拒絕。
+`LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` 支援逗號分隔。設定 `example.com` 時，`<user>@example.com` 與 `<user>@staff.example.com` 會通過，其他 domain 會被拒絕。
 
 `LARK_OAUTH_SCOPES` 會寫入 Lark OAuth authorize URL。若 Lark app 後台已開通企業郵箱權限，但授權頁仍只顯示基本身份權限，應確認這個 env 是否包含 `directory:employee.base.enterprise_email:read`。
 
@@ -306,12 +306,12 @@ DB Connection host policy 用來限制平台可連線的 DB / Redis endpoint，�
 
 ```dotenv
 DB_CONNECTION_HOST_POLICY_ENFORCEMENT=warn
-DB_CONNECTION_HOST_ALLOWLIST=*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal
+DB_CONNECTION_HOST_ALLOWLIST=*.rds.amazonaws.com,*.cache.amazonaws.com,*.db.example.com
 DB_CONNECTION_CIDR_ALLOWLIST=10.183.0.0/16,10.222.38.0/24
 DB_CONNECTION_CIDR_DENYLIST=127.0.0.0/8,169.254.0.0/16,::1/128
 
 LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL=true
-LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
+LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=example.com
 LARK_OAUTH_SCOPES=directory:employee.base.enterprise_email:read
 ```
 
@@ -347,7 +347,7 @@ DB_POOL_SCOPED_PG_QUERY_MAX_OPEN=2
 DB_POOL_SHADOW_VALIDATION_MAX_OPEN=1
 
 DB_CONNECTION_HOST_POLICY_ENFORCEMENT=warn
-DB_CONNECTION_HOST_ALLOWLIST=*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal
+DB_CONNECTION_HOST_ALLOWLIST=*.rds.amazonaws.com,*.cache.amazonaws.com,*.db.example.com
 DB_CONNECTION_CIDR_ALLOWLIST=10.183.0.0/16,10.222.38.0/24
 DB_CONNECTION_CIDR_DENYLIST=127.0.0.0/8,169.254.0.0/16,::1/128
 ```

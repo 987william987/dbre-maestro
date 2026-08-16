@@ -133,6 +133,60 @@ func (r *TicketRollbackRepo) MarkGenerated(ctx context.Context, executionID uint
 	return err
 }
 
+func (r *TicketRollbackRepo) MarkGeneratedForExecution(ctx context.Context, ticket *model.Ticket, execRow model.TicketExecution, generated GeneratedRollback) error {
+	if ticket == nil || ticket.DBConnectionID == nil {
+		return nil
+	}
+	rollbackSQL := strings.TrimSpace(generated.SQL)
+	enc, err := crypto.Encrypt(r.encKey, []byte(rollbackSQL))
+	if err != nil {
+		return fmt.Errorf("encrypt rollback sql: %w", err)
+	}
+	sum := sha256.Sum256([]byte(rollbackSQL))
+	sha := hex.EncodeToString(sum[:])
+	size := int64(len([]byte(rollbackSQL)))
+	now := timeutil.NowUTC()
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO ticket_execution_rollbacks
+		 (ticket_id, execution_id, seq, status, generator, generator_version, source_connection_id, source_database_name, source_schema_name,
+		  rollback_sql_encrypted, rollback_sql_sha256, rollback_sql_bytes, statement_count, confidence, warning_message, generated_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE
+		   status = VALUES(status),
+		   generator = VALUES(generator),
+		   generator_version = VALUES(generator_version),
+		   unsupported_reason = NULL,
+		   failure_message = NULL,
+		   rollback_sql_encrypted = VALUES(rollback_sql_encrypted),
+		   rollback_sql_sha256 = VALUES(rollback_sql_sha256),
+		   rollback_sql_bytes = VALUES(rollback_sql_bytes),
+		   statement_count = VALUES(statement_count),
+		   confidence = VALUES(confidence),
+		   warning_message = VALUES(warning_message),
+		   generated_at = VALUES(generated_at),
+		   updated_at = VALUES(updated_at)`,
+		ticket.ID,
+		execRow.ID,
+		execRow.Seq,
+		RollbackStatusGenerated,
+		strings.TrimSpace(generated.Generator),
+		strings.TrimSpace(generated.GeneratorVersion),
+		*ticket.DBConnectionID,
+		ticket.DatabaseName,
+		ticket.SchemaName,
+		enc,
+		sha,
+		size,
+		generated.StatementCount,
+		nullableTrimmed(generated.Confidence),
+		nullableTrimmed(generated.Warning),
+		now,
+		now,
+		now,
+	)
+	return err
+}
+
 func (r *TicketRollbackRepo) MarkFailed(ctx context.Context, executionID uint64, message string) error {
 	now := timeutil.NowUTC()
 	_, err := r.db.ExecContext(ctx,

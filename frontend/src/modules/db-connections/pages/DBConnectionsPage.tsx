@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Pencil, Plus, ServerCog, Trash2, X } from 'lucide-react'
-import { createDBConnection, deleteDBConnection, getDBConnectionBindings, listDBConnections, patchDBConnection, testDBConnection, testRollbackCapability } from '@/modules/db-connections/api'
+import { createDBConnection, deleteDBConnection, listDBConnections, patchDBConnection, testDBConnection, testRollbackCapability } from '@/modules/db-connections/api'
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { formatDateTime } from '@/shared/lib/format'
-import type { DBConnection, DBConnectionBindings } from '@/shared/types/dbConnection'
+import type { DBConnection } from '@/shared/types/dbConnection'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
@@ -97,9 +97,8 @@ export function DBConnectionsPage() {
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState<ConnectionForm>(EMPTY_FORM)
   const [selectedConnection, setSelectedConnection] = useState<DBConnection | null>(null)
-  const [bindings, setBindings] = useState<DBConnectionBindings | null>(null)
-  const [bindingsLoading, setBindingsLoading] = useState(false)
-  const [testingId, setTestingId] = useState<number | null>(null)
+  const [connectionTestingId, setConnectionTestingId] = useState<number | null>(null)
+  const [rollbackTestingId, setRollbackTestingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
   const [nameKeyword, setNameKeyword] = useState('')
@@ -130,8 +129,6 @@ export function DBConnectionsPage() {
     setDrawerError('')
     setDrawerLoading(false)
     setSelectedConnection(null)
-    setBindings(null)
-    setBindingsLoading(false)
     setForm(EMPTY_FORM)
   }
 
@@ -140,8 +137,6 @@ export function DBConnectionsPage() {
     setDrawerError('')
     setDrawerLoading(false)
     setSelectedConnection(connection)
-    setBindings(null)
-    setBindingsLoading(true)
     setForm({
       name: connection.name,
       dbType: normalizeDBType(connection.db_type),
@@ -157,7 +152,6 @@ export function DBConnectionsPage() {
       rollbackPassword: '',
       sslMode: normalizeSSLMode(connection.ssl_mode),
     })
-    void loadBindings(connection.id)
   }
 
   function closeDrawer() {
@@ -166,20 +160,7 @@ export function DBConnectionsPage() {
     setDrawerLoading(false)
     setSubmitting(false)
     setSelectedConnection(null)
-    setBindings(null)
-    setBindingsLoading(false)
     setForm(EMPTY_FORM)
-  }
-
-  async function loadBindings(connectionId: number) {
-    try {
-      const response = await getDBConnectionBindings(connectionId)
-      setBindings(response)
-    } catch {
-      setBindings(null)
-    } finally {
-      setBindingsLoading(false)
-    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -220,7 +201,7 @@ export function DBConnectionsPage() {
     if (!canWrite) {
       return
     }
-    setTestingId(id)
+    setConnectionTestingId(id)
     setError('')
     const targetConnection = connections.find((connection) => connection.id === id)
     const connectionName = targetConnection?.name ?? `#${id}`
@@ -245,7 +226,7 @@ export function DBConnectionsPage() {
       const message = testError instanceof ApiError ? testError.message : 'Connection test failed'
       pushToast(`${connectionName} connection test failed: ${message}`, 'error', { placement: 'center', durationMs: 3600 })
     } finally {
-      setTestingId(null)
+      setConnectionTestingId(null)
     }
   }
 
@@ -253,7 +234,7 @@ export function DBConnectionsPage() {
     if (!canWrite) {
       return
     }
-    setTestingId(id)
+    setRollbackTestingId(id)
     setError('')
     const targetConnection = connections.find((connection) => connection.id === id)
     const connectionName = targetConnection?.name ?? `#${id}`
@@ -269,7 +250,7 @@ export function DBConnectionsPage() {
       const message = testError instanceof ApiError ? testError.message : 'Rollback capability test failed'
       pushToast(`${connectionName} rollback capability test failed: ${message}`, 'error', { placement: 'center', durationMs: 4200 })
     } finally {
-      setTestingId(null)
+      setRollbackTestingId(null)
     }
   }
 
@@ -438,10 +419,10 @@ export function DBConnectionsPage() {
                                 <button
                                   type="button"
                                   onClick={() => void handleTest(connection.id)}
-                                  disabled={testingId === connection.id}
+                                  disabled={connectionTestingId === connection.id}
                                   className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2 text-[11px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                                 >
-                                  {testingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                                  {connectionTestingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
                                   Test
                                 </button>
                               ) : null}
@@ -449,10 +430,10 @@ export function DBConnectionsPage() {
                                 <button
                                   type="button"
                                   onClick={() => void handleTestRollback(connection.id)}
-                                  disabled={testingId === connection.id}
+                                  disabled={rollbackTestingId === connection.id}
                                   className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-panel-soft px-2 text-[11px] font-semibold text-ink transition hover:bg-page disabled:opacity-50"
                                 >
-                                  {testingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                                  {rollbackTestingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
                                   Test Rollback
                                 </button>
                               ) : null}
@@ -706,31 +687,6 @@ export function DBConnectionsPage() {
                       ) : null}
                     </form>
                   </CardSection>
-                  {drawerState.mode === 'edit' ? (
-                    <CardSection title="Resource Bindings" icon={<ServerCog className="h-4 w-4 text-accent" />}>
-                      {bindingsLoading ? (
-                        <LoadingBlock message="Loading resource bindings..." className="min-h-[160px] rounded-xl border-border bg-panel" />
-                      ) : (
-                        <div className="grid gap-4 sm:grid-cols-3">
-                          <BindingList
-                            title="Direct Users"
-                            items={bindings?.direct_users.map((user) => user.username) ?? []}
-                            emptyLabel="No direct user bindings."
-                          />
-                          <BindingList
-                            title="Auth Groups"
-                            items={bindings?.auth_groups.map((group) => group.name || group.group_key) ?? []}
-                            emptyLabel="No auth group bindings."
-                          />
-                          <BindingList
-                            title="Effective Users"
-                            items={bindings?.effective_users.map((user) => user.username) ?? []}
-                            emptyLabel="No effective users."
-                          />
-                        </div>
-                      )}
-                    </CardSection>
-                  ) : null}
                   {drawerError ? <InlineAlert>{drawerError}</InlineAlert> : null}
                 </div>
               )}
@@ -894,26 +850,6 @@ function ExpandableEndpointValue({ value, className }: { value: string; classNam
     </button>
   )
 }
-
-function BindingList({ title, items, emptyLabel }: { title: string; items: string[]; emptyLabel: string }) {
-  return (
-    <div className="grid gap-2">
-      <p className="text-[12px] font-semibold text-ink">{title}</p>
-      {items.length === 0 ? (
-        <p className="text-[12px] text-muted">{emptyLabel}</p>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          {items.map((item) => (
-            <span key={item} className="inline-flex rounded-full border border-border bg-panel-soft px-2.5 py-1 text-[11px] font-medium text-ink">
-              {item}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 
 function CardSection({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
   return (

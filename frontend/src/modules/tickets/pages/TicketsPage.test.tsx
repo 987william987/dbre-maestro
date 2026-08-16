@@ -228,8 +228,8 @@ describe('TicketsPage', () => {
           description: null,
           sql_content: 'SELECT 1;',
           ticket_type: 'ddl',
-          db_connection_name: 'aws-jp-edgex-share-mysql-nonprod',
-          database_name: 'testnet_edgex_user_server',
+          db_connection_name: 'aws-jp-shared-mysql-nonprod',
+          database_name: 'testnet_user_server',
           status: 'pending_review',
           submitter_id: 99,
           submitter_name: 'alice',
@@ -249,8 +249,8 @@ describe('TicketsPage', () => {
     )
 
     expect(await screen.findByText('alice')).toBeInTheDocument()
-    expect(screen.getByText('aws-jp-edgex-share-mysql-nonprod')).toBeInTheDocument()
-    expect(screen.getByText('testnet_edgex_user_server')).toBeInTheDocument()
+    expect(screen.getByText('aws-jp-shared-mysql-nonprod')).toBeInTheDocument()
+    expect(screen.getByText('testnet_user_server')).toBeInTheDocument()
     expect(screen.queryByText(/^99$/)).not.toBeInTheDocument()
   })
 

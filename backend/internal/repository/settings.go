@@ -43,6 +43,7 @@ const (
 	settingSQLExportMySQLMaxExecTimeMs   = "sql_export_mysql_max_execution_time_ms"
 	settingSQLExportPGStatementTimeoutMs = "sql_export_postgres_statement_timeout_ms"
 	settingMySQLRollbackEnabled          = "mysql_rollback_enabled"
+	settingMySQLRollbackEngine           = "mysql_rollback_engine"
 	settingMySQLRollbackMy2SQLPath       = "mysql_rollback_my2sql_path"
 	settingMySQLRollbackTimeoutSeconds   = "mysql_rollback_generation_timeout_seconds"
 	settingMySQLRollbackMaxSQLBytes      = "mysql_rollback_max_sql_bytes"
@@ -77,6 +78,7 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 		SQLExportMySQLMaxExecutionTimeMs:      25000,
 		SQLExportPostgresStatementTimeoutMs:   25000,
 		MySQLRollbackMy2SQLPath:               "my2sql",
+		MySQLRollbackEngine:                   model.MySQLRollbackEngineHybrid,
 		MySQLRollbackGenerationTimeoutSeconds: 30,
 		MySQLRollbackMaxSQLBytes:              5 * 1024 * 1024,
 		DBMetadataInventoryEnabled:            true,
@@ -275,6 +277,13 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	if mysqlRollbackEnabled != nil {
 		settings.MySQLRollbackEnabled = *mysqlRollbackEnabled
 	}
+	mysqlRollbackEngine, err := r.getString(ctx, settingMySQLRollbackEngine)
+	if err != nil {
+		return nil, err
+	}
+	if mysqlRollbackEngine != nil {
+		settings.MySQLRollbackEngine = model.NormalizeMySQLRollbackEngine(*mysqlRollbackEngine)
+	}
 	mysqlRollbackMy2SQLPath, err := r.getString(ctx, settingMySQLRollbackMy2SQLPath)
 	if err != nil {
 		return nil, err
@@ -467,6 +476,9 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 		return err
 	}
 	if err := upsertBool(ctx, tx, settingMySQLRollbackEnabled, settings.MySQLRollbackEnabled); err != nil {
+		return err
+	}
+	if err := upsertString(ctx, tx, settingMySQLRollbackEngine, model.NormalizeMySQLRollbackEngine(settings.MySQLRollbackEngine)); err != nil {
 		return err
 	}
 	if err := upsertString(ctx, tx, settingMySQLRollbackMy2SQLPath, strings.TrimSpace(settings.MySQLRollbackMy2SQLPath)); err != nil {
