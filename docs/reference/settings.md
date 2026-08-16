@@ -57,7 +57,7 @@ enterprise email policy 不是 Settings，而是 deploy env：
 
 ```text
 LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL=true
-LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
+LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=example.com
 ```
 
 這代表平台只接受 Lark 回傳的企業信箱。personal email 不會寫進 `users.email`，也不會拿來建立或匹配平台 user。

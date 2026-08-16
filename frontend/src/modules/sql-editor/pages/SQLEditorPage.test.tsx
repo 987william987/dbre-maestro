@@ -2095,7 +2095,7 @@ describe('SQLEditorPage', () => {
           db_type: 'mysql',
           level: 'database',
           items: [
-            { kind: 'database', name: 'dev_edgex_ops_intelligence' },
+            { kind: 'database', name: 'dev_ops_intelligence' },
           ],
         }
       }
@@ -2103,18 +2103,18 @@ describe('SQLEditorPage', () => {
       return {
         db_type: 'mysql',
         level: 'table',
-        database: 'dev_edgex_ops_intelligence',
+        database: 'dev_ops_intelligence',
         items: [
           {
             kind: 'table',
-            database: 'dev_edgex_ops_intelligence',
-            schema: 'dev_edgex_ops_intelligence',
+            database: 'dev_ops_intelligence',
+            schema: 'dev_ops_intelligence',
             name: 't_activity_delivery_attempt',
           },
           {
             kind: 'table',
-            database: 'dev_edgex_ops_intelligence',
-            schema: 'dev_edgex_ops_intelligence',
+            database: 'dev_ops_intelligence',
+            schema: 'dev_ops_intelligence',
             name: 't_activity_delivery_outbox',
           },
         ],
@@ -2132,8 +2132,8 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByRole('button', { name: 'Run' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
     fireEvent.click(screen.getByText('Primary MySQL'))
-    fireEvent.click(await screen.findByText('dev_edgex_ops_intelligence'))
-    fireEvent.click(screen.getByText('dev_edgex_ops_intelligence'))
+    fireEvent.click(await screen.findByText('dev_ops_intelligence'))
+    fireEvent.click(screen.getByText('dev_ops_intelligence'))
     fireEvent.click(await screen.findByText('t_activity_delivery_attempt'))
 
     expect(screen.getByText('t_activity_delivery_outbox')).toBeInTheDocument()

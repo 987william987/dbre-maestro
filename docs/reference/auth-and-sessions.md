@@ -118,9 +118,9 @@ Reset MFA 會清除該使用者 MFA secret、停用 MFA 狀態、撤銷現有 se
 |---|---|---|
 | `LARK_OAUTH_SCOPES` | `directory:employee.base.enterprise_email:read` | OAuth authorize URL 要求的 scopes，逗號分隔 |
 | `LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL` | `true` | 是否要求 Lark 回傳 `enterprise_email` |
-| `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | `edgex.exchange` | 允許的企業信箱 domain，逗號分隔 |
+| `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | `example.com` | 允許的企業信箱 domain，逗號分隔 |
 
-`LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange` 時，`<user>@edgex.exchange` 與 `<user>@team.edgex.exchange` 允許登入，其他 domain 會被拒絕。
+`LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=example.com` 時，`<user>@example.com` 與 `<user>@team.example.com` 允許登入，其他 domain 會被拒絕。
 
 `LARK_OAUTH_SCOPES` 只控制 OAuth 授權頁要求的 scope。若授權頁已顯示企業郵箱權限但登入仍出現 `lark user info missing enterprise_email` 或 `lark enterprise_email is required`，通常代表 `GET /open-apis/authen/v1/user_info` 沒回 `enterprise_email`；此時應優先檢查 Lark app 的「查看員工工作郵箱」欄位權限、審核發布狀態與使用者授權結果。
 

@@ -324,7 +324,7 @@ export function SettingsPage() {
                   label="OAuth Redirect URL"
                   value={form.larkOAuthRedirectURL}
                   onChange={(value) => setForm((current) => current ? { ...current, larkOAuthRedirectURL: value } : current)}
-                  placeholder="https://dbre-maestro-test.tskyrocket.xyz/api/auth/lark/login/callback"
+                  placeholder="https://maestro.example.com/api/auth/lark/login/callback"
                 />
               </div>
             </div>

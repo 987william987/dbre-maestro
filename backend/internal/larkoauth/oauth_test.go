@@ -22,7 +22,7 @@ func TestMergeIdentityKeepsBaseEnterpriseEmailWhenOverrideMissing(t *testing.T) 
 		OpenID:          "ou_base",
 		UnionID:         "on_base",
 		Email:           "personal@example.com",
-		EnterpriseEmail: "user@edgex.exchange",
+		EnterpriseEmail: "user@example.com",
 	}
 	override := Identity{
 		OpenID: "ou_override",
@@ -43,8 +43,8 @@ func TestMergeIdentityKeepsBaseEnterpriseEmailWhenOverrideMissing(t *testing.T) 
 }
 
 func TestMergeIdentityOverridesEnterpriseEmailWhenProvided(t *testing.T) {
-	base := Identity{EnterpriseEmail: "old@edgex.exchange"}
-	override := Identity{EnterpriseEmail: "new@edgex.exchange"}
+	base := Identity{EnterpriseEmail: "old@example.com"}
+	override := Identity{EnterpriseEmail: "new@example.com"}
 
 	got := mergeIdentity(base, override)
 
@@ -80,7 +80,7 @@ func TestExchangeCodeUsesUserInfoEnterpriseEmail(t *testing.T) {
 		case req.URL.String() == "https://open.larksuite.com/open-apis/authen/v2/oauth/token":
 			return jsonResponse(http.StatusOK, `{"code":0,"data":{"access_token":"user-token","open_id":"ou_test","union_id":"on_test"}}`), nil
 		case req.URL.String() == "https://open.larksuite.com/open-apis/authen/v1/user_info":
-			return jsonResponse(http.StatusOK, `{"code":0,"data":{"open_id":"ou_test","union_id":"on_test","name":"William","email":"personal@example.com","enterprise_email":"william@edgex.exchange"}}`), nil
+			return jsonResponse(http.StatusOK, `{"code":0,"data":{"open_id":"ou_test","union_id":"on_test","name":"William","email":"personal@example.com","enterprise_email":"william@example.com"}}`), nil
 		default:
 			t.Fatalf("unexpected request: %s", req.URL.String())
 			return nil, nil
@@ -97,7 +97,7 @@ func TestExchangeCodeUsesUserInfoEnterpriseEmail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExchangeCode() error = %v", err)
 	}
-	if identity.EnterpriseEmail != "william@edgex.exchange" {
+	if identity.EnterpriseEmail != "william@example.com" {
 		t.Fatalf("EnterpriseEmail = %q, want user_info enterprise email", identity.EnterpriseEmail)
 	}
 }

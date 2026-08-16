@@ -12,7 +12,7 @@
 測試環境若 `Service` 是 `ClusterIP`，可用：
 
 ```bash
-kubectl -n sre-test port-forward svc/dbre-maestro 8080:8080
+kubectl -n staging port-forward svc/dbre-maestro 8080:8080
 ```
 
 然後打開：
@@ -33,7 +33,7 @@ http://localhost:8080
 
 ```text
 Username: admin
-Email: dbre-maestro-admin-sre-test@example.com
+Email: maestro-admin-staging@example.com
 Password: <strong-password>
 ```
 

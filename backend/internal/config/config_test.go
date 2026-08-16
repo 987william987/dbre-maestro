@@ -200,15 +200,15 @@ func TestLoadDefaultsOIDCSSOEnterpriseEmailPolicy(t *testing.T) {
 	if !cfg.OIDCSSO.RequireEnterpriseEmail {
 		t.Fatal("OIDCSSO.RequireEnterpriseEmail = false, want true")
 	}
-	if len(cfg.OIDCSSO.EnterpriseEmailDomains) != 1 || cfg.OIDCSSO.EnterpriseEmailDomains[0] != "edgex.exchange" {
-		t.Fatalf("OIDCSSO.EnterpriseEmailDomains = %#v, want edgex.exchange", cfg.OIDCSSO.EnterpriseEmailDomains)
+	if len(cfg.OIDCSSO.EnterpriseEmailDomains) != 0 {
+		t.Fatalf("OIDCSSO.EnterpriseEmailDomains = %#v, want empty default allowlist", cfg.OIDCSSO.EnterpriseEmailDomains)
 	}
 }
 
 func TestLoadOverridesOIDCSSOEnterpriseEmailPolicy(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("SSO_OIDC_REQUIRE_ENTERPRISE_EMAIL", "false")
-	t.Setenv("SSO_OIDC_ENTERPRISE_EMAIL_DOMAINS", "example.com,edgex.exchange")
+	t.Setenv("SSO_OIDC_ENTERPRISE_EMAIL_DOMAINS", "example.com,example.org")
 
 	cfg, err := Load()
 	if err != nil {
@@ -217,8 +217,8 @@ func TestLoadOverridesOIDCSSOEnterpriseEmailPolicy(t *testing.T) {
 	if cfg.OIDCSSO.RequireEnterpriseEmail {
 		t.Fatal("OIDCSSO.RequireEnterpriseEmail = true, want false")
 	}
-	if len(cfg.OIDCSSO.EnterpriseEmailDomains) != 2 || cfg.OIDCSSO.EnterpriseEmailDomains[0] != "example.com" || cfg.OIDCSSO.EnterpriseEmailDomains[1] != "edgex.exchange" {
-		t.Fatalf("OIDCSSO.EnterpriseEmailDomains = %#v, want example.com, edgex.exchange", cfg.OIDCSSO.EnterpriseEmailDomains)
+	if len(cfg.OIDCSSO.EnterpriseEmailDomains) != 2 || cfg.OIDCSSO.EnterpriseEmailDomains[0] != "example.com" || cfg.OIDCSSO.EnterpriseEmailDomains[1] != "example.org" {
+		t.Fatalf("OIDCSSO.EnterpriseEmailDomains = %#v, want example.com, example.org", cfg.OIDCSSO.EnterpriseEmailDomains)
 	}
 }
 
@@ -281,7 +281,7 @@ func TestLoadRejectsInvalidAWSSecretsManagerEnable(t *testing.T) {
 func TestLoadDefersRequiredSecretsWhenAWSSecretsManagerEnabled(t *testing.T) {
 	t.Setenv("AWS_SM_ENABLE", "true")
 	t.Setenv("AWS_SM_REGION", "ap-northeast-1")
-	t.Setenv("AWS_SM_SECRET_ID", "/sre-test/dbre-maestro")
+	t.Setenv("AWS_SM_SECRET_ID", "/staging/maestro")
 
 	cfg, err := Load()
 	if err != nil {
@@ -293,8 +293,8 @@ func TestLoadDefersRequiredSecretsWhenAWSSecretsManagerEnabled(t *testing.T) {
 	if cfg.AWSSecretsManagerRegion != "ap-northeast-1" {
 		t.Fatalf("AWSSecretsManagerRegion = %q, want ap-northeast-1", cfg.AWSSecretsManagerRegion)
 	}
-	if cfg.AWSSecretsManagerSecretID != "/sre-test/dbre-maestro" {
-		t.Fatalf("AWSSecretsManagerSecretID = %q, want /sre-test/dbre-maestro", cfg.AWSSecretsManagerSecretID)
+	if cfg.AWSSecretsManagerSecretID != "/staging/maestro" {
+		t.Fatalf("AWSSecretsManagerSecretID = %q, want /staging/maestro", cfg.AWSSecretsManagerSecretID)
 	}
 }
 

@@ -56,7 +56,7 @@ Backend Pod 至少需要：
 |---|---|
 | `APP_ENV` | `staging` 或 `production` |
 | `PORT` | 預設 `8080` |
-| `APP_BASE_URL` | 前端公開 URL，用於站內信與 Lark 工單連結，例如 `https://dbre-maestro-test.tskyrocket.xyz` |
+| `APP_BASE_URL` | 前端公開 URL，用於站內信與 Lark 工單連結，例如 `https://maestro.example.com` |
 | `AWS_SM_ENABLE` | EKS/devops 環境建議 `true`，由 app 從 AWS Secrets Manager 讀敏感值 |
 | `AWS_SM_REGION` | AWS Secrets Manager region，例如 `ap-northeast-1` |
 | `AWS_SM_SECRET_ID` | DBRE Maestro app secret id |
@@ -68,12 +68,12 @@ Backend Pod 至少需要：
 | `MFA_ENFORCEMENT` | production 建議 `required_for_admins` |
 | `REFRESH_COOKIE_SECURE` | production 必須等同 `true`；程式會強制 |
 | `DB_CONNECTION_HOST_POLICY_ENFORCEMENT` | DB/Redis endpoint host policy；建議先用 `warn`，確認後改 `enforce` |
-| `DB_CONNECTION_HOST_ALLOWLIST` | 允許的 host pattern，例如 `*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal` |
+| `DB_CONNECTION_HOST_ALLOWLIST` | 允許的 host pattern，例如 `*.rds.amazonaws.com,*.cache.amazonaws.com,*.db.example.com` |
 | `DB_CONNECTION_CIDR_ALLOWLIST` | 允許的 DB / Redis subnet CIDR，需由 SRE 依環境提供 |
 | `DB_CONNECTION_CIDR_DENYLIST` | 禁止連線 CIDR，至少擋 metadata / loopback，例如 `127.0.0.0/8,169.254.0.0/16,::1/128` |
 | `LARK_OAUTH_SCOPES` | Lark OAuth 授權 URL 顯式要求的 scopes；預設包含企業郵箱 scope |
 | `LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL` | Lark OAuth 是否要求 `enterprise_email`；建議維持 `true` |
-| `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | 允許登入的企業信箱 domain，例如 `edgex.exchange` |
+| `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | 允許登入的企業信箱 domain，例如 `example.com` |
 
 Lark App ID / Secret、OAuth enable、OAuth site 與 OAuth redirect URL 建議透過平台 Settings 管理，不建議寫死在 image。
 
@@ -179,24 +179,24 @@ secretsmanager:GetSecretValue
 
 devops pipeline 會更新 image tag，但通常不會自動新增 runtime env。每個環境的 `deploy.envs` 需要在 ArgoCD values 裡配置。
 
-sre-test 初期最小建議：
+staging 初期最小建議：
 
 ```yaml
 deploy:
   envs:
     AWS_SM_ENABLE: "true"
     AWS_SM_REGION: "ap-northeast-1"
-    AWS_SM_SECRET_ID: "/testnet/dbre-maestro/default"
-    APP_ENV: "sre-test"
-    APP_BASE_URL: "https://dbre-maestro-test.tskyrocket.xyz"
+    AWS_SM_SECRET_ID: "/staging/maestro/default"
+    APP_ENV: "staging"
+    APP_BASE_URL: "https://maestro.example.com"
     MFA_ENFORCEMENT: "disabled"
     RUN_MIGRATIONS_ON_STARTUP: "true"
     DB_CONNECTION_HOST_POLICY_ENFORCEMENT: "warn"
-    DB_CONNECTION_HOST_ALLOWLIST: "*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal"
+    DB_CONNECTION_HOST_ALLOWLIST: "*.rds.amazonaws.com,*.cache.amazonaws.com,*.db.example.com"
     DB_CONNECTION_CIDR_ALLOWLIST: "10.183.0.0/16,10.222.38.0/24"
     DB_CONNECTION_CIDR_DENYLIST: "127.0.0.0/8,169.254.0.0/16,::1/128"
     LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL: "true"
-    LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS: "edgex.exchange"
+    LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS: "example.com"
     LARK_OAUTH_SCOPES: "directory:employee.base.enterprise_email:read"
 ```
 
@@ -213,18 +213,18 @@ deploy:
   envs:
     AWS_SM_ENABLE: "true"
     AWS_SM_REGION: "ap-northeast-1"
-    AWS_SM_SECRET_ID: "/prod/dbre-maestro/default"
+    AWS_SM_SECRET_ID: "/prod/maestro/default"
     APP_ENV: "production"
     APP_BASE_URL: "https://dbre-maestro.<prod-domain>"
     MFA_ENFORCEMENT: "required_for_admins"
     REFRESH_COOKIE_SECURE: "true"
     RUN_MIGRATIONS_ON_STARTUP: "false"
     DB_CONNECTION_HOST_POLICY_ENFORCEMENT: "enforce"
-    DB_CONNECTION_HOST_ALLOWLIST: "*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal"
+    DB_CONNECTION_HOST_ALLOWLIST: "*.rds.amazonaws.com,*.cache.amazonaws.com,*.db.example.com"
     DB_CONNECTION_CIDR_ALLOWLIST: "<prod-db-and-redis-subnet-cidrs>"
     DB_CONNECTION_CIDR_DENYLIST: "127.0.0.0/8,169.254.0.0/16,::1/128"
     LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL: "true"
-    LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS: "edgex.exchange"
+    LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS: "example.com"
     LARK_OAUTH_SCOPES: "directory:employee.base.enterprise_email:read"
 ```
 
@@ -275,7 +275,7 @@ Pod 啟動時先用 `MIGRATION_DSN` 執行 migration，再啟動 server。這是
 
 適用於：
 
-- sre-test 初期
+- staging 初期
 - production 初期希望先降低流程複雜度
 - 可接受單副本短暫不可用
 - 尚未建立 migration Job 流程
@@ -419,14 +419,14 @@ Service 使用 ClusterIP，Ingress 由 ALB 對外暴露。
 3. 到 Lark app 後台把 OAuth redirect URL 加入允許清單。測試環境範例：
 
    ```text
-   https://dbre-maestro-test.tskyrocket.xyz/api/auth/lark/login/callback
+   https://maestro.example.com/api/auth/lark/login/callback
    ```
 
 4. 確認 deploy env 已設定：
 
    ```text
    LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL=true
-   LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=edgex.exchange
+   LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS=example.com
    LARK_OAUTH_SCOPES=directory:employee.base.enterprise_email:read
    ```
 
@@ -458,7 +458,7 @@ Test 環境可設定：
 
 ```text
 APP_ENV=staging
-APP_BASE_URL=https://dbre-maestro-test.tskyrocket.xyz
+APP_BASE_URL=https://maestro.example.com
 MFA_ENFORCEMENT=disabled
 ```
 

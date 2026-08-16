@@ -131,8 +131,8 @@ describe('NewTicketPage', () => {
       databases: [
         { name: 'bot' },
         { name: 'bot-key-manage' },
-        { name: 'dev_edgex_assets_server' },
-        { name: 'dev_edgex_cms' },
+        { name: 'dev_assets_server' },
+        { name: 'dev_cms' },
         { name: 'billing' },
         { name: 'orders_archive' },
         { name: 'reporting' },

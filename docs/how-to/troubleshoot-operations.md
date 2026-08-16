@@ -109,7 +109,7 @@ RUN_MIGRATIONS_ON_STARTUP: "false"
 
 ```yaml
 DB_CONNECTION_HOST_POLICY_ENFORCEMENT: "warn"
-DB_CONNECTION_HOST_ALLOWLIST: "*.rds.amazonaws.com,*.cache.amazonaws.com,*.edgex.internal"
+DB_CONNECTION_HOST_ALLOWLIST: "*.rds.amazonaws.com,*.cache.amazonaws.com,*.db.example.com"
 DB_CONNECTION_CIDR_ALLOWLIST: "10.183.0.0/16,10.222.38.0/24"
 DB_CONNECTION_CIDR_DENYLIST: "127.0.0.0/8,169.254.0.0/16,::1/128"
 ```
@@ -142,7 +142,7 @@ AccessDenied: ... rds:DescribeDBClusters
 通知連結依賴：
 
 ```yaml
-APP_BASE_URL: "https://dbre-maestro-test.tskyrocket.xyz"
+APP_BASE_URL: "https://maestro.example.com"
 ```
 
 如果未設定，通知可能只出現相對路徑，例如 `/tickets/TK-...`。

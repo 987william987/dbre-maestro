@@ -114,20 +114,20 @@ func TestFindOrCreateSSOUserAllowsUnverifiedCompanyEmail(t *testing.T) {
 		WithArgs("oidc", "authentik-user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectQuery(`SELECT \* FROM users WHERE email = \?`).
-		WithArgs("alice@edgex.exchange").
+		WithArgs("alice@example.com").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
-			AddRow(7, "alice", "alice@edgex.exchange", "hash", 0, 0, 1, time.Now(), time.Now()))
+			AddRow(7, "alice", "alice@example.com", "hash", 0, 0, 1, time.Now(), time.Now()))
 	mock.ExpectExec(`UPDATE users`).
 		WithArgs("oidc", "authentik-user-1", sqlmock.AnyArg(), uint64(7)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
 		WithArgs(uint64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
-			AddRow(7, "alice", "alice@edgex.exchange", "hash", 0, 0, 1, time.Now(), time.Now()))
+			AddRow(7, "alice", "alice@example.com", "hash", 0, 0, 1, time.Now(), time.Now()))
 
 	user, err := handler.findOrCreateSSOUser(context.Background(), oidcsso.Identity{
 		Subject:                   "authentik-user-1",
-		Email:                     "alice@edgex.exchange",
+		Email:                     "alice@example.com",
 		EmailVerified:             false,
 		EmailVerifiedClaimPresent: true,
 	})
@@ -156,20 +156,20 @@ func TestFindOrCreateSSOUserAllowsMissingEmailVerifiedForCompanyEmail(t *testing
 		WithArgs("oidc", "authentik-user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectQuery(`SELECT \* FROM users WHERE email = \?`).
-		WithArgs("alice@edgex.exchange").
+		WithArgs("alice@example.com").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
-			AddRow(7, "alice", "alice@edgex.exchange", "hash", 0, 0, 1, time.Now(), time.Now()))
+			AddRow(7, "alice", "alice@example.com", "hash", 0, 0, 1, time.Now(), time.Now()))
 	mock.ExpectExec(`UPDATE users`).
 		WithArgs("oidc", "authentik-user-1", sqlmock.AnyArg(), uint64(7)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT \* FROM users WHERE id = \?`).
 		WithArgs(uint64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password", "is_setup", "is_protected", "is_active", "created_at", "updated_at"}).
-			AddRow(7, "alice", "alice@edgex.exchange", "hash", 0, 0, 1, time.Now(), time.Now()))
+			AddRow(7, "alice", "alice@example.com", "hash", 0, 0, 1, time.Now(), time.Now()))
 
 	user, err := handler.findOrCreateSSOUser(context.Background(), oidcsso.Identity{
 		Subject:                   "authentik-user-1",
-		Email:                     "alice@edgex.exchange",
+		Email:                     "alice@example.com",
 		EmailVerifiedClaimPresent: false,
 	})
 	if err != nil {
@@ -199,7 +199,7 @@ func TestFindOrCreateSSOUserRejectsNonCompanyEmailBeforeAutoBinding(t *testing.T
 
 	_, err = handler.findOrCreateSSOUser(context.Background(), oidcsso.Identity{
 		Subject:                   "authentik-user-1",
-		Email:                     "alice@example.com",
+		Email:                     "alice@example.net",
 		EmailVerified:             true,
 		EmailVerifiedClaimPresent: true,
 	})
@@ -214,7 +214,7 @@ func TestFindOrCreateSSOUserRejectsNonCompanyEmailBeforeAutoBinding(t *testing.T
 func ssoEnterpriseEmailConfig() config.OIDCSSOConfig {
 	return config.OIDCSSOConfig{
 		RequireEnterpriseEmail: true,
-		EnterpriseEmailDomains: []string{"edgex.exchange"},
+		EnterpriseEmailDomains: []string{"example.com"},
 	}
 }
 
@@ -232,7 +232,7 @@ func configuredOIDCSSOConfig() config.OIDCSSOConfig {
 
 func TestSSOUsernameBasePrefersEmailLocalPart(t *testing.T) {
 	got := ssoUsernameBase(oidcsso.Identity{
-		Email: "William.Yeh@edgex.exchange",
+		Email: "William.Yeh@example.com",
 		Name:  "Ignored Name",
 	})
 	if got != "william.yeh" {
@@ -248,7 +248,7 @@ func TestResolveOIDCSSOConfigAppliesDefaults(t *testing.T) {
 		ClientSecret:           "secret",
 		RedirectURL:            "https://dbre.example.com/api/auth/sso/callback",
 		RequireEnterpriseEmail: true,
-		EnterpriseEmailDomains: []string{"edgex.exchange"},
+		EnterpriseEmailDomains: []string{"example.com"},
 	})
 
 	cfg, err := handler.resolveOIDCSSOConfig(context.Background())
@@ -261,7 +261,7 @@ func TestResolveOIDCSSOConfigAppliesDefaults(t *testing.T) {
 	if len(cfg.Scopes) != 4 || cfg.Scopes[0] != "openid" {
 		t.Fatalf("Scopes = %#v, want default oidc scopes", cfg.Scopes)
 	}
-	if !cfg.RequireEnterpriseEmail || len(cfg.EnterpriseEmailDomains) != 1 || cfg.EnterpriseEmailDomains[0] != "edgex.exchange" {
+	if !cfg.RequireEnterpriseEmail || len(cfg.EnterpriseEmailDomains) != 1 || cfg.EnterpriseEmailDomains[0] != "example.com" {
 		t.Fatalf("enterprise email policy = %#v / %#v", cfg.RequireEnterpriseEmail, cfg.EnterpriseEmailDomains)
 	}
 }
@@ -402,32 +402,32 @@ func TestLarkEnterpriseEmailAllowed(t *testing.T) {
 	}{
 		{
 			name:           "allows exact configured enterprise domain",
-			email:          "william@edgex.exchange",
-			allowedDomains: []string{"edgex.exchange"},
+			email:          "william@example.com",
+			allowedDomains: []string{"example.com"},
 			want:           true,
 		},
 		{
 			name:           "allows subdomain of configured enterprise domain",
-			email:          "william@staff.edgex.exchange",
-			allowedDomains: []string{"edgex.exchange"},
+			email:          "william@staff.example.com",
+			allowedDomains: []string{"example.com"},
 			want:           true,
 		},
 		{
 			name:           "rejects personal email domain",
 			email:          "william@gmail.com",
-			allowedDomains: []string{"edgex.exchange"},
+			allowedDomains: []string{"example.com"},
 			want:           false,
 		},
 		{
 			name:           "rejects suffix spoofing",
-			email:          "william@notedgex.exchange",
-			allowedDomains: []string{"edgex.exchange"},
+			email:          "william@notexample.com",
+			allowedDomains: []string{"example.com"},
 			want:           false,
 		},
 		{
 			name:           "rejects invalid email",
 			email:          "william",
-			allowedDomains: []string{"edgex.exchange"},
+			allowedDomains: []string{"example.com"},
 			want:           false,
 		},
 		{
@@ -450,7 +450,7 @@ func TestLarkEnterpriseEmailAllowed(t *testing.T) {
 func TestLarkUsernameBasePrefersEnterpriseEmail(t *testing.T) {
 	identity := larkoauth.Identity{
 		Email:           "personal.real.name@gmail.com",
-		EnterpriseEmail: "william@edgex.exchange",
+		EnterpriseEmail: "william@example.com",
 		DisplayName:     "William Yeh",
 		OpenID:          "ou_test",
 	}
@@ -756,7 +756,7 @@ func TestAuthHandlerCompleteSSOLoginRejectsUnknownState(t *testing.T) {
 		[]byte("secret"),
 		configuredOIDCSSOConfig(),
 		repository.NewSSOLoginRepo(sqlxDB),
-		mockOIDCSSOClient{identity: oidcsso.Identity{Subject: "sub", Email: "alice@edgex.exchange"}},
+		mockOIDCSSOClient{identity: oidcsso.Identity{Subject: "sub", Email: "alice@example.com"}},
 	)
 
 	expectSetupCompleted(mock, 1)
