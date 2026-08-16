@@ -1401,7 +1401,7 @@ export function TicketDetailPage() {
                         const rowExpanded = expandedStatementSQLs.has(rowKey)
                         const rowExpandable = isExpandableSql(row.sql)
                         const rowActionBusy = actingExecutionID === row.executionID
-                        const rowCanExecute = Boolean(canExecute && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
+                        const rowCanExecute = Boolean(canExecute && (ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml') && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
                         const rowCanStop = Boolean(canExecute && row.executionID && row.executionStatus === 'running')
                         return (
                           <DataTableRow

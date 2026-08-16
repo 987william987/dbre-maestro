@@ -1260,6 +1260,19 @@ func splitRedisTicketCommands(sqlContent string) []string {
 	return items
 }
 
+func redisTicketExecutionRows(ticketID uint64, sqlContent string) []model.TicketExecution {
+	commands := splitRedisTicketCommands(sqlContent)
+	rows := make([]model.TicketExecution, 0, len(commands))
+	for index, commandLine := range commands {
+		rows = append(rows, model.TicketExecution{
+			TicketID: ticketID,
+			Seq:      index + 1,
+			SQLStmt:  commandLine,
+		})
+	}
+	return rows
+}
+
 func parseRedisDatabaseIndex(databaseName *string) (int, error) {
 	value := strings.TrimSpace(nullableStringValue(databaseName))
 	if value == "" {
@@ -1303,30 +1316,64 @@ func (h *TicketHandler) runTicketRedisCommands(ticket *model.Ticket, executorID 
 		return
 	}
 
-	commands := splitRedisTicketCommands(ticket.SQLContent)
+	notificationActorID := &executorID
+	if opts.Automated {
+		notificationActorID = &opts.ReviewerID
+	}
+	if err := h.tickets.EnsureExecutions(ctx, ticket.ID, redisTicketExecutionRows(ticket.ID, ticket.SQLContent)); err != nil {
+		h.finishTicketExecutionStartFailure(ctx, ticket, executorID, opts, "prepare redis executions failed: "+err.Error())
+		return
+	}
+	executions, err := h.tickets.ListExecutions(ctx, ticket.ID)
+	if err != nil {
+		h.finishTicketExecutionStartFailure(ctx, ticket, executorID, opts, "load redis executions failed: "+err.Error())
+		return
+	}
+	h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
+
 	finalStatus := model.TicketStatusCompleted
-	for index, commandLine := range commands {
+	for _, execRow := range executions {
+		commandLine := strings.TrimSpace(execRow.SQLStmt)
+		if execRow.Status != "pending" {
+			if execRow.Status == "failed" || execRow.Status == "stopped" {
+				finalStatus = model.TicketStatusFailed
+				break
+			}
+			continue
+		}
+
 		current, err := h.tickets.GetByID(ctx, ticket.ID)
 		if err == nil && current != nil && current.Status == model.TicketStatusStopped {
 			return
 		}
 
-		execID, err := h.tickets.CreateExecution(ctx, &model.TicketExecution{
-			TicketID: ticket.ID,
-			Seq:      index + 1,
-			SQLStmt:  commandLine,
-		})
+		ok, err := h.tickets.MarkExecutionRunningIfPending(ctx, execRow.ID)
 		if err != nil {
-			h.finishTicket(ctx, ticket.ID, model.TicketStatusFailed, "record redis execution failed")
-			return
+			msg := err.Error()
+			_ = h.tickets.MarkExecutionDone(ctx, execRow.ID, nil, nil, &msg)
+			finalStatus = model.TicketStatusFailed
+			h.refreshTicketStatusFromExecutions(ctx, ticket.ID)
+			h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
+			break
 		}
-		_ = h.tickets.MarkExecutionRunning(ctx, execID)
+		if !ok {
+			currentExec, _ := h.tickets.GetExecution(ctx, ticket.ID, execRow.ID)
+			if currentExec != nil && (currentExec.Status == "failed" || currentExec.Status == "stopped") {
+				finalStatus = model.TicketStatusFailed
+				break
+			}
+			continue
+		}
+		h.refreshTicketStatusFromExecutions(ctx, ticket.ID)
+		h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
 
 		cmd, args, parseErr := sqlreview.ParseRedisCommand(commandLine)
 		if parseErr != nil {
 			msg := parseErr.Error()
-			_ = h.tickets.MarkExecutionDone(ctx, execID, nil, nil, &msg)
+			_ = h.tickets.MarkExecutionDone(ctx, execRow.ID, nil, nil, &msg)
 			finalStatus = model.TicketStatusFailed
+			h.refreshTicketStatusFromExecutions(ctx, ticket.ID)
+			h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
 			break
 		}
 		ifaces := make([]interface{}, len(args))
@@ -1342,8 +1389,30 @@ func (h *TicketHandler) runTicketRedisCommands(ticket *model.Ticket, executorID 
 			ifaces[i] = arg
 		}
 
+		statementCtx, cancel := context.WithCancel(ctx)
+		queryID := ticketExecutionQueryID(execRow.ID)
+		if h.activeExecutions != nil {
+			if canceled := h.activeExecutions.register(queryID, activeSQLQuery{
+				UserID:       executorID,
+				ConnectionID: resolvedConn.ID,
+				TicketID:     ticket.ID,
+				DBType:       "redis",
+				Statement:    commandLine,
+				Conn:         resolvedConn,
+				Cancel:       cancel,
+				RegisteredAt: time.Now(),
+			}); canceled {
+				cancel()
+				_ = h.tickets.MarkExecutionStopped(ctx, execRow.ID, "manually stopped")
+				finalStatus = model.TicketStatusFailed
+				h.refreshTicketStatusFromExecutions(ctx, ticket.ID)
+				h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
+				break
+			}
+		}
+
 		startedAt := time.Now()
-		_, execErr := pool.RedisGlobal().DoInDB(ctx, pool.RedisConnOptions{
+		_, execErr := pool.RedisGlobal().DoInDB(statementCtx, pool.RedisConnOptions{
 			ConnID:   resolvedConn.ID,
 			Host:     resolvedConn.Host,
 			Port:     resolvedConn.Port,
@@ -1352,14 +1421,29 @@ func (h *TicketHandler) runTicketRedisCommands(ticket *model.Ticket, executorID 
 			DB:       dbIndex,
 			SSLMode:  resolvedConn.SSLMode,
 		}, append([]interface{}{cmd}, ifaces...)...)
+		if h.activeExecutions != nil {
+			h.activeExecutions.remove(queryID)
+		}
+		cancel()
 		durationMs := time.Since(startedAt).Milliseconds()
-		if execErr != nil && execErr != redis.Nil {
-			msg := execErr.Error()
-			_ = h.tickets.MarkExecutionDone(ctx, execID, nil, &durationMs, &msg)
+		currentExec, _ := h.tickets.GetExecution(ctx, ticket.ID, execRow.ID)
+		if currentExec != nil && currentExec.Status == "stopped" {
 			finalStatus = model.TicketStatusFailed
+			h.refreshTicketStatusFromExecutions(ctx, ticket.ID)
+			h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
 			break
 		}
-		_ = h.tickets.MarkExecutionDone(ctx, execID, nil, &durationMs, nil)
+		if execErr != nil && execErr != redis.Nil {
+			msg := execErr.Error()
+			_ = h.tickets.MarkExecutionDone(ctx, execRow.ID, nil, &durationMs, &msg)
+			finalStatus = model.TicketStatusFailed
+			h.refreshTicketStatusFromExecutions(ctx, ticket.ID)
+			h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
+			break
+		}
+		_ = h.tickets.MarkExecutionDone(ctx, execRow.ID, nil, &durationMs, nil)
+		h.refreshTicketStatusFromExecutions(ctx, ticket.ID)
+		h.publishTicketUpdateByID(ctx, ticket.ID, ticket, notificationActorID)
 	}
 
 	h.finishTicket(ctx, ticket.ID, finalStatus, "")
@@ -1384,10 +1468,8 @@ func (h *TicketHandler) runTicketRedisCommands(ticket *model.Ticket, executorID 
 		}
 	}
 	auditActorID := &executorID
-	notificationActorID := &executorID
 	if opts.Automated {
 		auditActorID = &opts.ReviewerID
-		notificationActorID = &opts.ReviewerID
 	}
 	h.audit.Log(ctx, repository.AuditEntry{
 		ActorID:      auditActorID,

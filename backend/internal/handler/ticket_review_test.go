@@ -422,6 +422,20 @@ func TestBuildRedisTicketDatabaseOptions(t *testing.T) {
 	}
 }
 
+func TestRedisTicketExecutionRowsUseLineBasedCommands(t *testing.T) {
+	rows := redisTicketExecutionRows(42, "\nSET market:anchor:30000145 162\n\nHSET index:market:contract:isopen 30000145 false\n")
+
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	if rows[0].TicketID != 42 || rows[0].Seq != 1 || rows[0].SQLStmt != "SET market:anchor:30000145 162" {
+		t.Fatalf("unexpected first redis execution row: %+v", rows[0])
+	}
+	if rows[1].TicketID != 42 || rows[1].Seq != 2 || rows[1].SQLStmt != "HSET index:market:contract:isopen 30000145 false" {
+		t.Fatalf("unexpected second redis execution row: %+v", rows[1])
+	}
+}
+
 func assertErr(message string) error {
 	return testError(message)
 }

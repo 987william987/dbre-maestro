@@ -56,3 +56,9 @@ func TestClassifyTicketStatementExecutionError(t *testing.T) {
 		})
 	}
 }
+
+func TestCancelActiveSQLQueryRedisUsesContextCancelOnly(t *testing.T) {
+	if err := cancelActiveSQLQuery(t.Context(), activeSQLQuery{DBType: "redis"}); err != nil {
+		t.Fatalf("cancelActiveSQLQuery(redis) error = %v", err)
+	}
+}
