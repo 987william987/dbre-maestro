@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1129,6 +1130,13 @@ func executeSingleSQLStatement(
 		rows.Close()
 		return nil, err
 	}
+	columnTypes, _ := rows.ColumnTypes()
+	databaseTypes := make([]string, len(cols))
+	for i := range cols {
+		if i < len(columnTypes) {
+			databaseTypes[i] = columnTypes[i].DatabaseTypeName()
+		}
+	}
 
 	origins := make([]masking.ColumnOrigin, len(cols))
 	dependencies := make([][]masking.ColumnOrigin, len(cols))
@@ -1153,7 +1161,7 @@ func executeSingleSQLStatement(
 			return nil, err
 		}
 		for i, v := range vals {
-			vals[i] = queryResultCellValue(v)
+			vals[i] = queryResultCellValueForDatabaseType(v, databaseTypes[i])
 		}
 		result.Rows = append(result.Rows, vals)
 	}
@@ -1430,7 +1438,7 @@ func collectPostgresQueryResult(
 			return nil, err
 		}
 		for i, value := range values {
-			values[i] = queryResultCellValue(value)
+			values[i] = queryResultCellValueForPostgresField(value, fieldDescriptions[i])
 		}
 		resultRows = append(resultRows, values)
 	}
@@ -1454,10 +1462,17 @@ func collectPostgresQueryResult(
 }
 
 func queryResultCellValue(value any) any {
+	return queryResultCellValueForDatabaseType(value, "")
+}
+
+func queryResultCellValueForDatabaseType(value any, databaseType string) any {
 	switch v := value.(type) {
 	case nil:
 		return nil
 	case []byte:
+		if isBinaryDatabaseType(databaseType) {
+			return "0x" + hex.EncodeToString(v)
+		}
 		return string(v)
 	case time.Time:
 		return v.Format(time.RFC3339Nano)
@@ -1466,9 +1481,26 @@ func queryResultCellValue(value any) any {
 		if err != nil {
 			return fmt.Sprint(v)
 		}
-		return queryResultCellValue(driverValue)
+		return queryResultCellValueForDatabaseType(driverValue, databaseType)
 	default:
 		return fmt.Sprint(v)
+	}
+}
+
+func queryResultCellValueForPostgresField(value any, field pgconn.FieldDescription) any {
+	const postgresByteaOID = 17
+	if field.DataTypeOID == postgresByteaOID {
+		return queryResultCellValueForDatabaseType(value, "BYTEA")
+	}
+	return queryResultCellValue(value)
+}
+
+func isBinaryDatabaseType(databaseType string) bool {
+	switch strings.ToUpper(strings.TrimSpace(databaseType)) {
+	case "BINARY", "VARBINARY", "BLOB", "TINYBLOB", "MEDIUMBLOB", "LONGBLOB", "BYTEA", "BIT":
+		return true
+	default:
+		return false
 	}
 }
 

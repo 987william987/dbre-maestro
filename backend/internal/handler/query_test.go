@@ -313,6 +313,44 @@ func TestExecuteSQLQueryReturnsDisplayCellsAsStringsOrNull(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLQueryFormatsMySQLBinaryColumnsAsHex(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("SET SESSION max_execution_time = 25000").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT binary_values").
+		WillReturnRows(mock.NewRowsWithColumnDefinition(
+			mock.NewColumn("stark_key").OfType("BINARY", []byte{}),
+			mock.NewColumn("verify_calldata").OfType("MEDIUMBLOB", []byte{}),
+			mock.NewColumn("label").OfType("VARCHAR", ""),
+		).AddRow([]byte{0x00, 0xff, 0x10}, []byte{0xab, 0xcd, 0xef}, []byte("plain text")))
+
+	result, err := executeSQLQuery(
+		context.Background(),
+		&model.DBConnection{DBType: "mysql"},
+		db,
+		"SELECT binary_values",
+		queryExecutionContext{},
+		defaultSQLEditorTimeoutSettings(),
+		sqlQueryExecutionOptions{},
+	)
+	if err != nil {
+		t.Fatalf("executeSQLQuery() error = %v", err)
+	}
+	want := []any{"0x00ff10", "0xabcdef", "plain text"}
+	for i := range want {
+		if result.Rows[0][i] != want[i] {
+			t.Fatalf("row[%d] = %#v, want %#v", i, result.Rows[0][i], want[i])
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
 func TestQueryResultCellValuePreservesPostgresNumericPrecision(t *testing.T) {
 	numericInt, ok := big.NewInt(0).SetString("12345678901234567890123456789", 10)
 	if !ok {
@@ -698,6 +736,32 @@ func TestCollectPostgresQueryResultPreservesUnsafeIntegersAsStrings(t *testing.T
 	}
 	if got := result.Rows[0][0]; got != "704428864692027651" {
 		t.Fatalf("unsafe integer row value = %#v, want exact string", got)
+	}
+}
+
+func TestCollectPostgresQueryResultFormatsByteaAsHex(t *testing.T) {
+	rows := &fakePGXRows{
+		fields: []pgconn.FieldDescription{{
+			Name:        "payload",
+			DataTypeOID: 17,
+		}},
+		values: [][]any{{[]byte{0xde, 0xad, 0xbe, 0xef}}},
+	}
+
+	result, err := collectPostgresQueryResult(
+		context.Background(),
+		rows,
+		&model.DBConnection{DBType: "postgres"},
+		queryExecutionContext{DatabaseName: "postgres"},
+		func(_ context.Context, fields []pgconn.FieldDescription) ([]masking.ColumnOrigin, error) {
+			return make([]masking.ColumnOrigin, len(fields)), nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("collectPostgresQueryResult() error = %v", err)
+	}
+	if got := result.Rows[0][0]; got != "0xdeadbeef" {
+		t.Fatalf("bytea row value = %#v, want hex", got)
 	}
 }
 
