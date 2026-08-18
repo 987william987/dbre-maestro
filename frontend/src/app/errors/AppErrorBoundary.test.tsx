@@ -9,6 +9,12 @@ function BoomOnRender(): never {
   throw new Error('NotFoundError: Failed to execute \'insertBefore\' on \'Node\'')
 }
 
+function errorWithStack(message: string, stack: string) {
+  const error = new Error(message)
+  error.stack = stack
+  return error
+}
+
 function mockLocationReload() {
   const originalLocation = window.location
   const reload = vi.fn()
@@ -181,6 +187,80 @@ describe('GlobalErrorBoundary — proactive version-mismatch reload', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('外掛注入的 inpage.js / 外部 URL 錯誤不會切成初始化失敗畫面', async () => {
+    const { GlobalErrorBoundary } = await loadFreshModule()
+    const fetchMock = mockFetchReturning(UNCHANGED_MARKUP_TEXT)
+    vi.stubGlobal('fetch', fetchMock)
+    const { reload, restore } = mockLocationReload()
+    restoreLocation = restore
+
+    render(<GlobalErrorBoundary><div>app remains usable</div></GlobalErrorBoundary>)
+    window.dispatchEvent(new ErrorEvent('error', {
+      error: errorWithStack(
+        'func sseError not found',
+        [
+          'Error: func sseError not found',
+          '    at Object.<anonymous> (inpage.js:252:19758)',
+          '    at https://wallet.binance.com/tonbridge/bridge/events?client_id=abc:1:1',
+        ].join('\n'),
+      ),
+      filename: 'inpage.js',
+      message: 'func sseError not found',
+    }))
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('app remains usable')).toBeInTheDocument()
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+    expect(screen.queryByText('Frontend initialization failed')).not.toBeInTheDocument()
+  })
+
+  it('同 origin asset 的 window error 仍會照原本邏輯顯示初始化失敗', async () => {
+    const { GlobalErrorBoundary } = await loadFreshModule()
+    const fetchMock = mockFetchReturning(UNCHANGED_MARKUP_TEXT)
+    vi.stubGlobal('fetch', fetchMock)
+    const { reload, restore } = mockLocationReload()
+    restoreLocation = restore
+
+    render(<GlobalErrorBoundary><div>ok</div></GlobalErrorBoundary>)
+    window.dispatchEvent(new ErrorEvent('error', {
+      error: errorWithStack(
+        'own bundle crashed',
+        'Error: own bundle crashed\n    at run (http://localhost:3000/assets/index-AAA.js:1:1)',
+      ),
+      filename: 'http://localhost:3000/assets/index-AAA.js',
+      message: 'own bundle crashed',
+    }))
+
+    await screen.findByText('Frontend initialization failed')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('沒有來源資訊的 unhandled rejection 不會覆蓋目前頁面', async () => {
+    const { GlobalErrorBoundary } = await loadFreshModule()
+    const fetchMock = mockFetchReturning(UNCHANGED_MARKUP_TEXT)
+    vi.stubGlobal('fetch', fetchMock)
+    const { reload, restore } = mockLocationReload()
+    restoreLocation = restore
+
+    render(<GlobalErrorBoundary><div>still here</div></GlobalErrorBoundary>)
+    const error = new Error('transient external failure')
+    error.stack = ''
+    window.dispatchEvent(new PromiseRejectionEvent('unhandledrejection', {
+      promise: Promise.resolve(),
+      reason: error,
+    }))
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('still here')).toBeInTheDocument()
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+    expect(screen.queryByText('Frontend initialization failed')).not.toBeInTheDocument()
   })
 
   it('分頁從背景切回前景時，立即檢查一次版本並 reload', async () => {

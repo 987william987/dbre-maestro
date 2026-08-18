@@ -70,6 +70,49 @@ function isDynamicImportLoadError(error: Error) {
   return /failed to fetch dynamically imported module|loading chunk|importing a module script failed/i.test(error.message)
 }
 
+function isCurrentOriginURL(rawURL: string) {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  if (!/^https?:\/\//i.test(rawURL) && !rawURL.startsWith('/')) {
+    return false
+  }
+
+  try {
+    return new URL(rawURL, window.location.href).origin === window.location.origin
+  } catch {
+    return false
+  }
+}
+
+function extractSourceURLs(sourceText: string) {
+  return Array.from(sourceText.matchAll(/\b(?:https?:\/\/|chrome-extension:\/\/|moz-extension:\/\/|safari-web-extension:\/\/|ms-browser-extension:\/\/)[^\s)"']+/gi))
+    .map((match) => match[0])
+}
+
+function shouldHandleWindowLevelError(error: Error, eventSource = '') {
+  const sourceText = [eventSource, error.stack ?? ''].filter(Boolean).join('\n')
+  if (!sourceText.trim()) {
+    return false
+  }
+  if (/\b(?:chrome-extension|moz-extension|safari-web-extension|ms-browser-extension):\/\//i.test(sourceText)) {
+    return false
+  }
+  if (eventSource && isCurrentOriginURL(eventSource)) {
+    return true
+  }
+
+  const urls = extractSourceURLs(sourceText)
+  if (urls.some((url) => isCurrentOriginURL(url))) {
+    return true
+  }
+  if (urls.length > 0) {
+    return false
+  }
+
+  return false
+}
+
 function maybeReloadForDynamicImportError(error: Error) {
   if (!isDynamicImportLoadError(error)) {
     return false
@@ -246,6 +289,9 @@ export class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, Glo
     if (maybeReloadForDynamicImportError(error)) {
       return
     }
+    if (!shouldHandleWindowLevelError(error, event.filename)) {
+      return
+    }
     void maybeReloadForVersionMismatch('window-error', error).then((reloading) => {
       if (!reloading) {
         this.setState({ error })
@@ -256,6 +302,9 @@ export class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, Glo
   private handleRejectionEvent = (event: PromiseRejectionEvent) => {
     const error = formatUnknownError(event.reason)
     if (maybeReloadForDynamicImportError(error)) {
+      return
+    }
+    if (!shouldHandleWindowLevelError(error)) {
       return
     }
     void maybeReloadForVersionMismatch('unhandled-rejection', error).then((reloading) => {
