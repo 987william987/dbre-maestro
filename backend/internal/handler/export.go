@@ -784,7 +784,7 @@ func (h *ExportHandler) downloadExportRequest(w http.ResponseWriter, r *http.Req
 	}
 
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="export-%d.csv"`, req.ID))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, exportDownloadFilename(req, ticket)))
 
 	cw := csv.NewWriter(w)
 	_ = cw.Write(result.Columns)
@@ -819,6 +819,18 @@ func (h *ExportHandler) downloadExportRequest(w http.ResponseWriter, r *http.Req
 		Details:      details,
 		IPAddress:    clientIP(r),
 	})
+}
+
+func exportDownloadFilename(req *model.ExportRequest, ticket *model.Ticket) string {
+	if ticket != nil {
+		if ticketNo := strings.TrimSpace(ticket.TicketNo); ticketNo != "" {
+			return fmt.Sprintf("export-%s.csv", ticketNo)
+		}
+	}
+	if req != nil {
+		return fmt.Sprintf("export-%d.csv", req.ID)
+	}
+	return "export.csv"
 }
 
 func (h *ExportHandler) auditExportDownloadFailure(r *http.Request, userID uint64, req *model.ExportRequest, reason string) {
