@@ -472,7 +472,7 @@ func (h *TicketHandler) buildTicketNotificationBody(ctx context.Context, ticket 
 		parts = append(parts, fmt.Sprintf("提交者：%s", submitterName))
 	}
 	if ticket.DBConnectionID != nil && h.dbConns != nil {
-		conn, err := h.dbConns.GetByID(ctx, *ticket.DBConnectionID)
+		conn, err := h.dbConns.GetAnyByID(ctx, *ticket.DBConnectionID)
 		if err == nil && conn != nil {
 			parts = append(parts, fmt.Sprintf("數據庫實例：%s", conn.Name))
 		}
@@ -1145,7 +1145,7 @@ func (h *TicketHandler) ticketAuditDetails(ctx context.Context, ticket *model.Ti
 	if ticket.DBConnectionID != nil {
 		details["db_connection_id"] = *ticket.DBConnectionID
 		if h.dbConns != nil {
-			conn, err := h.dbConns.GetByID(ctx, *ticket.DBConnectionID)
+			conn, err := h.dbConns.GetAnyByID(ctx, *ticket.DBConnectionID)
 			if err == nil && conn != nil {
 				addAuditConnectionDetails(details, conn)
 			}
@@ -2063,7 +2063,7 @@ func (h *TicketHandler) buildTicketResponse(ctx context.Context, ticket *model.T
 	response := ticketResponse{Ticket: *ticket}
 
 	if ticket.DBConnectionID != nil {
-		conn, err := h.dbConns.GetByID(ctx, *ticket.DBConnectionID)
+		conn, err := h.dbConns.GetAnyByID(ctx, *ticket.DBConnectionID)
 		if err != nil {
 			return ticketResponse{}, fmt.Errorf("load db connection %d: %w", *ticket.DBConnectionID, err)
 		}
@@ -3776,7 +3776,7 @@ func (h *TicketHandler) mustListQueryAccessItems(ctx context.Context, ticketID u
 		connectionID := items[i].ConnectionID
 		if _, ok := connectionNames[connectionID]; !ok {
 			connectionNames[connectionID] = nil
-			conn, err := h.dbConns.GetByID(ctx, connectionID)
+			conn, err := h.dbConns.GetAnyByID(ctx, connectionID)
 			if err == nil && conn != nil {
 				name := conn.Name
 				connectionNames[connectionID] = &name

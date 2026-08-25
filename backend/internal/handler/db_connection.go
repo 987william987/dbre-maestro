@@ -2,7 +2,10 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -831,22 +834,60 @@ func (h *DBConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pool.Global().Invalidate(id)
-	pool.RedisGlobal().Invalidate(id)
-
-	if err := h.repo.Delete(r.Context(), id); err != nil {
-		jsonErr(w, http.StatusInternalServerError, "delete failed")
+	conn, err := h.repo.GetByID(r.Context(), id)
+	if err != nil {
+		slog.Warn("load db connection before delete failed", "connection_id", id, "err", err)
+		jsonErr(w, http.StatusInternalServerError, "load connection failed")
+		return
+	}
+	if conn == nil {
+		jsonErr(w, http.StatusNotFound, "connection not found")
 		return
 	}
 
 	userID := middleware.UserIDFromCtx(r.Context())
+	if err := h.repo.Delete(r.Context(), id, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			jsonErr(w, http.StatusNotFound, "connection not found")
+			return
+		}
+		slog.Warn("delete db connection failed", "connection_id", id, "err", err)
+		jsonErr(w, http.StatusInternalServerError, "delete failed")
+		return
+	}
+
+	pool.Global().Invalidate(id)
+	pool.RedisGlobal().Invalidate(id)
+
+	details := auditConnectionDetails(conn)
+	details["action"] = "delete"
+	details["cleaned_dependency_types"] = []string{
+		"credentials",
+		"direct_user_db_scope",
+		"auth_group_db_scope",
+		"metadata_object_snapshots",
+		"rollback_artifacts",
+		"masking_whitelist",
+		"masking_rules",
+		"redis_sensitive_key_prefixes",
+		"query_access_rules",
+		"query_access_grants",
+		"scheduled_sql_reports",
+		"metadata_scan_settings",
+	}
+	details["retained_history_types"] = []string{
+		"tickets",
+		"audit_logs",
+		"query_history",
+		"saved_queries",
+	}
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
 		ActionType:   "setting_change",
 		ResourceType: "db_connection",
 		ResourceID:   &id,
-		Details:      map[string]string{"action": "delete"},
+		Details:      details,
 	})
 
 	w.WriteHeader(http.StatusNoContent)

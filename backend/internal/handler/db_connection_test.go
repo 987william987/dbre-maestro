@@ -40,8 +40,10 @@ func dbConnectionRows(databaseName any) *sqlmock.Rows {
 		"created_by",
 		"created_at",
 		"updated_at",
+		"deleted_at",
+		"deleted_by",
 	}).
-		AddRow(5, "analytics", "mysql", "db.internal", 3306, "db.internal", 3306, "db-write.internal", 3307, databaseName, "readonly", []byte("cipher"), 1, "prefer", nil, nil, nil, nil, 1, now, now)
+		AddRow(5, "analytics", "mysql", "db.internal", 3306, "db.internal", 3306, "db-write.internal", 3307, databaseName, "readonly", []byte("cipher"), 1, "prefer", nil, nil, nil, nil, 1, now, now, nil, nil)
 }
 
 func TestDBConnectionHandlerPatchAllowsClearingDatabaseName(t *testing.T) {

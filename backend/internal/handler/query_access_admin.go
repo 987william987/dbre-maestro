@@ -213,7 +213,7 @@ func (h *QueryAccessAdminHandler) queryAccessRuleAuditDetails(ctx context.Contex
 		details["subject_name"] = name
 	}
 	if h.dbConns != nil {
-		conn, err := h.dbConns.GetByID(ctx, rule.ConnectionID)
+		conn, err := h.dbConns.GetAnyByID(ctx, rule.ConnectionID)
 		if err == nil && conn != nil {
 			addAuditConnectionDetails(details, conn)
 		}

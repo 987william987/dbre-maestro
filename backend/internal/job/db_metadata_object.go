@@ -374,14 +374,7 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 		}
 
 		queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		rows, err := targetDB.QueryContext(queryCtx, `SELECT
-			schemaname,
-			relname,
-			COALESCE(n_live_tup, 0) AS row_count,
-			pg_relation_size(format('%I.%I', schemaname, relname)::regclass) AS data_size_bytes,
-			pg_indexes_size(format('%I.%I', schemaname, relname)::regclass) AS index_size_bytes
-		FROM pg_stat_user_tables
-		ORDER BY schemaname, relname`)
+		rows, err := targetDB.QueryContext(queryCtx, postgresObjectSnapshotQuery())
 		if err != nil {
 			cancel()
 			_ = targetDB.Close()
@@ -431,6 +424,71 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 	}
 
 	return items, nil
+}
+
+func postgresObjectSnapshotQuery() string {
+	return `WITH RECURSIVE partition_tree AS (
+		SELECT
+			c.oid AS parent_oid,
+			c.oid AS relation_oid
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname NOT IN ('information_schema', 'pg_catalog')
+		  AND c.relkind = 'p'
+		UNION ALL
+		SELECT
+			tree.parent_oid,
+			child.oid
+		FROM partition_tree tree
+		JOIN pg_inherits inh ON inh.inhparent = tree.relation_oid
+		JOIN pg_class child ON child.oid = inh.inhrelid
+		JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+		WHERE child_ns.nspname NOT IN ('information_schema', 'pg_catalog')
+		  AND child.relkind IN ('r', 'p')
+	),
+	partition_stats AS (
+		SELECT
+			parent_oid,
+			COALESCE(SUM(CASE WHEN child.relkind = 'r' THEN GREATEST(child.reltuples, 0) ELSE 0 END), 0)::bigint AS row_count,
+			COALESCE(SUM(CASE WHEN child.relkind = 'r' THEN pg_relation_size(child.oid) ELSE 0 END), 0)::bigint AS data_size_bytes,
+			COALESCE(SUM(CASE WHEN child.relkind = 'r' THEN pg_indexes_size(child.oid) ELSE 0 END), 0)::bigint AS index_size_bytes
+		FROM partition_tree tree
+		JOIN pg_class child ON child.oid = tree.relation_oid
+		GROUP BY parent_oid
+	),
+	partition_members AS (
+		SELECT DISTINCT
+			parent_oid,
+			relation_oid
+		FROM partition_tree
+		WHERE relation_oid <> parent_oid
+	)
+	SELECT
+		n.nspname AS schemaname,
+		c.relname AS relname,
+		CASE
+			WHEN c.relkind = 'p' THEN COALESCE(stats.row_count, 0)
+			ELSE COALESCE(GREATEST(c.reltuples, 0), 0)::bigint
+		END AS row_count,
+		CASE
+			WHEN c.relkind = 'p' THEN COALESCE(stats.data_size_bytes, 0)
+			ELSE pg_relation_size(c.oid)
+		END AS data_size_bytes,
+		CASE
+			WHEN c.relkind = 'p' THEN COALESCE(stats.index_size_bytes, 0)
+			ELSE pg_indexes_size(c.oid)
+		END AS index_size_bytes
+	FROM pg_class c
+	JOIN pg_namespace n ON n.oid = c.relnamespace
+	LEFT JOIN partition_stats stats ON stats.parent_oid = c.oid
+	WHERE n.nspname NOT IN ('information_schema', 'pg_catalog')
+	  AND c.relkind IN ('r', 'p')
+	  AND NOT EXISTS (
+		SELECT 1
+		FROM partition_members member
+		WHERE member.relation_oid = c.oid
+	  )
+	ORDER BY n.nspname, c.relname`
 }
 
 func (j *DBMetadataObjectJob) resolveInventoryNames(ctx context.Context, conn *model.DBConnection) (*string, *string, error) {

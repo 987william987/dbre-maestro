@@ -699,7 +699,7 @@ export function DBConnectionsPage() {
       <ConfirmDialog
         open={pendingDeleteId !== null}
         title="Delete Database Connection"
-        description="Delete this database connection? Tickets, SQL Editor, and export flows will no longer be able to reference it."
+        description={<DeleteConnectionDescription />}
         confirmLabel="Confirm Delete"
         tone="danger"
         loading={pendingDeleteId !== null && deletingId === pendingDeleteId}
@@ -710,6 +710,22 @@ export function DBConnectionsPage() {
           }
         }}
       />
+    </div>
+  )
+}
+
+function DeleteConnectionDescription() {
+  return (
+    <div className="space-y-3">
+      <p>Delete this database connection? New tickets, SQL Editor, exports, metadata scan, masking, query access, scheduled reports, and rollback generation will no longer be able to use it.</p>
+      <div>
+        <p className="font-semibold text-ink">Cleaned dependencies</p>
+        <p className="mt-1">Credentials, user and group DB scope, metadata snapshots, rollback artifacts, masking config, query access rules, scheduled reports, and metadata scan settings.</p>
+      </div>
+      <div>
+        <p className="font-semibold text-ink">Retained history</p>
+        <p className="mt-1">Tickets, audit logs, SQL Editor history, and saved queries remain visible for traceability.</p>
+      </div>
     </div>
   )
 }
