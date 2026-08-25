@@ -143,6 +143,7 @@ func cleanupDBConnectionReferences(ctx context.Context, tx *sqlx.Tx, connectionI
 		{query: `DELETE FROM user_db_connections WHERE db_connection_id = ?`, args: []any{connectionID}, label: "user db connection grants"},
 		{query: `DELETE FROM auth_group_db_connections WHERE db_connection_id = ?`, args: []any{connectionID}, label: "auth group db connection grants"},
 		{query: `DELETE FROM db_object_snapshots WHERE db_connection_id = ?`, args: []any{connectionID}, label: "db object snapshots"},
+		{query: `DELETE FROM ticket_execution_rollbacks WHERE source_connection_id = ?`, args: []any{connectionID}, label: "ticket execution rollbacks"},
 		{query: `DELETE FROM masking_whitelist WHERE db_connection_id = ?`, args: []any{connectionID}, label: "masking whitelist"},
 		{query: `DELETE FROM masking_rules WHERE db_connection_id = ?`, args: []any{connectionID}, label: "masking rules"},
 		{query: `DELETE FROM redis_sensitive_key_prefixes WHERE db_connection_id = ?`, args: []any{connectionID}, label: "redis sensitive key prefixes"},

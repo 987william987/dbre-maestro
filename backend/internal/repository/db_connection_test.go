@@ -31,6 +31,7 @@ func TestDBConnectionRepoDeleteCleansConfigurationReferences(t *testing.T) {
 		`DELETE FROM user_db_connections WHERE db_connection_id = ?`,
 		`DELETE FROM auth_group_db_connections WHERE db_connection_id = ?`,
 		`DELETE FROM db_object_snapshots WHERE db_connection_id = ?`,
+		`DELETE FROM ticket_execution_rollbacks WHERE source_connection_id = ?`,
 		`DELETE FROM masking_whitelist WHERE db_connection_id = ?`,
 		`DELETE FROM masking_rules WHERE db_connection_id = ?`,
 		`DELETE FROM redis_sensitive_key_prefixes WHERE db_connection_id = ?`,
