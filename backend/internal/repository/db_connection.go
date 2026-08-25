@@ -78,8 +78,20 @@ func (r *DBConnectionRepo) Create(ctx context.Context, c *model.DBConnection, pl
 }
 
 func (r *DBConnectionRepo) GetByID(ctx context.Context, id uint64) (*model.DBConnection, error) {
+	return r.getByID(ctx, id, false)
+}
+
+func (r *DBConnectionRepo) GetAnyByID(ctx context.Context, id uint64) (*model.DBConnection, error) {
+	return r.getByID(ctx, id, true)
+}
+
+func (r *DBConnectionRepo) getByID(ctx context.Context, id uint64, includeDeleted bool) (*model.DBConnection, error) {
 	var c model.DBConnection
-	err := r.db.GetContext(ctx, &c, `SELECT * FROM db_connections WHERE id = ?`, id)
+	query := `SELECT * FROM db_connections WHERE id = ?`
+	if !includeDeleted {
+		query += ` AND deleted_at IS NULL`
+	}
+	err := r.db.GetContext(ctx, &c, query, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -94,7 +106,7 @@ func (r *DBConnectionRepo) GetByID(ctx context.Context, id uint64) (*model.DBCon
 
 func (r *DBConnectionRepo) List(ctx context.Context) ([]model.DBConnection, error) {
 	var conns []model.DBConnection
-	err := r.db.SelectContext(ctx, &conns, `SELECT * FROM db_connections ORDER BY name`)
+	err := r.db.SelectContext(ctx, &conns, `SELECT * FROM db_connections WHERE deleted_at IS NULL ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +116,7 @@ func (r *DBConnectionRepo) List(ctx context.Context) ([]model.DBConnection, erro
 	return conns, nil
 }
 
-func (r *DBConnectionRepo) Delete(ctx context.Context, id uint64) error {
+func (r *DBConnectionRepo) Delete(ctx context.Context, id uint64, deletedBy uint64) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin delete db_connection tx: %w", err)
@@ -118,8 +130,17 @@ func (r *DBConnectionRepo) Delete(ctx context.Context, id uint64) error {
 	if err := cleanupDBConnectionReferences(ctx, tx, id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM db_connections WHERE id = ?`, id); err != nil {
-		return fmt.Errorf("delete db_connection: %w", err)
+	now := timeutil.NowUTC()
+	res, err := tx.ExecContext(ctx, `UPDATE db_connections SET deleted_at = ?, deleted_by = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`, now, deletedBy, now, id)
+	if err != nil {
+		return fmt.Errorf("soft delete db_connection: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check soft delete db_connection result: %w", err)
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delete db_connection tx: %w", err)

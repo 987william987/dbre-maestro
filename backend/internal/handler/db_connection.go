@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -838,8 +840,17 @@ func (h *DBConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "load connection failed")
 		return
 	}
+	if conn == nil {
+		jsonErr(w, http.StatusNotFound, "connection not found")
+		return
+	}
 
-	if err := h.repo.Delete(r.Context(), id); err != nil {
+	userID := middleware.UserIDFromCtx(r.Context())
+	if err := h.repo.Delete(r.Context(), id, userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			jsonErr(w, http.StatusNotFound, "connection not found")
+			return
+		}
 		slog.Warn("delete db connection failed", "connection_id", id, "err", err)
 		jsonErr(w, http.StatusInternalServerError, "delete failed")
 		return
@@ -848,7 +859,6 @@ func (h *DBConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	pool.Global().Invalidate(id)
 	pool.RedisGlobal().Invalidate(id)
 
-	userID := middleware.UserIDFromCtx(r.Context())
 	details := auditConnectionDetails(conn)
 	details["action"] = "delete"
 	details["cleaned_dependency_types"] = []string{

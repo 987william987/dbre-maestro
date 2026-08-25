@@ -47,12 +47,12 @@ func TestDBConnectionRepoDeleteCleansConfigurationReferences(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE workflow_rules SET db_connection_id = NULL, updated_at = ? WHERE db_connection_id = ?`)).
 		WithArgs(sqlmock.AnyArg(), uint64(10)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM db_connections WHERE id = ?`)).
-		WithArgs(uint64(10)).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE db_connections SET deleted_at = ?, deleted_by = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`)).
+		WithArgs(sqlmock.AnyArg(), uint64(99), sqlmock.AnyArg(), uint64(10)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	if err := repo.Delete(context.Background(), 10); err != nil {
+	if err := repo.Delete(context.Background(), 10, 99); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
