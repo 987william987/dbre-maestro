@@ -20,6 +20,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/job"
 	"github.com/dbre-maestro/maestro/internal/masking"
 	"github.com/dbre-maestro/maestro/internal/middleware"
+	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/netguard"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/pool"
@@ -729,7 +730,7 @@ func runScheduler(tickets *repository.TicketRepo, dbConns *repository.DBConnecti
 			if t.ExecutorID != nil {
 				executorID = *t.ExecutorID
 			}
-			ok, err := tickets.StartExecution(context.Background(), t.ID, executorID)
+			ok, err := tickets.StartExecution(context.Background(), t.ID, executorID, model.TicketExecutionRunModeBatch)
 			if err != nil || !ok {
 				continue // already taken or error
 			}

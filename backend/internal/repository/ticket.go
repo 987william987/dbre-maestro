@@ -1020,15 +1020,41 @@ func (r *TicketRepo) ListActiveSensitiveAccessScopes(ctx context.Context, userID
 }
 
 // T9: OCC — atomically transition to executing, returns false if already taken
-func (r *TicketRepo) StartExecution(ctx context.Context, id, executorID uint64) (bool, error) {
+func (r *TicketRepo) StartExecution(ctx context.Context, id, executorID uint64, runMode string) (bool, error) {
 	now := timeutil.NowUTC()
+	runMode = strings.TrimSpace(runMode)
+	if runMode == "" {
+		runMode = model.TicketExecutionRunModeBatch
+	}
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE tickets SET status = 'executing', executor_id = ?, execution_requested_at = COALESCE(execution_requested_at, ?), started_at = ?, updated_at = ?
+		`UPDATE tickets SET status = 'executing', executor_id = ?, execution_requested_at = COALESCE(execution_requested_at, ?), execution_run_mode = ?, started_at = ?, updated_at = ?
          WHERE id = ? AND status = 'pending_execution'`,
-		executorID, now, now, now, id,
+		executorID, now, runMode, now, now, id,
 	)
 	if err != nil {
 		return false, fmt.Errorf("start execution OCC: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+func (r *TicketRepo) ClaimManualStatementExecution(ctx context.Context, ticketID uint64, executorID uint64) (bool, error) {
+	now := timeutil.NowUTC()
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE tickets
+		 SET status = CASE WHEN status = 'pending_execution' THEN 'executing' ELSE status END,
+		     executor_id = COALESCE(executor_id, ?),
+		     execution_requested_at = COALESCE(execution_requested_at, ?),
+		     execution_run_mode = CASE WHEN execution_run_mode IS NULL OR execution_run_mode = '' THEN ? ELSE execution_run_mode END,
+		     started_at = COALESCE(started_at, ?),
+		     updated_at = ?
+		 WHERE id = ?
+		   AND status IN ('pending_execution', 'executing')
+		   AND (execution_run_mode IS NULL OR execution_run_mode = '' OR execution_run_mode = ?)`,
+		executorID, now, model.TicketExecutionRunModeManualStatement, now, now, ticketID, model.TicketExecutionRunModeManualStatement,
+	)
+	if err != nil {
+		return false, fmt.Errorf("claim manual statement execution: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
@@ -1108,10 +1134,11 @@ func (r *TicketRepo) MarkTicketExecuting(ctx context.Context, ticketID uint64, e
 		 SET status = CASE WHEN status = 'pending_execution' THEN 'executing' ELSE status END,
 		     executor_id = COALESCE(executor_id, ?),
 		     execution_requested_at = COALESCE(execution_requested_at, ?),
+		     execution_run_mode = CASE WHEN execution_run_mode IS NULL OR execution_run_mode = '' THEN ? ELSE execution_run_mode END,
 		     started_at = COALESCE(started_at, ?),
 		     updated_at = ?
 		 WHERE id = ? AND status IN ('pending_execution', 'executing')`,
-		executorID, now, now, now, ticketID,
+		executorID, now, model.TicketExecutionRunModeManualStatement, now, now, ticketID,
 	)
 	return err
 }

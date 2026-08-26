@@ -2320,13 +2320,15 @@ func (h *TicketHandler) startWorkflowAutoExecution(ctx context.Context, ticket *
 	if ticket == nil || h.tickets == nil {
 		return nil
 	}
-	ok, err := h.tickets.StartExecution(ctx, ticket.ID, 0)
+	ok, err := h.tickets.StartExecution(ctx, ticket.ID, 0, model.TicketExecutionRunModeWorkflowAuto)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return fmt.Errorf("ticket already taken by another executor")
 	}
+	mode := model.TicketExecutionRunModeWorkflowAuto
+	ticket.ExecutionRunMode = &mode
 	details := map[string]any{
 		"automated":          true,
 		"workflow_rule_name": resolution.RuleName,
@@ -2632,7 +2634,7 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// T9: OCC — WHERE status='pending_execution', returns 409 if 0 rows affected
-	ok, err := h.tickets.StartExecution(r.Context(), id, userID)
+	ok, err := h.tickets.StartExecution(r.Context(), id, userID, model.TicketExecutionRunModeBatch)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "execution start failed")
 		return
@@ -2641,6 +2643,8 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "ticket already taken by another executor")
 		return
 	}
+	mode := model.TicketExecutionRunModeBatch
+	ticket.ExecutionRunMode = &mode
 
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
@@ -2699,6 +2703,10 @@ func (h *TicketHandler) ExecuteStatement(w http.ResponseWriter, r *http.Request)
 		h.forbidTicketAccess(w, r, ticket, "execute_statement", "not_executor")
 		return
 	}
+	if isFullTicketExecutionRunMode(ticket.ExecutionRunMode) {
+		jsonErr(w, http.StatusConflict, "ticket is already running by full execution")
+		return
+	}
 	if err := h.ensureTicketExecutionRows(r.Context(), ticket); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "prepare statement executions failed")
 		return
@@ -2716,6 +2724,17 @@ func (h *TicketHandler) ExecuteStatement(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusConflict, "statement is not pending")
 		return
 	}
+	ok, err := h.tickets.ClaimManualStatementExecution(r.Context(), ticket.ID, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "statement execution start failed")
+		return
+	}
+	if !ok {
+		jsonErr(w, http.StatusConflict, "ticket is already running by full execution")
+		return
+	}
+	mode := model.TicketExecutionRunModeManualStatement
+	ticket.ExecutionRunMode = &mode
 
 	go h.runTicketStatementExecutionSafely(ticket, *execRow, userID, true)
 	updated, _ := h.tickets.GetByID(r.Context(), ticket.ID)
@@ -2905,6 +2924,18 @@ func ticketExecutionActorID(executorID uint64, opts ticketExecutionRunOptions) *
 		return nil
 	}
 	return &executorID
+}
+
+func isFullTicketExecutionRunMode(runMode *string) bool {
+	if runMode == nil {
+		return false
+	}
+	switch strings.TrimSpace(*runMode) {
+	case model.TicketExecutionRunModeBatch, model.TicketExecutionRunModeWorkflowAuto:
+		return true
+	default:
+		return false
+	}
 }
 
 func ticketExecutionQueryID(executionID uint64) string {

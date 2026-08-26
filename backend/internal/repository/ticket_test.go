@@ -338,6 +338,66 @@ func TestTicketSetExecutorIfEmptyDoesNotOverwriteExistingExecutor(t *testing.T) 
 	}
 }
 
+func TestTicketStartExecutionStoresRunMode(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = 'executing', executor_id = ?, execution_requested_at = COALESCE(execution_requested_at, ?), execution_run_mode = ?, started_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'pending_execution'`)).
+		WithArgs(uint64(7), sqlmock.AnyArg(), model.TicketExecutionRunModeBatch, sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(12)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	ok, err := repo.StartExecution(context.Background(), 12, 7, model.TicketExecutionRunModeBatch)
+	if err != nil {
+		t.Fatalf("StartExecution() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("StartExecution() ok = false, want true")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
+func TestTicketClaimManualStatementExecutionRejectsFullTicketRunMode(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets
+		 SET status = CASE WHEN status = 'pending_execution' THEN 'executing' ELSE status END,
+		     executor_id = COALESCE(executor_id, ?),
+		     execution_requested_at = COALESCE(execution_requested_at, ?),
+		     execution_run_mode = CASE WHEN execution_run_mode IS NULL OR execution_run_mode = '' THEN ? ELSE execution_run_mode END,
+		     started_at = COALESCE(started_at, ?),
+		     updated_at = ?
+		 WHERE id = ?
+		   AND status IN ('pending_execution', 'executing')
+		   AND (execution_run_mode IS NULL OR execution_run_mode = '' OR execution_run_mode = ?)`)).
+		WithArgs(uint64(7), sqlmock.AnyArg(), model.TicketExecutionRunModeManualStatement, sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(12), model.TicketExecutionRunModeManualStatement).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	ok, err := repo.ClaimManualStatementExecution(context.Background(), 12, 7)
+	if err != nil {
+		t.Fatalf("ClaimManualStatementExecution() error = %v", err)
+	}
+	if ok {
+		t.Fatal("ClaimManualStatementExecution() ok = true, want false when full-ticket run mode already owns execution")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
 func TestTicketRecoverExecutingTicketsKeepsPartialManualTicketResumable(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

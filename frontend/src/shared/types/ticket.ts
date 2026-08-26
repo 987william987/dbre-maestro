@@ -19,6 +19,8 @@ export type TicketType = 'ddl' | 'dml'
   | 'sensitive_query_access'
   | 'query_access'
 
+export type TicketExecutionRunMode = 'batch' | 'workflow_auto' | 'manual_statement' | string
+
 export type QueryAccessScopeMode = 'database' | 'table'
 export type QueryAccessEffect = 'allow' | 'deny'
 
@@ -59,6 +61,7 @@ export type Ticket = {
   scheduled_at?: string | null
   started_at?: string | null
   completed_at?: string | null
+  execution_run_mode?: TicketExecutionRunMode | null
   approved_duration_minutes?: number | null
   approved_until?: string | null
   revoked_at?: string | null

@@ -621,6 +621,10 @@ function formatReviewTableSizes(tables: ReviewStatementTable[]) {
   return tables.map((table) => `${table.label}: ${formatReviewBytes(table.dataSizeBytes)}`).join('\n')
 }
 
+function isFullTicketExecutionRunMode(mode?: string | null) {
+  return mode === 'batch' || mode === 'workflow_auto'
+}
+
 function buildStatementResults(detail: TicketDetail) {
   const rows = new Map<number, StatementResultRow>()
   const hidePendingExecutionStatus = detail.ticket.status === 'rejected' || detail.ticket.status === 'withdrawn'
@@ -1401,7 +1405,7 @@ export function TicketDetailPage() {
                         const rowExpanded = expandedStatementSQLs.has(rowKey)
                         const rowExpandable = isExpandableSql(row.sql)
                         const rowActionBusy = actingExecutionID === row.executionID
-                        const rowCanExecute = Boolean(canExecute && (ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml') && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
+                        const rowCanExecute = Boolean(canExecute && !isFullTicketExecutionRunMode(ticket.execution_run_mode) && (ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml') && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
                         const rowCanStop = Boolean(canExecute && row.executionID && row.executionStatus === 'running')
                         return (
                           <DataTableRow
