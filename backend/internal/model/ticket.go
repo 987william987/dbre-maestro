@@ -23,6 +23,15 @@ const (
 	TicketStatusNeedsAdminAttention TicketStatus = "needs_admin_attention"
 )
 
+const (
+	TicketExecutionRunModeBatch           = "batch"
+	TicketExecutionRunModeWorkflowAuto    = "workflow_auto"
+	TicketExecutionRunModeManualStatement = "manual_statement"
+	TicketExecutionRunModeWholeTicket     = "whole_ticket"
+	TicketDMLExecutionModePerStatement    = "per_statement"
+	TicketDMLExecutionModeWholeTicket     = "whole_ticket"
+)
+
 type TicketType string
 
 const (
@@ -54,6 +63,8 @@ type Ticket struct {
 	ReviewRejectedAt        *time.Time   `db:"review_rejected_at" json:"review_rejected_at,omitempty"`
 	PendingExecutionAt      *time.Time   `db:"pending_execution_at" json:"pending_execution_at,omitempty"`
 	ExecutionRequestedAt    *time.Time   `db:"execution_requested_at" json:"execution_requested_at,omitempty"`
+	ExecutionRunMode        *string      `db:"execution_run_mode" json:"execution_run_mode,omitempty"`
+	DMLExecutionMode        *string      `db:"dml_execution_mode" json:"dml_execution_mode,omitempty"`
 	ExecutionRejectedAt     *time.Time   `db:"execution_rejected_at" json:"execution_rejected_at,omitempty"`
 	WithdrawnAt             *time.Time   `db:"withdrawn_at"     json:"withdrawn_at,omitempty"`
 	RejectionReason         *string      `db:"rejection_reason" json:"rejection_reason,omitempty"`

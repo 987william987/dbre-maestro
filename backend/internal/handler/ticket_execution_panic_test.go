@@ -135,6 +135,9 @@ func TestCancelActiveExecutionsForShutdownCancelsAndMarksExecutionFailed(t *test
 		 WHERE id = ?`)).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "service_shutdown", ticketExecutionOutcomeServiceShutdown, executionID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM tickets WHERE id = ?`)).
+		WithArgs(ticketID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "execution_run_mode"}).AddRow(ticketID, model.TicketExecutionRunModeBatch))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM ticket_executions WHERE ticket_id = ? ORDER BY seq`)).
 		WithArgs(ticketID).
 		WillReturnRows(sqlmock.NewRows([]string{
