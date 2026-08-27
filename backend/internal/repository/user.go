@@ -571,6 +571,7 @@ func (r *UserRepo) GetEffectiveDBConnectionIDs(ctx context.Context, userID uint6
 		if err := r.db.SelectContext(ctx, &allIDs, `
 			SELECT id
 			FROM db_connections
+			WHERE deleted_at IS NULL
 			ORDER BY id
 		`); err != nil {
 			return nil, err
@@ -583,15 +584,18 @@ func (r *UserRepo) GetEffectiveDBConnectionIDs(ctx context.Context, userID uint6
 		SELECT DISTINCT db_connection_id FROM (
 			SELECT udc.db_connection_id
 			FROM user_db_connections udc
+			INNER JOIN db_connections dc ON dc.id = udc.db_connection_id AND dc.deleted_at IS NULL
 			WHERE udc.user_id = ?
 			UNION
 			SELECT agdc.db_connection_id
 			FROM auth_group_db_connections agdc
+			INNER JOIN db_connections dc ON dc.id = agdc.db_connection_id AND dc.deleted_at IS NULL
 			INNER JOIN user_auth_groups uag ON uag.auth_group_id = agdc.auth_group_id
 			WHERE uag.user_id = ? AND (uag.expires_at IS NULL OR uag.expires_at > ?)
 			UNION
 			SELECT agdc.db_connection_id
 			FROM auth_group_db_connections agdc
+			INNER JOIN db_connections dc ON dc.id = agdc.db_connection_id AND dc.deleted_at IS NULL
 			INNER JOIN auth_groups ag ON ag.id = agdc.auth_group_id
 			INNER JOIN auth_group_memberships agm ON agm.auth_group = ag.group_key
 			WHERE agm.user_id = ? AND (agm.expires_at IS NULL OR agm.expires_at > ?)

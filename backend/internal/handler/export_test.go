@@ -142,3 +142,24 @@ func TestExportPendingReviewTitle(t *testing.T) {
 		t.Fatalf("exportPendingReviewTitle() = %q, want %q", got, want)
 	}
 }
+
+func TestExportDownloadFilenameUsesTicketNumber(t *testing.T) {
+	req := &model.ExportRequest{ID: 123}
+	ticket := &model.Ticket{TicketNo: "TK-20260825-120000000-ABCDEF"}
+
+	got := exportDownloadFilename(req, ticket)
+	want := "export-TK-20260825-120000000-ABCDEF.csv"
+	if got != want {
+		t.Fatalf("exportDownloadFilename() = %q, want %q", got, want)
+	}
+}
+
+func TestExportDownloadFilenameFallsBackToExportID(t *testing.T) {
+	req := &model.ExportRequest{ID: 123}
+
+	got := exportDownloadFilename(req, nil)
+	want := "export-123.csv"
+	if got != want {
+		t.Fatalf("exportDownloadFilename() = %q, want %q", got, want)
+	}
+}

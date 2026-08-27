@@ -56,7 +56,7 @@ func buildLarkTicketCard(
 		fields = append(fields, notification.CardField{Label: "提交者", Value: submitter})
 	}
 	if ticket.DBConnectionID != nil && dbConns != nil {
-		if conn, err := dbConns.GetByID(ctx, *ticket.DBConnectionID); err == nil && conn != nil {
+		if conn, err := dbConns.GetAnyByID(ctx, *ticket.DBConnectionID); err == nil && conn != nil {
 			fields = append(fields, notification.CardField{Label: "數據庫實例", Value: conn.Name})
 		}
 	}
@@ -117,7 +117,7 @@ func buildLarkTicketSummaryFields(
 		fields = append(fields, notification.CardField{Label: "提交者", Value: submitter})
 	}
 	if ticket.DBConnectionID != nil && dbConns != nil {
-		if conn, err := dbConns.GetByID(ctx, *ticket.DBConnectionID); err == nil && conn != nil {
+		if conn, err := dbConns.GetAnyByID(ctx, *ticket.DBConnectionID); err == nil && conn != nil {
 			fields = append(fields, notification.CardField{Label: "數據庫實例", Value: conn.Name})
 		}
 	}
@@ -335,7 +335,7 @@ func buildLarkTicketDetailCard(
 		fields = append(fields, notification.CardField{Label: "提交者", Value: submitter})
 	}
 	if ticket.DBConnectionID != nil && dbConns != nil {
-		if conn, err := dbConns.GetByID(ctx, *ticket.DBConnectionID); err == nil && conn != nil {
+		if conn, err := dbConns.GetAnyByID(ctx, *ticket.DBConnectionID); err == nil && conn != nil {
 			fields = append(fields, notification.CardField{Label: "數據庫實例", Value: conn.Name})
 		}
 	}

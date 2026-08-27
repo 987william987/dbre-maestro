@@ -27,6 +27,8 @@ type DBConnection struct {
 	CreatedBy            uint64                   `db:"created_by"             json:"created_by"`
 	CreatedAt            time.Time                `db:"created_at"             json:"created_at"`
 	UpdatedAt            time.Time                `db:"updated_at"             json:"updated_at"`
+	DeletedAt            *time.Time               `db:"deleted_at"             json:"deleted_at,omitempty"`
+	DeletedBy            *uint64                  `db:"deleted_by"             json:"deleted_by,omitempty"`
 	Credentials          []DBConnectionCredential `db:"-" json:"credentials,omitempty"`
 }
 

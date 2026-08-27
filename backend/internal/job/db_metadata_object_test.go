@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/dbre-maestro/maestro/internal/model"
@@ -70,5 +71,25 @@ func TestShouldSkipPostgresMetadataDatabase(t *testing.T) {
 	}
 	if shouldSkipPostgresMetadataDatabase("postgres") {
 		t.Fatal(`shouldSkipPostgresMetadataDatabase("postgres") = true, want false`)
+	}
+}
+
+func TestPostgresObjectSnapshotQueryUsesPgClassAndPartitionTree(t *testing.T) {
+	query := postgresObjectSnapshotQuery()
+	for _, expected := range []string{
+		"pg_class",
+		"pg_inherits",
+		"reltuples",
+		"relkind = 'p'",
+		"partition_members",
+		"pg_relation_size",
+		"pg_indexes_size",
+	} {
+		if !strings.Contains(query, expected) {
+			t.Fatalf("postgresObjectSnapshotQuery() missing %q", expected)
+		}
+	}
+	if strings.Contains(query, "pg_stat_user_tables") {
+		t.Fatal("postgresObjectSnapshotQuery() still uses pg_stat_user_tables")
 	}
 }
