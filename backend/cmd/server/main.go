@@ -730,7 +730,7 @@ func runScheduler(tickets *repository.TicketRepo, dbConns *repository.DBConnecti
 			if t.ExecutorID != nil {
 				executorID = *t.ExecutorID
 			}
-			ok, err := tickets.StartExecution(context.Background(), t.ID, executorID, model.TicketExecutionRunModeBatch)
+			ok, err := tickets.StartExecution(context.Background(), t.ID, executorID, model.TicketExecutionRunModeBatch, nil)
 			if err != nil || !ok {
 				continue // already taken or error
 			}

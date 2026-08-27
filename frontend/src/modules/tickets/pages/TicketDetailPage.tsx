@@ -7,7 +7,7 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
-import type { QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants, TicketWorkflowResolution, TicketWorkflowTrace } from '@/shared/types/ticket'
+import type { DMLExecutionMode, QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants, TicketWorkflowResolution, TicketWorkflowTrace } from '@/shared/types/ticket'
 import type { TicketStatus } from '@/shared/types/ticket'
 import type { CurrentUser } from '@/shared/types/auth'
 import type { AuditLog } from '@/shared/types/audit'
@@ -622,7 +622,11 @@ function formatReviewTableSizes(tables: ReviewStatementTable[]) {
 }
 
 function isFullTicketExecutionRunMode(mode?: string | null) {
-  return mode === 'batch' || mode === 'workflow_auto'
+  return mode === 'batch' || mode === 'workflow_auto' || mode === 'whole_ticket'
+}
+
+function isWholeTicketDMLExecutionMode(mode?: string | null) {
+  return mode === 'whole_ticket'
 }
 
 function buildStatementResults(detail: TicketDetail) {
@@ -931,6 +935,7 @@ export function TicketDetailPage() {
   const [debugTraceOpen, setDebugTraceOpen] = useState(false)
   const [statusTransitioning, setStatusTransitioning] = useState(false)
   const [expandedStatementSQLs, setExpandedStatementSQLs] = useState<Set<string>>(() => new Set())
+  const [executeMode, setExecuteMode] = useState<DMLExecutionMode>('per_statement')
   const previousStatusRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -1019,6 +1024,12 @@ export function TicketDetailPage() {
     setExpandedStatementSQLs(new Set())
   }, [detail?.ticket.id])
 
+  useEffect(() => {
+    if (confirmAction === 'execute') {
+      setExecuteMode('per_statement')
+    }
+  }, [confirmAction, detail?.ticket?.id])
+
   if (!user) {
     return null
   }
@@ -1073,6 +1084,12 @@ export function TicketDetailPage() {
   )
   const generatedRollbacks = detail?.execution_rollbacks.filter((item) => item.status === 'generated') ?? []
   const canCreateRollbackTicket = Boolean(ticket && generatedRollbacks.length > 0 && user.permissions.includes('tickets.apply'))
+  const showWholeTicketRollbackNotice = Boolean(
+    ticket &&
+    ticket.ticket_type === 'dml' &&
+    isWholeTicketDMLExecutionMode(ticket.dml_execution_mode) &&
+    ticket.status === 'failed',
+  )
 
   async function reloadTicket(_options?: { background?: boolean }) {
     if (!id) {
@@ -1352,6 +1369,13 @@ export function TicketDetailPage() {
               <div className="px-4 pb-4">
                 <div>
                   <p className="text-[12px] font-semibold text-faint">Statement Results</p>
+                  {showWholeTicketRollbackNotice ? (
+                    <div className="mt-2">
+                      <InlineAlert tone="warning" className="text-[12px]">
+                        This DML ticket was executed in whole-ticket mode and the transaction rolled back after a statement failed.
+                      </InlineAlert>
+                    </div>
+                  ) : null}
                   {expandableStatementKeys.length > 0 ? (
                     <button
                       type="button"
@@ -1405,7 +1429,7 @@ export function TicketDetailPage() {
                         const rowExpanded = expandedStatementSQLs.has(rowKey)
                         const rowExpandable = isExpandableSql(row.sql)
                         const rowActionBusy = actingExecutionID === row.executionID
-                        const rowCanExecute = Boolean(canExecute && !isFullTicketExecutionRunMode(ticket.execution_run_mode) && (ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml') && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
+                        const rowCanExecute = Boolean(canExecute && !isFullTicketExecutionRunMode(ticket.execution_run_mode) && !isWholeTicketDMLExecutionMode(ticket.dml_execution_mode) && (ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml') && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
                         const rowCanStop = Boolean(canExecute && row.executionID && row.executionStatus === 'running')
                         return (
                           <DataTableRow
@@ -1603,7 +1627,12 @@ export function TicketDetailPage() {
                             <button
                               type="button"
                               disabled={acting !== null || !canExecute}
-                              onClick={() => setConfirmAction('execute')}
+                              onClick={() => {
+                                if (ticket.ticket_type === 'dml') {
+                                  setExecuteMode('per_statement')
+                                }
+                                setConfirmAction('execute')
+                              }}
                               className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {acting === 'execute' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
@@ -1811,7 +1840,49 @@ export function TicketDetailPage() {
           confirmAction === 'withdraw'
             ? 'Withdraw this ticket now? Reviewers will no longer process it.'
             : confirmAction === 'execute'
-              ? 'Execute statements in submission order. Execution stops if any statement fails.'
+              ? (
+                  <div className="space-y-3">
+                    <p>
+                      {ticket?.ticket_type === 'dml'
+                        ? 'Execute DML statements in submission order.'
+                        : 'Execute statements in submission order. Execution stops if any statement fails.'}
+                    </p>
+                    {ticket?.ticket_type === 'dml' ? (
+                      <div className="space-y-2">
+                        <p className="text-[12px] font-semibold text-faint">DML execution mode</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setExecuteMode('per_statement')}
+                            className={cn(
+                              'inline-flex h-9 items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition',
+                              executeMode === 'per_statement'
+                                ? 'border-accent bg-accent/10 text-accent'
+                                : 'border-border bg-white text-ink hover:bg-panel-soft',
+                            )}
+                          >
+                            Per statement
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setExecuteMode('whole_ticket')}
+                            className={cn(
+                              'inline-flex h-9 items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition',
+                              executeMode === 'whole_ticket'
+                                ? 'border-accent bg-accent/10 text-accent'
+                                : 'border-border bg-white text-ink hover:bg-panel-soft',
+                            )}
+                          >
+                            Whole ticket
+                          </button>
+                        </div>
+                        <p className="text-[12px] text-muted">
+                          Per statement keeps the current behavior. Whole ticket runs all DML in one transaction and rolls back the whole ticket if any statement fails.
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                )
               : ticket?.ticket_type === 'query_access'
                 ? 'Revoke this query access ticket early? The granted query scope will be invalidated from the next query onwards.'
                 : 'Revoke this sensitive access ticket early? Access will be invalidated from the next query onwards.'
@@ -1831,7 +1902,7 @@ export function TicketDetailPage() {
             void runAction('withdraw', () => withdrawTicket(ticket.ticket_no, comment.trim())).finally(() => setConfirmAction(null))
           }
           if (confirmAction === 'execute') {
-            void runAction('execute', () => executeTicket(ticket.ticket_no, reason)).finally(() => setConfirmAction(null))
+            void runAction('execute', () => executeTicket(ticket.ticket_no, reason, ticket.ticket_type === 'dml' ? executeMode : undefined)).finally(() => setConfirmAction(null))
           }
           if (confirmAction === 'revoke') {
             void runAction('revoke', () => revokeTicket(ticket.ticket_no)).finally(() => setConfirmAction(null))

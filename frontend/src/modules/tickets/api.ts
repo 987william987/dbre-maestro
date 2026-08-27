@@ -1,6 +1,7 @@
 import { apiClient } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type {
+  DMLExecutionMode,
   QueryAccessScopeMode,
   QueryAccessEffect,
   QueryAccessTicketItem,
@@ -173,9 +174,10 @@ export async function withdrawTicket(ticketRef: string | number, reason?: string
   })
 }
 
-export async function executeTicket(ticketRef: string | number, comment?: string) {
+export async function executeTicket(ticketRef: string | number, comment?: string, dmlExecutionMode?: DMLExecutionMode) {
   return apiClient.post<Ticket>(`/tickets/${ticketRef}/execute`, {
     comment: comment?.trim() ? comment.trim() : null,
+    ...(dmlExecutionMode ? { dml_execution_mode: dmlExecutionMode } : {}),
   })
 }
 

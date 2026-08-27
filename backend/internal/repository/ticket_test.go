@@ -346,13 +346,14 @@ func TestTicketStartExecutionStoresRunMode(t *testing.T) {
 	defer db.Close()
 
 	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+	dmlExecutionMode := model.TicketDMLExecutionModeWholeTicket
 
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = 'executing', executor_id = ?, execution_requested_at = COALESCE(execution_requested_at, ?), execution_run_mode = ?, started_at = ?, updated_at = ?
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tickets SET status = 'executing', executor_id = ?, execution_requested_at = COALESCE(execution_requested_at, ?), execution_run_mode = ?, dml_execution_mode = COALESCE(?, dml_execution_mode), started_at = ?, updated_at = ?
          WHERE id = ? AND status = 'pending_execution'`)).
-		WithArgs(uint64(7), sqlmock.AnyArg(), model.TicketExecutionRunModeBatch, sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(12)).
+		WithArgs(uint64(7), sqlmock.AnyArg(), model.TicketExecutionRunModeBatch, model.TicketDMLExecutionModeWholeTicket, sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(12)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	ok, err := repo.StartExecution(context.Background(), 12, 7, model.TicketExecutionRunModeBatch)
+	ok, err := repo.StartExecution(context.Background(), 12, 7, model.TicketExecutionRunModeBatch, &dmlExecutionMode)
 	if err != nil {
 		t.Fatalf("StartExecution() error = %v", err)
 	}
@@ -412,6 +413,9 @@ func TestTicketRecoverExecutingTicketsKeepsPartialManualTicketResumable(t *testi
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM tickets WHERE status = ? FOR UPDATE`)).
 		WithArgs(model.TicketStatusExecuting).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(ticketID))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM tickets WHERE id = ? FOR UPDATE`)).
+		WithArgs(ticketID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "execution_run_mode"}).AddRow(ticketID, model.TicketExecutionRunModeManualStatement))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM ticket_executions WHERE ticket_id = ? ORDER BY seq`)).
 		WithArgs(ticketID).
 		WillReturnRows(ticketExecutionRows().
@@ -456,6 +460,9 @@ func TestTicketRecoverExecutingTicketsFailsRunningStatements(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM tickets WHERE status = ? FOR UPDATE`)).
 		WithArgs(model.TicketStatusExecuting).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(ticketID))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM tickets WHERE id = ? FOR UPDATE`)).
+		WithArgs(ticketID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "execution_run_mode"}).AddRow(ticketID, model.TicketExecutionRunModeBatch))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM ticket_executions WHERE ticket_id = ? ORDER BY seq`)).
 		WithArgs(ticketID).
 		WillReturnRows(ticketExecutionRows().
@@ -540,6 +547,108 @@ func TestPlatformExecutionRiskStatsScansSnakeCaseColumns(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
+func TestAggregateTicketStatusFromCountsRespectsExecutionRunMode(t *testing.T) {
+	t.Parallel()
+
+	manual := model.TicketExecutionRunModeManualStatement
+	batch := model.TicketExecutionRunModeBatch
+	workflowAuto := model.TicketExecutionRunModeWorkflowAuto
+	wholeTicket := model.TicketExecutionRunModeWholeTicket
+
+	cases := []struct {
+		name      string
+		total     int
+		pending   int
+		running   int
+		completed int
+		failed    int
+		runMode   *string
+		want      model.TicketStatus
+	}{
+		{
+			name:      "manual statement keeps executing when some statements are still pending",
+			total:     3,
+			pending:   1,
+			running:   0,
+			completed: 1,
+			failed:    1,
+			runMode:   &manual,
+			want:      model.TicketStatusExecuting,
+		},
+		{
+			name:      "manual statement fails when all statements are terminal and one failed",
+			total:     3,
+			pending:   0,
+			running:   0,
+			completed: 2,
+			failed:    1,
+			runMode:   &manual,
+			want:      model.TicketStatusFailed,
+		},
+		{
+			name:      "batch fails when any statement failed",
+			total:     3,
+			pending:   1,
+			running:   0,
+			completed: 1,
+			failed:    1,
+			runMode:   &batch,
+			want:      model.TicketStatusFailed,
+		},
+		{
+			name:      "batch stays executing while statements are still pending and none failed",
+			total:     3,
+			pending:   1,
+			running:   0,
+			completed: 2,
+			failed:    0,
+			runMode:   &batch,
+			want:      model.TicketStatusExecuting,
+		},
+		{
+			name:      "workflow auto fails when any statement failed",
+			total:     3,
+			pending:   1,
+			running:   0,
+			completed: 1,
+			failed:    1,
+			runMode:   &workflowAuto,
+			want:      model.TicketStatusFailed,
+		},
+		{
+			name:      "whole ticket fails when any statement failed or stopped",
+			total:     3,
+			pending:   1,
+			running:   0,
+			completed: 1,
+			failed:    1,
+			runMode:   &wholeTicket,
+			want:      model.TicketStatusFailed,
+		},
+		{
+			name:      "whole ticket stays executing while later statements are still pending and no failure exists",
+			total:     3,
+			pending:   1,
+			running:   0,
+			completed: 2,
+			failed:    0,
+			runMode:   &wholeTicket,
+			want:      model.TicketStatusExecuting,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := AggregateTicketStatusFromCounts(tc.total, tc.pending, tc.running, tc.completed, tc.failed, tc.runMode)
+			if got != tc.want {
+				t.Fatalf("AggregateTicketStatusFromCounts() = %s, want %s", got, tc.want)
+			}
+		})
 	}
 }
 

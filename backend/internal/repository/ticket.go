@@ -1020,16 +1020,23 @@ func (r *TicketRepo) ListActiveSensitiveAccessScopes(ctx context.Context, userID
 }
 
 // T9: OCC — atomically transition to executing, returns false if already taken
-func (r *TicketRepo) StartExecution(ctx context.Context, id, executorID uint64, runMode string) (bool, error) {
+func (r *TicketRepo) StartExecution(ctx context.Context, id, executorID uint64, runMode string, dmlExecutionMode *string) (bool, error) {
 	now := timeutil.NowUTC()
 	runMode = strings.TrimSpace(runMode)
 	if runMode == "" {
 		runMode = model.TicketExecutionRunModeBatch
 	}
+	var normalizedDMLExecutionMode *string
+	if dmlExecutionMode != nil {
+		value := strings.TrimSpace(*dmlExecutionMode)
+		if value != "" {
+			normalizedDMLExecutionMode = &value
+		}
+	}
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE tickets SET status = 'executing', executor_id = ?, execution_requested_at = COALESCE(execution_requested_at, ?), execution_run_mode = ?, started_at = ?, updated_at = ?
+		`UPDATE tickets SET status = 'executing', executor_id = ?, execution_requested_at = COALESCE(execution_requested_at, ?), execution_run_mode = ?, dml_execution_mode = COALESCE(?, dml_execution_mode), started_at = ?, updated_at = ?
          WHERE id = ? AND status = 'pending_execution'`,
-		executorID, now, runMode, now, now, id,
+		executorID, now, runMode, normalizedDMLExecutionMode, now, now, id,
 	)
 	if err != nil {
 		return false, fmt.Errorf("start execution OCC: %w", err)
@@ -1421,6 +1428,10 @@ func (r *TicketRepo) RecoverExecutingTickets(ctx context.Context) ([]TicketExecu
 	now := timeutil.NowUTC()
 	const restartReason = "service restarted during execution; database outcome unknown"
 	for _, ticketID := range ticketIDs {
+		var ticket model.Ticket
+		if err := tx.GetContext(ctx, &ticket, `SELECT * FROM tickets WHERE id = ? FOR UPDATE`, ticketID); err != nil {
+			return nil, fmt.Errorf("load executing ticket for recovery: %w", err)
+		}
 		var executions []model.TicketExecution
 		if err := tx.SelectContext(ctx, &executions, `SELECT * FROM ticket_executions WHERE ticket_id = ? ORDER BY seq`, ticketID); err != nil {
 			return nil, fmt.Errorf("list ticket executions for recovery: %w", err)
@@ -1491,7 +1502,7 @@ func (r *TicketRepo) RecoverExecutingTickets(ctx context.Context) ([]TicketExecu
 			running = 0
 		}
 
-		status := aggregateTicketStatusFromCounts(len(executions), pending, running, completed, failed)
+		status := AggregateTicketStatusFromCounts(len(executions), pending, running, completed, failed, ticket.ExecutionRunMode)
 		if status == model.TicketStatusCompleted || status == model.TicketStatusFailed || status == model.TicketStatusStopped {
 			if _, err := tx.ExecContext(ctx,
 				`UPDATE tickets SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
@@ -1542,21 +1553,39 @@ func ticketExecutionRestartMessage(execRow model.TicketExecution) string {
 	return "service restarted after statement was sent to database; database outcome unknown"
 }
 
-func aggregateTicketStatusFromCounts(total, pending, running, completed, failed int) model.TicketStatus {
-	switch {
-	case total == 0:
+// AggregateTicketStatusFromCounts converts statement counts and execution run mode
+// into the ticket-level status used by the UI and recovery flow.
+func AggregateTicketStatusFromCounts(total, pending, running, completed, failed int, runMode *string) model.TicketStatus {
+	if total == 0 {
 		return model.TicketStatusFailed
-	case pending == total:
-		return model.TicketStatusPendingExecution
+	}
+	normalizedRunMode := ""
+	if runMode != nil {
+		normalizedRunMode = strings.TrimSpace(*runMode)
+	}
+	isManualStatementRun := normalizedRunMode == model.TicketExecutionRunModeManualStatement
+	isBatchOrAutoRun := normalizedRunMode == model.TicketExecutionRunModeBatch ||
+		normalizedRunMode == model.TicketExecutionRunModeWorkflowAuto ||
+		normalizedRunMode == model.TicketExecutionRunModeWholeTicket
+
+	switch {
 	case running > 0:
 		return model.TicketStatusExecuting
-	case pending > 0 && completed+failed > 0:
-		return model.TicketStatusExecuting
+	case pending == total:
+		return model.TicketStatusPendingExecution
 	case completed == total:
 		return model.TicketStatusCompleted
-	case completed+failed == total && failed > 0:
+	case failed > 0:
+		if isManualStatementRun && pending > 0 {
+			return model.TicketStatusExecuting
+		}
 		return model.TicketStatusFailed
+	case pending > 0 && completed > 0:
+		return model.TicketStatusExecuting
 	default:
+		if isBatchOrAutoRun {
+			return model.TicketStatusFailed
+		}
 		return model.TicketStatusExecuting
 	}
 }
