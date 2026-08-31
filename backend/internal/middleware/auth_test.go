@@ -115,12 +115,21 @@ func newUserRepo(t *testing.T) (*repository.UserRepo, sqlmock.Sqlmock) {
 	return repository.NewUserRepo(sqlx.NewDb(db, "sqlmock")), mock
 }
 
-func TestOIDCBearerAuthFindsBoundIdentityFirst(t *testing.T) {
-	users, mock := newUserRepo(t)
-	mock.ExpectQuery(`SELECT \* FROM users WHERE external_identity_source`).WithArgs("oidc", "uuid-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "is_active"}).AddRow(7, "brian", "brian@example.com", true))
+func stubMFA(required, trusted bool) (func(context.Context, *model.User) (bool, error), func(context.Context) (bool, error)) {
+	return func(context.Context, *model.User) (bool, error) { return required, nil },
+		func(context.Context) (bool, error) { return trusted, nil }
+}
 
-	a := OIDCBearerAuth{Verifier: fakeVerifier{id: oidcbearer.Identity{Subject: "uuid-1", Email: "other@example.com"}}, Users: users, Provider: "oidc"}
+func userRow(id int, username string, protected bool) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"id", "username", "email", "is_active", "is_protected"}).AddRow(id, username, username+"@example.com", true, protected)
+}
+
+func TestOIDCBearerAuthFindsTheBoundIdentityOnly(t *testing.T) {
+	users, mock := newUserRepo(t)
+	mock.ExpectQuery(`SELECT \* FROM users WHERE external_identity_source`).WithArgs("oidc", "uuid-1").WillReturnRows(userRow(7, "brian", false))
+
+	requires, trusts := stubMFA(false, false)
+	a := OIDCBearerAuth{Verifier: fakeVerifier{id: oidcbearer.Identity{Subject: "uuid-1", Email: "other@example.com"}}, Users: users, Provider: "oidc", RequiresMFA: requires, TrustsMFA: trusts}
 	user, err := a.Authenticate(context.Background(), "raw")
 	if err != nil || user == nil || user.ID != 7 {
 		t.Fatalf("user=%+v err=%v", user, err)
@@ -130,28 +139,78 @@ func TestOIDCBearerAuthFindsBoundIdentityFirst(t *testing.T) {
 	}
 }
 
-func TestOIDCBearerAuthFallsBackToEmailAndNeverCreates(t *testing.T) {
+func TestOIDCBearerAuthNeverFallsBackToEmailOrCreates(t *testing.T) {
 	users, mock := newUserRepo(t)
 	mock.ExpectQuery(`SELECT \* FROM users WHERE external_identity_source`).WithArgs("oidc", "uuid-1").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(`SELECT \* FROM users WHERE email`).WithArgs("brian@example.com").WillReturnError(sql.ErrNoRows)
 
-	a := OIDCBearerAuth{Verifier: fakeVerifier{id: oidcbearer.Identity{Subject: "uuid-1", Email: "brian@example.com"}}, Users: users, Provider: "oidc"}
+	requires, trusts := stubMFA(false, false)
+	a := OIDCBearerAuth{Verifier: fakeVerifier{id: oidcbearer.Identity{Subject: "uuid-1", Email: "admin@example.com"}}, Users: users, Provider: "oidc", RequiresMFA: requires, TrustsMFA: trusts}
 	user, err := a.Authenticate(context.Background(), "raw")
-	if err != nil || user != nil {
-		t.Fatalf("user=%+v err=%v, want nil, nil (find-only)", user, err)
+	if err == nil || user != nil {
+		t.Fatalf("user=%+v err=%v, want denial without any email query", user, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }
 
+func TestOIDCBearerAuthDeniesProtectedUsers(t *testing.T) {
+	users, mock := newUserRepo(t)
+	mock.ExpectQuery(`SELECT \* FROM users WHERE external_identity_source`).WithArgs("oidc", "uuid-1").WillReturnRows(userRow(1, "admin", true))
+
+	requires, trusts := stubMFA(true, true)
+	a := OIDCBearerAuth{Verifier: fakeVerifier{id: oidcbearer.Identity{Subject: "uuid-1"}}, Users: users, Provider: "oidc", RequiresMFA: requires, TrustsMFA: trusts}
+	if user, err := a.Authenticate(context.Background(), "raw"); err == nil || user != nil {
+		t.Fatalf("protected user accepted: user=%+v err=%v", user, err)
+	}
+}
+
+func TestOIDCBearerAuthAppliesTheMFAPolicy(t *testing.T) {
+	for name, tc := range map[string]struct {
+		required, trusted, want bool
+	}{
+		"no MFA required":       {false, false, true},
+		"required, IdP trusted": {true, true, true},
+		"required, not trusted": {true, false, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			users, mock := newUserRepo(t)
+			mock.ExpectQuery(`SELECT \* FROM users WHERE external_identity_source`).WithArgs("oidc", "uuid-1").WillReturnRows(userRow(7, "brian", false))
+			requires, trusts := stubMFA(tc.required, tc.trusted)
+			a := OIDCBearerAuth{Verifier: fakeVerifier{id: oidcbearer.Identity{Subject: "uuid-1"}}, Users: users, Provider: "oidc", RequiresMFA: requires, TrustsMFA: trusts}
+			user, err := a.Authenticate(context.Background(), "raw")
+			if got := err == nil && user != nil; got != tc.want {
+				t.Fatalf("accepted=%v want %v (err=%v)", got, tc.want, err)
+			}
+		})
+	}
+}
+
 func TestOIDCBearerAuthRejectsVerifierError(t *testing.T) {
 	users, mock := newUserRepo(t)
-	a := OIDCBearerAuth{Verifier: fakeVerifier{err: errors.New("expired")}, Users: users, Provider: "oidc"}
+	requires, trusts := stubMFA(false, false)
+	a := OIDCBearerAuth{Verifier: fakeVerifier{err: errors.New("expired")}, Users: users, Provider: "oidc", RequiresMFA: requires, TrustsMFA: trusts}
 	if user, err := a.Authenticate(context.Background(), "raw"); err == nil || user != nil {
 		t.Fatalf("user=%+v err=%v", user, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestRequireAuthPassesTheRawTokenToTheAuthenticator(t *testing.T) {
+	var got string
+	fb := bearerFunc(func(ctx context.Context, raw string) (*model.User, error) {
+		got = raw
+		return &model.User{ID: 1, Username: "x"}, nil
+	})
+	if code, _ := serve(t, []byte("s"), fb, "Bearer a.b.c"); code != http.StatusOK || got != "a.b.c" {
+		t.Fatalf("code=%d raw=%q", code, got)
+	}
+}
+
+type bearerFunc func(ctx context.Context, raw string) (*model.User, error)
+
+func (f bearerFunc) Authenticate(ctx context.Context, raw string) (*model.User, error) {
+	return f(ctx, raw)
 }

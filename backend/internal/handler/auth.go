@@ -1715,6 +1715,22 @@ func (h *AuthHandler) allowMFAVerifyAttempt(w http.ResponseWriter, r *http.Reque
 	return true
 }
 
+// RequiresMFA reports whether the MFA policy applies to user; the bearer auth
+// path uses it to mirror the browser SSO rule.
+func (h *AuthHandler) RequiresMFA(ctx context.Context, user *model.User) (bool, error) {
+	return h.requiresMFA(ctx, user)
+}
+
+// OIDCTrustsMFA reports the effective SSO "trust the IdP for MFA" setting,
+// env overridden by the Settings UI, the same value the browser SSO login uses.
+func (h *AuthHandler) OIDCTrustsMFA(ctx context.Context) (bool, error) {
+	cfg, err := h.resolveOIDCSSOConfig(ctx)
+	if err != nil {
+		return false, err
+	}
+	return cfg.TrustMFA, nil
+}
+
 func (h *AuthHandler) requiresMFA(ctx context.Context, user *model.User) (bool, error) {
 	if h.mfaEnforcement == MFAEnforcementDisabled {
 		return false, nil

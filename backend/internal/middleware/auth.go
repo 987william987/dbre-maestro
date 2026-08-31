@@ -2,11 +2,13 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/dbre-maestro/maestro/internal/auth"
+	"github.com/dbre-maestro/maestro/internal/oidcbearer"
 	"github.com/dbre-maestro/maestro/internal/repository"
 )
 
@@ -47,7 +49,12 @@ func RequireAuth(secret []byte, bearer BearerAuthenticator) func(http.Handler) h
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
-				if err != nil {
+				switch {
+				case err == nil, errors.Is(err, oidcbearer.ErrForeignIssuer):
+					// expired session tokens land here too; nothing to log
+				case errors.Is(err, oidcbearer.ErrDiscovery):
+					slog.Warn("oidc bearer discovery failed", "err", err)
+				default:
 					slog.Debug("oidc bearer token rejected", "err", err)
 				}
 			}

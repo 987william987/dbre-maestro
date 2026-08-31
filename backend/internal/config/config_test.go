@@ -334,7 +334,6 @@ func TestLoadOverridesPoolProfilesFromEnv(t *testing.T) {
 
 func TestLoadOIDCBearerKeepsIssuerVerbatim(t *testing.T) {
 	setRequiredEnv(t)
-	t.Setenv("SSO_OIDC_TRUST_MFA", "true")
 	t.Setenv("SSO_OIDC_BEARER_ISSUER_URL", " https://idp.example.com/application/o/edgex-cli/ ")
 	t.Setenv("SSO_OIDC_BEARER_AUDIENCES", "edgex-cli, other-cli")
 
@@ -366,18 +365,17 @@ func TestLoadOIDCBearerDefaultsOff(t *testing.T) {
 
 func TestLoadRejectsHalfConfiguredOIDCBearer(t *testing.T) {
 	setRequiredEnv(t)
-	t.Setenv("SSO_OIDC_TRUST_MFA", "true")
 	t.Setenv("SSO_OIDC_BEARER_ISSUER_URL", "https://idp.example.com/application/o/edgex-cli/")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() accepted an issuer without audiences")
 	}
 }
 
-func TestLoadOIDCBearerRequiresTrustMFA(t *testing.T) {
+func TestLoadRejectsNonHTTPSOIDCBearerIssuer(t *testing.T) {
 	setRequiredEnv(t)
-	t.Setenv("SSO_OIDC_BEARER_ISSUER_URL", "https://idp.example.com/application/o/edgex-cli/")
+	t.Setenv("SSO_OIDC_BEARER_ISSUER_URL", "http://idp.example.com/application/o/edgex-cli/")
 	t.Setenv("SSO_OIDC_BEARER_AUDIENCES", "edgex-cli")
 	if _, err := Load(); err == nil {
-		t.Fatal("Load() accepted bearer auth without SSO_OIDC_TRUST_MFA")
+		t.Fatal("Load() accepted an http issuer")
 	}
 }

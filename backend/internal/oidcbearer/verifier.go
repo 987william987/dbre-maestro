@@ -17,11 +17,16 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/sync/singleflight"
 )
 
-// ErrForeignIssuer marks a token that names another issuer. It is decided from
-// the unverified payload, so such tokens cost no network round-trip.
-var ErrForeignIssuer = errors.New("oidc bearer: token issuer is not ours")
+var (
+	// ErrForeignIssuer marks a token that names another issuer. It is decided
+	// from the unverified payload, so such tokens cost no network round-trip.
+	ErrForeignIssuer = errors.New("oidc bearer: token issuer is not ours")
+	// ErrDiscovery wraps a failed OIDC discovery (IdP unreachable, issuer typo).
+	ErrDiscovery = errors.New("oidc bearer: discovery failed")
+)
 
 type Identity struct {
 	Subject           string
@@ -41,6 +46,7 @@ type HTTPVerifier struct {
 
 	mu       sync.Mutex
 	verifier *oidc.IDTokenVerifier
+	discover singleflight.Group
 }
 
 func New(issuerURL string, audiences []string) *HTTPVerifier {
@@ -52,12 +58,20 @@ func New(issuerURL string, audiences []string) *HTTPVerifier {
 }
 
 func (v *HTTPVerifier) Verify(ctx context.Context, rawToken string) (Identity, error) {
-	issuer, err := peekIssuer(rawToken)
+	// Cheap gate on the unverified payload: wrong issuer, wrong audience or
+	// expired tokens never reach the signature check, which may fetch keys.
+	unverified, err := peek(rawToken)
 	if err != nil {
 		return Identity{}, err
 	}
-	if issuer != v.issuerURL {
+	if unverified.Issuer != v.issuerURL {
 		return Identity{}, ErrForeignIssuer
+	}
+	if unverified.Expiry == 0 || time.Unix(unverified.Expiry, 0).Before(time.Now()) {
+		return Identity{}, errors.New("oidc bearer: token expired or has no exp")
+	}
+	if !audienceAllowed(unverified.Audience, v.audiences) {
+		return Identity{}, fmt.Errorf("oidc bearer: audience %v not allowed", unverified.Audience)
 	}
 	verifier, err := v.idTokenVerifier()
 	if err != nil {
@@ -67,6 +81,7 @@ func (v *HTTPVerifier) Verify(ctx context.Context, rawToken string) (Identity, e
 	if err != nil {
 		return Identity{}, fmt.Errorf("oidc bearer: %w", err)
 	}
+	// Same check again on the verified claims; the peek above was unsigned input.
 	if !audienceAllowed(token.Audience, v.audiences) {
 		return Identity{}, fmt.Errorf("oidc bearer: audience %v not allowed", token.Audience)
 	}
@@ -86,42 +101,74 @@ func (v *HTTPVerifier) Verify(ctx context.Context, rawToken string) (Identity, e
 	}, nil
 }
 
-// idTokenVerifier runs discovery on first use, so an IdP that is unreachable at
-// boot delays only bearer logins. A failed discovery is retried on the next call.
+// idTokenVerifier runs discovery on first use, once for all concurrent callers,
+// so an IdP that is unreachable at boot delays only bearer logins. A failed
+// discovery is retried on the next call.
 func (v *HTTPVerifier) idTokenVerifier() (*oidc.IDTokenVerifier, error) {
 	v.mu.Lock()
-	defer v.mu.Unlock()
-	if v.verifier != nil {
-		return v.verifier, nil
+	cached := v.verifier
+	v.mu.Unlock()
+	if cached != nil {
+		return cached, nil
 	}
-	// Background, not a request context: the key set outlives any request and
-	// refetches the JWKS on an unknown kid.
-	ctx := oidc.ClientContext(context.Background(), v.client)
-	provider, err := oidc.NewProvider(ctx, v.issuerURL)
+	result, err, _ := v.discover.Do("discover", func() (any, error) {
+		// Background, not a request context: the key set outlives any request and
+		// refetches the JWKS on an unknown kid.
+		ctx := oidc.ClientContext(context.Background(), v.client)
+		provider, err := oidc.NewProvider(ctx, v.issuerURL)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrDiscovery, err)
+		}
+		// Audiences are a list here, so they are checked in Verify.
+		verifier := provider.VerifierContext(ctx, &oidc.Config{SkipClientIDCheck: true})
+		v.mu.Lock()
+		v.verifier = verifier
+		v.mu.Unlock()
+		return verifier, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("oidc bearer: discovery: %w", err)
+		return nil, err
 	}
-	// Audiences are a list here, so they are checked in Verify.
-	v.verifier = provider.VerifierContext(ctx, &oidc.Config{SkipClientIDCheck: true})
-	return v.verifier, nil
+	return result.(*oidc.IDTokenVerifier), nil
 }
 
-func peekIssuer(rawToken string) (string, error) {
+// audience accepts the JWT `aud` claim as a string or an array of strings.
+type audience []string
+
+func (a *audience) UnmarshalJSON(b []byte) error {
+	var single string
+	if err := json.Unmarshal(b, &single); err == nil {
+		*a = audience{single}
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal(b, &list); err != nil {
+		return err
+	}
+	*a = audience(list)
+	return nil
+}
+
+type unverifiedClaims struct {
+	Issuer   string   `json:"iss"`
+	Audience audience `json:"aud"`
+	Expiry   int64    `json:"exp"`
+}
+
+func peek(rawToken string) (unverifiedClaims, error) {
 	parts := strings.Split(rawToken, ".")
 	if len(parts) != 3 {
-		return "", errors.New("oidc bearer: not a JWT")
+		return unverifiedClaims{}, errors.New("oidc bearer: not a JWT")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", fmt.Errorf("oidc bearer: decode payload: %w", err)
+		return unverifiedClaims{}, fmt.Errorf("oidc bearer: decode payload: %w", err)
 	}
-	var claims struct {
-		Issuer string `json:"iss"`
-	}
+	var claims unverifiedClaims
 	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", fmt.Errorf("oidc bearer: decode claims: %w", err)
+		return unverifiedClaims{}, fmt.Errorf("oidc bearer: decode claims: %w", err)
 	}
-	return claims.Issuer, nil
+	return claims, nil
 }
 
 func audienceAllowed(got, allowed []string) bool {

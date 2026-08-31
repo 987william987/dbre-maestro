@@ -66,6 +66,10 @@ func (f *fakeIssuer) token(t *testing.T, override jwt.MapClaims) string {
 		"email": "brian@example.com", "email_verified": true, "preferred_username": "brian",
 	}
 	for k, v := range override {
+		if v == nil {
+			delete(claims, k)
+			continue
+		}
 		claims[k] = v
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -145,5 +149,51 @@ func TestVerifyRejectsNonJWT(t *testing.T) {
 	v := New("https://idp.example.com/", []string{"edgex-cli"})
 	if _, err := v.Verify(context.Background(), "not-a-jwt"); err == nil {
 		t.Fatal("Verify() accepted a non-JWT string")
+	}
+}
+
+func TestVerifyAcceptsAudienceArray(t *testing.T) {
+	f := newFakeIssuer(t)
+	v := New(f.url, []string{"edgex-cli"})
+	if _, err := v.Verify(context.Background(), f.token(t, jwt.MapClaims{"aud": []string{"grafana", "edgex-cli"}})); err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+}
+
+func TestVerifyRejectsCheapCasesWithoutNetwork(t *testing.T) {
+	f := newFakeIssuer(t)
+	v := New(f.url, []string{"edgex-cli"})
+	for name, override := range map[string]jwt.MapClaims{
+		"wrong audience": {"aud": "grafana"},
+		"expired":        {"exp": time.Now().Add(-time.Minute).Unix()},
+		"no exp":         {"exp": nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := v.Verify(context.Background(), f.token(t, override)); err == nil {
+				t.Fatal("Verify() accepted the token")
+			}
+			if f.hits.Load() != 0 {
+				t.Fatalf("%s caused %d network hits", name, f.hits.Load())
+			}
+		})
+	}
+}
+
+func TestVerifyDiscoveryFailureIsRetriedAndFlagged(t *testing.T) {
+	f := newFakeIssuer(t)
+	v := New(f.url, []string{"edgex-cli"})
+	f.srv.Close() // discovery fails
+	_, err := v.Verify(context.Background(), f.token(t, nil))
+	if !errors.Is(err, ErrDiscovery) {
+		t.Fatalf("Verify() error = %v, want ErrDiscovery", err)
+	}
+	f.srv = httptest.NewServer(f.srv.Config.Handler)
+	t.Cleanup(f.srv.Close)
+	// the issuer URL changed with the new port, so build a verifier for it and
+	// confirm a fresh instance recovers; the failed one keeps retrying too.
+	f.url = f.srv.URL + "/"
+	v2 := New(f.url, []string{"edgex-cli"})
+	if _, err := v2.Verify(context.Background(), f.token(t, nil)); err != nil {
+		t.Fatalf("Verify() after recovery error = %v", err)
 	}
 }

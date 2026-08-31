@@ -300,18 +300,20 @@ func main() {
 	}
 
 	healthH := handler.NewHealthHandler(metaDB)
+	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret, cfg.RefreshCookieSecure, cfg.MFAEnforcement, mfaChallengeRepo, larkLoginRepo, ssoLoginRepo, cfg.LarkOAuth, cfg.OIDCSSO, settingsRepo, notifRepo, eventBroker, larkDispatcher)
 	var bearerAuth middleware.BearerAuthenticator
 	if cfg.OIDCBearer.Configured() {
 		bearerAuth = middleware.OIDCBearerAuth{
-			Verifier: oidcbearer.New(cfg.OIDCBearer.IssuerURL, cfg.OIDCBearer.Audiences),
-			Users:    userRepo,
-			Provider: handler.OIDCProviderKey,
+			Verifier:    oidcbearer.New(cfg.OIDCBearer.IssuerURL, cfg.OIDCBearer.Audiences),
+			Users:       userRepo,
+			Provider:    handler.OIDCProviderKey,
+			RequiresMFA: authH.RequiresMFA,
+			TrustsMFA:   authH.OIDCTrustsMFA,
 		}
 		slog.Info("oidc bearer auth enabled", "issuer", cfg.OIDCBearer.IssuerURL, "audiences", cfg.OIDCBearer.Audiences)
 	}
 	requireAuth := middleware.RequireAuth(cfg.JWTSecret, bearerAuth)
 
-	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret, cfg.RefreshCookieSecure, cfg.MFAEnforcement, mfaChallengeRepo, larkLoginRepo, ssoLoginRepo, cfg.LarkOAuth, cfg.OIDCSSO, settingsRepo, notifRepo, eventBroker, larkDispatcher)
 	frontendReloadH := handler.NewFrontendReloadHandler()
 	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL, handler.WithTicketHandlerAppEnv(cfg.AppEnv), handler.WithTicketHandlerDBMetadata(dbMetadataRepo), handler.WithTicketHandlerRollbacks(ticketRollbackRepo))
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo, handler.WithDBConnectionHandlerHostPolicy(dbConnectionHostPolicy), handler.WithDBConnectionHandlerSettings(settingsRepo))

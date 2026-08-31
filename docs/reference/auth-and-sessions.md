@@ -134,17 +134,19 @@ Protected admin 不允許透過 Lark email 自動綁定。這是 bootstrap admin
 
 規則：
 
-- 只在 `SSO_OIDC_BEARER_ISSUER_URL` 與 `SSO_OIDC_BEARER_AUDIENCES` 都設定時啟用，預設關閉。
+- 只在 `SSO_OIDC_BEARER_ISSUER_URL` 與 `SSO_OIDC_BEARER_AUDIENCES` 都設定時啟用，預設關閉。issuer 必須是 https URL。
 - 驗證項目：簽章（issuer discovery 的 JWKS，RS256）、`iss` 必須與設定完全相同、`exp`、`aud` 必須包含允許清單中的 client id。`aud` 檢查不能省：Authentik 所有 provider 共用同一把簽章金鑰，沒有 `aud` 限制時任何 app 的 token 都能登入。
-- 對應使用者：先用 `external_identity_source='oidc'` 加 token `sub` 找已綁定的使用者，找不到再用 `email` 比對。只查不建：token 本身不會建立或綁定帳號，新使用者仍須先用瀏覽器 SSO 登入一次。
+- 對應使用者：只用 `external_identity_source='oidc'` 加 token `sub` 找瀏覽器 SSO 登入時綁定的使用者。不比對 email、不建立、不綁定：新使用者仍須先用瀏覽器 SSO 登入一次。因此簽發 CLI token 的 Authentik provider 必須與 Maestro 的 provider 使用相同的 Subject mode（預設「Based on the User's hashed ID」），否則 `sub` 對不上，bearer 登入一律失敗（fail closed）。
+- Protected 使用者（bootstrap admin）不能用 bearer token，與瀏覽器 SSO 不自動綁定 protected 使用者的規則一致。
+- MFA：bearer 流程沒有 TOTP 步驟。落在 MFA policy 內的使用者（`MFA_ENFORCEMENT=required_for_admins` 下的 admin）只有在 SSO「信任 IdP MFA」設定生效時才能通過，判斷時機是每次請求，來源與瀏覽器 SSO 相同（環境變數 `SSO_OIDC_TRUST_MFA`，Settings 有設定時以 Settings 為準）。設定關閉時這些使用者的 bearer 請求回 401，一般使用者不受影響。
 - 之後的檢查與一般登入相同：active user、RBAC、DB scope 都照常套用。
 - 沒有 session row：`/api/auth/me` 的 `auth_method` 為空，logout 與 session 撤銷對這種 token 無效。要撤銷只能在 Authentik 撤銷 token，或停用使用者。
-- MFA：bearer 流程沒有 TOTP 步驟，因此啟用時強制要求 `SSO_OIDC_TRUST_MFA=true`，也就是把 Authentik 視為 MFA 來源，與瀏覽器 SSO 的既有作法一致。
-- Audit：目前沒有逐請求的 audit，bearer 請求只會在後續動作（工單、查詢）留下一般 audit 紀錄。
+- Audit：目前沒有逐請求的 audit，bearer 請求只會在後續動作（工單、查詢）留下一般 audit 紀錄。拒絕的 token 記在 log（discovery 失敗為 warn，其餘 debug；有效 token 但無綁定使用者為 info）。
+- Authentik 端：允許清單裡的 client 其存取政策必須與 Maestro app 相同（或直接用 Maestro 專屬的 CLI client）。Authentik 只在簽發時檢查該 client 的政策，使用者若被移出 Maestro app 但仍在 CLI client 的政策內，只要 Maestro 帳號還是 active 就仍能呼叫 API。
 
 | 變數 | 預設 | 說明 |
 |---|---|---|
-| `SSO_OIDC_BEARER_ISSUER_URL` | 無 | 簽發 token 的 Authentik provider issuer，須與 discovery document 的 `issuer` 完全相同（含結尾 `/`） |
+| `SSO_OIDC_BEARER_ISSUER_URL` | 無 | 簽發 token 的 Authentik provider issuer，https，須與 discovery document 的 `issuer` 完全相同（含結尾 `/`） |
 | `SSO_OIDC_BEARER_AUDIENCES` | 無 | 允許的 client id 清單，逗號分隔 |
 
 ## Session 管理

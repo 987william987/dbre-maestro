@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -169,9 +170,10 @@ func Load() (*Config, error) {
 	if (c.OIDCBearer.IssuerURL == "") != (len(c.OIDCBearer.Audiences) == 0) {
 		return nil, errors.New("SSO_OIDC_BEARER_ISSUER_URL and SSO_OIDC_BEARER_AUDIENCES must be set together")
 	}
-	if c.OIDCBearer.Configured() && !c.OIDCSSO.TrustMFA {
-		// A bearer login has no MFA step of its own; only the IdP can vouch for it.
-		return nil, errors.New("SSO_OIDC_BEARER_* requires SSO_OIDC_TRUST_MFA=true")
+	if c.OIDCBearer.IssuerURL != "" {
+		if u, err := url.Parse(c.OIDCBearer.IssuerURL); err != nil || u.Scheme != "https" || u.Host == "" {
+			return nil, errors.New("SSO_OIDC_BEARER_ISSUER_URL must be an https URL")
+		}
 	}
 	if raw := os.Getenv("RUN_MIGRATIONS_ON_STARTUP"); raw != "" {
 		runMigrations, err := strconv.ParseBool(raw)
