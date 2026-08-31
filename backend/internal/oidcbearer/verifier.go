@@ -1,8 +1,8 @@
 // Package oidcbearer verifies tokens issued by the SSO IdP (Authentik) and
 // presented as `Authorization: Bearer`, so CLI tools can call the API from a
 // loopback OIDC login instead of a browser session. Signing keys come from the
-// issuer's discovery document and are cached by go-oidc. The issuer string must
-// be copied from that document verbatim (Authentik's ends with a slash).
+// issuer's discovery document. The issuer string must be copied from that
+// document verbatim (Authentik's ends with a slash).
 package oidcbearer
 
 import (
@@ -28,11 +28,23 @@ var (
 	ErrDiscovery = errors.New("oidc bearer: discovery failed")
 )
 
+const (
+	// maxTokenBytes bounds the work spent on a token before any check; real
+	// Authentik tokens are around 1-2 KiB.
+	maxTokenBytes = 16 << 10
+	// jwksCooldown caps JWKS refetches caused by tokens no cached key verifies.
+	jwksCooldown = 30 * time.Second
+)
+
 type Identity struct {
 	Subject           string
 	Email             string
 	EmailVerified     bool
 	PreferredUsername string
+	// Lark ids from Authentik's Lark source, when the provider's scope mapping
+	// emits them (claims lark_open_id / lark_union_id). Empty otherwise.
+	LarkOpenID  string
+	LarkUnionID string
 }
 
 type Verifier interface {
@@ -43,6 +55,7 @@ type HTTPVerifier struct {
 	issuerURL string
 	audiences []string
 	client    *http.Client
+	cooldown  time.Duration
 
 	mu       sync.Mutex
 	verifier *oidc.IDTokenVerifier
@@ -54,10 +67,14 @@ func New(issuerURL string, audiences []string) *HTTPVerifier {
 		issuerURL: issuerURL,
 		audiences: audiences,
 		client:    &http.Client{Timeout: 10 * time.Second},
+		cooldown:  jwksCooldown,
 	}
 }
 
 func (v *HTTPVerifier) Verify(ctx context.Context, rawToken string) (Identity, error) {
+	if len(rawToken) > maxTokenBytes {
+		return Identity{}, errors.New("oidc bearer: token too large")
+	}
 	// Cheap gate on the unverified payload: wrong issuer, wrong audience or
 	// expired tokens never reach the signature check, which may fetch keys.
 	unverified, err := peek(rawToken)
@@ -73,7 +90,7 @@ func (v *HTTPVerifier) Verify(ctx context.Context, rawToken string) (Identity, e
 	if !audienceAllowed(unverified.Audience, v.audiences) {
 		return Identity{}, fmt.Errorf("oidc bearer: audience %v not allowed", unverified.Audience)
 	}
-	verifier, err := v.idTokenVerifier()
+	verifier, err := v.idTokenVerifier(ctx)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -89,6 +106,8 @@ func (v *HTTPVerifier) Verify(ctx context.Context, rawToken string) (Identity, e
 		Email             string `json:"email"`
 		EmailVerified     bool   `json:"email_verified"`
 		PreferredUsername string `json:"preferred_username"`
+		LarkOpenID        string `json:"lark_open_id"`
+		LarkUnionID       string `json:"lark_union_id"`
 	}
 	if err := token.Claims(&claims); err != nil {
 		return Identity{}, fmt.Errorf("oidc bearer: claims: %w", err)
@@ -98,38 +117,54 @@ func (v *HTTPVerifier) Verify(ctx context.Context, rawToken string) (Identity, e
 		Email:             strings.TrimSpace(claims.Email),
 		EmailVerified:     claims.EmailVerified,
 		PreferredUsername: strings.TrimSpace(claims.PreferredUsername),
+		LarkOpenID:        strings.TrimSpace(claims.LarkOpenID),
+		LarkUnionID:       strings.TrimSpace(claims.LarkUnionID),
 	}, nil
 }
 
 // idTokenVerifier runs discovery on first use, once for all concurrent callers,
 // so an IdP that is unreachable at boot delays only bearer logins. A failed
-// discovery is retried on the next call.
-func (v *HTTPVerifier) idTokenVerifier() (*oidc.IDTokenVerifier, error) {
+// discovery is retried on the next call; a caller whose ctx ends stops waiting.
+func (v *HTTPVerifier) idTokenVerifier(ctx context.Context) (*oidc.IDTokenVerifier, error) {
 	v.mu.Lock()
 	cached := v.verifier
 	v.mu.Unlock()
 	if cached != nil {
 		return cached, nil
 	}
-	result, err, _ := v.discover.Do("discover", func() (any, error) {
-		// Background, not a request context: the key set outlives any request and
-		// refetches the JWKS on an unknown kid.
-		ctx := oidc.ClientContext(context.Background(), v.client)
-		provider, err := oidc.NewProvider(ctx, v.issuerURL)
+	ch := v.discover.DoChan("discover", func() (any, error) {
+		// Background, not a request context: the fetch is shared by every waiter.
+		bg := oidc.ClientContext(context.Background(), v.client)
+		provider, err := oidc.NewProvider(bg, v.issuerURL)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrDiscovery, err)
 		}
+		var endpoints struct {
+			JWKSURL string `json:"jwks_uri"`
+		}
+		if err := provider.Claims(&endpoints); err != nil || endpoints.JWKSURL == "" {
+			return nil, fmt.Errorf("%w: discovery document has no jwks_uri", ErrDiscovery)
+		}
+		keys := &cachedKeySet{jwksURL: endpoints.JWKSURL, client: v.client, cooldown: v.cooldown, now: time.Now}
 		// Audiences are a list here, so they are checked in Verify.
-		verifier := provider.VerifierContext(ctx, &oidc.Config{SkipClientIDCheck: true})
+		verifier := oidc.NewVerifier(v.issuerURL, keys, &oidc.Config{
+			SkipClientIDCheck:    true,
+			SupportedSigningAlgs: []string{oidc.RS256},
+		})
 		v.mu.Lock()
 		v.verifier = verifier
 		v.mu.Unlock()
 		return verifier, nil
 	})
-	if err != nil {
-		return nil, err
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return res.Val.(*oidc.IDTokenVerifier), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	return result.(*oidc.IDTokenVerifier), nil
 }
 
 // audience accepts the JWT `aud` claim as a string or an array of strings.
@@ -173,6 +208,9 @@ func peek(rawToken string) (unverifiedClaims, error) {
 
 func audienceAllowed(got, allowed []string) bool {
 	for _, a := range got {
+		if a == "" {
+			continue
+		}
 		for _, b := range allowed {
 			if a == b {
 				return true

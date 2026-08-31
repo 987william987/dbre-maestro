@@ -135,7 +135,7 @@ Protected admin 不允許透過 Lark email 自動綁定。這是 bootstrap admin
 規則：
 
 - 只在 `SSO_OIDC_BEARER_ISSUER_URL` 與 `SSO_OIDC_BEARER_AUDIENCES` 都設定時啟用，預設關閉。issuer 必須是 https URL。
-- 驗證項目：簽章（issuer discovery 的 JWKS，RS256）、`iss` 必須與設定完全相同、`exp`、`aud` 必須包含允許清單中的 client id。`aud` 檢查不能省：Authentik 所有 provider 共用同一把簽章金鑰，沒有 `aud` 限制時任何 app 的 token 都能登入。
+- 驗證項目：簽章（只接受 RS256，金鑰來自 issuer discovery 的 JWKS，金鑰輪換時最多每 30 秒重新拉取一次，偽造簽章不會讓伺服器反覆打 IdP）、`iss` 必須與設定完全相同、`exp`、`aud` 必須包含允許清單中的 client id。超過 16 KiB 的 token、issuer 不符、`aud` 不符、過期或沒有 `exp` 的 token 在驗簽前就被拒絕，不產生網路請求。`aud` 檢查不能省：Authentik 所有 provider 共用同一把簽章金鑰，沒有 `aud` 限制時任何 app 的 token 都能登入。
 - 對應使用者：只用 `external_identity_source='oidc'` 加 token `sub` 找瀏覽器 SSO 登入時綁定的使用者。不比對 email、不建立、不綁定：新使用者仍須先用瀏覽器 SSO 登入一次。因此簽發 CLI token 的 Authentik provider 必須與 Maestro 的 provider 使用相同的 Subject mode（預設「Based on the User's hashed ID」），否則 `sub` 對不上，bearer 登入一律失敗（fail closed）。
 - Protected 使用者（bootstrap admin）不能用 bearer token，與瀏覽器 SSO 不自動綁定 protected 使用者的規則一致。
 - MFA：bearer 流程沒有 TOTP 步驟。落在 MFA policy 內的使用者（`MFA_ENFORCEMENT=required_for_admins` 下的 admin）只有在 SSO「信任 IdP MFA」設定生效時才能通過，判斷時機是每次請求，來源與瀏覽器 SSO 相同（環境變數 `SSO_OIDC_TRUST_MFA`，Settings 有設定時以 Settings 為準）。設定關閉時這些使用者的 bearer 請求回 401，一般使用者不受影響。
