@@ -45,6 +45,8 @@
 | `LARK_OAUTH_SCOPES` | Lark OAuth 授權 URL 顯式要求的 scopes，逗號分隔 | `directory:employee.base.enterprise_email:read` |
 | `LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL` | Lark OAuth 是否要求企業信箱 | `true` |
 | `LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS` | 允許登入的企業信箱 domain，逗號分隔 | `example.com` |
+| `SSO_OIDC_BEARER_ISSUER_URL` | 接受 IdP 簽發的 OIDC token 作為 Bearer（CLI 用途）的 issuer，須與 discovery `issuer` 完全相同；細節見 `auth-and-sessions.md` | 無，未設定即關閉 |
+| `SSO_OIDC_BEARER_AUDIENCES` | 上述 token 允許的 client id，逗號分隔；需同時設定 `SSO_OIDC_TRUST_MFA=true` | 無 |
 | `REFRESH_COOKIE_SECURE` | 非 production 環境強制 refresh cookie Secure | production 永遠強制 Secure |
 | `DB_CONNECTION_HOST_POLICY_ENFORCEMENT` | DB Connection host policy 模式 | `off`；可設 `warn` 或 `enforce` |
 | `DB_CONNECTION_HOST_ALLOWLIST` | 允許的 DB/Redis host pattern，逗號分隔 | 無；例如 `*.rds.amazonaws.com,*.cache.amazonaws.com` |

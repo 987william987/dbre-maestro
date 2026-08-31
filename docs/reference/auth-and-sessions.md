@@ -128,6 +128,25 @@ Protected admin 不允許透過 Lark email 自動綁定。這是 bootstrap admin
 
 若環境啟用了 MFA policy，Lark OAuth 成功後仍會套用既有 MFA 要求。也就是說，高權限帳號不會因為改用 Lark 登入而繞過 MFA。
 
+## CLI Bearer 登入（IdP 簽發的 OIDC Token）
+
+除了 session access token，`Authorization: Bearer` 也可以直接帶 Authentik 簽發的 OIDC token（id_token 或 access_token）。用途是 CLI 與自動化工具：使用者在自己的瀏覽器完成 loopback OIDC 登入拿到 token，之後呼叫 API 不需要瀏覽器 session、refresh cookie 或 `/api/auth/refresh`。
+
+規則：
+
+- 只在 `SSO_OIDC_BEARER_ISSUER_URL` 與 `SSO_OIDC_BEARER_AUDIENCES` 都設定時啟用，預設關閉。
+- 驗證項目：簽章（issuer discovery 的 JWKS，RS256）、`iss` 必須與設定完全相同、`exp`、`aud` 必須包含允許清單中的 client id。`aud` 檢查不能省：Authentik 所有 provider 共用同一把簽章金鑰，沒有 `aud` 限制時任何 app 的 token 都能登入。
+- 對應使用者：先用 `external_identity_source='oidc'` 加 token `sub` 找已綁定的使用者，找不到再用 `email` 比對。只查不建：token 本身不會建立或綁定帳號，新使用者仍須先用瀏覽器 SSO 登入一次。
+- 之後的檢查與一般登入相同：active user、RBAC、DB scope 都照常套用。
+- 沒有 session row：`/api/auth/me` 的 `auth_method` 為空，logout 與 session 撤銷對這種 token 無效。要撤銷只能在 Authentik 撤銷 token，或停用使用者。
+- MFA：bearer 流程沒有 TOTP 步驟，因此啟用時強制要求 `SSO_OIDC_TRUST_MFA=true`，也就是把 Authentik 視為 MFA 來源，與瀏覽器 SSO 的既有作法一致。
+- Audit：目前沒有逐請求的 audit，bearer 請求只會在後續動作（工單、查詢）留下一般 audit 紀錄。
+
+| 變數 | 預設 | 說明 |
+|---|---|---|
+| `SSO_OIDC_BEARER_ISSUER_URL` | 無 | 簽發 token 的 Authentik provider issuer，須與 discovery document 的 `issuer` 完全相同（含結尾 `/`） |
+| `SSO_OIDC_BEARER_AUDIENCES` | 無 | 允許的 client id 清單，逗號分隔 |
+
 ## Session 管理
 
 使用者可以在 `/account/sessions` 查看自己的 active refresh sessions，並撤銷不認識的 session。

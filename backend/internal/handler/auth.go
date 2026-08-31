@@ -69,7 +69,7 @@ const (
 	larkLoginTicketTTL      = 2 * time.Minute
 	ssoLoginStateTTL        = 10 * time.Minute
 	ssoLoginTicketTTL       = 2 * time.Minute
-	oidcProviderKey         = "oidc"
+	OIDCProviderKey         = "oidc"
 )
 
 func NewAuthHandler(users *repository.UserRepo, sessions *repository.SessionRepo, audit *repository.AuditRepo, jwtSecret []byte, options ...any) *AuthHandler {
@@ -536,7 +536,7 @@ func (h *AuthHandler) ListSSOProviders(w http.ResponseWriter, r *http.Request) {
 			displayName = "SSO"
 		}
 		providers = append(providers, map[string]any{
-			"key":          oidcProviderKey,
+			"key":          OIDCProviderKey,
 			"display_name": displayName,
 			"start_url":    "/api/auth/sso/start",
 		})
@@ -726,7 +726,7 @@ func (h *AuthHandler) ConsumeSSOLoginResult(w http.ResponseWriter, r *http.Reque
 		jsonOK(w, map[string]any{"mfa_required": true, "mfa_token": mfaToken})
 		return
 	}
-	options := repository.SessionCreateOptions{AuthMethod: "sso", AuthProvider: oidcProviderKey}
+	options := repository.SessionCreateOptions{AuthMethod: "sso", AuthProvider: OIDCProviderKey}
 	if requiresMFA && cfg.TrustMFA {
 		options.MFASatisfied = true
 		options.MFASource = "trusted_oidc_provider"
@@ -795,7 +795,7 @@ func (h *AuthHandler) findOrCreateLarkUser(ctx context.Context, identity larkoau
 
 func (h *AuthHandler) findOrCreateSSOUser(ctx context.Context, identity oidcsso.Identity) (*model.User, error) {
 	input := repository.SSOIdentityInput{
-		Provider:    oidcProviderKey,
+		Provider:    OIDCProviderKey,
 		Subject:     strings.TrimSpace(identity.Subject),
 		Email:       strings.TrimSpace(identity.Email),
 		DisplayName: strings.TrimSpace(identity.Name),

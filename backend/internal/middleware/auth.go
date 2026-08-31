@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -18,7 +19,7 @@ const (
 	CtxPermissions contextKey = "permissions"
 )
 
-func RequireAuth(secret []byte) func(http.Handler) http.Handler {
+func RequireAuth(secret []byte, bearer BearerAuthenticator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearer(r)
@@ -27,16 +28,30 @@ func RequireAuth(secret []byte) func(http.Handler) http.Handler {
 				return
 			}
 
-			claims, err := auth.ParseAccessToken(token, secret)
-			if err != nil {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			if claims, err := auth.ParseAccessToken(token, secret); err == nil {
+				ctx := context.WithValue(r.Context(), CtxUserID, claims.UserID)
+				ctx = context.WithValue(ctx, CtxUsername, claims.Username)
+				ctx = context.WithValue(ctx, CtxSessionID, claims.SessionID)
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), CtxUserID, claims.UserID)
-			ctx = context.WithValue(ctx, CtxUsername, claims.Username)
-			ctx = context.WithValue(ctx, CtxSessionID, claims.SessionID)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			// Not a session token: an IdP-issued token, when that path is enabled.
+			// No session row exists for it, so CtxSessionID stays 0.
+			if bearer != nil {
+				user, err := bearer.Authenticate(r.Context(), token)
+				if err == nil && user != nil {
+					ctx := context.WithValue(r.Context(), CtxUserID, user.ID)
+					ctx = context.WithValue(ctx, CtxUsername, user.Username)
+					ctx = context.WithValue(ctx, CtxSessionID, uint64(0))
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+				if err != nil {
+					slog.Debug("oidc bearer token rejected", "err", err)
+				}
+			}
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		})
 	}
 }

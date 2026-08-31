@@ -23,6 +23,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/netguard"
 	"github.com/dbre-maestro/maestro/internal/notification"
+	"github.com/dbre-maestro/maestro/internal/oidcbearer"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
@@ -299,6 +300,17 @@ func main() {
 	}
 
 	healthH := handler.NewHealthHandler(metaDB)
+	var bearerAuth middleware.BearerAuthenticator
+	if cfg.OIDCBearer.Configured() {
+		bearerAuth = middleware.OIDCBearerAuth{
+			Verifier: oidcbearer.New(cfg.OIDCBearer.IssuerURL, cfg.OIDCBearer.Audiences),
+			Users:    userRepo,
+			Provider: handler.OIDCProviderKey,
+		}
+		slog.Info("oidc bearer auth enabled", "issuer", cfg.OIDCBearer.IssuerURL, "audiences", cfg.OIDCBearer.Audiences)
+	}
+	requireAuth := middleware.RequireAuth(cfg.JWTSecret, bearerAuth)
+
 	authH := handler.NewAuthHandler(userRepo, sessionRepo, auditRepo, cfg.JWTSecret, cfg.RefreshCookieSecure, cfg.MFAEnforcement, mfaChallengeRepo, larkLoginRepo, ssoLoginRepo, cfg.LarkOAuth, cfg.OIDCSSO, settingsRepo, notifRepo, eventBroker, larkDispatcher)
 	frontendReloadH := handler.NewFrontendReloadHandler()
 	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL, handler.WithTicketHandlerAppEnv(cfg.AppEnv), handler.WithTicketHandlerDBMetadata(dbMetadataRepo), handler.WithTicketHandlerRollbacks(ticketRollbackRepo))
@@ -356,7 +368,7 @@ func main() {
 		r.Post("/setup", authH.Setup)
 		r.Post("/lark/cards/callback", ticketH.LarkCardCallback)
 		r.With(
-			middleware.RequireAuth(cfg.JWTSecret),
+			requireAuth,
 			middleware.RequireActiveUser(userRepo),
 			middleware.InjectPermissions(userRepo),
 		).Get("/dashboard", ticketH.Dashboard)
@@ -372,30 +384,30 @@ func main() {
 			r.Post("/mfa/verify", authH.VerifyMFA)
 			r.Post("/refresh", authH.Refresh)
 			r.With(
-				middleware.RequireAuth(cfg.JWTSecret),
+				requireAuth,
 				middleware.RequireActiveUser(userRepo),
 				middleware.InjectPermissions(userRepo),
 			).Get("/me", authH.Me)
 			r.With(
-				middleware.RequireAuth(cfg.JWTSecret),
+				requireAuth,
 				middleware.RequireActiveUser(userRepo),
 			).Post("/logout", authH.Logout)
 			r.With(
-				middleware.RequireAuth(cfg.JWTSecret),
+				requireAuth,
 				middleware.RequireActiveUser(userRepo),
 			).Get("/sessions", authH.ListSessions)
 			r.With(
-				middleware.RequireAuth(cfg.JWTSecret),
+				requireAuth,
 				middleware.RequireActiveUser(userRepo),
 			).Delete("/sessions", authH.RevokeSessions)
 			r.With(
-				middleware.RequireAuth(cfg.JWTSecret),
+				requireAuth,
 				middleware.RequireActiveUser(userRepo),
 			).Delete("/sessions/{id}", authH.RevokeSession)
 		})
 
 		r.Route("/account", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.Get("/access-scopes", ticketH.AccountAccessScopes)
@@ -403,25 +415,25 @@ func main() {
 
 		r.Route("/exports", func(r chi.Router) {
 			r.With(
-				middleware.RequireAuth(cfg.JWTSecret),
+				requireAuth,
 				middleware.RequireActiveUser(userRepo),
 				middleware.InjectPermissions(userRepo),
 				middleware.RequirePermission("sql_editor.export"),
 			).Post("/", exportH.Create)
 			r.With(
-				middleware.RequireAuth(cfg.JWTSecret),
+				requireAuth,
 				middleware.RequireActiveUser(userRepo),
 				middleware.InjectPermissions(userRepo),
 			).Get("/download/{token}", exportH.Download)
 			r.With(
-				middleware.RequireAuth(cfg.JWTSecret),
+				requireAuth,
 				middleware.RequireActiveUser(userRepo),
 				middleware.InjectPermissions(userRepo),
 			).Get("/{id}/download", exportH.DownloadByID)
 		})
 
 		r.Route("/db-connections", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 
@@ -435,7 +447,7 @@ func main() {
 		})
 
 		r.Route("/audit-logs", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireAuditLogsRead).Get("/", auditH.List)
@@ -443,7 +455,7 @@ func main() {
 		})
 
 		r.Route("/users", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireUsersRead).Get("/", userH.List)
@@ -469,7 +481,7 @@ func main() {
 		})
 
 		r.Route("/settings", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSettingsRead).Get("/", settingsH.Get)
@@ -484,7 +496,7 @@ func main() {
 		})
 
 		r.Route("/db-metadata", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireDBMetadataRead).Get("/inventory", dbMetadataH.ListInventory)
@@ -492,7 +504,7 @@ func main() {
 		})
 
 		r.Route("/auth-groups", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireUsersRead).Get("/", authGroupH.List)
@@ -507,7 +519,7 @@ func main() {
 		})
 
 		r.Route("/masking-rules", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireMaskingRulesRead).Get("/redis-prefixes", redisSensitivePrefixH.List)
@@ -521,7 +533,7 @@ func main() {
 		})
 
 		r.Route("/masking-whitelist", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireMaskingRulesRead).Get("/", whitelistH.List)
@@ -534,7 +546,7 @@ func main() {
 		})
 
 		r.Route("/sql-review-rules", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSQLReviewRead).Get("/", sqlReviewRuleH.List)
@@ -542,7 +554,7 @@ func main() {
 		})
 
 		r.Route("/query", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSQLEditorQuery).Get("/connections", queryH.ListConnections)
@@ -557,7 +569,7 @@ func main() {
 		})
 
 		r.Route("/scheduled-sql-reports", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireScheduledSQLReportsRead).Get("/", scheduledReportH.List)
@@ -570,7 +582,7 @@ func main() {
 		})
 
 		r.Route("/db-connections/{id}/metadata", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSQLEditorQuery).Get("/", metadataH.Tables)
@@ -580,7 +592,7 @@ func main() {
 		})
 
 		r.Route("/tickets", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 
@@ -610,7 +622,7 @@ func main() {
 		})
 
 		r.Route("/notifications", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.Get("/", notifH.List)
@@ -620,7 +632,7 @@ func main() {
 		})
 
 		r.Route("/events", func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.JWTSecret))
+			r.Use(requireAuth)
 			r.Use(middleware.RequireActiveUser(userRepo))
 			r.Get("/stream", eventStreamH.Stream)
 		})
