@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -29,9 +31,10 @@ var (
 )
 
 const (
-	// maxTokenBytes bounds the work spent on a token before any check; real
-	// Authentik tokens are around 1-2 KiB.
-	maxTokenBytes = 16 << 10
+	// MaxTokenBytes bounds the work spent on a token before any check; real
+	// Authentik tokens are around 1-2 KiB. Callers that parse other token
+	// kinds first should apply the same bound before parsing.
+	MaxTokenBytes = 16 << 10
 	// jwksCooldown caps JWKS refetches caused by tokens no cached key verifies.
 	jwksCooldown = 30 * time.Second
 )
@@ -66,13 +69,45 @@ func New(issuerURL string, audiences []string) *HTTPVerifier {
 	return &HTTPVerifier{
 		issuerURL: issuerURL,
 		audiences: audiences,
-		client:    &http.Client{Timeout: 10 * time.Second},
+		client:    &http.Client{Timeout: 10 * time.Second, CheckRedirect: secureRedirectsOnly},
 		cooldown:  jwksCooldown,
 	}
 }
 
+// secureURL is https, or plain http on a loopback host (tests, local IdPs).
+// Discovery and JWKS fetches over anything else would let an on-path attacker
+// hand us signing keys.
+func secureURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	switch u.Scheme {
+	case "https":
+		return true
+	case "http":
+		host := u.Hostname()
+		if host == "localhost" {
+			return true
+		}
+		ip := net.ParseIP(host)
+		return ip != nil && ip.IsLoopback()
+	}
+	return false
+}
+
+func secureRedirectsOnly(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return errors.New("oidc bearer: too many redirects")
+	}
+	if !secureURL(req.URL.String()) {
+		return errors.New("oidc bearer: redirect to a non-https URL refused")
+	}
+	return nil
+}
+
 func (v *HTTPVerifier) Verify(ctx context.Context, rawToken string) (Identity, error) {
-	if len(rawToken) > maxTokenBytes {
+	if len(rawToken) > MaxTokenBytes {
 		return Identity{}, errors.New("oidc bearer: token too large")
 	}
 	// Cheap gate on the unverified payload: wrong issuer, wrong audience or
@@ -133,6 +168,15 @@ func (v *HTTPVerifier) idTokenVerifier(ctx context.Context) (*oidc.IDTokenVerifi
 		return cached, nil
 	}
 	ch := v.discover.DoChan("discover", func() (any, error) {
+		v.mu.Lock()
+		done := v.verifier
+		v.mu.Unlock()
+		if done != nil {
+			return done, nil
+		}
+		if !secureURL(v.issuerURL) {
+			return nil, fmt.Errorf("%w: issuer must be an https URL", ErrDiscovery)
+		}
 		// Background, not a request context: the fetch is shared by every waiter.
 		bg := oidc.ClientContext(context.Background(), v.client)
 		provider, err := oidc.NewProvider(bg, v.issuerURL)
@@ -144,6 +188,9 @@ func (v *HTTPVerifier) idTokenVerifier(ctx context.Context) (*oidc.IDTokenVerifi
 		}
 		if err := provider.Claims(&endpoints); err != nil || endpoints.JWKSURL == "" {
 			return nil, fmt.Errorf("%w: discovery document has no jwks_uri", ErrDiscovery)
+		}
+		if !secureURL(endpoints.JWKSURL) {
+			return nil, fmt.Errorf("%w: jwks_uri must be an https URL", ErrDiscovery)
 		}
 		keys := &cachedKeySet{jwksURL: endpoints.JWKSURL, client: v.client, cooldown: v.cooldown, now: time.Now}
 		// Audiences are a list here, so they are checked in Verify.

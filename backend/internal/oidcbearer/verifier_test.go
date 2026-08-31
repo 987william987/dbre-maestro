@@ -21,11 +21,14 @@ import (
 
 // fakeIssuer mimics Authentik: discovery + JWKS, issuer with a trailing slash.
 type fakeIssuer struct {
-	srv  *httptest.Server
-	key  *rsa.PrivateKey
-	kid  string
-	url  string
-	hits atomic.Int32
+	srv     *httptest.Server
+	key     *rsa.PrivateKey
+	kid     string
+	use     string // JWK "use", default sig
+	alg     string // JWK "alg", default RS256
+	jwksURL string // advertised jwks_uri, default <srv>/jwks
+	url     string
+	hits    atomic.Int32
 }
 
 func newFakeIssuer(t *testing.T) *fakeIssuer {
@@ -34,13 +37,13 @@ func newFakeIssuer(t *testing.T) *fakeIssuer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeIssuer{key: key, kid: "k1"}
+	f := &fakeIssuer{key: key, kid: "k1", use: "sig", alg: "RS256"}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		f.hits.Add(1)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"issuer":                                f.url,
-			"jwks_uri":                              f.srv.URL + "/jwks",
+			"jwks_uri":                              f.jwksURL,
 			"authorization_endpoint":                f.srv.URL + "/authorize",
 			"token_endpoint":                        f.srv.URL + "/token",
 			"id_token_signing_alg_values_supported": []string{"RS256"},
@@ -50,13 +53,18 @@ func newFakeIssuer(t *testing.T) *fakeIssuer {
 		f.hits.Add(1)
 		pub := &f.key.PublicKey
 		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
-			"kty": "RSA", "kid": f.kid, "use": "sig", "alg": "RS256",
+			"kty": "RSA", "kid": f.kid, "use": f.use, "alg": f.alg,
 			"n": base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
 			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
 		}}})
 	})
+	mux.HandleFunc("/jwks-elsewhere", func(w http.ResponseWriter, r *http.Request) {
+		f.hits.Add(1)
+		http.Redirect(w, r, "http://example.invalid/jwks", http.StatusFound)
+	})
 	f.srv = httptest.NewServer(mux)
 	f.url = f.srv.URL + "/"
+	f.jwksURL = f.srv.URL + "/jwks"
 	t.Cleanup(f.srv.Close)
 	return f
 }
@@ -194,7 +202,7 @@ func TestVerifyRejectsCheapCasesWithoutNetwork(t *testing.T) {
 		"empty audience": f.token(t, map[string]any{"aud": ""}),
 		"expired":        f.token(t, map[string]any{"exp": time.Now().Add(-time.Minute).Unix()}),
 		"no exp":         f.token(t, map[string]any{"exp": nil}),
-		"too large":      f.token(t, map[string]any{"pad": strings.Repeat("x", maxTokenBytes)}),
+		"too large":      f.token(t, map[string]any{"pad": strings.Repeat("x", MaxTokenBytes)}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			before := f.hits.Load()

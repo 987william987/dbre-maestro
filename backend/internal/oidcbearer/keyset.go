@@ -2,6 +2,7 @@ package oidcbearer
 
 import (
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,14 +64,34 @@ func (k *cachedKeySet) verifyCached(jws *jose.JSONWebSignature, kid string) ([]b
 	keys := k.keys
 	k.mu.Unlock()
 	for i := range keys {
-		if kid != "" && keys[i].KeyID != kid {
+		key := &keys[i]
+		if kid != "" && key.KeyID != kid {
 			continue
 		}
-		if payload, err := jws.Verify(&keys[i]); err == nil {
+		if !rs256SigningKey(key) {
+			continue
+		}
+		if payload, err := jws.Verify(key); err == nil {
 			return payload, true
 		}
 	}
 	return nil, false
+}
+
+// rs256SigningKey accepts only what an RS256 verifier may use: an RSA public
+// key whose JWK metadata, when present, says signing with RS256. go-jose would
+// otherwise happily verify with an RSA key published for encryption or RS512.
+func rs256SigningKey(key *jose.JSONWebKey) bool {
+	if _, ok := key.Key.(*rsa.PublicKey); !ok {
+		return false
+	}
+	if key.Use != "" && key.Use != "sig" {
+		return false
+	}
+	if key.Algorithm != "" && key.Algorithm != string(jose.RS256) {
+		return false
+	}
+	return true
 }
 
 // refresh fetches the JWKS once for all concurrent callers. The fetch itself
@@ -79,6 +100,14 @@ func (k *cachedKeySet) verifyCached(jws *jose.JSONWebSignature, kid string) ([]b
 // returns when its own ctx is done.
 func (k *cachedKeySet) refresh(ctx context.Context) error {
 	ch := k.fetch.DoChan("jwks", func() (any, error) {
+		// A flight that finished between the caller's cooldown check and this
+		// point already refreshed the keys; do not fetch again inside the cooldown.
+		k.mu.Lock()
+		cool := k.now().Sub(k.fetchedAt) < k.cooldown
+		k.mu.Unlock()
+		if cool {
+			return nil, nil
+		}
 		defer func() {
 			k.mu.Lock()
 			k.fetchedAt = k.now()

@@ -140,7 +140,7 @@ Protected admin 不允許透過 Lark email 自動綁定。這是 bootstrap admin
 - Protected 使用者（bootstrap admin）不能用 bearer token，與瀏覽器 SSO 不自動綁定 protected 使用者的規則一致。
 - MFA：bearer 流程沒有 TOTP 步驟。落在 MFA policy 內的使用者（`MFA_ENFORCEMENT=required_for_admins` 下的 admin）只有在 SSO「信任 IdP MFA」設定生效時才能通過，判斷時機是每次請求，來源與瀏覽器 SSO 相同（環境變數 `SSO_OIDC_TRUST_MFA`，Settings 有設定時以 Settings 為準）。設定關閉時這些使用者的 bearer 請求回 401，一般使用者不受影響。
 - 之後的檢查與一般登入相同：active user、RBAC、DB scope 都照常套用。
-- 沒有 session row：`/api/auth/me` 的 `auth_method` 為空，logout 與 session 撤銷對這種 token 無效。要撤銷只能在 Authentik 撤銷 token，或停用使用者。
+- 沒有 session row：`/api/auth/me` 的 `auth_method` 為空，logout 與 session 撤銷對這種 token 無效。驗證是離線的（不向 Authentik 查詢），已簽發的 token 到期前一直有效；要提前切斷存取只能停用 Maestro 使用者（或在 Authentik 更換簽章金鑰，那會影響所有 app）。
 - Audit：目前沒有逐請求的 audit，bearer 請求只會在後續動作（工單、查詢）留下一般 audit 紀錄。拒絕的 token 記在 log（discovery 失敗為 warn，其餘 debug；有效 token 但無綁定使用者為 info）。
 - Authentik 端：允許清單裡的 client 其存取政策必須與 Maestro app 相同（或直接用 Maestro 專屬的 CLI client）。Authentik 只在簽發時檢查該 client 的政策，使用者若被移出 Maestro app 但仍在 CLI client 的政策內，只要 Maestro 帳號還是 active 就仍能呼叫 API。
 

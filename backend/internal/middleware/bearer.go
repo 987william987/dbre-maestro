@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -32,20 +33,28 @@ type OIDCBearerAuth struct {
 	TrustsMFA   func(ctx context.Context) (bool, error)
 }
 
+// ErrBearerBackend marks a repository or Settings failure while resolving a
+// valid token: the request is still refused, but the cause is operational.
+var ErrBearerBackend = errors.New("oidc bearer: backend lookup failed")
+
 var (
 	errBearerNoUser    = errors.New("oidc bearer: no user bound to this subject")
+	errBearerUnwired   = errors.New("oidc bearer: MFA policy callbacks not configured")
 	errBearerProtected = errors.New("oidc bearer: protected users cannot use bearer tokens")
 	errBearerMFA       = errors.New("oidc bearer: user requires MFA and the IdP is not trusted for it")
 )
 
 func (a OIDCBearerAuth) Authenticate(ctx context.Context, rawToken string) (*model.User, error) {
+	if a.RequiresMFA == nil || a.TrustsMFA == nil {
+		return nil, errBearerUnwired
+	}
 	identity, err := a.Verifier.Verify(ctx, rawToken)
 	if err != nil {
 		return nil, err
 	}
 	user, err := a.Users.GetByExternalIdentity(ctx, a.Provider, identity.Subject)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrBearerBackend, err)
 	}
 	if user == nil {
 		slog.Info("oidc bearer: valid token without a bound user", "email_domain", emailDomain(identity.Email))
@@ -57,12 +66,12 @@ func (a OIDCBearerAuth) Authenticate(ctx context.Context, rawToken string) (*mod
 	}
 	required, err := a.RequiresMFA(ctx, user)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrBearerBackend, err)
 	}
 	if required {
 		trusted, err := a.TrustsMFA(ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", ErrBearerBackend, err)
 		}
 		if !trusted {
 			slog.Info("oidc bearer: MFA-required user denied, IdP not trusted for MFA", "user_id", user.ID)

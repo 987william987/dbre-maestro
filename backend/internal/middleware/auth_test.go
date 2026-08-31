@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -213,4 +214,41 @@ type bearerFunc func(ctx context.Context, raw string) (*model.User, error)
 
 func (f bearerFunc) Authenticate(ctx context.Context, raw string) (*model.User, error) {
 	return f(ctx, raw)
+}
+
+func TestRequireAuthRejectsOversizedTokensBeforeAnyParser(t *testing.T) {
+	fb := &fakeBearer{user: &model.User{ID: 1, Username: "x"}}
+	code, got := serve(t, []byte("s"), fb, "Bearer "+strings.Repeat("a", oidcbearer.MaxTokenBytes+1))
+	if code != http.StatusUnauthorized || got.hit || fb.called != 0 {
+		t.Fatalf("code=%d hit=%v bearerCalled=%d", code, got.hit, fb.called)
+	}
+}
+
+func TestOIDCBearerAuthDeniesADifferentSubjectAndUnwiredPolicy(t *testing.T) {
+	users, mock := newUserRepo(t)
+	mock.ExpectQuery(`SELECT \* FROM users WHERE external_identity_source`).WithArgs("oidc", "uuid-2").WillReturnError(sql.ErrNoRows)
+	requires, trusts := stubMFA(false, false)
+	a := OIDCBearerAuth{Verifier: fakeVerifier{id: oidcbearer.Identity{Subject: "uuid-2"}}, Users: users, Provider: "oidc", RequiresMFA: requires, TrustsMFA: trusts}
+	if user, err := a.Authenticate(context.Background(), "raw"); err == nil || user != nil {
+		t.Fatalf("different subject accepted: user=%+v err=%v", user, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+
+	unwired := OIDCBearerAuth{Verifier: fakeVerifier{id: oidcbearer.Identity{Subject: "uuid-1"}}, Users: users, Provider: "oidc"}
+	if user, err := unwired.Authenticate(context.Background(), "raw"); err == nil || user != nil {
+		t.Fatalf("nil MFA callbacks did not fail closed: user=%+v err=%v", user, err)
+	}
+}
+
+func TestOIDCBearerAuthFlagsBackendFailures(t *testing.T) {
+	users, mock := newUserRepo(t)
+	mock.ExpectQuery(`SELECT \* FROM users WHERE external_identity_source`).WithArgs("oidc", "uuid-1").WillReturnError(errors.New("db down"))
+	requires, trusts := stubMFA(false, false)
+	a := OIDCBearerAuth{Verifier: fakeVerifier{id: oidcbearer.Identity{Subject: "uuid-1"}}, Users: users, Provider: "oidc", RequiresMFA: requires, TrustsMFA: trusts}
+	_, err := a.Authenticate(context.Background(), "raw")
+	if !errors.Is(err, ErrBearerBackend) {
+		t.Fatalf("err = %v, want ErrBearerBackend", err)
+	}
 }

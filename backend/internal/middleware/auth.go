@@ -25,7 +25,7 @@ func RequireAuth(secret []byte, bearer BearerAuthenticator) func(http.Handler) h
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearer(r)
-			if token == "" {
+			if token == "" || len(token) > oidcbearer.MaxTokenBytes {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
@@ -52,8 +52,8 @@ func RequireAuth(secret []byte, bearer BearerAuthenticator) func(http.Handler) h
 				switch {
 				case err == nil, errors.Is(err, oidcbearer.ErrForeignIssuer):
 					// expired session tokens land here too; nothing to log
-				case errors.Is(err, oidcbearer.ErrDiscovery):
-					slog.Warn("oidc bearer discovery failed", "err", err)
+				case errors.Is(err, oidcbearer.ErrDiscovery), errors.Is(err, ErrBearerBackend):
+					slog.Warn("oidc bearer unavailable", "err", err)
 				default:
 					slog.Debug("oidc bearer token rejected", "err", err)
 				}
