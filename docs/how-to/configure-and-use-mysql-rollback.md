@@ -70,7 +70,7 @@
    INSERT INTO maestro_rollback._maestro_rb_t... SELECT ... FROM app.target_table WHERE ...;
    ```
 
-   DBA 應依公司權限模型授予最小必要權限。
+   DBA 應依組織的權限模型授予最小必要權限。
 
 5. 點 `DB Connections > Test Rollback`。
 

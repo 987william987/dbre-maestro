@@ -3,7 +3,7 @@ status: archived
 spec_issue_number:
 spec_issue_url:
 spec_filed_at: 2026-06-11T00:00:00Z
-spec_branch: dev-william
+spec_branch: feature/mysql-masking
 spec_plan_mode: inactive
 spec_executed: false
 spec_worktree_path:

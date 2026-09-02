@@ -49,6 +49,7 @@
 
 ## Explanation
 
+- [UI 目標設計](../DESIGN.md)
 - [專案導覽](explanation/project-map.md)
 - [架構總覽](explanation/architecture-overview.md)
 - [安全邊界說明](explanation/security-boundaries.md)

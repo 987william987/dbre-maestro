@@ -4,6 +4,8 @@ status: active
 
 # 查詢授權工單（Query Access Ticket）與 SQL Editor 細粒度查詢權限 Spec
 
+> 實作狀態：Query Access 核心第一版已落地。本文保留產品邊界與後續演進設計；其中「背景」、「缺口」與 implementation phase 描述的是 2026-06-18 撰寫時的基線。
+
 ## 文件目的
 
 這份文件定義 DBRE Maestro 下一階段的「查詢授權工單 + SQL Editor 細粒度查詢權限」設計。

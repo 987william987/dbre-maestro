@@ -1,6 +1,6 @@
 # DBRE Maestro
 
-DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL / DML / Redis 工單、敏感資料遮罩、資料庫連線治理、Metadata 掃描、即時通知與 RBAC 權限控管。專案採前後端分離：
+DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL / DML / Redis 工單、敏感資料遮罩、資料庫連線治理、Metadata 掃描、即時通知與 RBAC 權限控管。原始碼按前後端分離，正式交付則由根目錄 `Dockerfile` 產生單一 application image：
 
 - `backend/`：Go API、排程工作、Meta DB 存取、外部資料庫連線與治理邏輯
 - `frontend/`：React + Vite 管理介面
@@ -21,6 +21,8 @@ DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL / DML /
 ## 文件入口
 
 - [文件總覽](docs/README.md)
+- [UI 目標設計](DESIGN.md)
+- [工程待辦](TODOS.md)
 - [專案導覽](docs/explanation/project-map.md)
 - [RD 使用手冊](docs/how-to/rd-user-guide.md)
 - [DBA/Admin 管理手冊](docs/how-to/dba-admin-user-guide.md)

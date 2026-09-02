@@ -2,7 +2,7 @@
 
 ## 1. 拆分 `ticket.go` 檔案
 
-**What：** 把 `backend/internal/handler/ticket.go`（目前 2900+ 行）依職責拆成多個檔案（例如 execution/stop/registry、review、CRUD 各自獨立）。
+**What：** 把 `backend/internal/handler/ticket.go`（目前 4400+ 行）依職責拆成多個檔案（例如 execution/stop/registry、review、CRUD 各自獨立）。
 
 **Why：** 檔案過大會降低可維護性，新功能持續堆加在同一個檔案上會讓它更難改。
 
@@ -16,16 +16,22 @@
 
 ---
 
-## 2. 多副本部署下 `TicketExecutionRegistry` 需要重新設計
+## 2. 補齊多副本部署 readiness
 
-**What：** 目前 `TicketExecutionRegistry` 是 in-process 記憶體結構，若平台從單一 pod 擴展為多副本部署，需要改用集中式儲存（例如 meta DB 或分散式鎖）記錄執行中工單的 registry 狀態，否則每個 pod 只知道自己那份工單的狀態。
+**What：** 平台目前以單副本部署，多個 runtime 元件仍依賴單一 process。擴成多副本前，需要逐項處理：
 
-**Why：** 現在 1-2 DBA 規模、單副本部署下沒問題，但若未來擴容，Stop/crash recovery 邏輯可能因為請求落在不同 pod 上而找不到對應的 registry entry，導致 KILL 機制失效。
+- `TicketExecutionRegistry`：改用集中式狀態或保證 stop request 路由到執行工單的 pod。
+- SQL Editor active query registry：確保 cancel request 能找到原查詢所在 pod 與 DB backend identifier。
+- SSE event broker：加入跨 pod event distribution，避免不同 pod 的 client 收不到事件。
+- Ticket scheduler、Scheduled SQL Report、DB Metadata inventory/object jobs：確認具備 leader election、distributed lock 或可重入設計，避免同一輪工作重複執行。
+- Migration：改由獨立 Job 執行，application containers 設定 `RUN_MIGRATIONS_ON_STARTUP=false`。
+
+**Why：** 單副本下 process-local 狀態與 background jobs 都在同一個 server 內，行為可預期。直接增加 replica 會讓 stop/cancel 找不到狀態、SSE 遺失事件、排程重複執行，並可能讓多個 pod 同時搶 migration。
 
 **Pros：** 提前記錄下來，避免未來擴容時被遺忘，直到某次事故才發現這個限制。
 
 **Cons：** 目前規模下沒有急迫性，過早設計容易變成過度工程。
 
-**Context：** 2026-08 工單執行容錯強化（因應 SRE 誤觸發版事故）設計文件與 eng review 中明確排除多副本設計，只在架構層面留下這條限制記錄。
+**Context：** `TicketExecutionRegistry`、active query registry 與 SSE broker 明確是 process-local；background jobs 也由每個 app process 啟動。在完成上述改造前，單副本是必要部署前提，不應只調高 `replicaCount`。
 
 **Depends on / blocked by：** 需要先有實際擴容到多副本的計畫才需要動工，目前無明確時程。

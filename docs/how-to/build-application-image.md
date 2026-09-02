@@ -152,4 +152,4 @@ RUN_MIGRATIONS_ON_STARTUP=false
 - Migration 執行時機
 - Health check、log、監控、擴縮容與 rollback
 
-部署到公司 AWS EKS 的現行流程請參考 [How to 部署到 AWS EKS](deploy-to-aws-eks.md)。
+以 AWS EKS 為例的部署流程請參考 [How to 部署到 AWS EKS](deploy-to-aws-eks.md)。

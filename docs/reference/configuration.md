@@ -18,9 +18,9 @@
 - AWS Secrets Manager：EKS/devops 環境提供 `DB_DSN`、`MIGRATION_DSN`、`DBRE_ENCRYPTION_KEY`、`JWT_SECRET`
 - `platform_settings`：平台運行中可調整的產品設定，例如 SQL Editor timeout 與 metadata scan
 
-## `.env` 必填項
+## 本機 Secret 與必選策略
 
-至少要提供：
+本機 `make dev` 的 `.env` 至少要提供以下 Secret：
 
 | 變數 | 用途 | 備註 |
 |---|---|---|
@@ -28,7 +28,14 @@
 | `MYSQL_ROOT_PASSWORD` | Meta DB root 密碼 | migration / 初始化用途 |
 | `DBRE_ENCRYPTION_KEY` | 加密 DB 連線密碼、敏感設定 | 32-byte AES key，base64 編碼 |
 | `JWT_SECRET` | JWT 簽章密鑰 | 任意高熵字串 |
+
+`MFA_ENFORCEMENT` 不是 Secret，不需要放進 AWS Secrets Manager，但每個環境都必須明確確認策略：
+
+| 變數 | 用途 | 可選值 |
+|---|---|---|
 | `MFA_ENFORCEMENT` | MFA 強制策略 | `disabled` 或 `required_for_admins` |
+
+Docker Compose 已將 `MFA_ENFORCEMENT` 映射到 app container；部署環境應透過 ArgoCD values、ConfigMap 或等價的 runtime env 設定。程式在未設定時會依 `APP_ENV` fallback：production 為 `required_for_admins`，其他環境為 `disabled`，但部署檢查不應依賴隱含 fallback。
 
 ## 可選項
 
@@ -50,7 +57,7 @@
 | `REFRESH_COOKIE_SECURE` | 非 production 環境強制 refresh cookie Secure | production 永遠強制 Secure |
 | `DB_CONNECTION_HOST_POLICY_ENFORCEMENT` | DB Connection host policy 模式 | `off`；可設 `warn` 或 `enforce` |
 | `DB_CONNECTION_HOST_ALLOWLIST` | 允許的 DB/Redis host pattern，逗號分隔 | 無；例如 `*.rds.amazonaws.com,*.cache.amazonaws.com` |
-| `DB_CONNECTION_CIDR_ALLOWLIST` | 允許的解析 IP CIDR，逗號分隔 | 無；例如 `10.183.0.0/16` |
+| `DB_CONNECTION_CIDR_ALLOWLIST` | 允許的解析 IP CIDR，逗號分隔 | 無；例如 `10.0.0.0/16` |
 | `DB_CONNECTION_CIDR_DENYLIST` | 禁止的解析 IP CIDR，逗號分隔 | 無；建議至少包含 metadata / loopback 網段 |
 | `AWS_PROFILE` | DB metadata inventory 使用的 AWS profile | `default` |
 | `AWS_SDK_LOAD_CONFIG` | 啟用 shared config | Compose 預設 `1` |
@@ -117,13 +124,15 @@ TO 'maestro_migration'@'%';
 
 `RUN_MIGRATIONS_ON_STARTUP=true` 時，app server 啟動前會先用 `MIGRATION_DSN` 執行 `backend/migrations`。這是預設值，適合本機開發與單副本測試環境。
 
-`RUN_MIGRATIONS_ON_STARTUP=false` 時，Deployment Pod 啟動不會自動跑 migration。多副本或正式環境建議使用這個設定，並改由 Kubernetes Job 執行：
+`RUN_MIGRATIONS_ON_STARTUP=false` 時，Deployment Pod 啟動不會自動跑 migration。多副本環境必須使用這個設定，並改由 Kubernetes Job 執行：
 
 ```bash
 /app/maestro -migrate-only
 ```
 
 修改 `RUN_MIGRATIONS_ON_STARTUP` 後需要重啟 Pod 才會生效。
+
+單副本部署可設定 `RUN_MIGRATIONS_ON_STARTUP=true`。獨立 migration Job 是擴成多副本前的目標方案。
 
 ## DB Pool Profile 環境變數
 
@@ -311,7 +320,7 @@ DB Connection host policy 用來限制平台可連線的 DB / Redis endpoint，�
 ```dotenv
 DB_CONNECTION_HOST_POLICY_ENFORCEMENT=warn
 DB_CONNECTION_HOST_ALLOWLIST=*.rds.amazonaws.com,*.cache.amazonaws.com,*.db.example.com
-DB_CONNECTION_CIDR_ALLOWLIST=10.183.0.0/16,10.222.38.0/24
+DB_CONNECTION_CIDR_ALLOWLIST=10.0.0.0/16,10.1.0.0/24
 DB_CONNECTION_CIDR_DENYLIST=127.0.0.0/8,169.254.0.0/16,::1/128
 
 LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL=true
@@ -352,7 +361,7 @@ DB_POOL_SHADOW_VALIDATION_MAX_OPEN=1
 
 DB_CONNECTION_HOST_POLICY_ENFORCEMENT=warn
 DB_CONNECTION_HOST_ALLOWLIST=*.rds.amazonaws.com,*.cache.amazonaws.com,*.db.example.com
-DB_CONNECTION_CIDR_ALLOWLIST=10.183.0.0/16,10.222.38.0/24
+DB_CONNECTION_CIDR_ALLOWLIST=10.0.0.0/16,10.1.0.0/24
 DB_CONNECTION_CIDR_DENYLIST=127.0.0.0/8,169.254.0.0/16,::1/128
 ```
 

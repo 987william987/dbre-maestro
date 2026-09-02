@@ -32,15 +32,15 @@
 
 判定：
 
-- 這是上述 Query Access 主 spec 的已完成實作拆解清單
-- 內容偏 execution checklist，不取代主 spec，但可作為實際開發排程與驗收依據
+- Query Access 核心第一版已落地；清單保留設計時的拆解狀態，未勾選項目不代表核心功能尚未上線
+- 內容偏 execution checklist，不取代主 spec；後續應以 reference 與實際程式碼判斷現行行為
 - 應與主 spec 一起維護
 
 ### [20260618 Query Access Backend Task List](active/20260618-124500-query-access-backend-task-list.md)
 
 判定：
 
-- 這是 Query Access 第一版的已完成後端執行清單
+- Query Access 第一版後端核心流程已落地；原始 checkbox 保留作設計時快照
 - 主要涵蓋 migration、domain、service、API、parser 整合、audit 與 tests
 - 屬於 implementation-ready 文件
 
@@ -48,7 +48,7 @@
 
 判定：
 
-- 這是 Query Access 第一版的已完成前端執行清單
+- Query Access 第一版前端核心流程已落地；原始 checkbox 保留作設計時快照
 - 主要涵蓋 New Ticket、SQL Editor CTA、Ticket List / Detail、文案與 QA
 - 屬於 implementation-ready 文件
 
@@ -59,6 +59,14 @@
 - 目前 `Inventory` / `Objects` / `Settings` / 多憑證角色等主軸仍與現況一致
 - 雖然其中部分內容已落地，但整份 spec 仍可作為後續 DB Metadata 演進的設計基線
 - 沒有被後續文件明確推翻
+
+### [20260702 Security Audit Remediation Spec](active/20260702-security-audit-remediation-spec.md)
+
+判定：
+
+- S-01 至 S-07 的程式修復與驗收文件已落地
+- 本文保留安全問題、修復邊界與驗收條件，舊「目前問題」段落是審計當時的基線
+- C-01 readonly database account 仍是持續性的部署與維運要求
 
 ### [Dynamic RBAC Refactor Spec](active/DYNAMIC_RBAC_REFACTOR_SPEC.md)
 

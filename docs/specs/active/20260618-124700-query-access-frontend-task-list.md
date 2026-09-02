@@ -4,6 +4,8 @@ status: active
 
 # Query Access Frontend Task List
 
+> 實作狀態：前端核心第一版已落地。原始 checkbox 保留為設計時拆解快照，不代表目前上線狀態；現行 UI 行為以使用手冊、reference 文件與程式碼為準。
+
 本文件把 Query Access 第一版需要的前端工作獨立拆出，供實作時逐項落地。
 
 對應主文件：
