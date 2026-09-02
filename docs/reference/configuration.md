@@ -4,7 +4,7 @@
 
 ## 設定來源
 
-目前專案主要有三層設定來源：
+目前專案主要有四層設定來源：
 
 1. `.env`
 2. `docker-compose.yml`
@@ -13,7 +13,7 @@
 
 責任分工如下：
 
-- `.env`：本機開發提供密鑰、密碼與 container runtime 參數
+- `.env`：僅供本機 `make dev` / Docker Compose 讀取；檔案已被 Git ignore，不應提交
 - `docker-compose.yml`：把 `.env` 的值映射進 container
 - AWS Secrets Manager：EKS/devops 環境提供 `DB_DSN`、`MIGRATION_DSN`、`DBRE_ENCRYPTION_KEY`、`JWT_SECRET`
 - `platform_settings`：平台運行中可調整的產品設定，例如 SQL Editor timeout 與 metadata scan
@@ -176,7 +176,9 @@ TO 'maestro_migration'@'%';
 
 ## Compose 的實際行為
 
-`make dev` 會使用專案根目錄的 `docker-compose.yml`。Compose 會：
+`make dev` 會使用專案根目錄的 `docker-compose.yml`。Compose 會自動讀取根目錄 `.env`，並將文件列出的 process-level env 映射到 `app` container。EKS 部署不會讀取此 `.env`；EKS 的 runtime env 與 secrets 由 ArgoCD values / Kubernetes Secret 或 AWS Secrets Manager 提供。
+
+Compose 會：
 
 - 讀取根目錄 `.env`
 - 把需要的值展開到 `app` service 的 `environment`

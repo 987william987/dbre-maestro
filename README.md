@@ -32,6 +32,7 @@ DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL / DML /
 - [前端維護參考](docs/reference/frontend-maintenance.md)
 - [權限模型說明](docs/explanation/permission-model.md)
 - [Workflow Rules 設定教學](docs/how-to/configure-workflow-rules.md)
+- [建立可部署的 Application Image](docs/how-to/build-application-image.md)
 - [AWS EKS 部署流程](docs/how-to/deploy-to-aws-eks.md)
 - [本機開發教學](docs/tutorials/getting-started-local-dev.md)
 - [登入安全與 Session](docs/reference/auth-and-sessions.md)
@@ -109,7 +110,9 @@ make gen-key
 
 ## 環境變數
 
-請先準備 `.env`，至少包含：
+本機使用 `make dev` 時，請在專案根目錄準備 `.env`；Docker Compose 會自動讀取它。`.env` 已被 Git ignore，只供本機使用。EKS 測試與 production 不使用 repo 內 `.env`，而是由 ArgoCD/Kubernetes 與 AWS Secrets Manager 注入設定。
+
+至少包含：
 
 - `MYSQL_APP_PASSWORD`
 - `MYSQL_ROOT_PASSWORD`
@@ -145,4 +148,3 @@ docker compose up --build
 ```bash
 AWS_PROFILE=default
 ```
-

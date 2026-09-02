@@ -1,6 +1,6 @@
 # How to 部署到 AWS EKS
 
-本文描述 DBRE Maestro 在測試環境與正式環境部署到 AWS EKS 的建議流程。這是部署 runbook，不是 Kubernetes manifest 規格；目前 repo 尚未提供 Helm chart 或 Kustomize overlay。
+本文描述 DBRE Maestro 在測試環境與正式環境部署到 AWS EKS 的建議流程。這是部署 runbook，不是 Kubernetes manifest 規格；Kubernetes/ArgoCD manifests 維護在獨立的 ArgoCD repositories。
 
 ## 部署目標
 
@@ -17,19 +17,14 @@
 
 | 項目 | 狀態 |
 |---|---|
-| Backend Docker image | 可用 `backend/Dockerfile` 建置 |
-| Frontend Docker image | 目前是 Vite dev server image，不適合 production |
-| Kubernetes manifests | 尚未提供 |
-| Helm chart / Kustomize | 尚未提供 |
+| Application Docker image | 根目錄 `Dockerfile` 會 build React，再由 Go server 提供 `/app/public` |
+| `backend/Dockerfile` | 後端開發/獨立建置用途，不是完整 production application image |
+| Kubernetes manifests | 由外部 ArgoCD repositories 提供與維護 |
+| Helm chart / Kustomize | 由外部 ArgoCD repositories 提供與維護，本 repo 不包含 |
 | Migration command | `/app/maestro -migrate-only` |
 | Health check | `GET /api/health` |
 
-正式部署 frontend 前，需先補其中一種方案：
-
-- 建立 production frontend image，以 Nginx 或其他靜態 server 提供 Vite build output
-- 或將 `frontend` build output 部署到 S3 + CloudFront，API 指向 EKS backend
-
-在完成上述其中一種方案前，不應把現有 `frontend/Dockerfile` 直接視為正式環境部署方式。
+Production 應使用根目錄 `Dockerfile` 建立的單一 application image。該 image 在 multi-stage build 中先執行 `npm run build`，再把 `frontend/dist` 複製到 `/app/public`，由 Go server 以 `STATIC_DIR=/app/public` 提供前端與 API。`frontend/Dockerfile` 僅供本機 Vite 開發容器使用。
 
 ## AWS 基礎設施
 
@@ -178,6 +173,8 @@ secretsmanager:GetSecretValue
 ## ArgoCD deploy.envs 範例
 
 devops pipeline 會更新 image tag，但通常不會自動新增 runtime env。每個環境的 `deploy.envs` 需要在 ArgoCD values 裡配置。
+
+本 repo 的 `.gitlab-ci.yml` 負責呼叫共用 CI/CD template；`main` 分支會將 `APP_ENV` 設為 `arm-sre`，測試分支使用 `arm-sre-test`。Deployment、Service、Ingress、replica、Secret reference 與 `deploy.envs` 由對應的 ArgoCD repository 維護，不由本 repo 產生 Kubernetes manifest。修改 runtime env 後需由 ArgoCD sync 並 rollout Pod。
 
 staging 初期最小建議：
 
@@ -520,14 +517,7 @@ Rollback 需要分成 image rollback 與 database rollback。
 
 ## 後續建議補齊
 
-目前部署文件可以指導手動或 CI/CD 落地，但 repo 還缺：
-
-- production frontend Dockerfile 或 S3/CloudFront 部署文件
-- Helm chart 或 Kustomize overlays
-- migration Job manifest
-- staging / production values 範本
-- startup migration 開關，避免多 Pod 同時 migration
-- CI/CD pipeline 文件
+目前本 repo 不包含 ArgoCD repository 內的實際 manifests；維運時應以對應環境的 ArgoCD values 與共用 pipeline template 為部署真實來源。本文件保留環境變數、image 與 migration 的契約，變更時需同步更新 ArgoCD repository。
 
 ## 相關文件
 

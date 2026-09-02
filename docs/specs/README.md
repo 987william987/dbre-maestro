@@ -25,14 +25,14 @@
 判定：
 
 - 這是 Query Access 工單、SQL Editor 細粒度查詢權限、DB Scope / Sensitive Access 邊界的主設計文件
-- 目前尚未實作完成，且是後續功能落地的直接依據
+- 第一版已大部分落地；本文保留作為現行 Query Access 行為與後續演進的設計基線
 - 沒有被其他文件取代
 
 ### [20260618 Query Access Implementation Checklist](active/20260618-123500-query-access-implementation-checklist.md)
 
 判定：
 
-- 這是上述 Query Access 主 spec 的實作拆解清單
+- 這是上述 Query Access 主 spec 的已完成實作拆解清單
 - 內容偏 execution checklist，不取代主 spec，但可作為實際開發排程與驗收依據
 - 應與主 spec 一起維護
 
@@ -40,7 +40,7 @@
 
 判定：
 
-- 這是 Query Access 第一版的後端執行清單
+- 這是 Query Access 第一版的已完成後端執行清單
 - 主要涵蓋 migration、domain、service、API、parser 整合、audit 與 tests
 - 屬於 implementation-ready 文件
 
@@ -48,7 +48,7 @@
 
 判定：
 
-- 這是 Query Access 第一版的前端執行清單
+- 這是 Query Access 第一版的已完成前端執行清單
 - 主要涵蓋 New Ticket、SQL Editor CTA、Ticket List / Detail、文案與 QA
 - 屬於 implementation-ready 文件
 
