@@ -232,28 +232,29 @@ func (j *DBMetadataObjectJob) syncConnection(ctx context.Context, conn *model.DB
 
 	snapshotAt := time.Now().UTC()
 	var items []model.DBObjectSnapshot
+	var databases []model.DBDatabaseSnapshot
 	switch normalizedDBType(resolvedConn.DBType) {
 	case "postgres":
-		items, err = j.collectPostgresObjects(ctx, resolvedConn, password, snapshotAt, clusterName, nodeName)
+		items, databases, err = j.collectPostgresObjects(ctx, resolvedConn, password, snapshotAt, clusterName, nodeName)
 	default:
-		items, err = j.collectMySQLObjects(ctx, resolvedConn, password, snapshotAt, clusterName, nodeName)
+		items, databases, err = j.collectMySQLObjects(ctx, resolvedConn, password, snapshotAt, clusterName, nodeName)
 	}
 	if err != nil {
 		return err
 	}
 
-	if err := j.replaceObjectSnapshotsForConnection(ctx, snapshotAt, resolvedConn.ID, items); err != nil {
-		return fmt.Errorf("replace object snapshots for connection %d: %w", resolvedConn.ID, err)
+	if err := j.replaceObjectSnapshotsForConnection(ctx, snapshotAt, resolvedConn.ID, items, databases); err != nil {
+		return fmt.Errorf("replace object and database snapshots for connection %d: %w", resolvedConn.ID, err)
 	}
 
 	j.logger.Info("db metadata objects: connection synced", "connection_id", resolvedConn.ID, "connection_name", resolvedConn.Name, "count", len(items))
 	return nil
 }
 
-func (j *DBMetadataObjectJob) replaceObjectSnapshotsForConnection(ctx context.Context, snapshotAt time.Time, connectionID uint64, items []model.DBObjectSnapshot) error {
+func (j *DBMetadataObjectJob) replaceObjectSnapshotsForConnection(ctx context.Context, snapshotAt time.Time, connectionID uint64, items []model.DBObjectSnapshot, databases []model.DBDatabaseSnapshot) error {
 	j.writeMu.Lock()
 	defer j.writeMu.Unlock()
-	return j.snapshots.ReplaceObjectSnapshotsForConnection(ctx, snapshotAt, connectionID, items)
+	return j.snapshots.ReplaceObjectAndDatabaseSnapshotsForConnection(ctx, snapshotAt, connectionID, items, databases)
 }
 
 func (j *DBMetadataObjectJob) collectMySQLObjects(
@@ -263,11 +264,11 @@ func (j *DBMetadataObjectJob) collectMySQLObjects(
 	snapshotAt time.Time,
 	clusterName *string,
 	nodeName *string,
-) ([]model.DBObjectSnapshot, error) {
+) ([]model.DBObjectSnapshot, []model.DBDatabaseSnapshot, error) {
 	driver, dsn := pool.BuildDSN(conn, password)
 	db, err := pool.Open(driver, dsn, pool.ProfileMetadata)
 	if err != nil {
-		return nil, fmt.Errorf("open mysql metadata connection %d: %w", conn.ID, err)
+		return nil, nil, fmt.Errorf("open mysql metadata connection %d: %w", conn.ID, err)
 	}
 	defer db.Close()
 
@@ -277,15 +278,18 @@ func (j *DBMetadataObjectJob) collectMySQLObjects(
 	rows, err := db.QueryContext(queryCtx, `SELECT
 		TABLE_SCHEMA,
 		TABLE_NAME,
+		S.DEFAULT_CHARACTER_SET_NAME,
+		S.DEFAULT_COLLATION_NAME,
 		IFNULL(TABLE_ROWS, 0) AS TABLE_ROWS,
 		IFNULL(DATA_LENGTH, 0) AS DATA_LENGTH,
 		IFNULL(INDEX_LENGTH, 0) AS INDEX_LENGTH
-	FROM information_schema.TABLES
+	FROM information_schema.TABLES T
+	INNER JOIN information_schema.SCHEMATA S ON S.SCHEMA_NAME = T.TABLE_SCHEMA
 	WHERE TABLE_TYPE = 'BASE TABLE'
 	  AND TABLE_SCHEMA NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys')
 	ORDER BY TABLE_SCHEMA, TABLE_NAME`)
 	if err != nil {
-		return nil, fmt.Errorf("query mysql objects for connection %d: %w", conn.ID, err)
+		return nil, nil, fmt.Errorf("query mysql objects for connection %d: %w", conn.ID, err)
 	}
 	defer rows.Close()
 
@@ -293,11 +297,13 @@ func (j *DBMetadataObjectJob) collectMySQLObjects(
 	for rows.Next() {
 		var databaseName string
 		var tableName string
+		var characterSetName string
+		var collationName string
 		var rowCount int64
 		var dataSize int64
 		var indexSize int64
-		if err := rows.Scan(&databaseName, &tableName, &rowCount, &dataSize, &indexSize); err != nil {
-			return nil, fmt.Errorf("scan mysql object row for connection %d: %w", conn.ID, err)
+		if err := rows.Scan(&databaseName, &tableName, &characterSetName, &collationName, &rowCount, &dataSize, &indexSize); err != nil {
+			return nil, nil, fmt.Errorf("scan mysql object row for connection %d: %w", conn.ID, err)
 		}
 		items = append(items, model.DBObjectSnapshot{
 			SnapshotAt:     snapshotAt,
@@ -316,9 +322,22 @@ func (j *DBMetadataObjectJob) collectMySQLObjects(
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate mysql object rows for connection %d: %w", conn.ID, err)
+		return nil, nil, fmt.Errorf("iterate mysql object rows for connection %d: %w", conn.ID, err)
 	}
-	return items, nil
+	databaseRows, err := db.QueryContext(queryCtx, `SELECT S.SCHEMA_NAME, S.DEFAULT_CHARACTER_SET_NAME, S.DEFAULT_COLLATION_NAME, COUNT(T.TABLE_NAME), COALESCE(SUM(T.DATA_LENGTH), 0), COALESCE(SUM(T.INDEX_LENGTH), 0) FROM information_schema.SCHEMATA S LEFT JOIN information_schema.TABLES T ON T.TABLE_SCHEMA = S.SCHEMA_NAME AND T.TABLE_TYPE = 'BASE TABLE' WHERE S.SCHEMA_NAME NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys') GROUP BY S.SCHEMA_NAME, S.DEFAULT_CHARACTER_SET_NAME, S.DEFAULT_COLLATION_NAME ORDER BY S.SCHEMA_NAME`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer databaseRows.Close()
+	databases := make([]model.DBDatabaseSnapshot, 0)
+	for databaseRows.Next() {
+		item := model.DBDatabaseSnapshot{SnapshotAt: snapshotAt, DBConnectionID: conn.ID, Engine: "mysql"}
+		if err := databaseRows.Scan(&item.DatabaseName, &item.CharacterSetName, &item.CollationName, &item.TableCount, &item.DataSizeBytes, &item.IndexSizeBytes); err != nil {
+			return nil, nil, err
+		}
+		databases = append(databases, item)
+	}
+	return items, databases, databaseRows.Err()
 }
 
 func (j *DBMetadataObjectJob) collectPostgresObjects(
@@ -328,49 +347,55 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 	snapshotAt time.Time,
 	clusterName *string,
 	nodeName *string,
-) ([]model.DBObjectSnapshot, error) {
+) ([]model.DBObjectSnapshot, []model.DBDatabaseSnapshot, error) {
 	driver, baseDSN := pool.BuildDSN(conn, password)
 	baseDB, err := pool.Open(driver, baseDSN, pool.ProfileMetadata)
 	if err != nil {
-		return nil, fmt.Errorf("open postgres metadata base connection %d: %w", conn.ID, err)
+		return nil, nil, fmt.Errorf("open postgres metadata base connection %d: %w", conn.ID, err)
 	}
 	defer baseDB.Close()
 
 	dbListCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	dbRows, err := baseDB.QueryContext(dbListCtx, `SELECT datname
+	dbRows, err := baseDB.QueryContext(dbListCtx, `SELECT datname, pg_encoding_to_char(encoding), datcollate
 	FROM pg_database
 	WHERE datistemplate = false
 	  AND datallowconn = true
 	ORDER BY datname`)
 	if err != nil {
-		return nil, fmt.Errorf("query postgres databases for connection %d: %w", conn.ID, err)
+		return nil, nil, fmt.Errorf("query postgres databases for connection %d: %w", conn.ID, err)
 	}
 	defer dbRows.Close()
 
-	databaseNames := make([]string, 0)
+	type databaseMetadata struct {
+		name, characterSet, collation string
+	}
+	databases := make([]databaseMetadata, 0)
 	for dbRows.Next() {
-		var databaseName string
-		if err := dbRows.Scan(&databaseName); err != nil {
-			return nil, fmt.Errorf("scan postgres database for connection %d: %w", conn.ID, err)
+		var database databaseMetadata
+		if err := dbRows.Scan(&database.name, &database.characterSet, &database.collation); err != nil {
+			return nil, nil, fmt.Errorf("scan postgres database for connection %d: %w", conn.ID, err)
 		}
-		if shouldSkipPostgresMetadataDatabase(databaseName) {
+		if shouldSkipPostgresMetadataDatabase(database.name) {
 			continue
 		}
-		databaseNames = append(databaseNames, databaseName)
+		databases = append(databases, database)
 	}
 	if err := dbRows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate postgres databases for connection %d: %w", conn.ID, err)
+		return nil, nil, fmt.Errorf("iterate postgres databases for connection %d: %w", conn.ID, err)
 	}
 
 	items := make([]model.DBObjectSnapshot, 0)
-	for _, databaseName := range databaseNames {
+	databasesSnapshots := make([]model.DBDatabaseSnapshot, 0, len(databases))
+	for _, database := range databases {
+		databaseName := database.name
+		databaseSnapshot := model.DBDatabaseSnapshot{SnapshotAt: snapshotAt, DBConnectionID: conn.ID, Engine: "postgres", DatabaseName: databaseName, CharacterSetName: &database.characterSet, CollationName: &database.collation}
 		dbName := databaseName
 		targetDSN := pool.BuildPostgresDSN(conn.Host, conn.Port, conn.Username, password, &dbName, conn.SSLMode)
 		targetDB, err := pool.Open("pgx", targetDSN, pool.ProfileMetadata)
 		if err != nil {
-			return nil, fmt.Errorf("open postgres database %s for connection %d: %w", databaseName, conn.ID, err)
+			return nil, nil, fmt.Errorf("open postgres database %s for connection %d: %w", databaseName, conn.ID, err)
 		}
 
 		queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -378,7 +403,7 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 		if err != nil {
 			cancel()
 			_ = targetDB.Close()
-			return nil, fmt.Errorf("query postgres objects for connection %d database %s: %w", conn.ID, databaseName, err)
+			return nil, nil, fmt.Errorf("query postgres objects for connection %d database %s: %w", conn.ID, databaseName, err)
 		}
 
 		for rows.Next() {
@@ -391,7 +416,7 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 				rows.Close()
 				cancel()
 				_ = targetDB.Close()
-				return nil, fmt.Errorf("scan postgres object row for connection %d database %s: %w", conn.ID, databaseName, err)
+				return nil, nil, fmt.Errorf("scan postgres object row for connection %d database %s: %w", conn.ID, databaseName, err)
 			}
 			items = append(items, model.DBObjectSnapshot{
 				SnapshotAt:     snapshotAt,
@@ -407,23 +432,27 @@ func (j *DBMetadataObjectJob) collectPostgresObjects(
 				DataSizeBytes:  dataSize,
 				IndexSizeBytes: indexSize,
 			})
+			databaseSnapshot.TableCount++
+			databaseSnapshot.DataSizeBytes += dataSize
+			databaseSnapshot.IndexSizeBytes += indexSize
 		}
 
 		if err := rows.Err(); err != nil {
 			rows.Close()
 			cancel()
 			_ = targetDB.Close()
-			return nil, fmt.Errorf("iterate postgres object rows for connection %d database %s: %w", conn.ID, databaseName, err)
+			return nil, nil, fmt.Errorf("iterate postgres object rows for connection %d database %s: %w", conn.ID, databaseName, err)
 		}
 
 		rows.Close()
 		cancel()
 		if err := targetDB.Close(); err != nil {
-			return nil, fmt.Errorf("close postgres database %s for connection %d: %w", databaseName, conn.ID, err)
+			return nil, nil, fmt.Errorf("close postgres database %s for connection %d: %w", databaseName, conn.ID, err)
 		}
+		databasesSnapshots = append(databasesSnapshots, databaseSnapshot)
 	}
 
-	return items, nil
+	return items, databasesSnapshots, nil
 }
 
 func postgresObjectSnapshotQuery() string {

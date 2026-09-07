@@ -14,6 +14,7 @@ const AccessScopesPage = lazy(() => import('@/modules/account/pages/AccessScopes
 const AccountSessionsPage = lazy(() => import('@/modules/account/pages/SessionsPage').then((module) => ({ default: module.SessionsPage })))
 const DashboardPage = lazy(() => import('@/modules/dashboard/pages/DashboardPage').then((module) => ({ default: module.DashboardPage })))
 const DBConnectionsPage = lazy(() => import('@/modules/db-connections/pages/DBConnectionsPage').then((module) => ({ default: module.DBConnectionsPage })))
+const DBConnectionDetailPage = lazy(() => import('@/modules/db-connections/pages/DBConnectionDetailPage').then((module) => ({ default: module.DBConnectionDetailPage })))
 const DBMetadataInventoryPage = lazy(() => import('@/modules/db-metadata/pages/DBMetadataInventoryPage').then((module) => ({ default: module.DBMetadataInventoryPage })))
 const DBMetadataObjectsPage = lazy(() => import('@/modules/db-metadata/pages/DBMetadataObjectsPage').then((module) => ({ default: module.DBMetadataObjectsPage })))
 const MaskingDSLGuidePage = lazy(() => import('@/modules/masking-rules/pages/MaskingDSLGuidePage').then((module) => ({ default: module.MaskingDSLGuidePage })))
@@ -75,9 +76,12 @@ export default function App() {
               <Route element={<RoleRoute allowedPermissions={['scheduled_sql_reports.read', 'scheduled_sql_reports.write']} />}>
                 <Route path="/scheduled-sql-reports" element={<ScheduledSQLReportsPage />} />
               </Route>
-              <Route element={<RoleRoute allowedPermissions={['db_connections.read', 'db_connections.write']} />}>
+              <Route element={<RoleRoute allowedPermissions={['db_connections.read', 'db_connections.write', 'db_connections.overview', 'db_connections.databases', 'db_connections.accounts']} />}>
                 <Route path="/db-connections" element={<DBConnectionsPage />} />
               </Route>
+              <Route element={<RoleRoute allowedPermissions={['db_connections.overview']} />}><Route path="/db-connections/:id/overview" element={<DBConnectionDetailPage view="overview" />} /></Route>
+              <Route element={<RoleRoute allowedPermissions={['db_connections.databases']} />}><Route path="/db-connections/:id/databases" element={<DBConnectionDetailPage view="databases" />} /></Route>
+              <Route element={<RoleRoute allowedPermissions={['db_connections.accounts']} />}><Route path="/db-connections/:id/accounts" element={<DBConnectionDetailPage view="accounts" />} /></Route>
               <Route element={<RoleRoute allowedPermissions={['db_metadata.read']} />}>
                 <Route path="/db-metadata/inventory" element={<DBMetadataInventoryPage />} />
                 <Route path="/db-metadata/objects" element={<DBMetadataObjectsPage />} />

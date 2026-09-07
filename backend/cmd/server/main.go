@@ -316,7 +316,7 @@ func main() {
 
 	frontendReloadH := handler.NewFrontendReloadHandler()
 	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL, handler.WithTicketHandlerAppEnv(cfg.AppEnv), handler.WithTicketHandlerDBMetadata(dbMetadataRepo), handler.WithTicketHandlerRollbacks(ticketRollbackRepo))
-	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo, handler.WithDBConnectionHandlerHostPolicy(dbConnectionHostPolicy), handler.WithDBConnectionHandlerSettings(settingsRepo))
+	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo, handler.WithDBConnectionHandlerHostPolicy(dbConnectionHostPolicy), handler.WithDBConnectionHandlerSettings(settingsRepo), handler.WithDBConnectionHandlerMetadata(dbMetadataRepo))
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL, cfg.JWTSecret)
 	auditH := handler.NewAuditHandler(auditRepo)
 	maskingRuleH := handler.NewMaskingRuleHandler(maskingRuleRepo, auditRepo, masking.GlobalCache())
@@ -347,12 +347,14 @@ func main() {
 	scheduledReportH := handler.NewScheduledSQLReportHandler(scheduledReportRepo, dbConnRepo, userRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, ticketRepo, maskingEngine, auditRepo, larkDispatcher)
 	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
 	objectJob := job.NewDBMetadataObjectJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
+	accountJob := job.NewDBMetadataAccountJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
 
 	// Background scheduler: poll every 30s for due scheduled tickets
 	go runScheduler(ticketRepo, dbConnRepo, ticketH)
 	go runScheduledSQLReportScheduler(scheduledReportH)
 	go inventoryJob.Start(context.Background())
 	go objectJob.Start(context.Background())
+	go accountJob.Start(context.Background())
 
 	r := chi.NewRouter()
 	r.Use(middleware.SecurityHeaders(cfg.AppEnv == "production"))
@@ -441,6 +443,9 @@ func main() {
 
 			r.With(requireDBConnectionsRead).Get("/", dbConnH.List)
 			r.With(requireDBConnectionsRead).Get("/{id}/bindings", dbConnH.Bindings)
+			r.With(requireDBConnectionsOverview).Get("/{id}/overview", dbConnH.Overview)
+			r.With(requireDBConnectionsDatabases).Get("/{id}/databases", dbConnH.Databases)
+			r.With(requireDBConnectionsAccounts).Get("/{id}/accounts", dbConnH.Accounts)
 			r.With(requireDBConnectionsWrite).Post("/", dbConnH.Create)
 			r.With(requireDBConnectionsWrite).Patch("/{id}", dbConnH.Patch)
 			r.With(requireDBConnectionsWrite).Post("/{id}/test", dbConnH.Test)
@@ -777,7 +782,7 @@ func requireAuditLogsWrite(next http.Handler) http.Handler {
 	return middleware.RequirePermission("audit_logs.write")(next)
 }
 func requireDBConnectionsRead(next http.Handler) http.Handler {
-	return middleware.RequirePermission("db_connections.read", "db_connections.write")(next)
+	return middleware.RequirePermission("db_connections.read", "db_connections.write", "db_connections.overview", "db_connections.databases", "db_connections.accounts")(next)
 }
 func requireDBConnectionsWrite(next http.Handler) http.Handler {
 	return middleware.RequirePermission("db_connections.write")(next)
@@ -844,4 +849,13 @@ func requireSettingsWrite(next http.Handler) http.Handler {
 }
 func requireDBMetadataRead(next http.Handler) http.Handler {
 	return middleware.RequirePermission("db_metadata.read")(next)
+}
+func requireDBConnectionsOverview(next http.Handler) http.Handler {
+	return middleware.RequirePermission("db_connections.overview")(next)
+}
+func requireDBConnectionsDatabases(next http.Handler) http.Handler {
+	return middleware.RequirePermission("db_connections.databases")(next)
+}
+func requireDBConnectionsAccounts(next http.Handler) http.Handler {
+	return middleware.RequirePermission("db_connections.accounts")(next)
 }

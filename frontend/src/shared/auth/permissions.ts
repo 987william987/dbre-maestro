@@ -19,7 +19,7 @@ export function defaultRouteForPermissions(userPermissions: string[]) {
   if (userPermissions.includes('users.read') || userPermissions.includes('users.write')) {
     return '/users'
   }
-  if (userPermissions.includes('db_connections.read') || userPermissions.includes('db_connections.write')) {
+  if (userPermissions.some((permission) => ['db_connections.read', 'db_connections.write', 'db_connections.overview', 'db_connections.databases', 'db_connections.accounts'].includes(permission))) {
     return '/db-connections'
   }
   if (userPermissions.includes('db_metadata.read')) {

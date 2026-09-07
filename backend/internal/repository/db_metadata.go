@@ -169,6 +169,67 @@ func (r *DBMetadataRepo) ListObjectSnapshots(ctx context.Context, connectionID u
 	return items, nil
 }
 
+func (r *DBMetadataRepo) ListDatabaseSummaries(ctx context.Context, connectionID uint64) ([]model.DBDatabaseSnapshot, error) {
+	items := make([]model.DBDatabaseSnapshot, 0)
+	if err := r.db.SelectContext(ctx, &items, `SELECT id, snapshot_at, db_connection_id, engine, database_name, character_set_name, collation_name, table_count, data_size_bytes, index_size_bytes FROM db_database_snapshots WHERE db_connection_id = ? ORDER BY database_name`, connectionID); err != nil {
+		return nil, fmt.Errorf("list database summaries for connection %d: %w", connectionID, err)
+	}
+	return items, nil
+}
+
+func (r *DBMetadataRepo) ListAccountSnapshots(ctx context.Context, connectionID uint64) ([]model.DBAccountSnapshot, []model.DBAccountGrantSnapshot, *model.DBAccountSnapshotStatus, error) {
+	accounts := make([]model.DBAccountSnapshot, 0)
+	if err := r.db.SelectContext(ctx, &accounts, `SELECT id, snapshot_at, db_connection_id, engine, principal_key, principal_name, principal_host, principal_type, can_login, is_superuser, inherits_roles, can_create_role, can_create_database, can_replicate, can_bypass_rls, is_locked, valid_until FROM db_account_snapshots WHERE db_connection_id = ? ORDER BY principal_name, principal_host`, connectionID); err != nil {
+		return nil, nil, nil, fmt.Errorf("list account snapshots for connection %d: %w", connectionID, err)
+	}
+	grants := make([]model.DBAccountGrantSnapshot, 0)
+	if err := r.db.SelectContext(ctx, &grants, `SELECT id, snapshot_at, db_connection_id, principal_key, grant_kind, grant_statement, granted_role, scope_type, database_name, schema_name, object_name, privilege_type, is_grantable FROM db_account_grant_snapshots WHERE db_connection_id = ? ORDER BY principal_key, grant_kind, scope_type, database_name, schema_name, object_name, privilege_type`, connectionID); err != nil {
+		return nil, nil, nil, fmt.Errorf("list account grant snapshots for connection %d: %w", connectionID, err)
+	}
+	var status model.DBAccountSnapshotStatus
+	err := r.db.GetContext(ctx, &status, `SELECT db_connection_id, last_attempt_at, last_success_at, status, error_message FROM db_account_snapshot_statuses WHERE db_connection_id = ?`, connectionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return accounts, grants, nil, nil
+	}
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("get account snapshot status for connection %d: %w", connectionID, err)
+	}
+	return accounts, grants, &status, nil
+}
+
+func (r *DBMetadataRepo) ReplaceAccountSnapshots(ctx context.Context, connectionID uint64, snapshotAt time.Time, accounts []model.DBAccountSnapshot, grants []model.DBAccountGrantSnapshot) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin replace account snapshots tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM db_account_grant_snapshots WHERE db_connection_id = ?`, connectionID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM db_account_snapshots WHERE db_connection_id = ?`, connectionID); err != nil {
+		return err
+	}
+	for _, item := range accounts {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO db_account_snapshots (snapshot_at, db_connection_id, engine, principal_key, principal_name, principal_host, principal_type, can_login, is_superuser, inherits_roles, can_create_role, can_create_database, can_replicate, can_bypass_rls, is_locked, valid_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, snapshotAt.UTC(), connectionID, item.Engine, item.PrincipalKey, item.PrincipalName, item.PrincipalHost, item.PrincipalType, item.CanLogin, item.IsSuperuser, item.InheritsRoles, item.CanCreateRole, item.CanCreateDB, item.CanReplicate, item.CanBypassRLS, item.IsLocked, item.ValidUntil); err != nil {
+			return fmt.Errorf("insert account snapshot %s: %w", item.PrincipalKey, err)
+		}
+	}
+	for _, item := range grants {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO db_account_grant_snapshots (snapshot_at, db_connection_id, principal_key, grant_kind, grant_statement, granted_role, scope_type, database_name, schema_name, object_name, privilege_type, is_grantable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, snapshotAt.UTC(), connectionID, item.PrincipalKey, item.GrantKind, item.GrantStatement, item.GrantedRole, item.ScopeType, item.DatabaseName, item.SchemaName, item.ObjectName, item.PrivilegeType, item.IsGrantable); err != nil {
+			return fmt.Errorf("insert account grant snapshot %s: %w", item.PrincipalKey, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO db_account_snapshot_statuses (db_connection_id, last_attempt_at, last_success_at, status, error_message) VALUES (?, ?, ?, 'success', NULL) ON DUPLICATE KEY UPDATE last_attempt_at = VALUES(last_attempt_at), last_success_at = VALUES(last_success_at), status = 'success', error_message = NULL`, connectionID, snapshotAt.UTC(), snapshotAt.UTC()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *DBMetadataRepo) MarkAccountSnapshotFailed(ctx context.Context, connectionID uint64, attemptedAt time.Time, message string) error {
+	_, err := r.db.ExecContext(ctx, `INSERT INTO db_account_snapshot_statuses (db_connection_id, last_attempt_at, last_success_at, status, error_message) VALUES (?, ?, NULL, 'failed', ?) ON DUPLICATE KEY UPDATE last_attempt_at = VALUES(last_attempt_at), status = 'failed', error_message = VALUES(error_message)`, connectionID, attemptedAt.UTC(), message)
+	return err
+}
+
 func (r *DBMetadataRepo) FindObjectSnapshot(ctx context.Context, connectionID uint64, databaseName, schemaName, tableName string) (*model.DBObjectSnapshot, error) {
 	var item model.DBObjectSnapshot
 	err := r.db.GetContext(ctx, &item, `SELECT
@@ -208,13 +269,36 @@ func (r *DBMetadataRepo) DeleteObjectSnapshotsForConnection(ctx context.Context,
 	if _, err := r.db.ExecContext(ctx, `DELETE FROM db_object_snapshots WHERE db_connection_id = ?`, connectionID); err != nil {
 		return fmt.Errorf("delete db_object_snapshots for connection %d: %w", connectionID, err)
 	}
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM db_database_snapshots WHERE db_connection_id = ?`, connectionID); err != nil {
+		return fmt.Errorf("delete db_database_snapshots for connection %d: %w", connectionID, err)
+	}
 	return nil
+}
+
+func (r *DBMetadataRepo) ReplaceDatabaseSnapshotsForConnection(ctx context.Context, snapshotAt time.Time, connectionID uint64, items []model.DBDatabaseSnapshot) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM db_database_snapshots WHERE db_connection_id = ?`, connectionID); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO db_database_snapshots (snapshot_at, db_connection_id, engine, database_name, character_set_name, collation_name, table_count, data_size_bytes, index_size_bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, snapshotAt.UTC(), connectionID, item.Engine, item.DatabaseName, item.CharacterSetName, item.CollationName, item.TableCount, item.DataSizeBytes, item.IndexSizeBytes); err != nil {
+			return fmt.Errorf("insert database snapshot %s: %w", item.DatabaseName, err)
+		}
+	}
+	return tx.Commit()
 }
 
 func (r *DBMetadataRepo) DeleteObjectSnapshotsExceptConnectionIDs(ctx context.Context, connectionIDs []uint64) error {
 	if len(connectionIDs) == 0 {
 		if _, err := r.db.ExecContext(ctx, `DELETE FROM db_object_snapshots`); err != nil {
 			return fmt.Errorf("delete all db_object_snapshots: %w", err)
+		}
+		if _, err := r.db.ExecContext(ctx, `DELETE FROM db_database_snapshots`); err != nil {
+			return fmt.Errorf("delete all db_database_snapshots: %w", err)
 		}
 		return nil
 	}
@@ -226,6 +310,13 @@ func (r *DBMetadataRepo) DeleteObjectSnapshotsExceptConnectionIDs(ctx context.Co
 	query = r.db.Rebind(query)
 	if _, err := r.db.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("delete db_object_snapshots except ids: %w", err)
+	}
+	databaseQuery, databaseArgs, err := sqlx.In(`DELETE FROM db_database_snapshots WHERE db_connection_id NOT IN (?)`, connectionIDs)
+	if err != nil {
+		return err
+	}
+	if _, err := r.db.ExecContext(ctx, r.db.Rebind(databaseQuery), databaseArgs...); err != nil {
+		return fmt.Errorf("delete db_database_snapshots except ids: %w", err)
 	}
 	return nil
 }
@@ -324,6 +415,55 @@ func (r *DBMetadataRepo) ReplaceObjectSnapshotsForConnection(ctx context.Context
 	}
 	tx = nil
 	return nil
+}
+
+func (r *DBMetadataRepo) ReplaceObjectAndDatabaseSnapshotsForConnection(ctx context.Context, snapshotAt time.Time, connectionID uint64, objects []model.DBObjectSnapshot, databases []model.DBDatabaseSnapshot) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin replace object and database snapshots tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM db_object_snapshots WHERE db_connection_id = ?`, connectionID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM db_database_snapshots WHERE db_connection_id = ?`, connectionID); err != nil {
+		return err
+	}
+	for _, item := range objects {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO db_object_snapshots (snapshot_at, db_connection_id, connection_name_snapshot, engine, cluster_name, node_name, database_name, schema_name, table_name, row_count, data_size_bytes, index_size_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, snapshotAt.UTC(), connectionID, item.ConnectionName, item.Engine, item.ClusterName, item.NodeName, item.DatabaseName, item.SchemaName, item.TableName, item.RowCount, item.DataSizeBytes, item.IndexSizeBytes, timeutil.NowUTC()); err != nil {
+			return fmt.Errorf("insert object snapshot %s.%s.%s: %w", item.DatabaseName, item.SchemaName, item.TableName, err)
+		}
+	}
+	for _, item := range databases {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO db_database_snapshots (snapshot_at, db_connection_id, engine, database_name, character_set_name, collation_name, table_count, data_size_bytes, index_size_bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, snapshotAt.UTC(), connectionID, item.Engine, item.DatabaseName, item.CharacterSetName, item.CollationName, item.TableCount, item.DataSizeBytes, item.IndexSizeBytes); err != nil {
+			return fmt.Errorf("insert database snapshot %s: %w", item.DatabaseName, err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *DBMetadataRepo) DeleteAccountSnapshotsExceptConnectionIDs(ctx context.Context, connectionIDs []uint64) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	tables := []string{"db_account_grant_snapshots", "db_account_snapshots", "db_account_snapshot_statuses"}
+	for _, table := range tables {
+		query := `DELETE FROM ` + table
+		args := []any{}
+		if len(connectionIDs) > 0 {
+			query, args, err = sqlx.In(query+` WHERE db_connection_id NOT IN (?)`, connectionIDs)
+			if err != nil {
+				return err
+			}
+			query = r.db.Rebind(query)
+		}
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+			return fmt.Errorf("clear stale %s: %w", table, err)
+		}
+	}
+	return tx.Commit()
 }
 
 func (r *DBMetadataRepo) FindLatestInventoryByEndpoint(ctx context.Context, endpoint string) (*model.CloudDBInventorySnapshot, error) {

@@ -92,6 +92,10 @@ function makeSettings(overrides: Partial<PlatformSettings> = {}): PlatformSettin
     db_metadata_object_enabled_connection_ids: [12, 18],
     db_metadata_object_cron: '0 10 * * *',
     db_metadata_object_sync_interval_minutes: 60,
+    db_metadata_account_enabled: false,
+    db_metadata_account_enabled_connection_ids: [],
+    db_metadata_account_cron: '0 11 * * *',
+    db_metadata_account_sync_interval_minutes: 60,
     db_metadata_cron_timezone: 'Asia/Taipei',
     ...overrides,
   }
@@ -182,6 +186,10 @@ describe('SettingsPage', () => {
       db_metadata_object_enabled_connection_ids: [12, 18],
       db_metadata_object_cron: '0 10 * * *',
       db_metadata_object_sync_interval_minutes: 60,
+      db_metadata_account_enabled: false,
+      db_metadata_account_enabled_connection_ids: [],
+      db_metadata_account_cron: '0 11 * * *',
+      db_metadata_account_sync_interval_minutes: 60,
       db_metadata_cron_timezone: 'Asia/Taipei',
     })
     mockedListSettingsDBConnections.mockResolvedValue({

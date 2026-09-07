@@ -44,6 +44,10 @@ export type PlatformSettings = {
   db_metadata_object_enabled_connection_ids: number[]
   db_metadata_object_cron: string
   db_metadata_object_sync_interval_minutes: number
+  db_metadata_account_enabled: boolean
+  db_metadata_account_enabled_connection_ids: number[]
+  db_metadata_account_cron: string
+  db_metadata_account_sync_interval_minutes: number
   db_metadata_cron_timezone: string
 }
 

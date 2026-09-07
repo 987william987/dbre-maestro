@@ -32,8 +32,11 @@ Workflow Rules 決定：
 
 大多數治理頁面遵循 `*.read` / `*.write` 模式：
 
-- `db_connections.read`：可進入 DB Connections 頁，看列表與詳情
+- `db_connections.read`：既有 DB Connections 列表權限
 - `db_connections.write`：可新增、修改、刪除、測試
+- `db_connections.overview`：查看單一 connection 設定與測試狀態
+- `db_connections.databases`：查看單一 connection 的 database snapshot
+- `db_connections.accounts`：查看敏感度較高的資料庫原生帳號與 grant snapshot
 - `masking_rules.read` / `masking_rules.write`
 - `sql_review.read` / `sql_review.write`
 - `settings.read` / `settings.write`
@@ -41,6 +44,8 @@ Workflow Rules 決定：
 - `audit_logs.read` / `audit_logs.write`
 
 這讓頁面可見性與寫入能力對齊，容易理解也容易維護。
+
+DB Connections 是例外：三個 detail 子頁採獨立 read permission。Overview、Databases 會由 migration 自動授予既有 connection readers/writers；Accounts 只預設授予 admin、dba 與 protected users。所有 detail permission 仍需搭配 DB Connection Scope。
 
 同一個導航群組底下的子頁，也沿用同一組權限。例如：
 

@@ -150,6 +150,9 @@
 |---|---|
 | `GET /api/db-connections` | `requireDBConnectionsRead` |
 | `GET /api/db-connections/{id}/bindings` | `requireDBConnectionsRead` |
+| `GET /api/db-connections/{id}/overview` | `db_connections.overview` + DB Scope |
+| `GET /api/db-connections/{id}/databases` | `db_connections.databases` + DB Scope |
+| `GET /api/db-connections/{id}/accounts` | `db_connections.accounts` + DB Scope |
 | `POST /api/db-connections` | `requireDBConnectionsWrite` |
 | `PATCH /api/db-connections/{id}` | `requireDBConnectionsWrite` |
 | `POST /api/db-connections/{id}/test` | `requireDBConnectionsWrite` |

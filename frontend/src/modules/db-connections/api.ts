@@ -55,6 +55,52 @@ type CreateConnectionPayload = {
 type PatchConnectionPayload = Partial<CreateConnectionPayload>
 type ConnectionBindingsResponse = DBConnectionBindings
 
+export type DBDatabaseSummary = {
+  snapshot_at: string
+  database_name: string
+  character_set_name?: string | null
+  collation_name?: string | null
+  table_count: number
+  data_size_bytes: number
+  index_size_bytes: number
+}
+
+export type DBAccountSnapshot = {
+  principal_key: string
+  principal_name: string
+  principal_host?: string | null
+  principal_type: 'user' | 'role' | string
+  can_login: boolean
+  is_superuser: boolean
+  inherits_roles: boolean
+  can_create_role: boolean
+  can_create_database: boolean
+  can_replicate: boolean
+  can_bypass_rls: boolean
+  is_locked: boolean
+  valid_until?: string | null
+}
+
+export type DBAccountGrantSnapshot = {
+  principal_key: string
+  grant_kind: 'privilege' | 'role_membership' | string
+  grant_statement?: string | null
+  granted_role?: string | null
+  scope_type?: string | null
+  database_name?: string | null
+  schema_name?: string | null
+  object_name?: string | null
+  privilege_type?: string | null
+  is_grantable: boolean
+}
+
+export type DBAccountScanStatus = {
+  last_attempt_at: string
+  last_success_at?: string | null
+  status: string
+  error_message?: string | null
+}
+
 export function listDBConnections() {
   return apiClient.get<ConnectionsResponse>('/db-connections').then((response) => ({
     ...response,
@@ -85,4 +131,16 @@ export function patchDBConnection(id: number, payload: PatchConnectionPayload) {
 
 export function getDBConnectionBindings(id: number) {
   return apiClient.get<ConnectionBindingsResponse>(`/db-connections/${id}/bindings`)
+}
+
+export function getDBConnectionOverview(id: number) {
+  return apiClient.get<DBConnection>(`/db-connections/${id}/overview`)
+}
+
+export function listDBConnectionDatabases(id: number) {
+  return apiClient.get<{ connection: DBConnection; items: DBDatabaseSummary[]; total: number }>(`/db-connections/${id}/databases`).then((response) => ({ ...response, items: Array.isArray(response.items) ? response.items : [] }))
+}
+
+export function listDBConnectionAccounts(id: number) {
+  return apiClient.get<{ connection: DBConnection; accounts: DBAccountSnapshot[]; grants: DBAccountGrantSnapshot[]; scan_status?: DBAccountScanStatus | null }>(`/db-connections/${id}/accounts`).then((response) => ({ ...response, accounts: Array.isArray(response.accounts) ? response.accounts : [], grants: Array.isArray(response.grants) ? response.grants : [] }))
 }

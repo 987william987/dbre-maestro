@@ -398,6 +398,17 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	for _, connectionID := range append([]uint64{}, req.DBMetadataAccountEnabledConnectionIDs...) {
+		conn, err := h.dbConns.GetByID(r.Context(), connectionID)
+		if err != nil || conn == nil {
+			jsonErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("db connection %d does not exist", connectionID))
+			return
+		}
+		if conn.DBType != "mysql" && conn.DBType != "postgres" {
+			jsonErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("db connection %d does not support account scanning", connectionID))
+			return
+		}
+	}
 	if req.SQLEditorAppTimeoutSeconds <= 0 {
 		jsonErr(w, http.StatusUnprocessableEntity, "sql_editor_app_timeout_seconds must be greater than 0")
 		return
@@ -447,6 +458,14 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := job.ValidateCronExpression(req.DBMetadataObjectCron); err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "db_metadata_object_cron is invalid: "+err.Error())
+		return
+	}
+	if req.DBMetadataAccountSyncIntervalMins <= 0 {
+		jsonErr(w, http.StatusUnprocessableEntity, "db_metadata_account_sync_interval_minutes must be greater than 0")
+		return
+	}
+	if err := job.ValidateCronExpression(req.DBMetadataAccountCron); err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "db_metadata_account_cron is invalid: "+err.Error())
 		return
 	}
 	if strings.TrimSpace(req.DBMetadataCronTimezone) == "" {
@@ -522,6 +541,10 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			"db_metadata_object_enabled_connection_ids":   req.DBMetadataObjectEnabledConnectionIDs,
 			"db_metadata_object_cron":                     req.DBMetadataObjectCron,
 			"db_metadata_object_sync_interval_minutes":    req.DBMetadataObjectSyncIntervalMins,
+			"db_metadata_account_enabled":                 req.DBMetadataAccountEnabled,
+			"db_metadata_account_enabled_connection_ids":  req.DBMetadataAccountEnabledConnectionIDs,
+			"db_metadata_account_cron":                    req.DBMetadataAccountCron,
+			"db_metadata_account_sync_interval_minutes":   req.DBMetadataAccountSyncIntervalMins,
 			"db_metadata_cron_timezone":                   req.DBMetadataCronTimezone,
 			"approval_policies":                           req.ApprovalPolicies,
 		},

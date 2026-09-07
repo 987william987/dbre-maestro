@@ -69,6 +69,10 @@ type PlatformSettings struct {
 	DBMetadataObjectEnabledConnectionIDs  []uint64         `json:"db_metadata_object_enabled_connection_ids"`
 	DBMetadataObjectCron                  string           `json:"db_metadata_object_cron"`
 	DBMetadataObjectSyncIntervalMins      int              `json:"db_metadata_object_sync_interval_minutes"`
+	DBMetadataAccountEnabled              bool             `json:"db_metadata_account_enabled"`
+	DBMetadataAccountEnabledConnectionIDs []uint64         `json:"db_metadata_account_enabled_connection_ids"`
+	DBMetadataAccountCron                 string           `json:"db_metadata_account_cron"`
+	DBMetadataAccountSyncIntervalMins     int              `json:"db_metadata_account_sync_interval_minutes"`
 	DBMetadataCronTimezone                string           `json:"db_metadata_cron_timezone"`
 }
 
