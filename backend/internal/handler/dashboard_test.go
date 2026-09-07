@@ -2,9 +2,38 @@ package handler
 
 import (
 	"testing"
+	"time"
 
+	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/repository"
 )
+
+func TestBuildDashboardOperationTrendFillsMissingUTCDays(t *testing.T) {
+	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 0, 3)
+
+	trend := buildDashboardOperationTrend(start, end, []repository.PlatformOperationDailyCount{
+		{Date: "2026-09-01", Type: string(model.TicketTypeDDL), Count: 2},
+		{Date: "2026-09-01", Type: "query", Count: 9},
+		{Date: "2026-09-03", Type: string(model.TicketTypeSensitiveQueryAccess), Count: 1},
+	})
+
+	if trend.Timezone != "UTC" || trend.StartDate != "2026-09-01" || trend.EndDate != "2026-09-03" {
+		t.Fatalf("unexpected trend metadata: %#v", trend)
+	}
+	if len(trend.Points) != 3 {
+		t.Fatalf("len(points) = %d, want 3", len(trend.Points))
+	}
+	if trend.Points[0].DDL != 2 || trend.Points[0].Query != 9 {
+		t.Fatalf("first point = %#v", trend.Points[0])
+	}
+	if trend.Points[1] != (dashboardOperationTrendPoint{Date: "2026-09-02"}) {
+		t.Fatalf("missing day was not zero-filled: %#v", trend.Points[1])
+	}
+	if trend.Points[2].SensitiveQueryAccess != 1 {
+		t.Fatalf("last point = %#v", trend.Points[2])
+	}
+}
 
 func TestBuildDashboardTicketSummaryDoesNotCountApprovedAsActive(t *testing.T) {
 	summary := buildDashboardTicketSummary(&repository.TicketDashboardSummary{

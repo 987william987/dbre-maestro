@@ -101,6 +101,43 @@ func TestTicketListIncludesWorkflowSnapshotReviewer(t *testing.T) {
 	}
 }
 
+func TestPlatformOperationDailyCountsCombinesTicketsAndQueryHistory(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewTicketRepo(sqlx.NewDb(db, "sqlmock"))
+	start := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	mock.ExpectQuery("SELECT DATE_FORMAT\\(created_at, '.+'\\) AS date_key, ticket_type AS operation_type, COUNT\\(\\*\\) AS count").
+		WithArgs(
+			start, end,
+			model.TicketTypeDDL,
+			model.TicketTypeDML,
+			model.TicketTypeRedisCommand,
+			model.TicketTypeSQLExport,
+			model.TicketTypeQueryAccess,
+			model.TicketTypeSensitiveQueryAccess,
+			start, end,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"date_key", "operation_type", "count"}).
+			AddRow("2026-09-06", "ddl", 3).
+			AddRow("2026-09-06", "query", 12))
+
+	counts, err := repo.PlatformOperationDailyCounts(context.Background(), start, end)
+	if err != nil {
+		t.Fatalf("PlatformOperationDailyCounts() error = %v", err)
+	}
+	if len(counts) != 2 || counts[0].Type != "ddl" || counts[1].Count != 12 {
+		t.Fatalf("counts = %#v", counts)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
 func TestTicketListFiltersByTicketNoTitleAndSubmitter(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

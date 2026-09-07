@@ -10,6 +10,7 @@ import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { getDashboard, type DashboardCount, type DashboardQueryAccessScope, type DashboardResponse, type DashboardTicketSummary, type DashboardUserCount } from '@/modules/dashboard/api'
+import { OperationsTrendChart } from '@/modules/dashboard/components/OperationsTrendChart'
 
 const TICKET_TYPE_LABELS: Record<TicketType, string> = {
   ddl: 'DDL',
@@ -422,6 +423,7 @@ export function DashboardPage() {
             <ShieldCheck className="h-4 w-4 text-muted" />
             <h2 className="text-[15px] font-semibold text-ink">Platform Operations</h2>
           </div>
+          <OperationsTrendChart trend={platform.operations_trend} />
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <KpiCard title="Platform Tickets" value={platform.ticket_summary.total} helper="All visible workflow tickets" icon={TicketIcon} />
             <KpiCard title="Platform Active" value={platform.ticket_summary.active} helper="Queue and executing workload" icon={Clock3} tone="warning" />

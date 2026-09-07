@@ -125,6 +125,24 @@ export type DashboardTopUsage = {
   sql_exports_by_user: DashboardUserCount[]
 }
 
+export type DashboardOperationTrendPoint = {
+  date: string
+  ddl: number
+  dml: number
+  redis: number
+  sql_export: number
+  query_access: number
+  sensitive_query_access: number
+  query: number
+}
+
+export type DashboardOperationTrend = {
+  timezone: string
+  start_date: string
+  end_date: string
+  points: DashboardOperationTrendPoint[]
+}
+
 export type DashboardPlatform = {
   ticket_summary: DashboardTicketSummary
   queue: DashboardQueueStats
@@ -134,6 +152,7 @@ export type DashboardPlatform = {
   db_metadata_health: DashboardDBMetadataHealth
   notification_health: DashboardNotificationHealth
   top_usage: DashboardTopUsage
+  operations_trend: DashboardOperationTrend
   recent_attention: Ticket[]
   long_pending_tickets: Ticket[]
   recent_failed_tickets: Ticket[]
@@ -218,6 +237,13 @@ const emptyTopUsage: DashboardTopUsage = {
   sql_exports_by_user: [],
 }
 
+const emptyOperationsTrend: DashboardOperationTrend = {
+  timezone: 'UTC',
+  start_date: '',
+  end_date: '',
+  points: [],
+}
+
 export async function getDashboard() {
   const response = await apiClient.get<DashboardResponse>('/dashboard')
   return {
@@ -257,6 +283,11 @@ export async function getDashboard() {
             db_connections_by_tickets: Array.isArray(response.platform.top_usage?.db_connections_by_tickets) ? response.platform.top_usage.db_connections_by_tickets : [],
             failed_db_connections: Array.isArray(response.platform.top_usage?.failed_db_connections) ? response.platform.top_usage.failed_db_connections : [],
             sql_exports_by_user: Array.isArray(response.platform.top_usage?.sql_exports_by_user) ? response.platform.top_usage.sql_exports_by_user : [],
+          },
+          operations_trend: {
+            ...emptyOperationsTrend,
+            ...response.platform.operations_trend,
+            points: Array.isArray(response.platform.operations_trend?.points) ? response.platform.operations_trend.points : [],
           },
           recent_attention: Array.isArray(response.platform.recent_attention) ? response.platform.recent_attention : [],
           long_pending_tickets: Array.isArray(response.platform.long_pending_tickets) ? response.platform.long_pending_tickets : [],
