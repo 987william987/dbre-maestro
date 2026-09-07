@@ -411,7 +411,7 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 
 	// Whitelist check: only SELECT/SHOW/EXPLAIN/DESC/WITH
 	if err := sqlreview.CheckReadOnly(sqlparse.DialectFromDBType(conn.DBType), req.SQL); err != nil {
-		jsonErr(w, http.StatusUnprocessableEntity, "only read-only SQL is allowed: "+err.Error())
+		jsonErr(w, http.StatusUnprocessableEntity, readOnlySQLErrorMessage(err))
 		return
 	}
 
@@ -625,7 +625,7 @@ func (h *QueryHandler) CreateSensitiveAccessTicket(w http.ResponseWriter, r *htt
 		return
 	}
 	if err := sqlreview.CheckReadOnly(sqlparse.DialectFromDBType(conn.DBType), req.SQLContent); err != nil {
-		jsonErr(w, http.StatusUnprocessableEntity, "only read-only SQL is allowed: "+err.Error())
+		jsonErr(w, http.StatusUnprocessableEntity, readOnlySQLErrorMessage(err))
 		return
 	}
 	hasAccess, err := h.userCanAccessConnection(r.Context(), userID, req.DBConnectionID)
