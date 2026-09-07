@@ -83,7 +83,37 @@ function Accounts({ engine, accounts, grants, status }: { engine?: string; accou
   const grantsByPrincipal = useMemo(() => grants.reduce<Record<string, DBAccountGrantSnapshot[]>>((result, grant) => { (result[grant.principal_key] ??= []).push(grant); return result }, {}), [grants])
   const isPostgres = engine === 'postgres' || engine === 'postgresql'
   const visibleAccounts = isPostgres ? accounts.filter((account) => !account.principal_name.startsWith('pg_')) : accounts
-  return <div className="grid gap-3">{status?.status === 'failed' ? <InlineAlert>Last account scan failed: {status.error_message || 'Insufficient catalog privileges.'}</InlineAlert> : null}<DataTableSurface>{visibleAccounts.length === 0 ? <Empty text="No account snapshot is available for this connection." /> : <DataTableScroll><DataTable><DataTableHead><tr><DataTableHeaderCell>Account</DataTableHeaderCell><DataTableHeaderCell>Type</DataTableHeaderCell><DataTableHeaderCell>Login</DataTableHeaderCell><DataTableHeaderCell>Superuser</DataTableHeaderCell><DataTableHeaderCell>Attributes</DataTableHeaderCell><DataTableHeaderCell>Valid Until</DataTableHeaderCell><DataTableHeaderCell>Grants</DataTableHeaderCell></tr></DataTableHead><DataTableBody>{visibleAccounts.map((account) => <DataTableRow key={account.principal_key}><DataTableCell><span className="font-medium">{account.principal_name}</span>{account.principal_host ? <span className="text-muted">@{account.principal_host}</span> : null}</DataTableCell><DataTableCell>{account.principal_type}</DataTableCell><DataTableCell>{account.can_login && !account.is_locked ? 'Can login' : 'Cannot login'}</DataTableCell><DataTableCell>{account.is_superuser ? 'Yes' : 'No'}</DataTableCell><DataTableCell>{isPostgres ? formatPostgresRoleAttributes(account) : '—'}</DataTableCell><DataTableCell>{account.valid_until ? formatDateTime(account.valid_until) : isPostgres ? 'Infinity' : '—'}</DataTableCell><DataTableCell><GrantList engine={engine} grants={grantsByPrincipal[account.principal_key] ?? []} /></DataTableCell></DataTableRow>)}</DataTableBody></DataTable></DataTableScroll>}</DataTableSurface></div>
+  return (
+    <div className="grid gap-3">
+      {status?.status === 'failed' ? <InlineAlert>Last account scan failed: {status.error_message || 'Insufficient catalog privileges.'}</InlineAlert> : null}
+      <DataTableSurface>
+        {visibleAccounts.length === 0 ? <Empty text="No account snapshot is available for this connection." /> : (
+          <DataTableScroll>
+            <DataTable>
+              <DataTableHead><tr>
+                <DataTableHeaderCell>Account</DataTableHeaderCell>
+                <DataTableHeaderCell>Type</DataTableHeaderCell>
+                <DataTableHeaderCell>Superuser</DataTableHeaderCell>
+                {isPostgres ? <DataTableHeaderCell>Attributes</DataTableHeaderCell> : null}
+                {isPostgres ? <DataTableHeaderCell>Valid Until</DataTableHeaderCell> : null}
+                <DataTableHeaderCell>Grants</DataTableHeaderCell>
+              </tr></DataTableHead>
+              <DataTableBody>{visibleAccounts.map((account) => (
+                <DataTableRow key={account.principal_key}>
+                  <DataTableCell><span className="font-medium">{account.principal_name}</span>{account.principal_host ? <span className="text-muted">@{account.principal_host}</span> : null}</DataTableCell>
+                  <DataTableCell>{account.principal_type}</DataTableCell>
+                  <DataTableCell>{account.is_superuser ? 'Yes' : 'No'}</DataTableCell>
+                  {isPostgres ? <DataTableCell>{formatPostgresRoleAttributes(account)}</DataTableCell> : null}
+                  {isPostgres ? <DataTableCell>{account.valid_until ? formatDateTime(account.valid_until) : 'Infinity'}</DataTableCell> : null}
+                  <DataTableCell><GrantList engine={engine} grants={grantsByPrincipal[account.principal_key] ?? []} /></DataTableCell>
+                </DataTableRow>
+              ))}</DataTableBody>
+            </DataTable>
+          </DataTableScroll>
+        )}
+      </DataTableSurface>
+    </div>
+  )
 }
 
 function formatPostgresRoleAttributes(account: DBAccountSnapshot) {

@@ -41,6 +41,9 @@ describe('DBConnectionDetailPage', () => {
     expect(await screen.findByText('app')).toBeInTheDocument()
     expect(screen.getByText("GRANT SELECT ON `orders`.* TO `app`@`%`")).toBeInTheDocument()
     expect(screen.queryByText('GRANT SELECT ON orders.invoices')).not.toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Login' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Attributes' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Valid Until' })).not.toBeInTheDocument()
   })
 
   it('shows PostgreSQL role attributes and hides built-in pg roles', async () => {
@@ -50,8 +53,10 @@ describe('DBConnectionDetailPage', () => {
     ], grants: [] })
     renderPage('accounts')
     expect(await screen.findByText('No inheritance, Create DB')).toBeInTheDocument()
-    expect(screen.getByText('Can login')).toBeInTheDocument()
     expect(screen.getByText('Infinity')).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Login' })).not.toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Attributes' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Valid Until' })).toBeInTheDocument()
     expect(screen.queryByText('pg_monitor')).not.toBeInTheDocument()
   })
 
