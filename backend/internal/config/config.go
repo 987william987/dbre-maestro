@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ type Config struct {
 	LarkWebhookURL            string // optional; empty = Lark notifications disabled
 	LarkOAuth                 LarkOAuthConfig
 	OIDCSSO                   OIDCSSOConfig
+	OIDCBearer                OIDCBearerConfig
 	PoolProfiles              map[pool.Profile]pool.ProfileConfig
 	DBConnectionHostPolicy    netguard.Config
 }
@@ -65,6 +67,19 @@ type OIDCSSOConfig struct {
 
 func (c OIDCSSOConfig) Configured() bool {
 	return c.Enabled && c.IssuerURL != "" && c.ClientID != "" && c.ClientSecret != "" && c.RedirectURL != ""
+}
+
+// OIDCBearerConfig accepts IdP-issued tokens as `Authorization: Bearer`, for
+// CLI use without a browser session. IssuerURL must equal the issuer in the
+// provider's discovery document verbatim (Authentik's ends with a slash);
+// Audiences lists the client ids whose tokens are accepted.
+type OIDCBearerConfig struct {
+	IssuerURL string
+	Audiences []string
+}
+
+func (c OIDCBearerConfig) Configured() bool {
+	return c.IssuerURL != "" && len(c.Audiences) > 0
 }
 
 func (c OIDCSSOConfig) ScopesOrDefault() []string {
@@ -147,6 +162,18 @@ func Load() (*Config, error) {
 		TrustMFA:               truthyEnv(os.Getenv("SSO_OIDC_TRUST_MFA")),
 		RequireEnterpriseEmail: truthyEnv(getEnv("SSO_OIDC_REQUIRE_ENTERPRISE_EMAIL", "true")),
 		EnterpriseEmailDomains: splitCSV(getEnv("SSO_OIDC_ENTERPRISE_EMAIL_DOMAINS", "")),
+	}
+	c.OIDCBearer = OIDCBearerConfig{
+		IssuerURL: strings.TrimSpace(os.Getenv("SSO_OIDC_BEARER_ISSUER_URL")),
+		Audiences: splitCSV(getEnv("SSO_OIDC_BEARER_AUDIENCES", "")),
+	}
+	if (c.OIDCBearer.IssuerURL == "") != (len(c.OIDCBearer.Audiences) == 0) {
+		return nil, errors.New("SSO_OIDC_BEARER_ISSUER_URL and SSO_OIDC_BEARER_AUDIENCES must be set together")
+	}
+	if c.OIDCBearer.IssuerURL != "" {
+		if u, err := url.Parse(c.OIDCBearer.IssuerURL); err != nil || u.Scheme != "https" || u.Host == "" {
+			return nil, errors.New("SSO_OIDC_BEARER_ISSUER_URL must be an https URL")
+		}
 	}
 	if raw := os.Getenv("RUN_MIGRATIONS_ON_STARTUP"); raw != "" {
 		runMigrations, err := strconv.ParseBool(raw)

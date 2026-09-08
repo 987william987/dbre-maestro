@@ -1,5 +1,7 @@
 # DESIGN.md — Admin Dashboard 設計規範
 
+> 文件定位：這是 DBRE Maestro 的 UI 目標設計與持續演進方向，不是現有頁面功能清單。實作新頁面或整理既有介面時應以此作為視覺與互動參考；尚未出現在程式碼中的元件或互動代表待逐步落地的目標態。
+>
 > 參考來源：[Shadcnblocks Admin Kit](https://www.shadcnblocks.com/admin-dashboard)（[Live Demo](https://shadcnblocks-admin.vercel.app/)）
 > 本專案技術基礎：React 18 + Vite + Tailwind CSS 3 + TypeScript + react-router-dom
 > （參考範例原為 Next.js + Tailwind 4；本文件已對應本專案 stack。shadcn/ui 以 Vite 方式引入，目前 lucide-react / clsx / tailwind-merge 已具備，Radix 元件與 Recharts 視需要再加）

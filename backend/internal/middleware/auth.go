@@ -2,10 +2,13 @@ package middleware
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/dbre-maestro/maestro/internal/auth"
+	"github.com/dbre-maestro/maestro/internal/oidcbearer"
 	"github.com/dbre-maestro/maestro/internal/repository"
 )
 
@@ -18,25 +21,44 @@ const (
 	CtxPermissions contextKey = "permissions"
 )
 
-func RequireAuth(secret []byte) func(http.Handler) http.Handler {
+func RequireAuth(secret []byte, bearer BearerAuthenticator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearer(r)
-			if token == "" {
+			if token == "" || len(token) > oidcbearer.MaxTokenBytes {
 				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
 
-			claims, err := auth.ParseAccessToken(token, secret)
-			if err != nil {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			if claims, err := auth.ParseAccessToken(token, secret); err == nil {
+				ctx := context.WithValue(r.Context(), CtxUserID, claims.UserID)
+				ctx = context.WithValue(ctx, CtxUsername, claims.Username)
+				ctx = context.WithValue(ctx, CtxSessionID, claims.SessionID)
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), CtxUserID, claims.UserID)
-			ctx = context.WithValue(ctx, CtxUsername, claims.Username)
-			ctx = context.WithValue(ctx, CtxSessionID, claims.SessionID)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			// Not a session token: an IdP-issued token, when that path is enabled.
+			// No session row exists for it, so CtxSessionID stays 0.
+			if bearer != nil {
+				user, err := bearer.Authenticate(r.Context(), token)
+				if err == nil && user != nil {
+					ctx := context.WithValue(r.Context(), CtxUserID, user.ID)
+					ctx = context.WithValue(ctx, CtxUsername, user.Username)
+					ctx = context.WithValue(ctx, CtxSessionID, uint64(0))
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+				switch {
+				case err == nil, errors.Is(err, oidcbearer.ErrForeignIssuer):
+					// expired session tokens land here too; nothing to log
+				case errors.Is(err, oidcbearer.ErrDiscovery), errors.Is(err, ErrBearerBackend):
+					slog.Warn("oidc bearer unavailable", "err", err)
+				default:
+					slog.Debug("oidc bearer token rejected", "err", err)
+				}
+			}
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		})
 	}
 }

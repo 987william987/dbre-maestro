@@ -4,6 +4,8 @@ status: active
 
 # Query Access Backend Task List
 
+> 實作狀態：後端核心第一版已落地。原始 checkbox 保留為設計時拆解快照，不代表目前上線狀態；現行 API 與授權行為以 reference 文件與程式碼為準。
+
 本文件把 Query Access 第一版需要的後端工作獨立拆出，供實作時逐項落地。
 
 對應主文件：

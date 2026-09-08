@@ -2,7 +2,11 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+
+	"github.com/dbre-maestro/maestro/internal/sqlparse"
 )
 
 func jsonOK(w http.ResponseWriter, v any) {
@@ -20,6 +24,17 @@ func jsonErr(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+func readOnlySQLErrorMessage(err error) string {
+	var syntaxErr *sqlparse.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		if syntaxErr.StatementSeq > 0 {
+			return fmt.Sprintf("SQL statement %d could not be parsed. It may use syntax that is not supported by the platform parser.", syntaxErr.StatementSeq)
+		}
+		return "SQL could not be parsed. It may use syntax that is not supported by the platform parser."
+	}
+	return "only read-only SQL is allowed: " + err.Error()
 }
 
 func bindJSON(r *http.Request, v any) error {

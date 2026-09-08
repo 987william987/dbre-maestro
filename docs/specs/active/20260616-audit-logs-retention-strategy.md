@@ -3,7 +3,7 @@ status: active
 spec_issue_number:
 spec_issue_url:
 spec_filed_at: 2026-06-16T00:00:00+08:00
-spec_branch: dev-william
+spec_branch: feature/audit-log-retention
 spec_plan_mode: inactive
 spec_executed: false
 spec_worktree_path:

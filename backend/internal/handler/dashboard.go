@@ -56,6 +56,24 @@ type dashboardDBMetadataHealth struct {
 	ObjectSyncFailed               bool                                `json:"object_sync_failed"`
 }
 
+type dashboardOperationTrendPoint struct {
+	Date                 string `json:"date"`
+	DDL                  int64  `json:"ddl"`
+	DML                  int64  `json:"dml"`
+	Redis                int64  `json:"redis"`
+	SQLExport            int64  `json:"sql_export"`
+	QueryAccess          int64  `json:"query_access"`
+	SensitiveQueryAccess int64  `json:"sensitive_query_access"`
+	Query                int64  `json:"query"`
+}
+
+type dashboardOperationTrend struct {
+	Timezone  string                         `json:"timezone"`
+	StartDate string                         `json:"start_date"`
+	EndDate   string                         `json:"end_date"`
+	Points    []dashboardOperationTrendPoint `json:"points"`
+}
+
 type dashboardPlatform struct {
 	TicketSummary        dashboardTicketSummary                `json:"ticket_summary"`
 	Queue                repository.PlatformQueueStats         `json:"queue"`
@@ -65,6 +83,7 @@ type dashboardPlatform struct {
 	DBMetadataHealth     dashboardDBMetadataHealth             `json:"db_metadata_health"`
 	NotificationHealth   repository.NotificationHealthStats    `json:"notification_health"`
 	TopUsage             repository.PlatformTopUsageStats      `json:"top_usage"`
+	OperationsTrend      dashboardOperationTrend               `json:"operations_trend"`
 	RecentAttention      []ticketResponse                      `json:"recent_attention"`
 	LongPendingTickets   []ticketResponse                      `json:"long_pending_tickets"`
 	RecentFailedTickets  []ticketResponse                      `json:"recent_failed_tickets"`
@@ -175,6 +194,13 @@ func (h *TicketHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "load dashboard top usage failed")
 			return
 		}
+		trendEnd := startOfUTCDay(timeutil.NowUTC()).AddDate(0, 0, 1)
+		trendStart := trendEnd.AddDate(0, 0, -30)
+		operationCounts, err := h.tickets.PlatformOperationDailyCounts(r.Context(), trendStart, trendEnd)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "load dashboard operations trend failed")
+			return
+		}
 		attentionTickets, err := h.tickets.RecentPlatformAttentionTickets(r.Context(), 8)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "load dashboard platform tickets failed")
@@ -224,6 +250,7 @@ func (h *TicketHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 			DBMetadataHealth:     dbMetadataHealth,
 			NotificationHealth:   *notificationHealth,
 			TopUsage:             *topUsage,
+			OperationsTrend:      buildDashboardOperationTrend(trendStart, trendEnd, operationCounts),
 			RecentAttention:      attentionTicketResponses,
 			LongPendingTickets:   longPendingResponses,
 			RecentFailedTickets:  failedTicketResponses,
@@ -241,6 +268,51 @@ func (h *TicketHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		},
 		"platform": platform,
 	})
+}
+
+func startOfUTCDay(value time.Time) time.Time {
+	value = value.UTC()
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func buildDashboardOperationTrend(start, end time.Time, counts []repository.PlatformOperationDailyCount) dashboardOperationTrend {
+	pointIndexByDate := make(map[string]int)
+	points := make([]dashboardOperationTrendPoint, 0, int(end.Sub(start).Hours()/24))
+	for day := start; day.Before(end); day = day.AddDate(0, 0, 1) {
+		point := dashboardOperationTrendPoint{Date: day.Format("2006-01-02")}
+		points = append(points, point)
+		pointIndexByDate[point.Date] = len(points) - 1
+	}
+	for _, item := range counts {
+		pointIndex, ok := pointIndexByDate[item.Date]
+		if !ok {
+			continue
+		}
+		point := &points[pointIndex]
+		switch item.Type {
+		case string(model.TicketTypeDDL):
+			point.DDL = item.Count
+		case string(model.TicketTypeDML):
+			point.DML = item.Count
+		case string(model.TicketTypeRedisCommand):
+			point.Redis = item.Count
+		case string(model.TicketTypeSQLExport):
+			point.SQLExport = item.Count
+		case string(model.TicketTypeQueryAccess):
+			point.QueryAccess = item.Count
+		case string(model.TicketTypeSensitiveQueryAccess):
+			point.SensitiveQueryAccess = item.Count
+		case "query":
+			point.Query = item.Count
+		}
+	}
+
+	result := dashboardOperationTrend{Timezone: "UTC", Points: points}
+	if len(points) > 0 {
+		result.StartDate = points[0].Date
+		result.EndDate = points[len(points)-1].Date
+	}
+	return result
 }
 
 func (h *TicketHandler) dashboardTicketSummary(ctx context.Context, submitterID *uint64) (dashboardTicketSummary, error) {

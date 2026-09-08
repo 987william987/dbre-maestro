@@ -331,3 +331,51 @@ func TestLoadOverridesPoolProfilesFromEnv(t *testing.T) {
 		t.Fatalf("query pool config = %#v, want %#v", got, want)
 	}
 }
+
+func TestLoadOIDCBearerKeepsIssuerVerbatim(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SSO_OIDC_BEARER_ISSUER_URL", " https://idp.example.com/application/o/edgex-cli/ ")
+	t.Setenv("SSO_OIDC_BEARER_AUDIENCES", "edgex-cli, other-cli")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.OIDCBearer.Configured() {
+		t.Fatal("OIDCBearer.Configured() = false, want true")
+	}
+	if cfg.OIDCBearer.IssuerURL != "https://idp.example.com/application/o/edgex-cli/" {
+		t.Fatalf("OIDCBearer.IssuerURL = %q, want the trailing slash kept", cfg.OIDCBearer.IssuerURL)
+	}
+	if len(cfg.OIDCBearer.Audiences) != 2 || cfg.OIDCBearer.Audiences[1] != "other-cli" {
+		t.Fatalf("OIDCBearer.Audiences = %#v", cfg.OIDCBearer.Audiences)
+	}
+}
+
+func TestLoadOIDCBearerDefaultsOff(t *testing.T) {
+	setRequiredEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.OIDCBearer.Configured() {
+		t.Fatal("OIDCBearer.Configured() = true with no env, want false")
+	}
+}
+
+func TestLoadRejectsHalfConfiguredOIDCBearer(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SSO_OIDC_BEARER_ISSUER_URL", "https://idp.example.com/application/o/edgex-cli/")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted an issuer without audiences")
+	}
+}
+
+func TestLoadRejectsNonHTTPSOIDCBearerIssuer(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SSO_OIDC_BEARER_ISSUER_URL", "http://idp.example.com/application/o/edgex-cli/")
+	t.Setenv("SSO_OIDC_BEARER_AUDIENCES", "edgex-cli")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted an http issuer")
+	}
+}

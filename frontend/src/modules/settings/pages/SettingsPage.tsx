@@ -52,6 +52,9 @@ type SettingsForm = {
   objectEnabled: boolean
   objectConnectionIDs: number[]
   objectCron: string
+  accountEnabled: boolean
+  accountConnectionIDs: number[]
+  accountCron: string
   cronTimezone: string
   approvalPolicies: ApprovalPolicy[]
   workflowRules: WorkflowRule[]
@@ -494,6 +497,45 @@ export function SettingsPage() {
                 value={form.mysqlRollbackMaxSQLBytes}
                 onChange={(value) => setForm((current) => current ? { ...current, mysqlRollbackMaxSQLBytes: value } : current)}
               />
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-border bg-panel shadow-soft">
+            <div className="border-b border-border/80 px-4 py-3">
+              <p className="text-[14px] font-semibold text-ink">Database Account Scan</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Capture MySQL and PostgreSQL account, role, and grant snapshots on a cron schedule.</p>
+            </div>
+            <div className="grid gap-4 px-4 py-4 md:grid-cols-2">
+              <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
+                <Switch ariaLabel="Enable database account scanning" checked={form.accountEnabled} onChange={(checked) => setForm((current) => current ? { ...current, accountEnabled: checked } : current)} />
+                Enable database account scan
+              </label>
+              <Field label="Account cron" value={form.accountCron} onChange={(value) => setForm((current) => current ? { ...current, accountCron: value } : current)} placeholder="0 11 * * *" />
+            </div>
+            <div className="border-t border-border/80 px-4 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[13px] font-semibold text-ink">Included DB Connections</p>
+                  <p className="mt-1 text-[12px] leading-5 text-muted">Choose MySQL and PostgreSQL connections whose native accounts and grants should be scanned.</p>
+                </div>
+                <div className="rounded-full border border-border bg-panel-soft px-3 py-1 text-[11px] font-semibold text-muted">{form.accountConnectionIDs.length} selected</div>
+              </div>
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {connections.filter((connection) => connection.db_type === 'mysql' || connection.db_type === 'postgres').map((connection) => {
+                  const checked = form.accountConnectionIDs.includes(connection.id)
+                  return (
+                    <label key={connection.id} className={`flex cursor-pointer items-start gap-4 rounded-xl border px-4 py-4 transition ${checked ? 'border-slate-300 bg-slate-50' : 'border-border bg-white hover:bg-panel-soft'}`}>
+                      <div className="pt-1">
+                        <Switch ariaLabel={`${connection.name} selected for account scan`} checked={checked} onChange={() => setForm((current) => current ? { ...current, accountConnectionIDs: checked ? current.accountConnectionIDs.filter((id) => id !== connection.id) : [...current.accountConnectionIDs, connection.id].sort((left, right) => left - right) } : current)} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-semibold leading-6 text-ink">{connection.name}</p>
+                        <p className="text-[11px] uppercase text-muted">{formatDBType(connection.db_type)}</p>
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
             </div>
           </section>
 
@@ -1097,6 +1139,9 @@ function toForm(settings: PlatformSettings): SettingsForm {
     objectEnabled: settings.db_metadata_object_enabled,
     objectConnectionIDs: settings.db_metadata_object_enabled_connection_ids,
     objectCron: settings.db_metadata_object_cron,
+    accountEnabled: settings.db_metadata_account_enabled,
+    accountConnectionIDs: settings.db_metadata_account_enabled_connection_ids,
+    accountCron: settings.db_metadata_account_cron,
     cronTimezone: settings.db_metadata_cron_timezone,
     approvalPolicies: settings.approval_policies,
     workflowRules: settings.workflow_rules,
@@ -1155,6 +1200,10 @@ function toPayload(
     db_metadata_object_enabled_connection_ids: form.objectConnectionIDs.filter((connectionID) => connectionIDs.has(connectionID)),
     db_metadata_object_cron: form.objectCron.trim(),
     db_metadata_object_sync_interval_minutes: current?.db_metadata_object_sync_interval_minutes ?? 60,
+    db_metadata_account_enabled: form.accountEnabled,
+    db_metadata_account_enabled_connection_ids: form.accountConnectionIDs.filter((connectionID) => connectionIDs.has(connectionID)),
+    db_metadata_account_cron: form.accountCron.trim(),
+    db_metadata_account_sync_interval_minutes: current?.db_metadata_account_sync_interval_minutes ?? 60,
     db_metadata_cron_timezone: form.cronTimezone.trim(),
     approval_policies: form.approvalPolicies,
     workflow_rules: form.workflowRules.map((rule) => {

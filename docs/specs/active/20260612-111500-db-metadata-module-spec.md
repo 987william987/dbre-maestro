@@ -3,15 +3,17 @@ status: active
 spec_issue_number:
 spec_issue_url:
 spec_filed_at: 2026-06-12T11:15:00+08:00
-spec_branch: dev-william
+spec_branch: feature/db-metadata
 spec_plan_mode: inactive
-spec_executed: false
+spec_executed: true
 spec_worktree_path:
 ttfc_ms:
 tthw_ms:
 ---
 
 # DB Metadata 模組、雲端實例總覽、資料庫物件快照、連線憑證角色化
+
+> 實作狀態：核心第一版已落地，包含 Inventory、Objects、Settings、`db_metadata.read` 與 readonly/readwrite credential。下方 Current State 記錄 2026-06-12 撰寫 spec 時的基線，不代表目前程式狀態。
 
 ## Context
 
@@ -23,7 +25,7 @@ tthw_ms:
 
 此功能要納入現有 RBAC、導航、Settings、DB Connections 模型中；不接受把 region、憑證、mapping 規則硬寫在程式碼裡。
 
-## Current State
+## Current State（2026-06-12 基線）
 
 已驗證現況如下：
 

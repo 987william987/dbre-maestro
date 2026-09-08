@@ -5,12 +5,14 @@ spec_issue_url:
 spec_filed_at: 2026-07-02T00:00:00+08:00
 spec_branch:
 spec_plan_mode: inactive
-spec_executed: false
+spec_executed: true
 spec_worktree_path:
-source_audit: /Users/william_yeh/Desktop/DBA平台安全审计.pdf
+source_audit: internal-security-audit-report
 ---
 
 # DBA 平台安全審計修復規格
+
+> 實作狀態：S-01 至 S-07 的核心修復與對應驗收文件已落地。下方「已驗證現況」與各節「目前問題」記錄審計當時的基線；C-01 readonly database account 是持續性的部署要求。
 
 ## 背景
 
@@ -26,7 +28,7 @@ source_audit: /Users/william_yeh/Desktop/DBA平台安全审计.pdf
 - 權限相關修復必須 fail-closed。授權判斷不確定時拒絕，不默認放行。
 - 對使用者造成行為變更的地方，前端需要有明確錯誤訊息或提示，而不是只回 `403`。
 
-## 已驗證現況
+## 已驗證現況（2026-07-02 基線）
 
 ### 架構與主要檔案
 
@@ -192,7 +194,7 @@ source_audit: /Users/william_yeh/Desktop/DBA平台安全审计.pdf
 本期採用「提交人分離」作為必做安全邊界：
 
 - 即使 submitter 是 admin，也不能審批或執行自己提交的工單。
-- 若 admin William 提交工單，可以由另一位 admin 審批。
+- 若 admin A 提交工單，可以由另一位 admin 審批。
 - 若該另一位 admin 同時具備 execute 權限與 workflow executor 候選資格，本期允許同一位另一位 admin 執行。
 - 也就是說，本期禁止的是「自己處理自己的單」，不是強制 reviewer 與 executor 必須是不同人。
 
@@ -449,7 +451,7 @@ Readonly credential 必須只具備業務查詢所需的最小 SELECT 權限，�
 
 ## 待確認決策
 
-以下決策目前採保守值，實作前可再由 William / SRE / 安全團隊確認：
+以下決策目前採保守值，實作前可再由產品負責人 / SRE / 安全團隊確認：
 
 - S-02 是否允許緊急 admin override。本規格預設不允許。
 - S-03 Redis interactive query 是否做值層級 pattern masking，或遇到敏感風險一律拒絕。本規格預設保守拒絕高風險與不可靠場景。

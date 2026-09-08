@@ -33,6 +33,7 @@ Workbench 的權限邊界分成頁面入口與操作權限：
 | `tickets.execute` | 操作 | 具備 DDL / DML / Redis 執行資格 |
 | `sql_editor.read` | 頁面入口 | 進入 SQL Editor |
 | `sql_editor.query` | 操作 | 執行查詢、讀取查詢相關 metadata |
+| `sql_editor.admin` | 操作 | 使用 readwrite credential 進入獨立管理員 console；預設只授予 admin auth group |
 | `sql_editor.export` | 操作 | 發起 SQL Export |
 | `sql_editor.export_review` | 操作 | 具備 SQL Export 審批資格 |
 | `sql_editor.sensitive_apply` | 操作 | 發起 Sensitive Query Access |

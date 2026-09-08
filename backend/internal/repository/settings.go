@@ -17,46 +17,50 @@ import (
 )
 
 const (
-	settingSensitiveExportReviewers      = "sensitive_export_reviewer_user_ids"
-	settingSensitiveQueryAccessReviewers = "sensitive_query_access_reviewer_user_ids"
-	settingRequireNonSensitiveExportRev  = "require_non_sensitive_export_review"
-	settingLarkAppID                     = "lark_app_id"
-	settingLarkAppSecret                 = "lark_app_secret"
-	settingLarkInteractiveCardsEnabled   = "lark_interactive_cards_enabled"
-	settingLarkCardCallbackMode          = "lark_card_callback_mode"
-	settingLarkCardVerificationToken     = "lark_card_verification_token"
-	settingLarkOAuthEnabled              = "lark_oauth_enabled"
-	settingLarkOAuthSite                 = "lark_oauth_site"
-	settingLarkOAuthRedirectURL          = "lark_oauth_redirect_url"
-	settingSSOOIDCEnabled                = "sso_oidc_enabled"
-	settingSSOOIDCDisplayName            = "sso_oidc_display_name"
-	settingSSOOIDCIssuerURL              = "sso_oidc_issuer_url"
-	settingSSOOIDCClientID               = "sso_oidc_client_id"
-	settingSSOOIDCClientSecret           = "sso_oidc_client_secret"
-	settingSSOOIDCRedirectURL            = "sso_oidc_redirect_url"
-	settingSSOOIDCScopes                 = "sso_oidc_scopes"
-	settingSSOOIDCTrustMFA               = "sso_oidc_trust_mfa"
-	settingSQLEditorAppTimeoutSeconds    = "sql_editor_app_timeout_seconds"
-	settingSQLEditorMySQLMaxExecTimeMs   = "sql_editor_mysql_max_execution_time_ms"
-	settingSQLEditorPGStatementTimeoutMs = "sql_editor_postgres_statement_timeout_ms"
-	settingSQLExportAppTimeoutSeconds    = "sql_export_app_timeout_seconds"
-	settingSQLExportMySQLMaxExecTimeMs   = "sql_export_mysql_max_execution_time_ms"
-	settingSQLExportPGStatementTimeoutMs = "sql_export_postgres_statement_timeout_ms"
-	settingMySQLRollbackEnabled          = "mysql_rollback_enabled"
-	settingMySQLRollbackEngine           = "mysql_rollback_engine"
-	settingMySQLRollbackMy2SQLPath       = "mysql_rollback_my2sql_path"
-	settingMySQLRollbackTimeoutSeconds   = "mysql_rollback_generation_timeout_seconds"
-	settingMySQLRollbackMaxSQLBytes      = "mysql_rollback_max_sql_bytes"
-	settingDBMetadataInventoryEnabled    = "db_metadata_inventory_enabled"
-	settingDBMetadataInventoryRegions    = "db_metadata_inventory_regions"
-	settingDBMetadataInventoryEngines    = "db_metadata_inventory_engines"
-	settingDBMetadataInventoryCron       = "db_metadata_inventory_cron"
-	settingDBMetadataInventorySyncMins   = "db_metadata_inventory_sync_interval_minutes"
-	settingDBMetadataObjectEnabled       = "db_metadata_object_enabled"
-	settingDBMetadataObjectConnectionIDs = "db_metadata_object_enabled_connection_ids"
-	settingDBMetadataObjectCron          = "db_metadata_object_cron"
-	settingDBMetadataObjectSyncMins      = "db_metadata_object_sync_interval_minutes"
-	settingDBMetadataCronTimezone        = "db_metadata_cron_timezone"
+	settingSensitiveExportReviewers       = "sensitive_export_reviewer_user_ids"
+	settingSensitiveQueryAccessReviewers  = "sensitive_query_access_reviewer_user_ids"
+	settingRequireNonSensitiveExportRev   = "require_non_sensitive_export_review"
+	settingLarkAppID                      = "lark_app_id"
+	settingLarkAppSecret                  = "lark_app_secret"
+	settingLarkInteractiveCardsEnabled    = "lark_interactive_cards_enabled"
+	settingLarkCardCallbackMode           = "lark_card_callback_mode"
+	settingLarkCardVerificationToken      = "lark_card_verification_token"
+	settingLarkOAuthEnabled               = "lark_oauth_enabled"
+	settingLarkOAuthSite                  = "lark_oauth_site"
+	settingLarkOAuthRedirectURL           = "lark_oauth_redirect_url"
+	settingSSOOIDCEnabled                 = "sso_oidc_enabled"
+	settingSSOOIDCDisplayName             = "sso_oidc_display_name"
+	settingSSOOIDCIssuerURL               = "sso_oidc_issuer_url"
+	settingSSOOIDCClientID                = "sso_oidc_client_id"
+	settingSSOOIDCClientSecret            = "sso_oidc_client_secret"
+	settingSSOOIDCRedirectURL             = "sso_oidc_redirect_url"
+	settingSSOOIDCScopes                  = "sso_oidc_scopes"
+	settingSSOOIDCTrustMFA                = "sso_oidc_trust_mfa"
+	settingSQLEditorAppTimeoutSeconds     = "sql_editor_app_timeout_seconds"
+	settingSQLEditorMySQLMaxExecTimeMs    = "sql_editor_mysql_max_execution_time_ms"
+	settingSQLEditorPGStatementTimeoutMs  = "sql_editor_postgres_statement_timeout_ms"
+	settingSQLExportAppTimeoutSeconds     = "sql_export_app_timeout_seconds"
+	settingSQLExportMySQLMaxExecTimeMs    = "sql_export_mysql_max_execution_time_ms"
+	settingSQLExportPGStatementTimeoutMs  = "sql_export_postgres_statement_timeout_ms"
+	settingMySQLRollbackEnabled           = "mysql_rollback_enabled"
+	settingMySQLRollbackEngine            = "mysql_rollback_engine"
+	settingMySQLRollbackMy2SQLPath        = "mysql_rollback_my2sql_path"
+	settingMySQLRollbackTimeoutSeconds    = "mysql_rollback_generation_timeout_seconds"
+	settingMySQLRollbackMaxSQLBytes       = "mysql_rollback_max_sql_bytes"
+	settingDBMetadataInventoryEnabled     = "db_metadata_inventory_enabled"
+	settingDBMetadataInventoryRegions     = "db_metadata_inventory_regions"
+	settingDBMetadataInventoryEngines     = "db_metadata_inventory_engines"
+	settingDBMetadataInventoryCron        = "db_metadata_inventory_cron"
+	settingDBMetadataInventorySyncMins    = "db_metadata_inventory_sync_interval_minutes"
+	settingDBMetadataObjectEnabled        = "db_metadata_object_enabled"
+	settingDBMetadataObjectConnectionIDs  = "db_metadata_object_enabled_connection_ids"
+	settingDBMetadataObjectCron           = "db_metadata_object_cron"
+	settingDBMetadataObjectSyncMins       = "db_metadata_object_sync_interval_minutes"
+	settingDBMetadataAccountEnabled       = "db_metadata_account_enabled"
+	settingDBMetadataAccountConnectionIDs = "db_metadata_account_enabled_connection_ids"
+	settingDBMetadataAccountCron          = "db_metadata_account_cron"
+	settingDBMetadataAccountSyncMins      = "db_metadata_account_sync_interval_minutes"
+	settingDBMetadataCronTimezone         = "db_metadata_cron_timezone"
 )
 
 type SettingsRepo struct {
@@ -90,6 +94,10 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 		DBMetadataObjectEnabledConnectionIDs:  []uint64{},
 		DBMetadataObjectCron:                  "0 10 * * *",
 		DBMetadataObjectSyncIntervalMins:      60,
+		DBMetadataAccountEnabled:              false,
+		DBMetadataAccountEnabledConnectionIDs: []uint64{},
+		DBMetadataAccountCron:                 "0 11 * * *",
+		DBMetadataAccountSyncIntervalMins:     60,
 		DBMetadataCronTimezone:                "Asia/Taipei",
 		LarkOAuthSite:                         "lark",
 		LarkCardCallbackMode:                  "http",
@@ -373,6 +381,32 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	if objectSyncMins != nil {
 		settings.DBMetadataObjectSyncIntervalMins = *objectSyncMins
 	}
+	accountEnabled, err := r.getBool(ctx, settingDBMetadataAccountEnabled)
+	if err != nil {
+		return nil, err
+	}
+	if accountEnabled != nil {
+		settings.DBMetadataAccountEnabled = *accountEnabled
+	}
+	accountConnectionIDs, err := r.getUint64List(ctx, settingDBMetadataAccountConnectionIDs)
+	if err != nil {
+		return nil, err
+	}
+	settings.DBMetadataAccountEnabledConnectionIDs = accountConnectionIDs
+	accountCron, err := r.getString(ctx, settingDBMetadataAccountCron)
+	if err != nil {
+		return nil, err
+	}
+	if accountCron != nil && *accountCron != "" {
+		settings.DBMetadataAccountCron = *accountCron
+	}
+	accountSyncMins, err := r.getInt(ctx, settingDBMetadataAccountSyncMins)
+	if err != nil {
+		return nil, err
+	}
+	if accountSyncMins != nil {
+		settings.DBMetadataAccountSyncIntervalMins = *accountSyncMins
+	}
 	cronTimezone, err := r.getString(ctx, settingDBMetadataCronTimezone)
 	if err != nil {
 		return nil, err
@@ -515,6 +549,18 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 		return err
 	}
 	if err := upsertInt(ctx, tx, settingDBMetadataObjectSyncMins, settings.DBMetadataObjectSyncIntervalMins); err != nil {
+		return err
+	}
+	if err := upsertBool(ctx, tx, settingDBMetadataAccountEnabled, settings.DBMetadataAccountEnabled); err != nil {
+		return err
+	}
+	if err := upsertUint64List(ctx, tx, settingDBMetadataAccountConnectionIDs, settings.DBMetadataAccountEnabledConnectionIDs); err != nil {
+		return err
+	}
+	if err := upsertString(ctx, tx, settingDBMetadataAccountCron, settings.DBMetadataAccountCron); err != nil {
+		return err
+	}
+	if err := upsertInt(ctx, tx, settingDBMetadataAccountSyncMins, settings.DBMetadataAccountSyncIntervalMins); err != nil {
 		return err
 	}
 	if err := upsertString(ctx, tx, settingDBMetadataCronTimezone, settings.DBMetadataCronTimezone); err != nil {

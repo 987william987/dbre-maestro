@@ -13,6 +13,7 @@
 
 ## How-To
 
+- [How to 建立可部署的 Application Image](how-to/build-application-image.md)
 - [How to RD 使用 DBRE Maestro](how-to/rd-user-guide.md)
 - [How to DBA/Admin 管理 DBRE Maestro](how-to/dba-admin-user-guide.md)
 - [How to 排查線上與部署問題](how-to/troubleshoot-operations.md)
@@ -48,6 +49,7 @@
 
 ## Explanation
 
+- [UI 目標設計](../DESIGN.md)
 - [專案導覽](explanation/project-map.md)
 - [架構總覽](explanation/architecture-overview.md)
 - [安全邊界說明](explanation/security-boundaries.md)

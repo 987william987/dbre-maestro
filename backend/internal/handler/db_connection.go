@@ -27,6 +27,7 @@ type DBConnectionHandler struct {
 	auths      *repository.AuthGroupRepo
 	audit      *repository.AuditRepo
 	settings   *repository.SettingsRepo
+	metadata   *repository.DBMetadataRepo
 	hostPolicy *netguard.Policy
 }
 
@@ -89,6 +90,71 @@ func WithDBConnectionHandlerSettings(settings *repository.SettingsRepo) DBConnec
 	return func(h *DBConnectionHandler) {
 		h.settings = settings
 	}
+}
+
+func WithDBConnectionHandlerMetadata(metadata *repository.DBMetadataRepo) DBConnectionHandlerOption {
+	return func(h *DBConnectionHandler) { h.metadata = metadata }
+}
+
+func (h *DBConnectionHandler) detailConnection(r *http.Request) (*model.DBConnection, bool) {
+	id, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id == 0 {
+		return nil, false
+	}
+	connection, err := h.repo.GetByID(r.Context(), id)
+	if err != nil || connection == nil {
+		return nil, false
+	}
+	if middleware.HasPermission(r.Context(), "db_connections.write") {
+		return connection, true
+	}
+	ids, err := h.users.GetEffectiveDBConnectionIDs(r.Context(), middleware.UserIDFromCtx(r.Context()))
+	if err != nil {
+		return nil, false
+	}
+	for _, allowedID := range ids {
+		if allowedID == id {
+			return connection, true
+		}
+	}
+	return nil, false
+}
+
+func (h *DBConnectionHandler) Overview(w http.ResponseWriter, r *http.Request) {
+	connection, ok := h.detailConnection(r)
+	if !ok {
+		jsonErr(w, http.StatusNotFound, "database connection not found")
+		return
+	}
+	jsonOK(w, connection)
+}
+
+func (h *DBConnectionHandler) Databases(w http.ResponseWriter, r *http.Request) {
+	connection, ok := h.detailConnection(r)
+	if !ok {
+		jsonErr(w, http.StatusNotFound, "database connection not found")
+		return
+	}
+	items, err := h.metadata.ListDatabaseSummaries(r.Context(), connection.ID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list database snapshots failed")
+		return
+	}
+	jsonOK(w, map[string]any{"connection": connection, "items": items, "total": len(items)})
+}
+
+func (h *DBConnectionHandler) Accounts(w http.ResponseWriter, r *http.Request) {
+	connection, ok := h.detailConnection(r)
+	if !ok {
+		jsonErr(w, http.StatusNotFound, "database connection not found")
+		return
+	}
+	accounts, grants, status, err := h.metadata.ListAccountSnapshots(r.Context(), connection.ID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list database account snapshots failed")
+		return
+	}
+	jsonOK(w, map[string]any{"connection": connection, "accounts": accounts, "grants": grants, "scan_status": status})
 }
 
 // GET /db-connections

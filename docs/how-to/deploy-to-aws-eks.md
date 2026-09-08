@@ -1,6 +1,6 @@
 # How to 部署到 AWS EKS
 
-本文描述 DBRE Maestro 在測試環境與正式環境部署到 AWS EKS 的建議流程。這是部署 runbook，不是 Kubernetes manifest 規格；目前 repo 尚未提供 Helm chart 或 Kustomize overlay。
+本文描述 DBRE Maestro 在測試環境與正式環境部署到 AWS EKS 的建議流程。這是部署 runbook，不是 Kubernetes manifest 規格；Kubernetes/ArgoCD manifests 維護在獨立的 ArgoCD repositories。
 
 ## 部署目標
 
@@ -17,19 +17,14 @@
 
 | 項目 | 狀態 |
 |---|---|
-| Backend Docker image | 可用 `backend/Dockerfile` 建置 |
-| Frontend Docker image | 目前是 Vite dev server image，不適合 production |
-| Kubernetes manifests | 尚未提供 |
-| Helm chart / Kustomize | 尚未提供 |
+| Application Docker image | 根目錄 `Dockerfile` 會 build React，再由 Go server 提供 `/app/public` |
+| `backend/Dockerfile` | 後端開發/獨立建置用途，不是完整 production application image |
+| Kubernetes manifests | 由外部 ArgoCD repositories 提供與維護 |
+| Helm chart / Kustomize | 由外部 ArgoCD repositories 提供與維護，本 repo 不包含 |
 | Migration command | `/app/maestro -migrate-only` |
 | Health check | `GET /api/health` |
 
-正式部署 frontend 前，需先補其中一種方案：
-
-- 建立 production frontend image，以 Nginx 或其他靜態 server 提供 Vite build output
-- 或將 `frontend` build output 部署到 S3 + CloudFront，API 指向 EKS backend
-
-在完成上述其中一種方案前，不應把現有 `frontend/Dockerfile` 直接視為正式環境部署方式。
+Production 應使用根目錄 `Dockerfile` 建立的單一 application image。該 image 在 multi-stage build 中先執行 `npm run build`，再把 `frontend/dist` 複製到 `/app/public`，由 Go server 以 `STATIC_DIR=/app/public` 提供前端與 API。`frontend/Dockerfile` 僅供本機 Vite 開發容器使用。
 
 ## AWS 基礎設施
 
@@ -38,7 +33,7 @@
 - EKS cluster，使用仍在 EKS standard support 的 Kubernetes 版本
 - Managed Node Group 或 Fargate profile
 - Amazon RDS MySQL 作為 Maestro Meta DB
-- Amazon ECR 儲存 backend / frontend image
+- Amazon ECR 儲存完整的 application image
 - AWS Load Balancer Controller，提供 ALB Ingress
 - ACM certificate，提供 HTTPS
 - Route 53 DNS record
@@ -65,7 +60,7 @@ Backend Pod 至少需要：
 | `DBRE_ENCRYPTION_KEY` | base64 32-byte key；`AWS_SM_ENABLE=true` 時由 secret payload 提供 |
 | `JWT_SECRET` | JWT 簽章 secret；`AWS_SM_ENABLE=true` 時由 secret payload 提供 |
 | `RUN_MIGRATIONS_ON_STARTUP` | 是否在 Deployment Pod 啟動時執行 migration；預設 `true` |
-| `MFA_ENFORCEMENT` | production 建議 `required_for_admins` |
+| `MFA_ENFORCEMENT` | 必須明確選擇 `disabled` 或 `required_for_admins`；production 使用 `required_for_admins` |
 | `REFRESH_COOKIE_SECURE` | production 必須等同 `true`；程式會強制 |
 | `DB_CONNECTION_HOST_POLICY_ENFORCEMENT` | DB/Redis endpoint host policy；建議先用 `warn`，確認後改 `enforce` |
 | `DB_CONNECTION_HOST_ALLOWLIST` | 允許的 host pattern，例如 `*.rds.amazonaws.com,*.cache.amazonaws.com,*.db.example.com` |
@@ -179,6 +174,8 @@ secretsmanager:GetSecretValue
 
 devops pipeline 會更新 image tag，但通常不會自動新增 runtime env。每個環境的 `deploy.envs` 需要在 ArgoCD values 裡配置。
 
+若採用 GitLab CI 與 ArgoCD，典型做法是由本 repo 的 pipeline 建置並推送 image，再更新獨立 GitOps repository 中對應環境的 image tag。Deployment、Service、Ingress、replica、Secret reference 與 runtime env 可由 GitOps repository 維護，不必由本 repo 產生 Kubernetes manifest。修改 runtime env 後需由 ArgoCD sync 並 rollout Pod。
+
 staging 初期最小建議：
 
 ```yaml
@@ -193,7 +190,7 @@ deploy:
     RUN_MIGRATIONS_ON_STARTUP: "true"
     DB_CONNECTION_HOST_POLICY_ENFORCEMENT: "warn"
     DB_CONNECTION_HOST_ALLOWLIST: "*.rds.amazonaws.com,*.cache.amazonaws.com,*.db.example.com"
-    DB_CONNECTION_CIDR_ALLOWLIST: "10.183.0.0/16,10.222.38.0/24"
+    DB_CONNECTION_CIDR_ALLOWLIST: "10.0.0.0/16,10.1.0.0/24"
     DB_CONNECTION_CIDR_DENYLIST: "127.0.0.0/8,169.254.0.0/16,::1/128"
     LARK_OAUTH_REQUIRE_ENTERPRISE_EMAIL: "true"
     LARK_OAUTH_ENTERPRISE_EMAIL_DOMAINS: "example.com"
@@ -206,7 +203,7 @@ deploy:
     RUN_MIGRATIONS_ON_STARTUP: "false"
 ```
 
-production 建議：
+目前單副本 production 的部署範例如下，由 Deployment Pod 在啟動時執行 migration：
 
 ```yaml
 deploy:
@@ -218,7 +215,7 @@ deploy:
     APP_BASE_URL: "https://dbre-maestro.<prod-domain>"
     MFA_ENFORCEMENT: "required_for_admins"
     REFRESH_COOKIE_SECURE: "true"
-    RUN_MIGRATIONS_ON_STARTUP: "false"
+    RUN_MIGRATIONS_ON_STARTUP: "true"
     DB_CONNECTION_HOST_POLICY_ENFORCEMENT: "enforce"
     DB_CONNECTION_HOST_ALLOWLIST: "*.rds.amazonaws.com,*.cache.amazonaws.com,*.db.example.com"
     DB_CONNECTION_CIDR_ALLOWLIST: "<prod-db-and-redis-subnet-cidrs>"
@@ -230,30 +227,20 @@ deploy:
 
 Host policy 建議先在 test 使用 `warn` 模式觀察 backend log 與 audit log，確認既有 DB / Redis endpoint 沒有誤傷後再於 production 使用 `enforce`。這是第一階段連線前檢查，會檢查 DB Connection 新增 / 修改，以及 SQL Editor、metadata、export、scheduled report、ticket execute、metadata sync 等 runtime 連線前的 resolved endpoint；目前尚未接管 driver custom dialer。
 
-production 必須先由 migration Job 執行：
-
-```bash
-/app/maestro -migrate-only
-```
+這是單副本部署範例。擴成多副本前，必須先改用下方「模式 B：Job 標準部署」，並將 `RUN_MIGRATIONS_ON_STARTUP` 設為 `false`。
 
 DB pool 參數已有保守預設，通常不需要一開始配置。若需要調整連線數，可在同一個 `deploy.envs` 補 `DB_POOL_*`；修改後需要 rollout Pod 才會生效。
 
 ## Image 建置與推送
 
-Backend image：
+使用專案根目錄 `Dockerfile` 建立單一 application image。該 image 已包含 Go server、React build output、migrations 與 `my2sql`：
 
 ```bash
-docker build -t <account_id>.dkr.ecr.<region>.amazonaws.com/dbre-maestro-backend:<git_sha> backend
-docker push <account_id>.dkr.ecr.<region>.amazonaws.com/dbre-maestro-backend:<git_sha>
+docker build -t <registry>/<repository>:<tag> .
+docker push <registry>/<repository>:<tag>
 ```
 
-Frontend 若改成 production image，應使用 Vite build output，不應使用 dev server：
-
-```bash
-cd frontend
-npm ci
-npm run build
-```
+CPU 架構、BuildKit 與 registry 推送方式請參考 [How to 建立可部署的 Application Image](build-application-image.md)。
 
 ## Migration 流程
 
@@ -321,9 +308,9 @@ deploy:
 流程：
 
 1. 先建立或更新 ConfigMap / Secret
-2. 用同一個 backend image 啟動 Kubernetes Job 執行 `/app/maestro -migrate-only`
-3. backend Deployment 設定 `RUN_MIGRATIONS_ON_STARTUP=false`
-4. migration 成功後再 rollout backend Deployment
+2. 用同一個 application image 啟動 Kubernetes Job 執行 `/app/maestro -migrate-only`
+3. application Deployment 設定 `RUN_MIGRATIONS_ON_STARTUP=false`
+4. migration 成功後再 rollout application Deployment
 5. rollout 完成後檢查 `/api/health`
 
 Job command：
@@ -444,22 +431,21 @@ OAuth 登入只解決身份識別與 `open_id` 綁定，不會自動授予 DBA /
 
 ## Test 部署流程
 
-1. 建立或更新 test EKS / RDS / ECR / Secrets
-2. 建置 backend image 並推送到 test ECR
-3. 部署或更新 ConfigMap / Secret
-4. 執行 migration Job
-5. rollout backend Deployment
-6. 部署 frontend production artifact
-7. 驗證 `/api/health`
-8. 驗證登入、MFA 設定、SQL Editor、Tickets、Scheduled SQL Reports、Lark 通知
-9. 檢查 audit log 與 backend logs
+GitLab CI 與 ArgoCD 的 test 部署範例：
 
-Test 環境可設定：
+1. test branch pipeline 使用根目錄 `Dockerfile` 建立目標 CPU 架構的 application image，推送到 `<test-ecr-repository>`。
+2. Pipeline 更新 `<gitops-repository>/apps/dbre-maestro/envs/test.yaml` 的 image tag。
+3. ArgoCD ApplicationSet 讀取 values，以 `general-chart` render Deployment 與 Service。
+4. ArgoCD sync 到 `<test-namespace>`；單副本 Pod 以 `RUN_MIGRATIONS_ON_STARTUP=true` 執行 migration。
+5. 驗證 `/api/health`、登入、SQL Editor、Tickets、Scheduled SQL Reports、Lark 通知、audit log 與 backend logs。
+
+test 環境設定範例：
 
 ```text
-APP_ENV=staging
-APP_BASE_URL=https://maestro.example.com
+APP_ENV=testnet
+APP_BASE_URL=https://maestro.test.example.com
 MFA_ENFORCEMENT=disabled
+RUN_MIGRATIONS_ON_STARTUP=true
 ```
 
 若 test 也需要演練高權限登入安全，可暫時設為：
@@ -470,23 +456,25 @@ MFA_ENFORCEMENT=required_for_admins
 
 ## Production 部署流程
 
-1. 確認 test 環境已用同一 image tag 驗證通過
-2. 確認 RDS snapshot / backup 可用
-3. 確認 production Secrets 已更新且未誤用 test secret
-4. 建置或 promote 已驗證 image 到 production ECR
-5. 執行 production migration Job
-6. rollout backend Deployment
-7. 部署 frontend production artifact
-8. 檢查 ALB target health 與 `/api/health`
-9. 驗證登入、refresh、MFA、Tickets、SQL Editor、Lark 通知
-10. 觀察 error logs、5xx、latency 與 DB connection 數
+GitLab CI 與 ArgoCD 的 production 部署範例：
 
-Production 建議設定：
+1. 確認 test 驗證結果、RDS snapshot / backup 與 production Secrets。
+2. production branch pipeline 使用根目錄 `Dockerfile` 建立目標 CPU 架構的 application image，推送到 `<production-ecr-repository>`。
+3. Pipeline 更新 `<gitops-repository>/apps/dbre-maestro/envs/production.yaml` 的 image tag。
+4. ArgoCD ApplicationSet 讀取 values，以 `general-chart` render Deployment 與 Service。
+5. 依組織的變更政策採自動或人工 ArgoCD sync；production 通常應先確認差異。
+6. 目前單副本 Pod 以 `RUN_MIGRATIONS_ON_STARTUP=true` 執行 migration，再啟動 Go server。
+7. 檢查 ALB target health、`/api/health`、登入、refresh、MFA、Tickets、SQL Editor、Lark 通知、error logs、5xx、latency 與 DB connection 數。
+
+擴成多副本前，先將第 6 步改為獨立 migration Job，再 rollout 設定 `RUN_MIGRATIONS_ON_STARTUP=false` 的 application Deployment。
+
+production 環境設定範例：
 
 ```text
 APP_ENV=production
-APP_BASE_URL=https://dbre-maestro.<prod-domain>
+APP_BASE_URL=https://maestro.example.com
 MFA_ENFORCEMENT=required_for_admins
+RUN_MIGRATIONS_ON_STARTUP=true
 ```
 
 ## Rollback
@@ -520,17 +508,11 @@ Rollback 需要分成 image rollback 與 database rollback。
 
 ## 後續建議補齊
 
-目前部署文件可以指導手動或 CI/CD 落地，但 repo 還缺：
-
-- production frontend Dockerfile 或 S3/CloudFront 部署文件
-- Helm chart 或 Kustomize overlays
-- migration Job manifest
-- staging / production values 範本
-- startup migration 開關，避免多 Pod 同時 migration
-- CI/CD pipeline 文件
+目前本 repo 不包含 ArgoCD repository 內的實際 manifests；維運時應以對應環境的 ArgoCD values 與共用 pipeline template 為部署真實來源。本文件保留環境變數、image 與 migration 的契約，變更時需同步更新 ArgoCD repository。
 
 ## 相關文件
 
+- [建立可部署的 Application Image](build-application-image.md)
 - [設定與環境變數](../reference/configuration.md)
 - [登入安全與 Session](../reference/auth-and-sessions.md)
 - [Scheduled SQL Reports](../reference/scheduled-sql-reports.md)

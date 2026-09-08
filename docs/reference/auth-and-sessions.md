@@ -128,6 +128,27 @@ Protected admin 不允許透過 Lark email 自動綁定。這是 bootstrap admin
 
 若環境啟用了 MFA policy，Lark OAuth 成功後仍會套用既有 MFA 要求。也就是說，高權限帳號不會因為改用 Lark 登入而繞過 MFA。
 
+## CLI Bearer 登入（IdP 簽發的 OIDC Token）
+
+除了 session access token，`Authorization: Bearer` 也可以直接帶 Authentik 簽發的 OIDC token（id_token 或 access_token）。用途是 CLI 與自動化工具：使用者在自己的瀏覽器完成 loopback OIDC 登入拿到 token，之後呼叫 API 不需要瀏覽器 session、refresh cookie 或 `/api/auth/refresh`。
+
+規則：
+
+- 只在 `SSO_OIDC_BEARER_ISSUER_URL` 與 `SSO_OIDC_BEARER_AUDIENCES` 都設定時啟用，預設關閉。issuer 必須是 https URL。
+- 驗證項目：簽章（只接受 RS256，金鑰來自 issuer discovery 的 JWKS，金鑰輪換時最多每 30 秒重新拉取一次，偽造簽章不會讓伺服器反覆打 IdP）、`iss` 必須與設定完全相同、`exp`、`aud` 必須包含允許清單中的 client id。超過 16 KiB 的 token、issuer 不符、`aud` 不符、過期或沒有 `exp` 的 token 在驗簽前就被拒絕，不產生網路請求。`aud` 檢查不能省：Authentik 所有 provider 共用同一把簽章金鑰，沒有 `aud` 限制時任何 app 的 token 都能登入。
+- 對應使用者：只用 `external_identity_source='oidc'` 加 token `sub` 找瀏覽器 SSO 登入時綁定的使用者。不比對 email、不建立、不綁定：新使用者仍須先用瀏覽器 SSO 登入一次。因此簽發 CLI token 的 Authentik provider 必須與 Maestro 的 provider 使用相同的 Subject mode（預設「Based on the User's hashed ID」），否則 `sub` 對不上，bearer 登入一律失敗（fail closed）。
+- Protected 使用者（bootstrap admin）不能用 bearer token，與瀏覽器 SSO 不自動綁定 protected 使用者的規則一致。
+- MFA：bearer 流程沒有 TOTP 步驟。落在 MFA policy 內的使用者（`MFA_ENFORCEMENT=required_for_admins` 下的 admin）只有在 SSO「信任 IdP MFA」設定生效時才能通過，判斷時機是每次請求，來源與瀏覽器 SSO 相同（環境變數 `SSO_OIDC_TRUST_MFA`，Settings 有設定時以 Settings 為準）。設定關閉時這些使用者的 bearer 請求回 401，一般使用者不受影響。
+- 之後的檢查與一般登入相同：active user、RBAC、DB scope 都照常套用。
+- 沒有 session row：`/api/auth/me` 的 `auth_method` 為空，logout 與 session 撤銷對這種 token 無效。驗證是離線的（不向 Authentik 查詢），已簽發的 token 到期前一直有效；要提前切斷存取只能停用 Maestro 使用者（或在 Authentik 更換簽章金鑰，那會影響所有 app）。
+- Audit：目前沒有逐請求的 audit，bearer 請求只會在後續動作（工單、查詢）留下一般 audit 紀錄。拒絕的 token 記在 log（discovery 失敗為 warn，其餘 debug；有效 token 但無綁定使用者為 info）。
+- Authentik 端：允許清單裡的 client 其存取政策必須與 Maestro app 相同（或直接用 Maestro 專屬的 CLI client）。Authentik 只在簽發時檢查該 client 的政策，使用者若被移出 Maestro app 但仍在 CLI client 的政策內，只要 Maestro 帳號還是 active 就仍能呼叫 API。
+
+| 變數 | 預設 | 說明 |
+|---|---|---|
+| `SSO_OIDC_BEARER_ISSUER_URL` | 無 | 簽發 token 的 Authentik provider issuer，https，須與 discovery document 的 `issuer` 完全相同（含結尾 `/`） |
+| `SSO_OIDC_BEARER_AUDIENCES` | 無 | 允許的 client id 清單，逗號分隔 |
+
 ## Session 管理
 
 使用者可以在 `/account/sessions` 查看自己的 active refresh sessions，並撤銷不認識的 session。

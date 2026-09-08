@@ -488,7 +488,10 @@ func validateScheduledReportSQL(conn *model.DBConnection, sqlContent string) err
 	if firstToken != "SELECT" && firstToken != "WITH" && firstToken != "SHOW" {
 		return fmt.Errorf("scheduled sql reports only allow SELECT, WITH, or SHOW")
 	}
-	return sqlreview.CheckReadOnly(sqlparse.DialectFromDBType(conn.DBType), sqlContent)
+	if err := sqlreview.CheckReadOnly(sqlparse.DialectFromDBType(conn.DBType), sqlContent); err != nil {
+		return fmt.Errorf("%s", readOnlySQLErrorMessage(err))
+	}
+	return nil
 }
 
 func safeReportFilename(name string, t time.Time) string {

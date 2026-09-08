@@ -2,6 +2,8 @@
 
 SQL Editor 是平台上的受控查詢工作區，用於 MySQL、PostgreSQL 與 Redis 的讀取場景。
 
+具備 `sql_editor.admin` 的使用者另可啟用管理員 console。管理員 console 是獨立的高權限執行路徑，不會把一般 SQL Editor 改成可寫模式。
+
 ## 功能定位
 
 - 用於查詢資料，不是通用變更 console
@@ -15,6 +17,27 @@ SQL Editor 是平台上的受控查詢工作區，用於 MySQL、PostgreSQL 與 
 - 主要 API namespace：`/api/query`
 
 `sql_editor.read` 只代表能進入 SQL Editor 頁面。實際查詢、歷史、收藏與 metadata 讀取仍需要 `sql_editor.query`。
+
+## 管理員 console
+
+管理員 console 支援 MySQL、PostgreSQL 與 Redis，並遵守以下邊界：
+
+- 需要獨立權限 `sql_editor.admin`，migration 預設只授予 `admin` auth group
+- 仍檢查使用者對目標 DB Connection 的 DB Scope
+- 使用 `readwrite_host` / `readwrite_port` 與 readwrite credential
+- 每次只接受一個 SQL statement 或 Redis command
+- SQL 可執行查詢、DDL、DML 與 DCL；有結果集時回傳欄位與資料，寫入操作回傳 command 與 affected rows
+- PostgreSQL 額外支援 `psql` meta-command：`\c` / `\connect`、`\conninfo`、`\l` / `\list`、`\dt`、`\dn`、`\du`；其他 meta-command 會明確回報平台不支援
+- 啟用、執行成功與執行失敗都寫入 Audit Log
+
+管理員 console 與一般 SQL Editor 不共用 SQL 輸入、查詢結果、錯誤狀態、History、Saved Queries、Export、Sensitive Access、Query Access、masking 或 cancel 流程。同一個 DB Connection 內執行 MySQL `USE database` 或 PostgreSQL `\c database` 後，database context 會延續至該 console session 的後續命令；退出、重新整理、切換 SQL Editor tab 或切換 DB Connection 後，管理員 session、database context 與畫面內紀錄都會清除。
+
+管理員 API：
+
+| API | 說明 |
+|---|---|
+| `POST /api/query/admin/activate` | 檢查權限與 DB Scope，回傳實際 readwrite endpoint / credential role |
+| `POST /api/query/admin/execute` | 在獨立路徑執行單一 command，不建立一般 SQL Editor history |
 
 ## Tab 工作區狀態
 

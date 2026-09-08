@@ -144,6 +144,8 @@ func TestDeleteObjectSnapshotsExceptConnectionIDsWithoutIDsDeletesAll(t *testing
 	repo := NewDBMetadataRepo(sqlx.NewDb(db, "sqlmock"))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM db_object_snapshots`)).
 		WillReturnResult(sqlmock.NewResult(0, 3))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM db_database_snapshots`)).
+		WillReturnResult(sqlmock.NewResult(0, 2))
 
 	if err := repo.DeleteObjectSnapshotsExceptConnectionIDs(context.Background(), nil); err != nil {
 		t.Fatalf("DeleteObjectSnapshotsExceptConnectionIDs() error = %v", err)
@@ -164,9 +166,34 @@ func TestDeleteObjectSnapshotsForConnection(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM db_object_snapshots WHERE db_connection_id = ?`)).
 		WithArgs(uint64(7)).
 		WillReturnResult(sqlmock.NewResult(0, 12))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM db_database_snapshots WHERE db_connection_id = ?`)).
+		WithArgs(uint64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 3))
 
 	if err := repo.DeleteObjectSnapshotsForConnection(context.Background(), 7); err != nil {
 		t.Fatalf("DeleteObjectSnapshotsForConnection() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
+func TestDeleteAccountSnapshotsExceptConnectionIDsWithoutIDsRemovesDisabledScope(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewDBMetadataRepo(sqlx.NewDb(db, "sqlmock"))
+	mock.ExpectBegin()
+	for _, table := range []string{"db_account_grant_snapshots", "db_account_snapshots", "db_account_snapshot_statuses"} {
+		mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM ` + table)).WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+	mock.ExpectCommit()
+
+	if err := repo.DeleteAccountSnapshotsExceptConnectionIDs(context.Background(), nil); err != nil {
+		t.Fatalf("DeleteAccountSnapshotsExceptConnectionIDs() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("mock expectations not met: %v", err)

@@ -226,7 +226,7 @@ func (h *ExportHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := sqlreview.CheckReadOnly(sqlparse.DialectFromDBType(conn.DBType), req.SQLContent); err != nil {
-		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+		jsonErr(w, http.StatusUnprocessableEntity, readOnlySQLErrorMessage(err))
 		return
 	}
 

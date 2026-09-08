@@ -73,6 +73,23 @@
 
 ## 常用統計口徑
 
+### Platform Operations 每日趨勢
+
+Dashboard 的 Platform Operations 顯示最近 30 個 UTC 日（包含當日）的每日操作量；沒有資料的日期補為 `0`。此資料僅提供給原本可查看全平台 Dashboard 統計的使用者。
+
+工單類序列以 `tickets.created_at` 作為日期，依 `tickets.ticket_type` 統計建立次數：
+
+| 圖表序列 | `ticket_type` |
+| --- | --- |
+| DDL | `ddl` |
+| DML | `dml` |
+| Redis | `redis_command` |
+| SQL Export | `sql_export` |
+| Query Access | `query_access` |
+| Sensitive Access | `sensitive_query_access` |
+
+Queries 序列以 `query_history.created_at` 統計。它代表成功寫入 query history 的 SQL Editor 查詢次數，不等同於送至資料庫的所有嘗試次數，也不包含未建立 history 紀錄的失敗。
+
 ### 敏感導出申請人統計
 
 資料來源：

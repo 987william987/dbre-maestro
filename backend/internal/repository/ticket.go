@@ -128,6 +128,12 @@ type PlatformTopUsageStats struct {
 	SQLExportsByUser       []WorkflowDashboardUserCount `json:"sql_exports_by_user"`
 }
 
+type PlatformOperationDailyCount struct {
+	Date  string `db:"date_key" json:"date"`
+	Type  string `db:"operation_type" json:"type"`
+	Count int64  `db:"count" json:"count"`
+}
+
 type TicketDashboardSummary struct {
 	Total    int64                    `json:"total"`
 	ByType   []WorkflowDashboardCount `json:"by_type"`
@@ -572,6 +578,34 @@ func (r *TicketRepo) TicketDashboardSummary(ctx context.Context, submitterID *ui
 		return nil, fmt.Errorf("count dashboard tickets by status: %w", err)
 	}
 	return summary, nil
+}
+
+func (r *TicketRepo) PlatformOperationDailyCounts(ctx context.Context, start, end time.Time) ([]PlatformOperationDailyCount, error) {
+	counts := make([]PlatformOperationDailyCount, 0)
+	if err := r.db.SelectContext(ctx, &counts,
+		`SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS date_key, ticket_type AS operation_type, COUNT(*) AS count
+		 FROM tickets
+		 WHERE created_at >= ? AND created_at < ?
+		   AND ticket_type IN (?, ?, ?, ?, ?, ?)
+		 GROUP BY date_key, ticket_type
+		 UNION ALL
+		 SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS date_key, 'query' AS operation_type, COUNT(*) AS count
+		 FROM query_history
+		 WHERE created_at >= ? AND created_at < ?
+		 GROUP BY date_key
+		 ORDER BY date_key, operation_type`,
+		start, end,
+		model.TicketTypeDDL,
+		model.TicketTypeDML,
+		model.TicketTypeRedisCommand,
+		model.TicketTypeSQLExport,
+		model.TicketTypeQueryAccess,
+		model.TicketTypeSensitiveQueryAccess,
+		start, end,
+	); err != nil {
+		return nil, fmt.Errorf("load platform operation daily counts: %w", err)
+	}
+	return counts, nil
 }
 
 func (r *TicketRepo) RecentTicketsBySubmitter(ctx context.Context, submitterID uint64, limit int) ([]model.Ticket, error) {

@@ -46,10 +46,12 @@ vi.mock('@/shared/auth/AuthContext', () => ({
 }))
 
 vi.mock('@/modules/sql-editor/api', () => ({
+  activateAdminMode: vi.fn(),
   cancelQueryExecution: vi.fn(),
   listQueryConnections: vi.fn(),
   getQueryConstraints: vi.fn(),
   executeQuery: vi.fn(),
+  executeAdminQuery: vi.fn(),
   listMetadata: vi.fn(),
   listMetadataSearchIndex: vi.fn(),
   listMetadataColumns: vi.fn(),
@@ -66,10 +68,12 @@ vi.mock('@/modules/exports/api', () => ({
 }))
 
 import { createExportRequest } from '@/modules/exports/api'
-import { cancelQueryExecution, createSavedQuery, createSensitiveAccessTicket, deleteSavedQuery, executeQuery, getQueryConstraints, listMetadata, listMetadataColumns, listMetadataDefinition, listMetadataSearchIndex, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
+import { activateAdminMode, cancelQueryExecution, createSavedQuery, createSensitiveAccessTicket, deleteSavedQuery, executeAdminQuery, executeQuery, getQueryConstraints, listMetadata, listMetadataColumns, listMetadataDefinition, listMetadataSearchIndex, listQueryConnections, listQueryHistory, listSavedQueries } from '@/modules/sql-editor/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 
 const mockedListQueryConnections = vi.mocked(listQueryConnections)
+const mockedActivateAdminMode = vi.mocked(activateAdminMode)
+const mockedExecuteAdminQuery = vi.mocked(executeAdminQuery)
 const mockedGetQueryConstraints = vi.mocked(getQueryConstraints)
 const mockedExecuteQuery = vi.mocked(executeQuery)
 const mockedCancelQueryExecution = vi.mocked(cancelQueryExecution)
@@ -111,6 +115,7 @@ describe('SQLEditorPage', () => {
       clearAuth: vi.fn(),
     })
     mockedCancelQueryExecution.mockResolvedValue({ cancel_requested: true })
+    mockedActivateAdminMode.mockResolvedValue({ enabled: true, endpoint: 'primary.local:3306', credential_role: 'readwrite' })
 
     Object.defineProperty(window, 'localStorage', {
       value: {
@@ -271,6 +276,103 @@ describe('SQLEditorPage', () => {
     expect(mockedGetQueryConstraints).not.toHaveBeenCalled()
     expect(mockedListQueryHistory).not.toHaveBeenCalled()
     expect(mockedListSavedQueries).not.toHaveBeenCalled()
+  })
+
+  it('管理員模式使用獨立輸入與執行 API，不會進入普通查詢流程', async () => {
+    mockedUseAuth.mockReturnValue({
+      user: {
+        id: 7,
+        username: 'admin',
+        authGroups: ['admin'],
+        authGroupDetails: [],
+        permissions: ['sql_editor.read', 'sql_editor.query', 'sql_editor.admin'],
+        dbConnectionIds: [1, 2],
+        protected: false,
+        isActive: true,
+      },
+      status: 'authenticated',
+      isAuthenticated: true,
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedExecuteAdminQuery.mockResolvedValue({
+      columns: [],
+      rows: [],
+      row_count: 0,
+      duration_ms: 12,
+      affected_rows: 1,
+      command: 'UPDATE',
+    })
+    mockedListQueryConnections.mockResolvedValue({
+      connections: [
+        {
+          id: 1,
+          name: 'Primary MySQL',
+          db_type: 'mysql',
+          host: 'db.local',
+          port: 3306,
+          database_name: 'maestro',
+          username: 'root',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          extra_params: null,
+          created_by: 1,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 2,
+          name: 'Secondary MySQL',
+          db_type: 'mysql',
+          host: 'db-secondary.local',
+          port: 3306,
+          database_name: 'other',
+          username: 'root',
+          encryption_key_version: 1,
+          ssl_mode: 'prefer',
+          extra_params: null,
+          created_by: 1,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    fireEvent.change(await screen.findByLabelText('CodeMirror'), { target: { value: 'SELECT readonly_data;' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Admin mode' }))
+
+    expect(await screen.findByText('Administrator console')).toBeInTheDocument()
+    expect((screen.getByLabelText('CodeMirror') as HTMLTextAreaElement).value).toBe('')
+    expect(screen.queryByRole('button', { name: 'Explain' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'EXPORT' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('CodeMirror'), { target: { value: 'UPDATE users SET active = 1;' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Execute' }))
+
+    await waitFor(() => expect(mockedExecuteAdminQuery).toHaveBeenCalledOnce())
+    expect(mockedExecuteQuery).not.toHaveBeenCalled()
+    expect(mockedListQueryHistory).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Secondary MySQL'))
+    expect(screen.queryByText('Administrator console')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Admin mode' }))
+    expect(await screen.findByText('Administrator console')).toBeInTheDocument()
+    expect(screen.getByText('No administrator commands executed in this session.')).toBeInTheDocument()
+    expect(screen.getByLabelText('CodeMirror')).toHaveValue('')
   })
 
   it('同一個瀏覽器執行環境內重新掛載會保留 workspace 草稿，但不保留查詢結果', async () => {

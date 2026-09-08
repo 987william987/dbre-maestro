@@ -4,6 +4,8 @@ status: active
 
 # Query Access Implementation Checklist
 
+> 實作狀態：核心第一版已落地。原始 checkbox 保留為設計時拆解快照，未勾選項目可能是尚待確認的測試、可觀測性或 UX follow-up；現行功能以 reference 文件與程式碼為準。
+
 本文件是 [查詢授權工單（Query Access Ticket）與 SQL Editor 細粒度查詢權限 Spec](./20260618-120025-query-access-ticket-and-sql-editor-query-scope-spec.md) 的實作拆解清單。
 
 目標不是重寫 spec，而是把 spec 拆成可分批落地、可驗收、可追蹤的 implementation checklist。

@@ -13,8 +13,12 @@ DB Connections 模組管理平台可使用的資料源。它不是單純保存�
 ## 頁面入口
 
 - Route：`/db-connections`
-- 可見權限：`db_connections.read` 或 `db_connections.write`
+- Overview：`/db-connections/{id}/overview`，需要 `db_connections.overview`
+- Databases：`/db-connections/{id}/databases`，需要 `db_connections.databases`
+- Accounts：`/db-connections/{id}/accounts`，需要 `db_connections.accounts`
 - 寫入權限：`db_connections.write`
+
+既有 `db_connections.read` / `db_connections.write` 持有者在 migration 時會取得 Overview 與 Databases。Accounts 含資料庫原生帳號與授權資訊，只預設授予 admin、dba 與 protected users；之後可在 Users / Auth Groups 個別授權。三個子頁仍會檢查使用者的 DB Connection Scope。
 
 ## 支援類型
 
@@ -116,6 +120,18 @@ Redis 也可使用同樣的 role 概念，但實際命令能力仍由目標實�
 - `effective_users`
 
 這是 Users 頁第三個 `Resources` 子頁與 DB Connections 詳情側邊資訊的資料來源。
+
+### Connection 詳情 API
+
+| API | 資料內容 |
+|---|---|
+| `GET /api/db-connections/{id}/overview` | connection 設定、endpoint、credential roles 與測試狀態 |
+| `GET /api/db-connections/{id}/databases` | database、table 數量、data/index size、character set 與 collation |
+| `GET /api/db-connections/{id}/accounts` | MySQL/PostgreSQL account、role、grant 與最近掃描狀態 |
+
+Databases 與既有 Object Scan 共用掃描排程，但會另外保存 database 層級摘要，因此沒有 table 的空 database 仍會顯示。Accounts 使用獨立排程；啟用狀態、cron 與 connection scope 均在 Settings 設定。取消某個 connection 的掃描範圍時，該 connection 的 account/grant snapshot 會被清除。
+
+掃描使用 readonly credential。Object Scan 需要讀取 `information_schema`（MySQL）或 PostgreSQL catalog 並連入各 database；Account Scan 需要讀取 MySQL `mysql.user`、grant metadata 並對帳號執行 `SHOW GRANTS`，或讀取 PostgreSQL `pg_roles`、role membership 與 grant metadata。MySQL Accounts 頁優先呈現 `SHOW GRANTS` 的原生 SQL；PostgreSQL 會略過 `pg_*` 內置 role，並呈現 login、inheritance、create role/database、replication、bypass RLS、有效期限及結構化 GRANT statement。若受管資料庫限制這些 catalog 權限，Accounts 會保留最後一次成功快照並顯示最近失敗狀態。快照不保存 password hash、authentication string 或 token。
 
 ## 前端展示重點
 

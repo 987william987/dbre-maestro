@@ -104,7 +104,7 @@ DB Connection host policy 是第一階段防線，用來防止 DB connection 管
 - submitter 不能 execute 自己的工單
 - reviewer 不能 execute 同一張工單
 
-admin 不豁免這個邊界。若 admin William 提交工單，需要另一位 admin 或合格審批人處理。
+admin 不豁免這個邊界。若 admin A 提交工單，需要另一位 admin 或合格審批人處理。
 
 ## 相關文件
 

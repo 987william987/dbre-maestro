@@ -44,7 +44,9 @@ import { DataTable, DataTableBody, DataTableCell, DataTableHead, DataTableHeader
 import { SearchInput } from '@/shared/ui/SearchInput'
 import { useNavigate } from 'react-router-dom'
 import { createExportRequest } from '@/modules/exports/api'
+import { AdminQueryConsole } from '@/modules/sql-editor/components/AdminQueryConsole'
 import {
+  activateAdminMode,
   cancelQueryExecution,
   createSavedQuery,
   createSensitiveAccessTicket,
@@ -1260,6 +1262,7 @@ export function SQLEditorPage() {
   }
   const hasSensitiveOverride = Boolean(user?.permissions.includes('global.sensitive'))
   const canQuery = Boolean(user?.permissions.includes('sql_editor.query'))
+  const canAdmin = Boolean(user?.permissions.includes('sql_editor.admin'))
   const canExport = Boolean(user?.permissions.includes('sql_editor.export'))
   const canApplySensitiveAccess = Boolean(user?.permissions.includes('sql_editor.sensitive_apply'))
   const canApplyTicket = Boolean(user?.permissions.includes('tickets.apply'))
@@ -1276,6 +1279,14 @@ export function SQLEditorPage() {
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([])
   const [queryConstraints, setQueryConstraints] = useState(DEFAULT_QUERY_CONSTRAINTS)
   const [runningTabIDs, setRunningTabIDs] = useState<string[]>([])
+  const [adminMode, setAdminMode] = useState<{
+    tabID: string
+    connection: DBConnection
+    database: string
+    schema: string
+    endpoint: string
+    credentialRole: string
+  } | null>(null)
   const runningControllersRef = useRef<Map<string, AbortController>>(new Map())
   const runningQueryExecutionIDsRef = useRef<Map<string, string>>(new Map())
   const [exportingTabIDs, setExportingTabIDs] = useState<string[]>([])
@@ -1289,6 +1300,10 @@ export function SQLEditorPage() {
   const [explorerTreeMaxHeight, setExplorerTreeMaxHeight] = useState(EMPTY_RESULT_BLOCK_MIN_HEIGHT)
   const [queryAccessAttentionKeys, setQueryAccessAttentionKeys] = useState<Record<string, number>>({})
   const workspaceOwnerKeyRef = useRef(workspaceOwnerKey)
+
+  useEffect(() => {
+    setAdminMode(null)
+  }, [activeTabId])
 
   useEffect(() => {
     if (!workspaceOwnerKey) {
@@ -1541,6 +1556,7 @@ export function SQLEditorPage() {
       }))
   }, [filteredConnections])
   const activeTabRunning = activeTab ? runningTabIDs.includes(activeTab.id) : false
+  const activeAdminMode = adminMode?.tabID === activeTab?.id ? adminMode : null
   const activeTabCanStop = activeTabRunning && activeConnection?.db_type !== 'redis'
   const activeTabExporting = activeTab ? exportingTabIDs.includes(activeTab.id) : false
   const activeTabCreatingSensitiveAccess = activeTab ? sensitiveAccessTabIDs.includes(activeTab.id) : false
@@ -2047,6 +2063,27 @@ export function SQLEditorPage() {
 
   async function handleRunQuery() {
     await executeEditorSQL('run')
+  }
+
+  async function handleToggleAdminMode() {
+    if (activeAdminMode) {
+      setAdminMode(null)
+      return
+    }
+    if (!canAdmin || !activeTab?.connectionId || !activeConnection) return
+    try {
+      const response = await activateAdminMode(activeTab.connectionId)
+      setAdminMode({
+        tabID: activeTab.id,
+        connection: activeConnection,
+        database: activeDatabase,
+        schema: activeSchema,
+        endpoint: response.endpoint,
+        credentialRole: response.credential_role,
+      })
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : 'Failed to enable admin mode.', 'error')
+    }
   }
 
   async function handleExplainQuery() {
@@ -2693,6 +2730,9 @@ export function SQLEditorPage() {
 
   function handleSelectConnection(connection: DBConnection) {
     const tabID = activeTab?.id
+    if (activeTab?.connectionId && activeTab.connectionId !== connection.id) {
+      setAdminMode(null)
+    }
     const loadingRootNode = {
       ...createConnectionNode(connection, connection.id),
       expanded: true,
@@ -3183,6 +3223,16 @@ export function SQLEditorPage() {
           <section className="flex min-h-0 flex-col bg-panel">
             {!activeTab ? (
               <LoadingBlock message="Loading editor..." className="m-4 min-h-[320px] rounded-xl border-border bg-panel" />
+            ) : activeAdminMode ? (
+              <AdminQueryConsole
+                key={`${activeAdminMode.tabID}-${activeAdminMode.connection.id}`}
+                connection={activeAdminMode.connection}
+                database={activeAdminMode.database}
+                schema={activeAdminMode.schema}
+                endpoint={activeAdminMode.endpoint}
+                credentialRole={activeAdminMode.credentialRole}
+                onExit={() => setAdminMode(null)}
+              />
             ) : (
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pt-3 pb-2">
@@ -3192,6 +3242,17 @@ export function SQLEditorPage() {
                     <span>Timeout {queryConstraintBadges.timeoutSeconds}s</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    {canAdmin ? (
+                      <button
+                        type="button"
+                        onClick={handleToggleAdminMode}
+                        disabled={activeTabRunning || !activeTab.connectionId}
+                        className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-[13px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${activeAdminMode ? 'border-amber-500 bg-amber-500 text-black' : 'border-border bg-white text-ink hover:bg-page'}`}
+                      >
+                        <ShieldAlert className="h-4 w-4" />
+                        {activeAdminMode ? 'Exit admin mode' : 'Admin mode'}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={handleFormatSQL}

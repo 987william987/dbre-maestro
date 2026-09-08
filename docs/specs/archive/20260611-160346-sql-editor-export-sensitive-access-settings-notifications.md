@@ -3,7 +3,7 @@ status: archived
 spec_issue_number:
 spec_issue_url:
 spec_filed_at: 2026-06-11T16:03:46Z
-spec_branch: dev-william
+spec_branch: feature/sql-editor-and-notifications
 spec_plan_mode: inactive
 spec_executed: false
 spec_worktree_path:

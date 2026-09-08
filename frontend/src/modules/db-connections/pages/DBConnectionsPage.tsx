@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { Link } from 'react-router-dom'
 import { Loader2, Pencil, Plus, ServerCog, Trash2, X } from 'lucide-react'
 import { createDBConnection, deleteDBConnection, listDBConnections, patchDBConnection, testDBConnection, testRollbackCapability } from '@/modules/db-connections/api'
 import { cn } from '@/lib/utils'
@@ -87,6 +88,7 @@ export function DBConnectionsPage() {
   const { user } = useAuth()
   const { pushToast } = useToast()
   const canWrite = user?.permissions.includes('db_connections.write') ?? false
+  const detailView = user?.permissions.includes('db_connections.overview') ? 'overview' : user?.permissions.includes('db_connections.databases') ? 'databases' : 'accounts'
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -399,7 +401,7 @@ export function DBConnectionsPage() {
                           }
                         >
                           <DataTableCell>
-                            <p className="whitespace-nowrap">{connection.name}</p>
+                            <Link to={`/db-connections/${connection.id}/${detailView}`} className="whitespace-nowrap font-medium text-accent hover:underline">{connection.name}</Link>
                           </DataTableCell>
                           <DataTableCell className={`whitespace-nowrap ${isFailed ? 'text-danger' : ''}`}>{formatDBType(connection.db_type)}</DataTableCell>
                           <DataTableCell>

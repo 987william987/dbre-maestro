@@ -59,6 +59,11 @@ func ParseAccessToken(tokenStr string, secret []byte) (*Claims, error) {
 	if !ok || !token.Valid {
 		return nil, errors.New("invalid token")
 	}
+	// MFA challenge and query-context tokens share the secret and the uid/sub
+	// fields but carry an aud; an access token never does.
+	if len(claims.Audience) != 0 {
+		return nil, errors.New("not an access token")
+	}
 	return claims, nil
 }
 

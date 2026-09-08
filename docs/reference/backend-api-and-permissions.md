@@ -46,6 +46,7 @@
 | `tickets.execute` | 執行 DDL / DML / Redis 工單 |
 | `sql_editor.read` | 進入 SQL Editor workspace |
 | `sql_editor.query` | 執行 SQL Editor 查詢、查詢歷史、收藏與 metadata API |
+| `sql_editor.admin` | 啟用並使用獨立的管理員 console，以 readwrite credential 直接執行單一 statement |
 | `sql_editor.export` | 從 SQL Editor 建立 export 工單 |
 | `sql_editor.export_review` | 審核 export 工單 |
 | `sql_editor.sensitive_apply` | 建立 sensitive access 工單 |
@@ -110,6 +111,8 @@
 | `GET /api/query/connections` | `requireSQLEditorQuery` | 回傳使用者可用 DB connections |
 | `GET /api/query/constraints` | `requireSQLEditorRead` | 回傳 limit / timeout 約束，供 SQL Editor 初始 UI 使用 |
 | `POST /api/query` | `requireSQLEditorQuery` | 單 statement 唯讀查詢 |
+| `POST /api/query/admin/activate` | `requireSQLEditorAdmin` | 啟用當次管理員 console session，檢查 DB Scope 並記錄 audit |
+| `POST /api/query/admin/execute` | `requireSQLEditorAdmin` | 以 readwrite endpoint / credential 執行單一 SQL statement 或 Redis command |
 | `POST /api/query/sensitive-access` | `requireSQLEditorSensitiveApply` | 建立 sensitive query access 工單 |
 | `GET /api/query/history` | `requireSQLEditorQuery` | 查詢歷史 |
 | `GET /api/query/saved-queries` | `requireSQLEditorQuery` | 常用 SQL |
@@ -150,6 +153,9 @@
 |---|---|
 | `GET /api/db-connections` | `requireDBConnectionsRead` |
 | `GET /api/db-connections/{id}/bindings` | `requireDBConnectionsRead` |
+| `GET /api/db-connections/{id}/overview` | `db_connections.overview` + DB Scope |
+| `GET /api/db-connections/{id}/databases` | `db_connections.databases` + DB Scope |
+| `GET /api/db-connections/{id}/accounts` | `db_connections.accounts` + DB Scope |
 | `POST /api/db-connections` | `requireDBConnectionsWrite` |
 | `PATCH /api/db-connections/{id}` | `requireDBConnectionsWrite` |
 | `POST /api/db-connections/{id}/test` | `requireDBConnectionsWrite` |
