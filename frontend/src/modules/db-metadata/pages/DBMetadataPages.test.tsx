@@ -183,23 +183,36 @@ describe('DBMetadata pages', () => {
     expect(screen.getByText('analytics-pg-ro')).toBeInTheDocument()
     expect(screen.getByText('customers').compareDocumentPosition(screen.getByText('orders')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
+    fireEvent.change(screen.getByLabelText('Connection Search'), { target: { value: 'mysql' } })
+    expect(screen.getByText('orders')).toBeInTheDocument()
+    expect(screen.queryByText('customers')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Connection Search'), { target: { value: '' } })
+
+    fireEvent.change(screen.getByLabelText('Database Schema Search'), { target: { value: 'public' } })
+    expect(screen.getByText('customers')).toBeInTheDocument()
+    expect(screen.queryByText('orders')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Database Schema Search'), { target: { value: '' } })
+
+    fireEvent.change(screen.getByLabelText('Table Search'), { target: { value: 'orders' } })
+    expect(screen.getByText('orders')).toBeInTheDocument()
+    expect(screen.queryByText('customers')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Table Search'), { target: { value: '' } })
+
     fireEvent.click(screen.getByRole('button', { name: 'Data Size' }))
     expect(screen.getByText('customers').compareDocumentPosition(screen.getByText('orders')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /Data Size DESC/i }))
     expect(screen.getByText('orders').compareDocumentPosition(screen.getByText('customers')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Engine' }))
+    expect(screen.getByRole('listbox', { name: 'Engine options' }).closest('.overflow-x-auto')).toBeNull()
     fireEvent.click(screen.getByRole('option', { name: 'postgres' }))
 
     expect(screen.queryByText('analytics-mysql-ro')).not.toBeInTheDocument()
     expect(screen.getAllByText('analytics-pg-ro').length).toBeGreaterThan(0)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Connection' }))
-    fireEvent.click(screen.getByRole('option', { name: 'analytics-pg-ro' }))
-
-    expect(screen.getAllByText('analytics-pg-ro').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'Connection' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Visible Columns' }))
+    expect(screen.getByRole('menu', { name: 'Visible columns menu' }).closest('.overflow-x-auto')).toBeNull()
     fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Index Size' }))
 
     expect(screen.queryByRole('columnheader', { name: 'Index Size' })).not.toBeInTheDocument()

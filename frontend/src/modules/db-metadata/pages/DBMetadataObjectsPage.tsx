@@ -5,7 +5,7 @@ import { listDBObjectSnapshots } from '@/modules/db-metadata/api'
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
-import type { DBObjectConnectionOption, DBObjectSnapshot } from '@/shared/types/dbMetadata'
+import type { DBObjectSnapshot } from '@/shared/types/dbMetadata'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
@@ -46,13 +46,13 @@ const DEFAULT_VISIBLE_COLUMNS: ObjectColumnKey[] = OBJECT_COLUMNS.map((column) =
 
 export function DBMetadataObjectsPage() {
   const [items, setItems] = useState<DBObjectSnapshot[]>([])
-  const [scanConnectionOptions, setScanConnectionOptions] = useState<DBObjectConnectionOption[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [offset, setOffset] = useState(0)
   const [engineFilter, setEngineFilter] = useState('all')
-  const [connectionFilter, setConnectionFilter] = useState('all')
-  const [keyword, setKeyword] = useState('')
+  const [connectionKeyword, setConnectionKeyword] = useState('')
+  const [databaseSchemaKeyword, setDatabaseSchemaKeyword] = useState('')
+  const [tableKeyword, setTableKeyword] = useState('')
   const [visibleColumns, setVisibleColumns] = useState<ObjectColumnKey[]>(DEFAULT_VISIBLE_COLUMNS)
   const [columnMenuOpen, setColumnMenuOpen] = useState(false)
   const [sortState, setSortState] = useState<{ key: SortKey; direction: SortDirection }>({ key: 'rows', direction: 'desc' })
@@ -68,7 +68,6 @@ export function DBMetadataObjectsPage() {
         const response = await listDBObjectSnapshots()
         if (active) {
           setItems(response.items)
-          setScanConnectionOptions(response.connection_options ?? [])
         }
       } catch (loadError) {
         if (active) {
@@ -114,46 +113,23 @@ export function DBMetadataObjectsPage() {
     return ['all', ...engines]
   }, [items])
 
-  const connectionSelectOptions = useMemo(() => {
-    const optionsByID = new Map<number, string>()
-    for (const option of scanConnectionOptions) {
-      optionsByID.set(option.id, option.name)
-    }
-    for (const item of items) {
-      if (!optionsByID.has(item.db_connection_id)) {
-        optionsByID.set(item.db_connection_id, item.connection_name)
-      }
-    }
-    return [
-      { value: 'all', label: 'All Connections' },
-      ...Array.from(optionsByID.entries())
-        .sort(([, left], [, right]) => left.localeCompare(right))
-        .map(([id, name]) => ({ value: String(id), label: name })),
-    ]
-  }, [items, scanConnectionOptions])
-
   const filteredItems = useMemo(() => {
-    const loweredKeyword = keyword.trim().toLowerCase()
+    const loweredConnectionKeyword = connectionKeyword.trim().toLowerCase()
+    const loweredDatabaseSchemaKeyword = databaseSchemaKeyword.trim().toLowerCase()
+    const loweredTableKeyword = tableKeyword.trim().toLowerCase()
     return items.filter((item) => {
       if (engineFilter !== 'all' && item.engine !== engineFilter) {
         return false
       }
-      if (connectionFilter !== 'all' && String(item.db_connection_id) !== connectionFilter) {
+      if (loweredConnectionKeyword && !item.connection_name.toLowerCase().includes(loweredConnectionKeyword)) {
         return false
       }
-      if (loweredKeyword === '') {
-        return true
+      if (loweredDatabaseSchemaKeyword && ![item.database_name, item.schema_name].some((value) => value.toLowerCase().includes(loweredDatabaseSchemaKeyword))) {
+        return false
       }
-
-      return [
-        item.connection_name,
-        item.engine,
-        item.database_name,
-        item.schema_name,
-        item.table_name,
-      ].some((value) => value.toLowerCase().includes(loweredKeyword))
+      return !loweredTableKeyword || item.table_name.toLowerCase().includes(loweredTableKeyword)
     })
-  }, [connectionFilter, engineFilter, items, keyword])
+  }, [connectionKeyword, databaseSchemaKeyword, engineFilter, items, tableKeyword])
 
   const sortedItems = useMemo(() => {
     return [...filteredItems].sort((left, right) => compareObjectSnapshots(left, right, sortState))
@@ -186,15 +162,40 @@ export function DBMetadataObjectsPage() {
       <DBMetadataSectionTabs />
 
       <section>
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_220px_auto]">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_180px_auto] gap-3">
           <label className="block">
             <SearchInput
-              value={keyword}
+              aria-label="Connection Search"
+              value={connectionKeyword}
               onChange={(event) => {
-                setKeyword(event.target.value)
+                setConnectionKeyword(event.target.value)
                 setOffset(0)
               }}
-              placeholder="Search connection / database / schema / table"
+              placeholder="Search connection"
+            />
+          </label>
+
+          <label className="block">
+            <SearchInput
+              aria-label="Database Schema Search"
+              value={databaseSchemaKeyword}
+              onChange={(event) => {
+                setDatabaseSchemaKeyword(event.target.value)
+                setOffset(0)
+              }}
+              placeholder="Search database / schema"
+            />
+          </label>
+
+          <label className="block">
+            <SearchInput
+              aria-label="Table Search"
+              value={tableKeyword}
+              onChange={(event) => {
+                setTableKeyword(event.target.value)
+                setOffset(0)
+              }}
+              placeholder="Search table"
             />
           </label>
 
@@ -209,21 +210,6 @@ export function DBMetadataObjectsPage() {
               options={engineOptions.map((option) => ({
                 value: option,
                 label: option === 'all' ? 'All Engines' : option,
-              }))}
-            />
-          </div>
-
-          <div>
-            <DropdownSelect
-              ariaLabel="Connection"
-              value={connectionFilter}
-              onChange={(value) => {
-                setConnectionFilter(value)
-                setOffset(0)
-              }}
-              options={connectionSelectOptions.map((option) => ({
-                value: option.value,
-                label: option.label,
               }))}
             />
           </div>
