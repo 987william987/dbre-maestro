@@ -119,7 +119,25 @@ func (h *QueryHandler) runAdminStatement(ctx context.Context, conn *model.DBConn
 		result := redisResultToQueryResult(value)
 		return map[string]any{"columns": result.Columns, "rows": result.Rows, "row_count": len(result.Rows), "affected_rows": int64(0), "command": cmd}, nil
 	}
-	driver, dsn := pool.BuildDSN(conn, password)
+	statement, err := adminPostgresStatement(conn.DBType, req.SQL)
+	if err != nil {
+		return nil, err
+	}
+	resolvedConn := *conn
+	postgresConnectCommand := false
+	if conn.DBType == "postgres" || conn.DBType == "postgresql" {
+		database := strings.TrimSpace(req.Database)
+		if connectedDatabase, ok, parseErr := postgresDatabaseFromConnect(req.SQL); parseErr != nil {
+			return nil, parseErr
+		} else if ok {
+			database = connectedDatabase
+			postgresConnectCommand = true
+		}
+		if database != "" {
+			resolvedConn.DatabaseName = &database
+		}
+	}
+	driver, dsn := pool.BuildDSN(&resolvedConn, password)
 	db, err := pool.Open(driver, dsn, pool.ProfileExec)
 	if err != nil {
 		return nil, err
@@ -135,13 +153,13 @@ func (h *QueryHandler) runAdminStatement(ctx context.Context, conn *model.DBConn
 			return nil, err
 		}
 	}
-	if req.Schema != "" && (conn.DBType == "postgres" || conn.DBType == "postgresql") {
+	if req.Schema != "" && !postgresConnectCommand && (conn.DBType == "postgres" || conn.DBType == "postgresql") {
 		if _, err := pinned.ExecContext(ctx, fmt.Sprintf(`SET search_path TO "%s"`, strings.ReplaceAll(req.Schema, `"`, `""`))); err != nil {
 			return nil, err
 		}
 	}
-	if adminStatementReturnsRows(req.SQL) {
-		rows, err := pinned.QueryContext(ctx, req.SQL)
+	if adminStatementReturnsRows(statement) {
+		rows, err := pinned.QueryContext(ctx, statement)
 		if err != nil {
 			return nil, err
 		}
@@ -174,12 +192,54 @@ func (h *QueryHandler) runAdminStatement(ctx context.Context, conn *model.DBConn
 		}
 		return map[string]any{"columns": columns, "rows": items, "row_count": len(items), "affected_rows": int64(0), "command": "QUERY"}, rows.Err()
 	}
-	result, err := pinned.ExecContext(ctx, req.SQL)
+	result, err := pinned.ExecContext(ctx, statement)
 	if err != nil {
 		return nil, err
 	}
 	affected, _ := result.RowsAffected()
-	return map[string]any{"columns": []string{}, "rows": [][]any{}, "row_count": 0, "affected_rows": affected, "command": strings.ToUpper(strings.Fields(req.SQL)[0])}, nil
+	return map[string]any{"columns": []string{}, "rows": [][]any{}, "row_count": 0, "affected_rows": affected, "command": strings.ToUpper(strings.Fields(statement)[0])}, nil
+}
+
+func adminPostgresStatement(dbType, statement string) (string, error) {
+	if dbType != "postgres" && dbType != "postgresql" {
+		return statement, nil
+	}
+	command := strings.ToLower(strings.TrimSpace(statement))
+	if !strings.HasPrefix(command, `\`) {
+		return statement, nil
+	}
+	switch command {
+	case `\l`, `\list`:
+		return `SELECT datname AS "Name", pg_catalog.pg_get_userbyid(datdba) AS "Owner", pg_catalog.pg_encoding_to_char(encoding) AS "Encoding", datcollate AS "Collate", datctype AS "Ctype" FROM pg_catalog.pg_database ORDER BY datname`, nil
+	case `\dt`:
+		return `SELECT schemaname AS "Schema", tablename AS "Name", tableowner AS "Owner" FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema') ORDER BY schemaname, tablename`, nil
+	case `\dn`:
+		return `SELECT nspname AS "Name", pg_catalog.pg_get_userbyid(nspowner) AS "Owner" FROM pg_catalog.pg_namespace WHERE nspname !~ '^pg_' AND nspname <> 'information_schema' ORDER BY nspname`, nil
+	case `\du`:
+		return `SELECT rolname AS "Role name", rolcanlogin AS "Login", rolsuper AS "Superuser", rolcreatedb AS "Create DB", rolcreaterole AS "Create role" FROM pg_catalog.pg_roles ORDER BY rolname`, nil
+	case `\conninfo`:
+		return `SELECT current_database() AS "Database", current_user AS "User", inet_server_addr() AS "Host", inet_server_port() AS "Port"`, nil
+	default:
+		if _, ok, err := postgresDatabaseFromConnect(statement); ok || err != nil {
+			return `SELECT current_database() AS "Database"`, err
+		}
+		return "", fmt.Errorf("unsupported psql meta-command %q; supported commands: \\c, \\connect, \\conninfo, \\l, \\list, \\dt, \\dn, \\du", strings.Fields(command)[0])
+	}
+}
+
+func postgresDatabaseFromConnect(statement string) (string, bool, error) {
+	fields := strings.Fields(strings.TrimSpace(statement))
+	if len(fields) == 0 || (strings.ToLower(fields[0]) != `\c` && strings.ToLower(fields[0]) != `\connect`) {
+		return "", false, nil
+	}
+	if len(fields) != 2 {
+		return "", true, fmt.Errorf("psql connect requires exactly one database name")
+	}
+	database := strings.Trim(fields[1], `"`)
+	if database == "" {
+		return "", true, fmt.Errorf("psql connect requires a database name")
+	}
+	return database, true, nil
 }
 
 func adminStatementReturnsRows(statement string) bool {

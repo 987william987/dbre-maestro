@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { MySQL, PostgreSQL, sql } from '@codemirror/lang-sql'
+import { EditorView } from '@codemirror/view'
 import { Copy, Download, List, Play, Search, ShieldAlert, Table2, X } from 'lucide-react'
 import { executeAdminQuery } from '@/modules/sql-editor/api'
 import { ApiError } from '@/shared/api/client'
@@ -29,11 +30,25 @@ function adminEditorExtension(connection: DBConnection) {
   return []
 }
 
+const adminSelectionTheme = EditorView.theme({
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
+    backgroundColor: '#2563eb !important',
+    color: '#ffffff !important',
+  },
+})
+
 function mysqlDatabaseFromUse(statement: string) {
   const match = statement.trim().match(/^USE\s+(`(?:``|[^`])+`|[A-Za-z0-9_$.-]+)\s*;?$/i)
   if (!match) return null
   const identifier = match[1]
   return identifier.startsWith('`') ? identifier.slice(1, -1).replace(/``/g, '`') : identifier
+}
+
+function postgresDatabaseFromConnect(statement: string) {
+  const match = statement.trim().match(/^\\(?:c|connect)\s+("(?:""|[^"])+"|\S+)$/i)
+  if (!match) return null
+  const identifier = match[1]
+  return identifier.startsWith('"') ? identifier.slice(1, -1).replace(/""/g, '"') : identifier
 }
 
 function resultRowsAsText(result: QueryResult, separator: string) {
@@ -119,11 +134,12 @@ export function AdminQueryConsole({ connection, database, schema, endpoint, cred
   const [running, setRunning] = useState(false)
   const [historyIndex, setHistoryIndex] = useState<number | null>(null)
   const [currentDatabase, setCurrentDatabase] = useState(database)
+  const [currentSchema, setCurrentSchema] = useState(schema)
   const historyDraft = useRef('')
   const outputRef = useRef<HTMLDivElement | null>(null)
   const latestEntryRef = useRef<HTMLElement | null>(null)
   const nextEntryID = useRef(1)
-  const extensions = useMemo(() => [adminEditorExtension(connection)], [connection])
+  const extensions = useMemo(() => [adminEditorExtension(connection), adminSelectionTheme], [connection])
 
   useEffect(() => {
     if (outputRef.current && latestEntryRef.current) {
@@ -144,12 +160,18 @@ export function AdminQueryConsole({ connection, database, schema, endpoint, cred
         db_connection_id: connection.id,
         sql: statement,
         database: currentDatabase || undefined,
-        schema: schema || undefined,
+        schema: currentSchema || undefined,
         redis_db_index: connection.db_type === 'redis' && database ? Number(database) : undefined,
       })
       if (connection.db_type === 'mysql') {
         const nextDatabase = mysqlDatabaseFromUse(statement)
         if (nextDatabase) setCurrentDatabase(nextDatabase)
+      } else if (connection.db_type === 'postgres' || connection.db_type === 'postgresql') {
+        const nextDatabase = postgresDatabaseFromConnect(statement)
+        if (nextDatabase) {
+          setCurrentDatabase(nextDatabase)
+          setCurrentSchema('')
+        }
       }
       setEntries((current) => [...current, { id: entryID, sql: statement, result, error: '' }])
       setCommand('')
@@ -162,7 +184,7 @@ export function AdminQueryConsole({ connection, database, schema, endpoint, cred
   }
 
   return (
-    <div className="flex h-[calc(100vh-12rem)] min-h-[520px] max-h-[900px] w-full flex-col overflow-hidden bg-[#111827] text-slate-100">
+    <div className="flex h-[calc(100vh-12rem)] min-h-[520px] max-h-[900px] w-full flex-col overflow-hidden bg-[#111827] text-slate-100 selection:bg-blue-600 selection:text-white">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <ShieldAlert className="h-5 w-5 shrink-0 text-amber-400" />

@@ -27,9 +27,10 @@ SQL Editor 是平台上的受控查詢工作區，用於 MySQL、PostgreSQL 與 
 - 使用 `readwrite_host` / `readwrite_port` 與 readwrite credential
 - 每次只接受一個 SQL statement 或 Redis command
 - SQL 可執行查詢、DDL、DML 與 DCL；有結果集時回傳欄位與資料，寫入操作回傳 command 與 affected rows
+- PostgreSQL 額外支援 `psql` meta-command：`\c` / `\connect`、`\conninfo`、`\l` / `\list`、`\dt`、`\dn`、`\du`；其他 meta-command 會明確回報平台不支援
 - 啟用、執行成功與執行失敗都寫入 Audit Log
 
-管理員 console 與一般 SQL Editor 不共用 SQL 輸入、查詢結果、錯誤狀態、History、Saved Queries、Export、Sensitive Access、Query Access、masking 或 cancel 流程。啟用時會鎖定當下的 connection、database 與 schema；退出、重新整理或切換 SQL Editor tab 後，管理員 session 與畫面內紀錄都會清除。
+管理員 console 與一般 SQL Editor 不共用 SQL 輸入、查詢結果、錯誤狀態、History、Saved Queries、Export、Sensitive Access、Query Access、masking 或 cancel 流程。同一個 DB Connection 內執行 MySQL `USE database` 或 PostgreSQL `\c database` 後，database context 會延續至該 console session 的後續命令；退出、重新整理、切換 SQL Editor tab 或切換 DB Connection 後，管理員 session、database context 與畫面內紀錄都會清除。
 
 管理員 API：
 

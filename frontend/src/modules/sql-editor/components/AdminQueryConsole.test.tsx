@@ -147,4 +147,23 @@ describe('AdminQueryConsole', () => {
     expect(mockedExecuteAdminQuery).toHaveBeenNthCalledWith(2, expect.objectContaining({ database: 'testnet_dbms', sql: 'SHOW TABLES' }))
     expect(screen.getByText(/readwrite · testnet_dbms/)).toBeInTheDocument()
   })
+
+  it('PostgreSQL \\c 成功後會切換 database 並清除舊 schema context', async () => {
+    mockedExecuteAdminQuery
+      .mockResolvedValueOnce({ columns: ['Database'], rows: [['app']], row_count: 1, duration_ms: 1, command: 'QUERY' })
+      .mockResolvedValueOnce({ columns: ['Name'], rows: [['users']], row_count: 1, duration_ms: 2, command: 'QUERY' })
+    const postgresConnection = { ...connection, name: 'Primary PostgreSQL', db_type: 'postgres', port: 5432 }
+    render(<AdminQueryConsole connection={postgresConnection} database="postgres" schema="public" endpoint="primary.local:5432" credentialRole="readwrite" onExit={vi.fn()} />)
+    const editor = screen.getByLabelText('Administrator command')
+
+    fireEvent.change(editor, { target: { value: '\\c app' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Execute' }))
+    expect(await screen.findByText('app')).toBeInTheDocument()
+
+    fireEvent.change(editor, { target: { value: '\\dt' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Execute' }))
+    expect(await screen.findByText('users')).toBeInTheDocument()
+    expect(mockedExecuteAdminQuery).toHaveBeenNthCalledWith(2, expect.objectContaining({ database: 'app', schema: undefined, sql: '\\dt' }))
+    expect(screen.getByText(/readwrite · app/)).toBeInTheDocument()
+  })
 })
