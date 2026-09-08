@@ -5,6 +5,8 @@ export type QueryResult = {
   rows: Array<Array<string | null>>
   row_count: number
   duration_ms: number
+  affected_rows?: number
+  command?: string
   sensitive_override_active?: boolean
   query_context_token?: string
 }

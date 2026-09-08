@@ -69,6 +69,7 @@ const PERMISSION_METADATA: PermissionOption[] = [
   { key: 'tickets.execute', module: 'Tickets', action: 'Execute', label: 'Tickets Execute', description: 'Execute approved DDL, DML, and Redis tickets.' },
   { key: 'sql_editor.read', module: 'SQL Editor', action: 'Read', label: 'SQL Editor Read', description: 'Enter the SQL Editor workspace.' },
   { key: 'sql_editor.query', module: 'SQL Editor', action: 'Query', label: 'SQL Editor Query', description: 'Run queries and browse database objects in SQL Editor.' },
+  { key: 'sql_editor.admin', module: 'SQL Editor', action: 'Admin', label: 'SQL Editor Admin Mode', description: 'Execute direct commands with readwrite database credentials.' },
   { key: 'sql_editor.export', module: 'SQL Editor', action: 'Export', label: 'SQL Editor Export', description: 'Export the current query result.' },
   { key: 'sql_editor.export_review', module: 'SQL Editor', action: 'Export Review', label: 'Export Review', description: 'Review SQL export requests.' },
   { key: 'sql_editor.sensitive_apply', module: 'SQL Editor', action: 'Sensitive Apply', label: 'Sensitive Apply', description: 'Request temporary sensitive data access.' },

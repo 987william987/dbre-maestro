@@ -568,6 +568,8 @@ func main() {
 			r.With(requireSQLEditorRead).Get("/constraints", queryH.Constraints)
 			r.With(requireSQLEditorQuery).Post("/", queryH.Execute)
 			r.With(requireSQLEditorQuery).Post("/cancel", queryH.Cancel)
+			r.With(requireSQLEditorAdmin).Post("/admin/activate", queryH.ActivateAdminMode)
+			r.With(requireSQLEditorAdmin).Post("/admin/execute", queryH.ExecuteAdmin)
 			r.With(requireSQLEditorSensitiveApply).Post("/sensitive-access", queryH.CreateSensitiveAccessTicket)
 			r.With(requireSQLEditorQuery).Get("/history", queryH.ListHistory)
 			r.With(requireSQLEditorQuery).Get("/saved-queries", queryH.ListSavedQueries)
@@ -801,6 +803,9 @@ func requireSQLReviewWrite(next http.Handler) http.Handler {
 }
 func requireSQLEditorQuery(next http.Handler) http.Handler {
 	return middleware.RequirePermission("sql_editor.query")(next)
+}
+func requireSQLEditorAdmin(next http.Handler) http.Handler {
+	return middleware.RequirePermission("sql_editor.admin")(next)
 }
 func requireSQLEditorRead(next http.Handler) http.Handler {
 	return middleware.RequirePermission("sql_editor.read")(next)

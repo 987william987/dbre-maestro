@@ -68,6 +68,7 @@ DB Connections 是例外：三個 detail 子頁採獨立 read permission。Overv
 工作流與操作能力：
 
 - `sql_editor.query`
+- `sql_editor.admin`
 - `sql_editor.export`
 - `sql_editor.export_review`
 - `sql_editor.sensitive_apply`
@@ -80,6 +81,7 @@ DB Connections 是例外：三個 detail 子頁採獨立 read permission。Overv
 其中：
 
 - 有 `sql_editor.read` 才能進入 SQL Editor；有 `sql_editor.query` 才能實際查詢
+- `sql_editor.admin` 是獨立高權限能力，預設只授予 `admin` auth group，且仍受 DB Scope 限制
 - 有 `tickets.read` 才能進入 Tickets workspace；有 `tickets.apply` 才能建立一般工單
 - 但可作用的連線清單，仍由使用者的 DB Scope 決定
 

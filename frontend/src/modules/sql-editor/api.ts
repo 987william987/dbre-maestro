@@ -2,7 +2,7 @@ import { apiClient } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataColumn, MetadataDefinition, MetadataResponse, MetadataSearchIndexResponse, QueryHistoryEntry, QueryResult, SavedQuery } from '@/shared/types/sqlEditor'
 
-type QueryPayload = {
+export type QueryPayload = {
   db_connection_id: number
   sql: string
   limit?: number
@@ -11,6 +11,8 @@ type QueryPayload = {
   redis_db_index?: number
   query_execution_id?: string
 }
+
+export type AdminQueryPayload = Pick<QueryPayload, 'db_connection_id' | 'sql' | 'database' | 'schema' | 'redis_db_index'>
 
 type ColumnsResponse = {
   database?: string
@@ -53,6 +55,18 @@ export function executeQuery(payload: QueryPayload, signal?: AbortSignal): Promi
     rows: Array.isArray(response.rows)
       ? response.rows.map((row) => (Array.isArray(row) ? row : []))
       : [],
+  }))
+}
+
+export function activateAdminMode(dbConnectionId: number) {
+  return apiClient.post<{ enabled: boolean; endpoint: string; credential_role: string }>('/query/admin/activate', { db_connection_id: dbConnectionId })
+}
+
+export function executeAdminQuery(payload: AdminQueryPayload, signal?: AbortSignal): Promise<QueryResult> {
+  return apiClient.post<QueryResult>('/query/admin/execute', payload, { signal }).then((response) => ({
+    ...response,
+    columns: Array.isArray(response.columns) ? response.columns : [],
+    rows: Array.isArray(response.rows) ? response.rows : [],
   }))
 }
 

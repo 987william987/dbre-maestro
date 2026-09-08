@@ -139,7 +139,7 @@ const NAV_GROUPS = [
 const READ_ONLY_HEADER_NOTICE_ROUTES = [
   { match: (pathname: string) => pathname === '/tickets', read: ['tickets.read'], write: ['tickets.apply', 'tickets.review', 'tickets.execute', 'sql_editor.export_review', 'sql_editor.sensitive_review'] },
   { match: (pathname: string) => pathname.startsWith('/tickets/') && pathname !== '/tickets/new', read: ['tickets.read'], write: ['tickets.apply', 'tickets.review', 'tickets.execute', 'sql_editor.export_review', 'sql_editor.sensitive_review'] },
-  { match: (pathname: string) => pathname === '/sql-editor', read: ['sql_editor.read'], write: ['sql_editor.query', 'sql_editor.export', 'sql_editor.sensitive_apply'] },
+  { match: (pathname: string) => pathname === '/sql-editor', read: ['sql_editor.read'], write: ['sql_editor.query', 'sql_editor.admin', 'sql_editor.export', 'sql_editor.sensitive_apply'] },
   { match: (pathname: string) => pathname === '/scheduled-sql-reports', read: ['scheduled_sql_reports.read'], write: ['scheduled_sql_reports.write'] },
   { match: (pathname: string) => pathname.startsWith('/users'), read: ['users.read'], write: ['users.write'] },
   { match: (pathname: string) => pathname === '/db-connections' || pathname.startsWith('/db-connections/'), read: ['db_connections.read', 'db_connections.overview', 'db_connections.databases', 'db_connections.accounts'], write: ['db_connections.write'] },
