@@ -36,8 +36,8 @@ func (r *SQLReviewRuleRepo) GetByName(ctx context.Context, name string) (*model.
 
 // Patch updates enabled and/or threshold for an existing rule.
 // Only fields present in the patch map are written.
-func (r *SQLReviewRuleRepo) Patch(ctx context.Context, name string, enabled *bool, threshold *int64, updatedBy uint64) error {
-	if enabled == nil && threshold == nil {
+func (r *SQLReviewRuleRepo) Patch(ctx context.Context, name string, enabled *bool, threshold *int64, severity *string, updatedBy uint64) error {
+	if enabled == nil && threshold == nil && severity == nil {
 		return nil
 	}
 
@@ -51,6 +51,10 @@ func (r *SQLReviewRuleRepo) Patch(ctx context.Context, name string, enabled *boo
 	if threshold != nil {
 		query += `, threshold = ?`
 		args = append(args, *threshold)
+	}
+	if severity != nil {
+		query += `, severity = ?`
+		args = append(args, *severity)
 	}
 	query += ` WHERE rule_name = ?`
 	args = append(args, name)

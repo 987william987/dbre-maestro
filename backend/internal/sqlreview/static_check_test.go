@@ -143,3 +143,29 @@ func TestRunStaticChecksParsed(t *testing.T) {
 		}
 	})
 }
+
+func TestMySQLPolicyRulesMatchingCompanyStandards(t *testing.T) {
+	tests := []struct {
+		name string
+		rule string
+		sql  string
+	}{
+		{name: "requires InnoDB", rule: "require_innodb", sql: "CREATE TABLE t (id BIGINT PRIMARY KEY) ENGINE=MyISAM"},
+		{name: "requires primary key", rule: "require_primary_key", sql: "CREATE TABLE t (name VARCHAR(20)) ENGINE=InnoDB"},
+		{name: "prohibits foreign key", rule: "prohibit_foreign_key", sql: "CREATE TABLE t (parent_id BIGINT, FOREIGN KEY (parent_id) REFERENCES parent(id)) ENGINE=InnoDB"},
+		{name: "prohibits select star", rule: "prohibit_select_star", sql: "SELECT * FROM t"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, test.sql)
+			if err != nil {
+				t.Fatalf("ParseSQL() error = %v", err)
+			}
+			issues := RunStaticChecksParsed(parsed.Statements[0], map[string]bool{test.rule: true})
+			if len(issues) != 1 {
+				t.Fatalf("expected one policy issue, got %#v", issues)
+			}
+		})
+	}
+}

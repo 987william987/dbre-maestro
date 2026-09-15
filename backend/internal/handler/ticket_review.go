@@ -107,19 +107,21 @@ func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID
 	rules, err := h.sqlReviewRules.List(ctx)
 	if err == nil {
 		ruleMap := make(map[string]bool, len(rules))
+		ruleSeverity := make(map[string]string, len(rules))
 		var rowThreshold int64 = sqlreview.DefaultRowThreshold
 		for _, rule := range rules {
 			if !rule.Enabled {
 				continue
 			}
 			ruleMap[rule.RuleName] = true
+			ruleSeverity[rule.RuleName] = rule.Severity
 			if rule.RuleName == "high_row_count" && rule.Threshold != nil {
 				rowThreshold = *rule.Threshold
 			}
 		}
-		results = append(results, buildStaticValidationItems(parsedStatements, ruleMap)...)
+		results = append(results, buildStaticValidationItems(parsedStatements, ruleMap, ruleSeverity)...)
 		if ticketType == model.TicketTypeDML && dialect == sqlparse.DialectMySQL {
-			results = append(results, h.runMySQLDMLExplainValidation(ctx, dbConnID, parsedStatements, databaseName, ruleMap, rowThreshold)...)
+			results = append(results, h.runMySQLDMLExplainValidation(ctx, dbConnID, parsedStatements, databaseName, ruleMap, ruleSeverity, rowThreshold)...)
 		}
 	}
 
@@ -493,6 +495,7 @@ func (h *TicketHandler) runMySQLDMLExplainValidation(
 	statements []sqlparse.ParsedStatement,
 	databaseName *string,
 	ruleMap map[string]bool,
+	ruleSeverity map[string]string,
 	rowThreshold int64,
 ) []ticketReviewItem {
 	if !ruleMap["full_table_scan"] && !ruleMap["high_row_count"] {
@@ -517,12 +520,14 @@ func (h *TicketHandler) runMySQLDMLExplainValidation(
 			continue
 		}
 		messages := make([]string, 0, len(explainResult.Issues))
+		status := "pass"
 		for _, issue := range explainResult.Issues {
 			if ruleMap[issue.Kind] {
 				messages = append(messages, issue.Msg)
+				status = strongestReviewStatus(status, configuredReviewStatus(ruleSeverity[issue.Kind]))
 			}
 		}
-		items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodMySQLExplain, nil, statementKind, "table", explainResult.MaxRows, messages))
+		items = append(items, buildValidationReviewItemWithStatus(stmt.Seq, stmt.RawSQL, validationMethodMySQLExplain, nil, statementKind, "table", explainResult.MaxRows, status, messages))
 	}
 	return items
 }
@@ -1502,11 +1507,24 @@ func buildParserReviewItems(statements []sqlparse.ParsedStatement) []ticketRevie
 	return items
 }
 
-func buildStaticValidationItems(statements []sqlparse.ParsedStatement, ruleMap map[string]bool) []ticketReviewItem {
+func buildStaticValidationItems(statements []sqlparse.ParsedStatement, ruleMap map[string]bool, ruleSeverity map[string]string) []ticketReviewItem {
+	staticRuleNames := []string{"dml_no_where", "ddl_no_comment", "require_utf8mb4", "require_innodb", "require_primary_key", "prohibit_foreign_key", "prohibit_select_star"}
 	items := make([]ticketReviewItem, 0, len(statements))
 	for _, stmt := range statements {
-		issues := sqlreview.RunStaticChecksParsed(stmt, ruleMap)
-		items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodStaticRule, nil, string(stmt.Kind), inferReviewObjectType(stmt), 0, issues))
+		var issues []string
+		status := "pass"
+		for _, ruleName := range staticRuleNames {
+			if !ruleMap[ruleName] {
+				continue
+			}
+			ruleIssues := sqlreview.RunStaticChecksParsed(stmt, map[string]bool{ruleName: true})
+			if len(ruleIssues) == 0 {
+				continue
+			}
+			issues = append(issues, ruleIssues...)
+			status = strongestReviewStatus(status, configuredReviewStatus(ruleSeverity[ruleName]))
+		}
+		items = append(items, buildValidationReviewItemWithStatus(stmt.Seq, stmt.RawSQL, validationMethodStaticRule, nil, string(stmt.Kind), inferReviewObjectType(stmt), 0, status, issues))
 	}
 	return items
 }
@@ -1541,6 +1559,14 @@ func buildParserErrorReviewItem(seq int, stmt, message string) ticketReviewItem 
 }
 
 func buildValidationReviewItem(seq int, stmt, method string, stage *string, statementKind, objectType string, scanRows int64, issues []string) ticketReviewItem {
+	status := "pass"
+	if len(issues) > 0 {
+		status = "error"
+	}
+	return buildValidationReviewItemWithStatus(seq, stmt, method, stage, statementKind, objectType, scanRows, status, issues)
+}
+
+func buildValidationReviewItemWithStatus(seq int, stmt, method string, stage *string, statementKind, objectType string, scanRows int64, status string, issues []string) ticketReviewItem {
 	item := ticketReviewItem{
 		Seq:              seq,
 		SQLStmt:          stmt,
@@ -1550,14 +1576,30 @@ func buildValidationReviewItem(seq int, stmt, method string, stage *string, stat
 		ObjectType:       optionalTrimmedString(objectType),
 		ValidationMethod: optionalTrimmedString(method),
 		ScanRows:         scanRows,
-		Status:           "pass",
+		Status:           status,
 	}
 	if len(issues) > 0 {
-		item.Status = "error"
 		message := strings.Join(issues, "\n")
 		item.Message = &message
 	}
 	return item
+}
+
+func configuredReviewStatus(severity string) string {
+	if severity == "warning" {
+		return "warn"
+	}
+	return "error"
+}
+
+func strongestReviewStatus(current, next string) string {
+	if current == "error" || next == "error" {
+		return "error"
+	}
+	if current == "warn" || next == "warn" {
+		return "warn"
+	}
+	return "pass"
 }
 
 func stringPtr(value string) *string {

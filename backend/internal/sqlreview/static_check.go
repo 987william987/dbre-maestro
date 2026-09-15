@@ -73,7 +73,7 @@ func CheckLikelyMissingStatementDelimiter(sqlStr string) error {
 }
 
 // RunStaticChecks runs all enabled static rules against a single SQL statement.
-// ruleMap keys: "dml_no_where", "ddl_no_comment", "require_utf8mb4"
+// ruleMap contains the enabled SQL review rule names.
 func RunStaticChecks(sqlStr string, ruleMap map[string]bool) []string {
 	var issues []string
 	if ruleMap["dml_no_where"] {
@@ -91,7 +91,24 @@ func RunStaticChecks(sqlStr string, ruleMap map[string]bool) []string {
 			issues = append(issues, err.Error())
 		}
 	}
+	if ruleMap["require_innodb"] && isCreateTableSQL(sqlStr) && !strings.Contains(strings.ToUpper(sqlStr), "ENGINE") {
+		issues = append(issues, "CREATE TABLE 必須使用 InnoDB 儲存引擎")
+	}
+	if ruleMap["require_primary_key"] && isCreateTableSQL(sqlStr) && !strings.Contains(strings.ToUpper(sqlStr), "PRIMARY KEY") {
+		issues = append(issues, "CREATE TABLE 必須包含主鍵")
+	}
+	if ruleMap["prohibit_foreign_key"] && strings.Contains(strings.ToUpper(sqlStr), "FOREIGN KEY") {
+		issues = append(issues, "禁止使用外鍵約束，請由應用層維護一致性")
+	}
+	if ruleMap["prohibit_select_star"] && strings.HasPrefix(strings.ToUpper(strings.TrimSpace(sqlStr)), "SELECT *") {
+		issues = append(issues, "禁止使用 SELECT *，請明確列出需要的欄位")
+	}
 	return issues
+}
+
+func isCreateTableSQL(sqlStr string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(sqlStr))
+	return strings.HasPrefix(upper, "CREATE TABLE") || strings.HasPrefix(upper, "CREATE TEMPORARY TABLE")
 }
 
 func RunStaticChecksParsed(stmt sqlparse.ParsedStatement, ruleMap map[string]bool) []string {
@@ -123,6 +140,26 @@ func runMySQLStaticChecks(stmt sqlparse.ParsedStatement, astNode tidbast.StmtNod
 	}
 	if ruleMap["require_utf8mb4"] {
 		if err := checkRequireUTF8MB4AST(astNode); err != nil {
+			issues = append(issues, err.Error())
+		}
+	}
+	if ruleMap["require_innodb"] {
+		if err := checkRequireInnoDBAST(astNode); err != nil {
+			issues = append(issues, err.Error())
+		}
+	}
+	if ruleMap["require_primary_key"] {
+		if err := checkRequirePrimaryKeyAST(astNode); err != nil {
+			issues = append(issues, err.Error())
+		}
+	}
+	if ruleMap["prohibit_foreign_key"] {
+		if err := checkProhibitForeignKeyAST(astNode); err != nil {
+			issues = append(issues, err.Error())
+		}
+	}
+	if ruleMap["prohibit_select_star"] {
+		if err := checkProhibitSelectStarAST(astNode); err != nil {
 			issues = append(issues, err.Error())
 		}
 	}
@@ -216,6 +253,65 @@ func checkRequireUTF8MB4AST(stmt tidbast.StmtNode) error {
 
 func checkRequireUTF8MB4PostgresAST(_ *pg_query.Node) error {
 	// PostgreSQL does not support per-table utf8mb4 charset declarations.
+	return nil
+}
+
+func checkRequireInnoDBAST(stmt tidbast.StmtNode) error {
+	createStmt, ok := stmt.(*tidbast.CreateTableStmt)
+	if !ok {
+		return nil
+	}
+	for _, option := range createStmt.Options {
+		if option != nil && option.Tp == tidbast.TableOptionEngine && strings.EqualFold(option.StrValue, "InnoDB") {
+			return nil
+		}
+	}
+	return fmt.Errorf("CREATE TABLE 必須使用 InnoDB 儲存引擎")
+}
+
+func checkRequirePrimaryKeyAST(stmt tidbast.StmtNode) error {
+	createStmt, ok := stmt.(*tidbast.CreateTableStmt)
+	if !ok {
+		return nil
+	}
+	for _, constraint := range createStmt.Constraints {
+		if constraint != nil && constraint.Tp == tidbast.ConstraintPrimaryKey {
+			return nil
+		}
+	}
+	for _, column := range createStmt.Cols {
+		for _, option := range column.Options {
+			if option != nil && option.Tp == tidbast.ColumnOptionPrimaryKey {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("CREATE TABLE 必須包含主鍵")
+}
+
+func checkProhibitForeignKeyAST(stmt tidbast.StmtNode) error {
+	createStmt, ok := stmt.(*tidbast.CreateTableStmt)
+	if !ok {
+		return nil
+	}
+	for _, constraint := range createStmt.Constraints {
+		if constraint != nil && constraint.Tp == tidbast.ConstraintForeignKey {
+			return fmt.Errorf("禁止使用外鍵約束，請由應用層維護一致性")
+		}
+	}
+	return nil
+}
+
+func checkProhibitSelectStarAST(stmt tidbast.StmtNode) error {
+	selectStmt, ok := stmt.(*tidbast.SelectStmt)
+	if !ok || selectStmt.Fields == nil {
+		return nil
+	}
+	for _, field := range selectStmt.Fields.Fields {
+		if field != nil && field.WildCard != nil {
+			return fmt.Errorf("禁止使用 SELECT *，請明確列出需要的欄位")
+		}
+	}
 	return nil
 }
 

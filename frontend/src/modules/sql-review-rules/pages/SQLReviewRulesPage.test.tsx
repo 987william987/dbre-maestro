@@ -139,4 +139,57 @@ describe('SQLReviewRulesPage', () => {
     expect(screen.getByDisplayValue('1000')).toBeInTheDocument()
     expect(screen.getByDisplayValue('N/A')).toBeDisabled()
   })
+
+  it('filters rules by object category and saves warning severity', async () => {
+    mockedListSQLReviewRules.mockResolvedValue({
+      rules: [
+        {
+          id: 1,
+          rule_name: 'require_primary_key',
+          category: 'table',
+          severity: 'error',
+          enabled: true,
+          threshold: null,
+          description: 'legacy text',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 2,
+          rule_name: 'prohibit_select_star',
+          category: 'statement',
+          severity: 'error',
+          enabled: true,
+          threshold: null,
+          description: 'legacy text',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    })
+    mockedPatchSQLReviewRule.mockResolvedValue({
+      id: 1,
+      rule_name: 'require_primary_key',
+      category: 'table',
+      severity: 'warning',
+      enabled: true,
+      threshold: null,
+      description: 'legacy text',
+      updated_at: '2026-01-01T00:00:00Z',
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLReviewRulesPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('require_primary_key')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Table\s*1/ }))
+    expect(screen.queryByText('prohibit_select_star')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'require_primary_key severity warning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(mockedPatchSQLReviewRule).toHaveBeenCalledWith('require_primary_key', { severity: 'warning' }))
+  })
 })
