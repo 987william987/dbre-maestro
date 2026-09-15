@@ -35,7 +35,7 @@ export function defaultRouteForPermissions(userPermissions: string[]) {
     return '/audit-logs'
   }
   if (userPermissions.includes('settings.read') || userPermissions.includes('settings.write')) {
-    return '/settings'
+    return '/settings/workflow'
   }
   return '/login'
 }

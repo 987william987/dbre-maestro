@@ -128,10 +128,14 @@ function mockSettingsDependencies() {
 }
 
 function renderSettingsPage() {
+  return renderSettingsPageSection('workflow')
+}
+
+function renderSettingsPageSection(section: 'workflow' | 'scans' | 'query-execution' | 'integrations') {
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[`/settings/${section}`]}>
       <ToastProvider>
-        <SettingsPage />
+        <SettingsPage section={section} />
       </ToastProvider>
     </MemoryRouter>,
   )
@@ -250,6 +254,31 @@ describe('SettingsPage', () => {
     expect(screen.queryByText('ID 12')).not.toBeInTheDocument()
     expect(screen.queryByText('db-a.internal:3306')).not.toBeInTheDocument()
     expect(mockedListUsers).not.toHaveBeenCalled()
+  })
+
+  it('groups related settings into route-backed subpages', async () => {
+    mockedGetSettings.mockResolvedValue(makeSettings())
+    mockSettingsDependencies()
+
+    renderSettingsPage()
+
+    const workflowSection = (await screen.findByText('Workflow Safety Exceptions')).closest('section')
+    const scanSection = screen.getByText('Inventory Scan').closest('section')
+    expect(workflowSection).not.toHaveClass('hidden')
+    expect(scanSection).toHaveClass('hidden')
+
+    expect(screen.getByRole('link', { name: 'Scans' })).toHaveAttribute('href', '/settings/scans')
+  })
+
+  it('shows the section selected by the route', async () => {
+    mockedGetSettings.mockResolvedValue(makeSettings())
+    mockSettingsDependencies()
+
+    renderSettingsPageSection('scans')
+
+    const scanSection = (await screen.findByText('Inventory Scan')).closest('section')
+    expect(scanSection).not.toHaveClass('hidden')
+    expect(screen.getByText('Workflow Rules').closest('section')).toHaveClass('hidden')
   })
 
   it('locks production workflow execution switches to approval required and manual execution', async () => {

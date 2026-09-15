@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Plus, Save, Trash2 } from 'lucide-react'
 import { listAuthGroups } from '@/modules/auth-groups/api'
+import { SettingsSectionTabs } from '@/modules/settings/components/SettingsSectionTabs'
+import type { SettingsSection } from '@/modules/settings/components/SettingsSectionTabs'
 import { getSettings, listSettingsDBConnections, listSettingsUsers, patchSettings, previewWorkflowRules } from '@/modules/settings/api'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
@@ -99,7 +101,7 @@ const MYSQL_ROLLBACK_ENGINE_OPTIONS: Array<{ value: PlatformSettings['mysql_roll
   { value: 'my2sql', label: 'my2sql only' },
 ]
 
-export function SettingsPage() {
+export function SettingsPage({ section = 'workflow' }: { section?: SettingsSection }) {
   const { user } = useAuth()
   const { pushToast } = useToast()
   const canWrite = user?.permissions.includes('settings.write') ?? false
@@ -253,12 +255,14 @@ export function SettingsPage() {
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
+      <SettingsSectionTabs />
+
       {loading || !form ? (
         <LoadingBlock message="Loading platform settings..." className="min-h-[320px] rounded-xl border-border bg-panel" />
       ) : (
         <form onSubmit={handleSubmit} className="grid gap-3">
           <fieldset disabled={!canWrite || saving} className="grid gap-3 disabled:opacity-100">
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'workflow' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Workflow Safety Exceptions</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Explicitly allow trusted groups or users to bypass selected separation-of-duties checks. Empty lists preserve the default restrictions.</p>
@@ -282,7 +286,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'integrations' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Lark Notifications</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Configure Lark app credentials for ticket notifications and Lark OAuth login. Directed delivery uses each user&apos;s configured Lark recipient. Leave App Secret blank to keep the existing secret.</p>
@@ -366,7 +370,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'integrations' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">OIDC SSO</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Configure a standard OIDC provider such as Authentik. Userinfo must include email and should include lark_union_id for directed Lark notifications.</p>
@@ -431,7 +435,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'query-execution' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">SQL Editor Timeout</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">These values apply only to SQL Editor `/api/query`. The app timeout caps the request lifetime, while MySQL and PostgreSQL values are applied at the session level before each query.</p>
@@ -455,7 +459,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'query-execution' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">SQL Export Timeout</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">These values apply to export download queries. The app timeout caps query execution, while MySQL and PostgreSQL values are applied as session-level circuit breakers.</p>
@@ -479,7 +483,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'query-execution' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">MySQL Rollback</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">
@@ -533,7 +537,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'scans' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Database Account Scan</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Capture MySQL and PostgreSQL account, role, and grant snapshots on a cron schedule.</p>
@@ -572,7 +576,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'scans' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Inventory Scan</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Pull a cloud inventory snapshot from AWS APIs on a cron schedule. Use 5-field cron syntax, for example 0 9 * * *.</p>
@@ -607,7 +611,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'scans' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Object Scan</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Capture object snapshots on a cron schedule for the selected DB connections.</p>
@@ -694,7 +698,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'workflow' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Workflow Rules</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Route ticket approval, export approval, and execution responsibility by ticket type and DB connection.</p>

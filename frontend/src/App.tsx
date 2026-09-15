@@ -98,7 +98,11 @@ export default function App() {
                 <Route path="/audit-logs" element={<AuditLogsPage />} />
               </Route>
               <Route element={<RoleRoute allowedPermissions={['settings.read', 'settings.write']} />}>
-                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/settings" element={<Navigate to="/settings/workflow" replace />} />
+                <Route path="/settings/workflow" element={<SettingsPage section="workflow" />} />
+                <Route path="/settings/scans" element={<SettingsPage section="scans" />} />
+                <Route path="/settings/query-execution" element={<SettingsPage section="query-execution" />} />
+                <Route path="/settings/integrations" element={<SettingsPage section="integrations" />} />
               </Route>
             </Route>
           </Route>
