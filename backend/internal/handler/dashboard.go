@@ -53,6 +53,7 @@ type dashboardDBMetadataHealth struct {
 	ObjectCount                    int64                               `json:"object_count"`
 	InventoryJob                   *model.DBMetadataJobRun             `json:"inventory_job,omitempty"`
 	ObjectJob                      *model.DBMetadataJobRun             `json:"object_job,omitempty"`
+	AccountJob                     *model.DBMetadataJobRun             `json:"account_job,omitempty"`
 	ObjectSyncFailed               bool                                `json:"object_sync_failed"`
 }
 
@@ -594,8 +595,13 @@ func (h *TicketHandler) dashboardDBMetadataHealth(ctx context.Context) (dashboar
 	if err != nil {
 		return health, err
 	}
+	accountJob, err := h.dbMetadata.GetJobRun(ctx, "db_metadata_account")
+	if err != nil {
+		return health, err
+	}
 	health.InventoryJob = inventoryJob
 	health.ObjectJob = objectJob
+	health.AccountJob = accountJob
 	health.ObjectSyncFailed = objectJob != nil && objectJob.Status == "failed"
 	return health, nil
 }

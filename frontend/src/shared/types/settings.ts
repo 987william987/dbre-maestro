@@ -5,6 +5,12 @@ export type PlatformSettings = {
   require_non_sensitive_export_review: boolean
   approval_policies: ApprovalPolicy[]
   workflow_rules: WorkflowRule[]
+  workflow_multi_step_bypass_user_ids: number[]
+  workflow_multi_step_bypass_auth_groups: string[]
+  workflow_self_review_bypass_user_ids: number[]
+  workflow_self_review_bypass_auth_groups: string[]
+  workflow_self_execute_bypass_user_ids: number[]
+  workflow_self_execute_bypass_auth_groups: string[]
   lark_app_id: string
   lark_app_secret?: string
   lark_app_secret_configured: boolean

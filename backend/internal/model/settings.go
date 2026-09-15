@@ -30,6 +30,12 @@ type PlatformSettings struct {
 	RequireNonSensitiveExportReview       bool             `json:"require_non_sensitive_export_review"`
 	ApprovalPolicies                      []ApprovalPolicy `json:"approval_policies"`
 	WorkflowRules                         []WorkflowRule   `json:"workflow_rules"`
+	WorkflowMultiStepBypassUserIDs        []uint64         `json:"workflow_multi_step_bypass_user_ids"`
+	WorkflowMultiStepBypassAuthGroups     []AuthGroup      `json:"workflow_multi_step_bypass_auth_groups"`
+	WorkflowSelfReviewBypassUserIDs       []uint64         `json:"workflow_self_review_bypass_user_ids"`
+	WorkflowSelfReviewBypassAuthGroups    []AuthGroup      `json:"workflow_self_review_bypass_auth_groups"`
+	WorkflowSelfExecuteBypassUserIDs      []uint64         `json:"workflow_self_execute_bypass_user_ids"`
+	WorkflowSelfExecuteBypassAuthGroups   []AuthGroup      `json:"workflow_self_execute_bypass_auth_groups"`
 	LarkAppID                             string           `json:"lark_app_id"`
 	LarkAppSecret                         string           `json:"lark_app_secret,omitempty"`
 	LarkAppSecretConfigured               bool             `json:"lark_app_secret_configured"`

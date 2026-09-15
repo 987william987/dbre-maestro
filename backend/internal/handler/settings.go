@@ -127,6 +127,25 @@ func (h *SettingsHandler) ListDBConnections(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+func (h *SettingsHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := h.users.List(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "list settings users failed")
+		return
+	}
+	type item struct {
+		ID       uint64 `json:"id"`
+		Username string `json:"username"`
+	}
+	items := make([]item, 0, len(users))
+	for _, user := range users {
+		if user.IsActive {
+			items = append(items, item{ID: user.ID, Username: user.Username})
+		}
+	}
+	jsonOK(w, map[string]any{"users": items})
+}
+
 func (h *SettingsHandler) ApprovalResolution(w http.ResponseWriter, r *http.Request) {
 	settings, err := h.settings.Get(r.Context())
 	if err != nil {
@@ -409,6 +428,18 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	for _, userID := range append(append(append([]uint64{}, req.WorkflowMultiStepBypassUserIDs...), req.WorkflowSelfReviewBypassUserIDs...), req.WorkflowSelfExecuteBypassUserIDs...) {
+		if err := h.validateUserExists(r, userID); err != nil {
+			jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+	}
+	for _, group := range append(append(append([]model.AuthGroup{}, req.WorkflowMultiStepBypassAuthGroups...), req.WorkflowSelfReviewBypassAuthGroups...), req.WorkflowSelfExecuteBypassAuthGroups...) {
+		if err := h.validateAuthGroupExists(r, group); err != nil {
+			jsonErr(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+	}
 	if req.SQLEditorAppTimeoutSeconds <= 0 {
 		jsonErr(w, http.StatusUnprocessableEntity, "sql_editor_app_timeout_seconds must be greater than 0")
 		return
@@ -547,6 +578,12 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			"db_metadata_account_sync_interval_minutes":   req.DBMetadataAccountSyncIntervalMins,
 			"db_metadata_cron_timezone":                   req.DBMetadataCronTimezone,
 			"approval_policies":                           req.ApprovalPolicies,
+			"workflow_multi_step_bypass_user_ids":         req.WorkflowMultiStepBypassUserIDs,
+			"workflow_multi_step_bypass_auth_groups":      req.WorkflowMultiStepBypassAuthGroups,
+			"workflow_self_review_bypass_user_ids":        req.WorkflowSelfReviewBypassUserIDs,
+			"workflow_self_review_bypass_auth_groups":     req.WorkflowSelfReviewBypassAuthGroups,
+			"workflow_self_execute_bypass_user_ids":       req.WorkflowSelfExecuteBypassUserIDs,
+			"workflow_self_execute_bypass_auth_groups":    req.WorkflowSelfExecuteBypassAuthGroups,
 		},
 		IPAddress: clientIP(r),
 	})

@@ -11,6 +11,12 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     sensitive_query_access_reviewer_user_ids: Array.isArray(settings.sensitive_query_access_reviewer_user_ids)
       ? settings.sensitive_query_access_reviewer_user_ids
       : [],
+    workflow_multi_step_bypass_user_ids: Array.isArray(settings.workflow_multi_step_bypass_user_ids) ? settings.workflow_multi_step_bypass_user_ids : [],
+    workflow_multi_step_bypass_auth_groups: Array.isArray(settings.workflow_multi_step_bypass_auth_groups) ? settings.workflow_multi_step_bypass_auth_groups : [],
+    workflow_self_review_bypass_user_ids: Array.isArray(settings.workflow_self_review_bypass_user_ids) ? settings.workflow_self_review_bypass_user_ids : [],
+    workflow_self_review_bypass_auth_groups: Array.isArray(settings.workflow_self_review_bypass_auth_groups) ? settings.workflow_self_review_bypass_auth_groups : [],
+    workflow_self_execute_bypass_user_ids: Array.isArray(settings.workflow_self_execute_bypass_user_ids) ? settings.workflow_self_execute_bypass_user_ids : [],
+    workflow_self_execute_bypass_auth_groups: Array.isArray(settings.workflow_self_execute_bypass_auth_groups) ? settings.workflow_self_execute_bypass_auth_groups : [],
     require_non_sensitive_export_review: typeof settings.require_non_sensitive_export_review === 'boolean'
       ? settings.require_non_sensitive_export_review
       : true,
@@ -159,4 +165,10 @@ export function listSettingsDBConnections() {
     ...response,
     connections: Array.isArray(response.connections) ? response.connections : [],
   }))
+}
+
+export function listSettingsUsers() {
+	return apiClient.get<{ users: Array<{ id: number; username: string }> }>('/settings/users').then((response) => ({
+		users: Array.isArray(response.users) ? response.users : [],
+	}))
 }

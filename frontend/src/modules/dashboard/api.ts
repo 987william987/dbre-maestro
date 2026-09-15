@@ -106,6 +106,7 @@ export type DashboardDBMetadataHealth = {
   object_count: number
   inventory_job?: DashboardMetadataJob | null
   object_job?: DashboardMetadataJob | null
+  account_job?: DashboardMetadataJob | null
   object_sync_failed: boolean
 }
 

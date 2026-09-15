@@ -457,7 +457,17 @@ func (h *TicketHandler) ticketWorkflowResolution(ctx context.Context, ticket *mo
 			return nil, err
 		}
 		if snapshot != nil {
-			return workflowResolutionFromSnapshot(ticket, snapshot), nil
+			resolution := workflowResolutionFromSnapshot(ticket, snapshot)
+			allowSelfReview, err := workflowBypassAllowed(ctx, h.settings, h.users, ticket.SubmitterID, workflowBypassSelfReview)
+			if err != nil {
+				return nil, err
+			}
+			allowSelfExecute, err := workflowBypassAllowed(ctx, h.settings, h.users, ticket.SubmitterID, workflowBypassSelfExecute)
+			if err != nil {
+				return nil, err
+			}
+			excludeSubmitterFromWorkflowResolutionWithBypass(ticket, resolution, allowSelfReview, allowSelfExecute)
+			return resolution, nil
 		}
 	}
 	return resolveTicketWorkflow(ctx, h.settings, h.users, ticket)
@@ -3957,8 +3967,14 @@ func (h *TicketHandler) canViewTicket(ctx context.Context, ticket *model.Ticket,
 }
 
 func (h *TicketHandler) canReviewTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
-	if ticket == nil || ticket.SubmitterID == userID {
+	if ticket == nil {
 		return false, nil
+	}
+	if ticket.SubmitterID == userID {
+		allowed, err := workflowBypassAllowed(ctx, h.settings, h.users, userID, workflowBypassSelfReview)
+		if err != nil || !allowed {
+			return false, err
+		}
 	}
 	if !h.canReviewWorkflowByPermission(ctx, approvalWorkflowForTicket(ticket)) {
 		return false, nil
@@ -4005,10 +4021,16 @@ func (h *TicketHandler) canExecuteTicket(ctx context.Context, ticket *model.Tick
 		return false, nil
 	}
 	if ticket.SubmitterID == userID {
-		return false, nil
+		allowed, err := workflowBypassAllowed(ctx, h.settings, h.users, userID, workflowBypassSelfExecute)
+		if err != nil || !allowed {
+			return false, err
+		}
 	}
 	if ticket.ReviewerID != nil && *ticket.ReviewerID == userID {
-		return false, nil
+		allowed, err := workflowBypassAllowed(ctx, h.settings, h.users, userID, workflowBypassMultiStep)
+		if err != nil || !allowed {
+			return false, err
+		}
 	}
 	if !middleware.HasPermission(ctx, permissionTicketExecute) {
 		return false, nil

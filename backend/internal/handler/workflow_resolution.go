@@ -34,7 +34,15 @@ func resolveTicketWorkflow(ctx context.Context, settings *repository.SettingsRep
 	if err != nil || resolution == nil {
 		return resolution, err
 	}
-	excludeSubmitterFromWorkflowResolution(ticket, resolution)
+	allowSelfReview, err := workflowBypassAllowed(ctx, settings, users, ticket.SubmitterID, workflowBypassSelfReview)
+	if err != nil {
+		return nil, err
+	}
+	allowSelfExecute, err := workflowBypassAllowed(ctx, settings, users, ticket.SubmitterID, workflowBypassSelfExecute)
+	if err != nil {
+		return nil, err
+	}
+	excludeSubmitterFromWorkflowResolutionWithBypass(ticket, resolution, allowSelfReview, allowSelfExecute)
 	return resolution, nil
 }
 
@@ -204,29 +212,30 @@ func workflowResolutionFromSnapshot(ticket *model.Ticket, snapshot *model.Ticket
 		ErrorCode:         snapshot.ErrorCode,
 		ErrorMessage:      snapshot.ErrorMessage,
 	}
-	excludeSubmitterFromWorkflowResolution(ticket, resolution)
 	return resolution
 }
 
 func excludeSubmitterFromWorkflowResolution(ticket *model.Ticket, resolution *model.WorkflowResolution) {
+	excludeSubmitterFromWorkflowResolutionWithBypass(ticket, resolution, false, false)
+}
+
+func excludeSubmitterFromWorkflowResolutionWithBypass(ticket *model.Ticket, resolution *model.WorkflowResolution, allowSelfReview, allowSelfExecute bool) {
 	if ticket == nil || resolution == nil || ticket.SubmitterID == 0 {
 		return
 	}
-	approvalUserIDs, approvalExcluded := excludeWorkflowUserID(resolution.ApprovalUserIDs, ticket.SubmitterID)
-	if approvalExcluded {
-		resolution.ApprovalUserIDs = approvalUserIDs
-		resolution.ExcludedApprovalUsers = append(resolution.ExcludedApprovalUsers, model.WorkflowExcludedUser{
-			UserID: ticket.SubmitterID,
-			Reason: workflowExcludedSubmitter,
-		})
+	if !allowSelfReview {
+		approvalUserIDs, approvalExcluded := excludeWorkflowUserID(resolution.ApprovalUserIDs, ticket.SubmitterID)
+		if approvalExcluded {
+			resolution.ApprovalUserIDs = approvalUserIDs
+			resolution.ExcludedApprovalUsers = append(resolution.ExcludedApprovalUsers, model.WorkflowExcludedUser{UserID: ticket.SubmitterID, Reason: workflowExcludedSubmitter})
+		}
 	}
-	executorUserIDs, executorExcluded := excludeWorkflowUserID(resolution.ExecutorUserIDs, ticket.SubmitterID)
-	if executorExcluded {
-		resolution.ExecutorUserIDs = executorUserIDs
-		resolution.ExcludedExecutorUsers = append(resolution.ExcludedExecutorUsers, model.WorkflowExcludedUser{
-			UserID: ticket.SubmitterID,
-			Reason: workflowExcludedSubmitter,
-		})
+	if !allowSelfExecute {
+		executorUserIDs, executorExcluded := excludeWorkflowUserID(resolution.ExecutorUserIDs, ticket.SubmitterID)
+		if executorExcluded {
+			resolution.ExecutorUserIDs = executorUserIDs
+			resolution.ExcludedExecutorUsers = append(resolution.ExcludedExecutorUsers, model.WorkflowExcludedUser{UserID: ticket.SubmitterID, Reason: workflowExcludedSubmitter})
+		}
 	}
 	if resolution.ErrorCode != "" {
 		return
@@ -241,6 +250,49 @@ func excludeSubmitterFromWorkflowResolution(ticket *model.Ticket, resolution *mo
 		resolution.ErrorMessage = "workflow has no effective executor users after excluding the submitter"
 		return
 	}
+}
+
+type workflowBypassKind string
+
+const (
+	workflowBypassMultiStep   workflowBypassKind = "multi_step"
+	workflowBypassSelfReview  workflowBypassKind = "self_review"
+	workflowBypassSelfExecute workflowBypassKind = "self_execute"
+)
+
+func workflowBypassAllowed(ctx context.Context, settings *repository.SettingsRepo, users *repository.UserRepo, userID uint64, kind workflowBypassKind) (bool, error) {
+	if settings == nil || users == nil || userID == 0 {
+		return false, nil
+	}
+	var userIDs []uint64
+	var groups []model.AuthGroup
+	var err error
+	switch kind {
+	case workflowBypassSelfReview:
+		userIDs, groups, err = settings.GetWorkflowSelfReviewBypass(ctx)
+	case workflowBypassSelfExecute:
+		userIDs, groups, err = settings.GetWorkflowSelfExecuteBypass(ctx)
+	default:
+		userIDs, groups, err = settings.GetWorkflowMultiStepBypass(ctx)
+	}
+	if err != nil {
+		return false, err
+	}
+	if uint64InSlice(userID, userIDs) {
+		return true, nil
+	}
+	userGroups, err := users.GetAuthGroups(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	for _, userGroup := range userGroups {
+		for _, group := range groups {
+			if userGroup == group {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func excludeWorkflowUserID(userIDs []uint64, excludedID uint64) ([]uint64, bool) {

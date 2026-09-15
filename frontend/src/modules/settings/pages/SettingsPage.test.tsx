@@ -10,6 +10,7 @@ vi.mock('@/modules/settings/api', () => ({
   listSettingsDBConnections: vi.fn(),
   patchSettings: vi.fn(),
   previewWorkflowRules: vi.fn(),
+  listSettingsUsers: vi.fn(),
 }))
 vi.mock('@/modules/users/api', () => ({
   listUsers: vi.fn(),
@@ -23,13 +24,14 @@ vi.mock('@/shared/auth/AuthContext', () => ({
   }),
 }))
 
-import { getSettings, listSettingsDBConnections, previewWorkflowRules } from '@/modules/settings/api'
+import { getSettings, listSettingsDBConnections, listSettingsUsers, previewWorkflowRules } from '@/modules/settings/api'
 import { listAuthGroups } from '@/modules/auth-groups/api'
 import { listUsers } from '@/modules/users/api'
 
 const mockedGetSettings = vi.mocked(getSettings)
 const mockedListSettingsDBConnections = vi.mocked(listSettingsDBConnections)
 const mockedPreviewWorkflowRules = vi.mocked(previewWorkflowRules)
+const mockedListSettingsUsers = vi.mocked(listSettingsUsers)
 const mockedListUsers = vi.mocked(listUsers)
 const mockedListAuthGroups = vi.mocked(listAuthGroups)
 
@@ -56,6 +58,12 @@ function makeSettings(overrides: Partial<PlatformSettings> = {}): PlatformSettin
     sensitive_export_reviewer_user_ids: [],
     sensitive_query_access_reviewer_user_ids: [],
     require_non_sensitive_export_review: true,
+    workflow_multi_step_bypass_user_ids: [],
+    workflow_multi_step_bypass_auth_groups: [],
+    workflow_self_review_bypass_user_ids: [],
+    workflow_self_review_bypass_auth_groups: [],
+    workflow_self_execute_bypass_user_ids: [],
+    workflow_self_execute_bypass_auth_groups: [],
     approval_policies: [],
     workflow_rules: [
       {
@@ -110,6 +118,7 @@ function mockSettingsDependencies() {
     ],
   })
   mockedListUsers.mockResolvedValue({ users: [] })
+  mockedListSettingsUsers.mockResolvedValue({ users: [] })
   mockedListAuthGroups.mockResolvedValue({
     auth_groups: [
       { name: 'data_owner', label: 'Data Owner', description: '', system_defined: true, user_count: 1 },
@@ -134,8 +143,10 @@ describe('SettingsPage', () => {
     mockedListSettingsDBConnections.mockReset()
     mockedPreviewWorkflowRules.mockReset()
     mockedListUsers.mockReset()
+    mockedListSettingsUsers.mockReset()
     mockedListAuthGroups.mockReset()
     mockedPreviewWorkflowRules.mockResolvedValue({ previews: [] })
+    mockedListSettingsUsers.mockResolvedValue({ users: [] })
   })
 
   it('loads the settings page without depending on the users API', async () => {
@@ -219,6 +230,7 @@ describe('SettingsPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('Workflow Rules')).toBeInTheDocument())
+    expect(screen.getByText('Workflow Safety Exceptions')).toBeInTheDocument()
     expect(screen.queryByText('Metadata Scope')).not.toBeInTheDocument()
     expect(screen.getByDisplayValue('ap-northeast-1')).toBeInTheDocument()
     expect(screen.getByDisplayValue('0 9 * * *')).toBeInTheDocument()

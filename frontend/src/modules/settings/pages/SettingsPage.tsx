@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Plus, Save, Trash2 } from 'lucide-react'
 import { listAuthGroups } from '@/modules/auth-groups/api'
-import { getSettings, listSettingsDBConnections, patchSettings, previewWorkflowRules } from '@/modules/settings/api'
+import { getSettings, listSettingsDBConnections, listSettingsUsers, patchSettings, previewWorkflowRules } from '@/modules/settings/api'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import type { AuthGroupSummary } from '@/shared/types/authGroup'
@@ -58,6 +58,12 @@ type SettingsForm = {
   cronTimezone: string
   approvalPolicies: ApprovalPolicy[]
   workflowRules: WorkflowRule[]
+  multiStepBypassUserIDs: number[]
+  multiStepBypassAuthGroups: string[]
+  selfReviewBypassUserIDs: number[]
+  selfReviewBypassAuthGroups: string[]
+  selfExecuteBypassUserIDs: number[]
+  selfExecuteBypassAuthGroups: string[]
 }
 
 const WORKFLOW_TICKET_TYPE_LABELS: Record<WorkflowRule['ticket_type'], string> = {
@@ -101,6 +107,7 @@ export function SettingsPage() {
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [connections, setConnections] = useState<Array<Pick<DBConnection, 'id' | 'name' | 'db_type' | 'host' | 'port'>>>([])
   const [authGroups, setAuthGroups] = useState<AuthGroupSummary[]>([])
+  const [users, setUsers] = useState<Array<{ id: number; username: string }>>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -117,16 +124,18 @@ export function SettingsPage() {
       setLoading(true)
       setError('')
       try {
-        const [settingsResponse, connectionsResponse, authGroupsResponse] = await Promise.all([
+        const [settingsResponse, connectionsResponse, authGroupsResponse, usersResponse] = await Promise.all([
           getSettings(),
           listSettingsDBConnections(),
           listAuthGroups(),
+          listSettingsUsers(),
         ])
         if (active) {
           setSettings(settingsResponse)
           setForm(toForm(settingsResponse))
           setConnections(connectionsResponse.connections)
           setAuthGroups(authGroupsResponse.auth_groups)
+          setUsers(usersResponse.users)
         }
       } catch (loadError) {
         if (active) {
@@ -249,6 +258,30 @@ export function SettingsPage() {
       ) : (
         <form onSubmit={handleSubmit} className="grid gap-3">
           <fieldset disabled={!canWrite || saving} className="grid gap-3 disabled:opacity-100">
+          <section className="rounded-xl border border-border bg-panel shadow-soft">
+            <div className="border-b border-border/80 px-4 py-3">
+              <p className="text-[14px] font-semibold text-ink">Workflow Safety Exceptions</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Explicitly allow trusted groups or users to bypass selected separation-of-duties checks. Empty lists preserve the default restrictions.</p>
+            </div>
+            <div className="grid gap-5 px-4 py-4 xl:grid-cols-3">
+              <div className="grid gap-3">
+                <p className="text-[13px] font-semibold text-ink">Review and execute the same ticket</p>
+                <Checklist title="Bypass groups" emptyMessage="No auth groups available." items={authGroups.map((group) => ({ id: group.name, label: group.label }))} selectedIDs={form.multiStepBypassAuthGroups} onChange={(ids) => setForm((current) => current ? { ...current, multiStepBypassAuthGroups: ids } : current)} />
+                <Checklist title="Bypass users" emptyMessage="No active users available." items={users.map((item) => ({ id: item.id, label: item.username }))} selectedIDs={form.multiStepBypassUserIDs} onChange={(ids) => setForm((current) => current ? { ...current, multiStepBypassUserIDs: ids } : current)} />
+              </div>
+              <div className="grid gap-3">
+                <p className="text-[13px] font-semibold text-ink">Review own submitted ticket</p>
+                <Checklist title="Bypass groups" emptyMessage="No auth groups available." items={authGroups.map((group) => ({ id: group.name, label: group.label }))} selectedIDs={form.selfReviewBypassAuthGroups} onChange={(ids) => setForm((current) => current ? { ...current, selfReviewBypassAuthGroups: ids } : current)} />
+                <Checklist title="Bypass users" emptyMessage="No active users available." items={users.map((item) => ({ id: item.id, label: item.username }))} selectedIDs={form.selfReviewBypassUserIDs} onChange={(ids) => setForm((current) => current ? { ...current, selfReviewBypassUserIDs: ids } : current)} />
+              </div>
+              <div className="grid gap-3">
+                <p className="text-[13px] font-semibold text-ink">Execute own submitted ticket</p>
+                <Checklist title="Bypass groups" emptyMessage="No auth groups available." items={authGroups.map((group) => ({ id: group.name, label: group.label }))} selectedIDs={form.selfExecuteBypassAuthGroups} onChange={(ids) => setForm((current) => current ? { ...current, selfExecuteBypassAuthGroups: ids } : current)} />
+                <Checklist title="Bypass users" emptyMessage="No active users available." items={users.map((item) => ({ id: item.id, label: item.username }))} selectedIDs={form.selfExecuteBypassUserIDs} onChange={(ids) => setForm((current) => current ? { ...current, selfExecuteBypassUserIDs: ids } : current)} />
+              </div>
+            </div>
+          </section>
+
           <section className="rounded-xl border border-border bg-panel shadow-soft">
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Lark Notifications</p>
@@ -1145,6 +1178,12 @@ function toForm(settings: PlatformSettings): SettingsForm {
     cronTimezone: settings.db_metadata_cron_timezone,
     approvalPolicies: settings.approval_policies,
     workflowRules: settings.workflow_rules,
+    multiStepBypassUserIDs: settings.workflow_multi_step_bypass_user_ids,
+    multiStepBypassAuthGroups: settings.workflow_multi_step_bypass_auth_groups,
+    selfReviewBypassUserIDs: settings.workflow_self_review_bypass_user_ids,
+    selfReviewBypassAuthGroups: settings.workflow_self_review_bypass_auth_groups,
+    selfExecuteBypassUserIDs: settings.workflow_self_execute_bypass_user_ids,
+    selfExecuteBypassAuthGroups: settings.workflow_self_execute_bypass_auth_groups,
   }
 }
 
@@ -1214,6 +1253,12 @@ function toPayload(
         ? normalizeWorkflowRulePatch({ ...nextRule, approval_enabled: true, execution_mode: 'manual' })
         : normalizeWorkflowRulePatch(nextRule)
     }),
+    workflow_multi_step_bypass_user_ids: form.multiStepBypassUserIDs,
+    workflow_multi_step_bypass_auth_groups: form.multiStepBypassAuthGroups,
+    workflow_self_review_bypass_user_ids: form.selfReviewBypassUserIDs,
+    workflow_self_review_bypass_auth_groups: form.selfReviewBypassAuthGroups,
+    workflow_self_execute_bypass_user_ids: form.selfExecuteBypassUserIDs,
+    workflow_self_execute_bypass_auth_groups: form.selfExecuteBypassAuthGroups,
   }
 }
 

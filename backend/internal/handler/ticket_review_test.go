@@ -697,6 +697,39 @@ func TestWorkflowResolutionExcludesSubmitter(t *testing.T) {
 	}
 }
 
+func TestWorkflowResolutionBypassesRemainIndependent(t *testing.T) {
+	ticket := &model.Ticket{TicketType: model.TicketTypeDDL, SubmitterID: 7}
+	resolution := &model.WorkflowResolution{
+		ApprovalEnabled: true,
+		ExecutionMode:   workflowExecutionModeManual,
+		ApprovalUserIDs: []uint64{7, 8},
+		ExecutorUserIDs: []uint64{7, 9},
+	}
+
+	excludeSubmitterFromWorkflowResolutionWithBypass(ticket, resolution, true, false)
+
+	if !uint64InSlice(7, resolution.ApprovalUserIDs) {
+		t.Fatal("self-review bypass must keep an otherwise eligible submitter in approval candidates")
+	}
+	if uint64InSlice(7, resolution.ExecutorUserIDs) {
+		t.Fatal("self-review bypass must not allow the submitter to execute their own ticket")
+	}
+
+	resolution = &model.WorkflowResolution{
+		ApprovalEnabled: true,
+		ExecutionMode:   workflowExecutionModeManual,
+		ApprovalUserIDs: []uint64{7, 8},
+		ExecutorUserIDs: []uint64{7, 9},
+	}
+	excludeSubmitterFromWorkflowResolutionWithBypass(ticket, resolution, false, true)
+	if uint64InSlice(7, resolution.ApprovalUserIDs) {
+		t.Fatal("self-execute bypass must not allow the submitter to review their own ticket")
+	}
+	if !uint64InSlice(7, resolution.ExecutorUserIDs) {
+		t.Fatal("self-execute bypass must keep an otherwise eligible submitter in executor candidates")
+	}
+}
+
 func TestWorkflowResolutionAutoExecutionDoesNotRequireExecutorAfterSubmitterExclusion(t *testing.T) {
 	connID := uint64(3)
 	for _, ticketType := range []model.TicketType{
