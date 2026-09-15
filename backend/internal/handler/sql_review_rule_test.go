@@ -18,6 +18,17 @@ func TestSQLReviewRuleSupportsThreshold(t *testing.T) {
 	}
 }
 
+func TestParserUnsupportedRulesRequireErrorSeverity(t *testing.T) {
+	for _, name := range []string{"prohibit_trigger", "prohibit_stored_function", "prohibit_event"} {
+		if !sqlReviewRuleRequiresError(name) {
+			t.Fatalf("expected %s to require error severity", name)
+		}
+	}
+	if sqlReviewRuleRequiresError("prohibit_stored_procedure") {
+		t.Fatal("stored procedure is parser-supported and may use warning severity")
+	}
+}
+
 func TestBuildStaticValidationItemsHonorsConfiguredSeverity(t *testing.T) {
 	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "CREATE TABLE child (parent_id BIGINT, FOREIGN KEY (parent_id) REFERENCES parent(id))")
 	if err != nil {

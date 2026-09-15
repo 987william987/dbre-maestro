@@ -26,7 +26,7 @@ type RuleSeverity = 'error' | 'warning'
 type RuleCategory = 'engine' | 'table' | 'statement' | 'naming' | 'column' | 'schema' | 'database' | 'index' | 'system'
 type DraftMap = Record<string, { enabled: boolean; threshold: string; severity: RuleSeverity }>
 
-const RULE_METADATA: Record<string, { description: string; thresholdEditable: boolean; category: RuleCategory }> = {
+const RULE_METADATA: Record<string, { description: string; thresholdEditable: boolean; category: RuleCategory; severityEditable?: boolean }> = {
   ddl_no_comment: {
     description: 'Require CREATE TABLE statements to include a table comment.',
     thresholdEditable: false,
@@ -67,11 +67,12 @@ const RULE_METADATA: Record<string, { description: string; thresholdEditable: bo
     thresholdEditable: false,
     category: 'table',
   },
-  prohibit_select_star: {
-    description: 'Require SELECT statements to list only the columns they need.',
-    thresholdEditable: false,
-    category: 'statement',
-  },
+  prohibit_trigger: { description: 'Prohibit MySQL triggers.', thresholdEditable: false, category: 'system', severityEditable: false },
+  prohibit_stored_function: { description: 'Prohibit MySQL stored functions.', thresholdEditable: false, category: 'system', severityEditable: false },
+  prohibit_stored_procedure: { description: 'Prohibit MySQL stored procedures.', thresholdEditable: false, category: 'system' },
+  prohibit_view: { description: 'Prohibit creating MySQL views.', thresholdEditable: false, category: 'system' },
+  prohibit_event: { description: 'Prohibit MySQL scheduled events.', thresholdEditable: false, category: 'system', severityEditable: false },
+  prohibit_reserved_column_name: { description: 'Prohibit MySQL reserved words as column names.', thresholdEditable: false, category: 'naming' },
 }
 
 const RULE_CATEGORIES: { key: 'all' | RuleCategory; label: string }[] = [
@@ -275,7 +276,7 @@ export function SQLReviewRulesPage() {
                                 type="button"
                                 aria-label={`${rule.rule_name} severity ${severity}`}
                                 aria-pressed={selected}
-                                disabled={!canWrite || savingRuleName === rule.rule_name}
+                                disabled={!canWrite || savingRuleName === rule.rule_name || RULE_METADATA[rule.rule_name]?.severityEditable === false}
                                 onClick={() => setDrafts((current) => ({
                                   ...current,
                                   [rule.rule_name]: { ...current[rule.rule_name], severity },

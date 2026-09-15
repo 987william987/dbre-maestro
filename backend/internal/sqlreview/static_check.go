@@ -6,8 +6,19 @@ import (
 
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	pg_query "github.com/pganalyze/pg_query_go/v6"
+	tidbparser "github.com/pingcap/tidb/pkg/parser"
 	tidbast "github.com/pingcap/tidb/pkg/parser/ast"
 )
+
+var mysqlReservedWords = func() map[string]struct{} {
+	words := make(map[string]struct{})
+	for _, keyword := range tidbparser.Keywords {
+		if keyword.Reserved {
+			words[keyword.Word] = struct{}{}
+		}
+	}
+	return words
+}()
 
 var statementRootKeywords = map[string]struct{}{
 	"ALTER":    {},
@@ -100,10 +111,72 @@ func RunStaticChecks(sqlStr string, ruleMap map[string]bool) []string {
 	if ruleMap["prohibit_foreign_key"] && strings.Contains(strings.ToUpper(sqlStr), "FOREIGN KEY") {
 		issues = append(issues, "禁止使用外鍵約束，請由應用層維護一致性")
 	}
-	if ruleMap["prohibit_select_star"] && strings.HasPrefix(strings.ToUpper(strings.TrimSpace(sqlStr)), "SELECT *") {
-		issues = append(issues, "禁止使用 SELECT *，請明確列出需要的欄位")
+	declaration := leadingSQLKeywords(sqlStr, 2)
+	prohibited := map[string]string{
+		"prohibit_trigger":         "TRIGGER",
+		"prohibit_stored_function": "FUNCTION",
+		"prohibit_event":           "EVENT",
+	}
+	for rule, objectType := range prohibited {
+		if ruleMap[rule] && declaration == "CREATE "+objectType {
+			issues = append(issues, "禁止建立 MySQL "+objectType)
+		}
 	}
 	return issues
+}
+
+func leadingSQLKeywords(sqlStr string, limit int) string {
+	cleaned := stripSQLCommentsAndLiterals(sqlStr)
+	fields := strings.Fields(strings.ToUpper(cleaned))
+	if len(fields) > limit {
+		fields = fields[:limit]
+	}
+	return strings.Join(fields, " ")
+}
+
+func stripSQLCommentsAndLiterals(sqlStr string) string {
+	var result strings.Builder
+	quote := byte(0)
+	lineComment, blockComment := false, false
+	for i := 0; i < len(sqlStr); i++ {
+		ch := sqlStr[i]
+		next := byte(0)
+		if i+1 < len(sqlStr) {
+			next = sqlStr[i+1]
+		}
+		switch {
+		case lineComment:
+			if ch == '\n' {
+				lineComment = false
+				result.WriteByte(' ')
+			}
+		case blockComment:
+			if ch == '*' && next == '/' {
+				blockComment = false
+				i++
+				result.WriteByte(' ')
+			}
+		case quote != 0:
+			if ch == quote && (i == 0 || sqlStr[i-1] != '\\') {
+				quote = 0
+			}
+			result.WriteByte(' ')
+		case ch == '-' && next == '-':
+			lineComment = true
+			i++
+		case ch == '#':
+			lineComment = true
+		case ch == '/' && next == '*':
+			blockComment = true
+			i++
+		case ch == '\'' || ch == '"':
+			quote = ch
+			result.WriteByte(' ')
+		default:
+			result.WriteByte(ch)
+		}
+	}
+	return result.String()
 }
 
 func isCreateTableSQL(sqlStr string) bool {
@@ -158,8 +231,18 @@ func runMySQLStaticChecks(stmt sqlparse.ParsedStatement, astNode tidbast.StmtNod
 			issues = append(issues, err.Error())
 		}
 	}
-	if ruleMap["prohibit_select_star"] {
-		if err := checkProhibitSelectStarAST(astNode); err != nil {
+	if ruleMap["prohibit_stored_procedure"] {
+		if _, ok := astNode.(*tidbast.ProcedureInfo); ok {
+			issues = append(issues, "禁止建立 MySQL STORED PROCEDURE")
+		}
+	}
+	if ruleMap["prohibit_view"] {
+		if _, ok := astNode.(*tidbast.CreateViewStmt); ok {
+			issues = append(issues, "禁止建立 MySQL VIEW")
+		}
+	}
+	if ruleMap["prohibit_reserved_column_name"] {
+		if err := checkProhibitReservedColumnNameAST(astNode); err != nil {
 			issues = append(issues, err.Error())
 		}
 	}
@@ -302,14 +385,15 @@ func checkProhibitForeignKeyAST(stmt tidbast.StmtNode) error {
 	return nil
 }
 
-func checkProhibitSelectStarAST(stmt tidbast.StmtNode) error {
-	selectStmt, ok := stmt.(*tidbast.SelectStmt)
-	if !ok || selectStmt.Fields == nil {
+func checkProhibitReservedColumnNameAST(stmt tidbast.StmtNode) error {
+	createStmt, ok := stmt.(*tidbast.CreateTableStmt)
+	if !ok {
 		return nil
 	}
-	for _, field := range selectStmt.Fields.Fields {
-		if field != nil && field.WildCard != nil {
-			return fmt.Errorf("禁止使用 SELECT *，請明確列出需要的欄位")
+	for _, column := range createStmt.Cols {
+		name := strings.ToUpper(column.Name.Name.O)
+		if _, reserved := mysqlReservedWords[name]; reserved {
+			return fmt.Errorf("禁止使用 MySQL 保留字 %q 作為欄位名稱", column.Name.Name.O)
 		}
 	}
 	return nil

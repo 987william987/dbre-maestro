@@ -153,7 +153,9 @@ func TestMySQLPolicyRulesMatchingCompanyStandards(t *testing.T) {
 		{name: "requires InnoDB", rule: "require_innodb", sql: "CREATE TABLE t (id BIGINT PRIMARY KEY) ENGINE=MyISAM"},
 		{name: "requires primary key", rule: "require_primary_key", sql: "CREATE TABLE t (name VARCHAR(20)) ENGINE=InnoDB"},
 		{name: "prohibits foreign key", rule: "prohibit_foreign_key", sql: "CREATE TABLE t (parent_id BIGINT, FOREIGN KEY (parent_id) REFERENCES parent(id)) ENGINE=InnoDB"},
-		{name: "prohibits select star", rule: "prohibit_select_star", sql: "SELECT * FROM t"},
+		{name: "prohibits stored procedure", rule: "prohibit_stored_procedure", sql: "CREATE PROCEDURE p() SELECT 1"},
+		{name: "prohibits view", rule: "prohibit_view", sql: "CREATE VIEW active_users AS SELECT id FROM users WHERE active = 1"},
+		{name: "prohibits reserved column name", rule: "prohibit_reserved_column_name", sql: "CREATE TABLE t (`select` INT) ENGINE=InnoDB"},
 	}
 
 	for _, test := range tests {
@@ -167,5 +169,39 @@ func TestMySQLPolicyRulesMatchingCompanyStandards(t *testing.T) {
 				t.Fatalf("expected one policy issue, got %#v", issues)
 			}
 		})
+	}
+}
+
+func TestUnsupportedMySQLObjectRulesUseLeadingKeywords(t *testing.T) {
+	rules := map[string]bool{"prohibit_trigger": true, "prohibit_stored_function": true, "prohibit_event": true}
+	for _, sql := range []string{
+		"/* migration */ CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET @x = 1",
+		"CREATE FUNCTION f() RETURNS INT RETURN 1",
+		"CREATE EVENT cleanup ON SCHEDULE EVERY 1 DAY DO DELETE FROM t",
+	} {
+		if issues := RunStaticChecks(sql, rules); len(issues) != 1 {
+			t.Fatalf("expected one prohibited-object issue for %q, got %#v", sql, issues)
+		}
+	}
+
+	for _, sql := range []string{
+		"SELECT 'CREATE TRIGGER trg'",
+		"-- CREATE EVENT ignored\nSELECT 1",
+		"CREATE TABLE function_log (id INT)",
+	} {
+		if issues := RunStaticChecks(sql, rules); len(issues) != 0 {
+			t.Fatalf("expected no issue for %q, got %#v", sql, issues)
+		}
+	}
+}
+
+func TestReservedColumnRuleAllowsOrdinaryColumnNames(t *testing.T) {
+	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "CREATE TABLE t (id BIGINT, display_name VARCHAR(64)) ENGINE=InnoDB")
+	if err != nil {
+		t.Fatalf("ParseSQL() error = %v", err)
+	}
+	issues := RunStaticChecksParsed(parsed.Statements[0], map[string]bool{"prohibit_reserved_column_name": true})
+	if len(issues) != 0 {
+		t.Fatalf("expected no issues, got %#v", issues)
 	}
 }

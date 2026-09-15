@@ -9,5 +9,4 @@ UPDATE sql_review_rules SET category = 'system' WHERE rule_name = 'require_utf8m
 INSERT INTO sql_review_rules (rule_name, category, severity, enabled, threshold, description) VALUES
 ('require_innodb', 'engine', 'error', 1, NULL, 'CREATE TABLE must use the InnoDB storage engine'),
 ('require_primary_key', 'table', 'error', 1, NULL, 'CREATE TABLE must include a primary key'),
-('prohibit_foreign_key', 'table', 'warning', 1, NULL, 'CREATE TABLE must not define foreign key constraints'),
-('prohibit_select_star', 'statement', 'error', 1, NULL, 'SELECT statements must list required columns instead of using *');
+('prohibit_foreign_key', 'table', 'warning', 1, NULL, 'CREATE TABLE must not define foreign key constraints');

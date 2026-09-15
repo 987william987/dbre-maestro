@@ -155,7 +155,7 @@ describe('SQLReviewRulesPage', () => {
         },
         {
           id: 2,
-          rule_name: 'prohibit_select_star',
+          rule_name: 'dml_no_where',
           category: 'statement',
           severity: 'error',
           enabled: true,
@@ -186,7 +186,7 @@ describe('SQLReviewRulesPage', () => {
 
     expect(await screen.findByText('require_primary_key')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Table\s*1/ }))
-    expect(screen.queryByText('prohibit_select_star')).not.toBeInTheDocument()
+    expect(screen.queryByText('dml_no_where')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'require_primary_key severity warning' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 

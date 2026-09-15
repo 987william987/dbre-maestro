@@ -73,6 +73,10 @@ func (h *SQLReviewRuleHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "severity must be error or warning")
 		return
 	}
+	if req.Severity != nil && *req.Severity == "warning" && sqlReviewRuleRequiresError(name) {
+		jsonErr(w, http.StatusUnprocessableEntity, "this rule must use error severity because the SQL parser cannot process the prohibited statement")
+		return
+	}
 
 	userID := middleware.UserIDFromCtx(r.Context())
 	if err := h.rules.Patch(r.Context(), name, req.Enabled, req.Threshold, req.Severity, userID); err != nil {
@@ -94,6 +98,10 @@ func (h *SQLReviewRuleHandler) Patch(w http.ResponseWriter, r *http.Request) {
 
 	updated, _ := h.rules.GetByName(r.Context(), name)
 	jsonOK(w, updated)
+}
+
+func sqlReviewRuleRequiresError(name string) bool {
+	return name == "prohibit_trigger" || name == "prohibit_stored_function" || name == "prohibit_event"
 }
 
 func sqlReviewRuleSupportsThreshold(name string) bool {

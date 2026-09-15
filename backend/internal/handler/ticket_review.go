@@ -92,6 +92,17 @@ func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID
 
 	parsedStatements, dialect, err := h.parseTicketStatements(ctx, dbConnID, sqlContent)
 	if err != nil {
+		if dialect == sqlparse.DialectMySQL {
+			if rules, listErr := h.sqlReviewRules.List(ctx); listErr == nil {
+				ruleMap := make(map[string]bool, len(rules))
+				for _, rule := range rules {
+					ruleMap[rule.RuleName] = rule.Enabled
+				}
+				if issues := sqlreview.RunStaticChecks(sqlContent, ruleMap); len(issues) > 0 {
+					return []ticketReviewItem{buildValidationReviewItem(1, strings.TrimSpace(sqlContent), validationMethodStaticRule, nil, "create", "system", 0, issues)}
+				}
+			}
+		}
 		return buildSyntaxErrorReviewItems(err, sqlContent)
 	}
 
@@ -1508,7 +1519,7 @@ func buildParserReviewItems(statements []sqlparse.ParsedStatement) []ticketRevie
 }
 
 func buildStaticValidationItems(statements []sqlparse.ParsedStatement, ruleMap map[string]bool, ruleSeverity map[string]string) []ticketReviewItem {
-	staticRuleNames := []string{"dml_no_where", "ddl_no_comment", "require_utf8mb4", "require_innodb", "require_primary_key", "prohibit_foreign_key", "prohibit_select_star"}
+	staticRuleNames := []string{"dml_no_where", "ddl_no_comment", "require_utf8mb4", "require_innodb", "require_primary_key", "prohibit_foreign_key", "prohibit_stored_procedure", "prohibit_view", "prohibit_reserved_column_name"}
 	items := make([]ticketReviewItem, 0, len(statements))
 	for _, stmt := range statements {
 		var issues []string
