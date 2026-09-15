@@ -793,7 +793,7 @@ function WorkflowRuleEditor({
 
   return (
     <div className="grid gap-4 px-4 py-4">
-      <div className="grid gap-3 lg:grid-cols-[220px_minmax(260px,1fr)_minmax(260px,1fr)_100px_40px]">
+      <div className="grid gap-3 lg:grid-cols-[220px_minmax(260px,1fr)_minmax(260px,1fr)_120px_40px]">
         <Field
           label="Rule name"
           value={rule.rule_name}
@@ -859,7 +859,7 @@ function WorkflowRuleEditor({
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[220px_minmax(260px,1fr)_minmax(260px,1fr)_100px_40px]">
+      <div className="grid gap-4 lg:grid-cols-[220px_minmax(260px,1fr)_minmax(260px,1fr)_120px_40px]">
         <div className="grid content-start gap-3">
           <label className="flex items-center gap-2 text-[13px] font-semibold text-ink">
             <Switch
@@ -1079,14 +1079,14 @@ function Field({
   type?: string
 }) {
   return (
-    <label className="grid gap-2 text-[12px] font-semibold text-muted">
+    <label className="grid min-w-0 gap-2 text-[12px] font-semibold text-muted">
       <span>{label}</span>
       <input
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
+        className="h-10 min-w-0 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
       />
     </label>
   )
