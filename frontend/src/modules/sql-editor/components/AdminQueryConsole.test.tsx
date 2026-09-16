@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AdminQueryConsole } from '@/modules/sql-editor/components/AdminQueryConsole'
-import { executeAdminQuery } from '@/modules/sql-editor/api'
+import { cancelQueryExecution, executeAdminQuery } from '@/modules/sql-editor/api'
 
 vi.mock('@uiw/react-codemirror', () => ({
   default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
@@ -11,9 +11,11 @@ vi.mock('@uiw/react-codemirror', () => ({
 
 vi.mock('@/modules/sql-editor/api', () => ({
   executeAdminQuery: vi.fn(),
+  cancelQueryExecution: vi.fn(),
 }))
 
 const mockedExecuteAdminQuery = vi.mocked(executeAdminQuery)
+const mockedCancelQueryExecution = vi.mocked(cancelQueryExecution)
 const connection = {
   id: 1,
   name: 'Primary MySQL',
@@ -32,6 +34,7 @@ const connection = {
 describe('AdminQueryConsole', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockedCancelQueryExecution.mockResolvedValue({ cancel_requested: true })
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn().mockResolvedValue(undefined) }, configurable: true })
   })
 
@@ -62,13 +65,18 @@ describe('AdminQueryConsole', () => {
 
     expect(screen.getByText(/UPDATE tickets SET status/)).toBeInTheDocument()
     expect(screen.getByText(/SELECT id FROM tickets/)).toBeInTheDocument()
-    expect(mockedExecuteAdminQuery).toHaveBeenNthCalledWith(1, {
-      db_connection_id: 1,
-      sql: 'UPDATE tickets SET status = 2 WHERE id = 7',
-      database: 'maestro',
-      schema: undefined,
-      redis_db_index: undefined,
-    })
+    expect(mockedExecuteAdminQuery).toHaveBeenNthCalledWith(
+      1,
+      {
+        db_connection_id: 1,
+        sql: 'UPDATE tickets SET status = 2 WHERE id = 7',
+        database: 'maestro',
+        schema: undefined,
+        redis_db_index: undefined,
+        query_execution_id: expect.any(String),
+      },
+      expect.any(AbortSignal),
+    )
     expect(mockedExecuteAdminQuery).toHaveBeenCalledTimes(2)
   })
 
@@ -143,9 +151,41 @@ describe('AdminQueryConsole', () => {
     fireEvent.change(editor, { target: { value: 'SHOW TABLES' } })
     fireEvent.click(screen.getByRole('button', { name: 'Execute' }))
     expect(await screen.findByText('users')).toBeInTheDocument()
-    expect(mockedExecuteAdminQuery).toHaveBeenNthCalledWith(1, expect.objectContaining({ database: undefined }))
-    expect(mockedExecuteAdminQuery).toHaveBeenNthCalledWith(2, expect.objectContaining({ database: 'testnet_dbms', sql: 'SHOW TABLES' }))
+    expect(mockedExecuteAdminQuery).toHaveBeenNthCalledWith(1, expect.objectContaining({ database: undefined }), expect.any(AbortSignal))
+    expect(mockedExecuteAdminQuery).toHaveBeenNthCalledWith(2, expect.objectContaining({ database: 'testnet_dbms', sql: 'SHOW TABLES' }), expect.any(AbortSignal))
     expect(screen.getByText(/readwrite · testnet_dbms/)).toBeInTheDocument()
+  })
+
+  it('MySQL 執行中顯示 Stop，按下後呼叫 cancelQueryExecution 並中止請求', async () => {
+    mockedExecuteAdminQuery.mockImplementation(
+      (_payload, signal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+        }),
+    )
+    render(<AdminQueryConsole connection={connection} database="maestro" schema="" endpoint="primary.local:3306" credentialRole="readwrite" onExit={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Administrator command'), { target: { value: 'OPTIMIZE TABLE member_trade_spot' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Execute' }))
+
+    const stopButton = await screen.findByRole('button', { name: 'Stop' })
+    fireEvent.click(stopButton)
+
+    expect(mockedCancelQueryExecution).toHaveBeenCalledWith(expect.any(String))
+    expect(await screen.findByText(/Stopped by user\./)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+  })
+
+  it('非 MySQL 連線執行中不顯示 Stop（尚未支援 kill-query）', async () => {
+    mockedExecuteAdminQuery.mockImplementation(() => new Promise(() => {}))
+    const postgresConnection = { ...connection, name: 'Primary PostgreSQL', db_type: 'postgres', port: 5432 }
+    render(<AdminQueryConsole connection={postgresConnection} database="postgres" schema="public" endpoint="primary.local:5432" credentialRole="readwrite" onExit={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Administrator command'), { target: { value: 'SELECT 1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Execute' }))
+
+    await waitFor(() => expect(mockedExecuteAdminQuery).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
   })
 
   it('PostgreSQL \\c 成功後會切換 database 並清除舊 schema context', async () => {
@@ -163,7 +203,7 @@ describe('AdminQueryConsole', () => {
     fireEvent.change(editor, { target: { value: '\\dt' } })
     fireEvent.click(screen.getByRole('button', { name: 'Execute' }))
     expect(await screen.findByText('users')).toBeInTheDocument()
-    expect(mockedExecuteAdminQuery).toHaveBeenNthCalledWith(2, expect.objectContaining({ database: 'app', schema: undefined, sql: '\\dt' }))
+    expect(mockedExecuteAdminQuery).toHaveBeenNthCalledWith(2, expect.objectContaining({ database: 'app', schema: undefined, sql: '\\dt' }), expect.any(AbortSignal))
     expect(screen.getByText(/readwrite · app/)).toBeInTheDocument()
   })
 })

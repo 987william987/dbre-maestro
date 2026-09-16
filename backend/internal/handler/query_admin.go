@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
@@ -15,11 +16,12 @@ import (
 )
 
 type adminQueryRequest struct {
-	DBConnectionID uint64 `json:"db_connection_id"`
-	SQL            string `json:"sql"`
-	Database       string `json:"database"`
-	Schema         string `json:"schema"`
-	RedisDBIndex   *int   `json:"redis_db_index"`
+	DBConnectionID   uint64 `json:"db_connection_id"`
+	SQL              string `json:"sql"`
+	Database         string `json:"database"`
+	Schema           string `json:"schema"`
+	RedisDBIndex     *int   `json:"redis_db_index"`
+	QueryExecutionID string `json:"query_execution_id"`
 }
 
 func (h *QueryHandler) ActivateAdminMode(w http.ResponseWriter, r *http.Request) {
@@ -65,13 +67,17 @@ func (h *QueryHandler) ExecuteAdmin(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "readwrite credential is not configured")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), h.loadSQLEditorTimeoutSettings(r.Context()).AppTimeout)
-	defer cancel()
-	response, err := h.runAdminStatement(ctx, resolved, password, req)
+	// Admin console statements (e.g. OPTIMIZE TABLE, ALTER TABLE) can legitimately
+	// run far longer than the SQL Editor's app timeout, so unlike the regular
+	// Execute path this is intentionally not bounded by AppTimeout — it only ends
+	// when the statement finishes, the client disconnects, or it's cancelled via
+	// POST /query/cancel (see the MySQL registration below).
+	userID := middleware.UserIDFromCtx(r.Context())
+	response, err := h.runAdminStatement(r.Context(), resolved, password, req, userID)
 	duration := time.Since(start).Milliseconds()
 	if err != nil {
 		h.logAdminAudit(r, conn, "sql_editor_admin_execute_failed", false, req.SQL, duration, 0)
-		writeQueryExecutionError(w, err, "admin command", h.loadSQLEditorTimeoutSettings(r.Context()).AppTimeout)
+		writeQueryExecutionError(w, err, "admin command", 0)
 		return
 	}
 	response["duration_ms"] = duration
@@ -97,7 +103,22 @@ func (h *QueryHandler) adminConnection(w http.ResponseWriter, r *http.Request, i
 	return conn, true
 }
 
-func (h *QueryHandler) runAdminStatement(ctx context.Context, conn *model.DBConnection, password string, req adminQueryRequest) (map[string]any, error) {
+func (h *QueryHandler) readwriteCancelDBOpener(conn *model.DBConnection) sqlCancelDBOpener {
+	return func(ctx context.Context) (*sql.DB, string, func(), error) {
+		resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadwrite)
+		if err != nil {
+			return nil, model.DBCredentialRoleReadwrite, func() {}, err
+		}
+		driver, dsn := pool.BuildDSN(resolvedConn, password)
+		db, err := pool.Open(driver, dsn, pool.ProfileExec)
+		if err != nil {
+			return nil, model.DBCredentialRoleReadwrite, func() {}, err
+		}
+		return db, model.DBCredentialRoleReadwrite, func() { db.Close() }, nil
+	}
+}
+
+func (h *QueryHandler) runAdminStatement(ctx context.Context, conn *model.DBConnection, password string, req adminQueryRequest, userID uint64) (map[string]any, error) {
 	if conn.DBType == "redis" {
 		cmd, args, err := sqlreview.ParseRedisCommand(req.SQL)
 		if err != nil {
@@ -158,8 +179,40 @@ func (h *QueryHandler) runAdminStatement(ctx context.Context, conn *model.DBConn
 			return nil, err
 		}
 	}
+
+	// Register MySQL statements so a stuck admin command (e.g. OPTIMIZE TABLE)
+	// can be killed via POST /query/cancel, since it's no longer bounded by
+	// AppTimeout. Mirrors executeSingleSQLStatement's registration in query.go.
+	execCtx := ctx
+	if conn.DBType == "mysql" {
+		threadID := currentMySQLConnectionID(ctx, pinned)
+		queryExecutionID := strings.TrimSpace(req.QueryExecutionID)
+		if threadID > 0 && queryExecutionID != "" && h.activeQueries != nil {
+			var cancel context.CancelFunc
+			execCtx, cancel = context.WithCancel(ctx)
+			if canceled := h.activeQueries.register(queryExecutionID, activeSQLQuery{
+				UserID:         userID,
+				ConnectionID:   conn.ID,
+				DBType:         conn.DBType,
+				MySQLThreadID:  threadID,
+				Statement:      statement,
+				Conn:           conn,
+				CancelDBOpener: h.readwriteCancelDBOpener(conn),
+				Cancel:         cancel,
+				RegisteredAt:   time.Now(),
+			}); canceled {
+				cancel()
+				return nil, context.Canceled
+			}
+			defer func() {
+				h.activeQueries.remove(queryExecutionID)
+				cancel()
+			}()
+		}
+	}
+
 	if adminStatementReturnsRows(statement) {
-		rows, err := pinned.QueryContext(ctx, statement)
+		rows, err := pinned.QueryContext(execCtx, statement)
 		if err != nil {
 			return nil, err
 		}
@@ -192,7 +245,7 @@ func (h *QueryHandler) runAdminStatement(ctx context.Context, conn *model.DBConn
 		}
 		return map[string]any{"columns": columns, "rows": items, "row_count": len(items), "affected_rows": int64(0), "command": "QUERY"}, rows.Err()
 	}
-	result, err := pinned.ExecContext(ctx, statement)
+	result, err := pinned.ExecContext(execCtx, statement)
 	if err != nil {
 		return nil, err
 	}

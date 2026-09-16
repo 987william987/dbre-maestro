@@ -69,7 +69,15 @@ func clearRequestWriteDeadline(w http.ResponseWriter, path string) {
 }
 
 func isQueryExecutionRequest(method, path string) bool {
-	return method == http.MethodPost && (path == "/api/query" || path == "/api/query/")
+	if method != http.MethodPost {
+		return false
+	}
+	switch path {
+	case "/api/query", "/api/query/", "/api/query/admin/execute", "/api/query/admin/activate":
+		return true
+	default:
+		return false
+	}
 }
 
 func isTicketExecutionRequest(method, path string) bool {
