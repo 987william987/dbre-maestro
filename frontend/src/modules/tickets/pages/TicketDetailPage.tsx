@@ -640,6 +640,16 @@ function mergeReviewStatus(current?: string | null, next?: string | null) {
   return next ?? current ?? 'pass'
 }
 
+function reviewStatusClass(status: string) {
+  if (status === 'pass') {
+    return 'bg-emerald-50 text-emerald-700'
+  }
+  if (status === 'warn') {
+    return 'bg-amber-50 text-amber-700'
+  }
+  return 'bg-red-50 text-danger'
+}
+
 function buildStatementResults(detail: TicketDetail) {
   const rows = new Map<number, StatementResultRow>()
   const hidePendingExecutionStatus = detail.ticket.status === 'rejected' || detail.ticket.status === 'withdrawn'
@@ -1486,7 +1496,13 @@ export function TicketDetailPage() {
                             {showStatementScanRows ? (
                               <DataTableCell className="break-words align-middle leading-6">{formatReviewRows(row.scanRows)}</DataTableCell>
                             ) : null}
-                            <DataTableCell className="break-words align-middle leading-6">{row.reviewStatus ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-middle leading-6">
+                              {row.reviewStatus ? (
+                                <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${reviewStatusClass(row.reviewStatus)}`}>
+                                  {row.reviewStatus}
+                                </span>
+                              ) : '—'}
+                            </DataTableCell>
                             {showReviewMessageColumn ? (
                               <DataTableCell className="break-words align-middle leading-6"><ReviewMessages value={row.reviewMessage} /></DataTableCell>
                             ) : null}

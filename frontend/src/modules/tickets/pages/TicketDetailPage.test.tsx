@@ -836,7 +836,7 @@ describe('TicketDetailPage role visibility', () => {
     renderPage()
 
     expect(await screen.findByText('Statement Results')).toBeInTheDocument()
-    expect(screen.getByText('warn')).toBeInTheDocument()
+    expect(screen.getByText('warn')).toHaveClass('bg-amber-50', 'text-amber-700')
     expect(screen.getByText('禁止使用 MySQL 保留字 "rank" 作為欄位名稱')).toBeInTheDocument()
   })
 
