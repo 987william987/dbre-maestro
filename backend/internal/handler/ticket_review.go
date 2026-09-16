@@ -102,6 +102,9 @@ func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID
 				}
 				if rule := sqlreview.UnsupportedMySQLObjectRule(sqlContent); rule != "" && ruleMap[rule] {
 					issues := sqlreview.RunStaticChecks(sqlContent, map[string]bool{rule: true})
+					for index := range issues {
+						issues[index] = formatReviewIssue(ruleSeverity[rule], issues[index])
+					}
 					return []ticketReviewItem{buildValidationReviewItemWithStatus(1, strings.TrimSpace(sqlContent), validationMethodStaticRule, nil, "create", "system", 0, configuredReviewStatus(ruleSeverity[rule]), issues)}
 				}
 			}
@@ -537,7 +540,7 @@ func (h *TicketHandler) runMySQLDMLExplainValidation(
 		status := "pass"
 		for _, issue := range explainResult.Issues {
 			if ruleMap[issue.Kind] {
-				messages = append(messages, issue.Msg)
+				messages = append(messages, formatReviewIssue(ruleSeverity[issue.Kind], issue.Msg))
 				status = strongestReviewStatus(status, configuredReviewStatus(ruleSeverity[issue.Kind]))
 			}
 		}
@@ -1535,7 +1538,9 @@ func buildStaticValidationItems(statements []sqlparse.ParsedStatement, ruleMap m
 			if len(ruleIssues) == 0 {
 				continue
 			}
-			issues = append(issues, ruleIssues...)
+			for _, issue := range ruleIssues {
+				issues = append(issues, formatReviewIssue(ruleSeverity[ruleName], issue))
+			}
 			status = strongestReviewStatus(status, configuredReviewStatus(ruleSeverity[ruleName]))
 		}
 		items = append(items, buildValidationReviewItemWithStatus(stmt.Seq, stmt.RawSQL, validationMethodStaticRule, nil, string(stmt.Kind), inferReviewObjectType(stmt), 0, status, issues))
@@ -1604,6 +1609,13 @@ func configuredReviewStatus(severity string) string {
 		return "warn"
 	}
 	return "error"
+}
+
+func formatReviewIssue(severity, message string) string {
+	if severity == "warning" {
+		return "[warn] " + message
+	}
+	return "[error] " + message
 }
 
 func strongestReviewStatus(current, next string) string {

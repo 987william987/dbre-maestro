@@ -14,6 +14,7 @@ import type { AuditLog } from '@/shared/types/audit'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DataTable, DataTableBody, DataTableCell, DataTableHead, DataTableHeaderCell, DataTableRow } from '@/shared/ui/DataTable'
 import { ExpandableSql, isExpandableSql } from '@/shared/ui/ExpandableSql'
+import { ReviewMessages } from '@/shared/ui/ReviewMessages'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
@@ -1487,7 +1488,7 @@ export function TicketDetailPage() {
                             ) : null}
                             <DataTableCell className="break-words align-middle leading-6">{row.reviewStatus ?? '—'}</DataTableCell>
                             {showReviewMessageColumn ? (
-                              <DataTableCell className="break-words align-middle leading-6 text-muted">{row.reviewMessage || '—'}</DataTableCell>
+                              <DataTableCell className="break-words align-middle leading-6"><ReviewMessages value={row.reviewMessage} /></DataTableCell>
                             ) : null}
                             {showStatementRowsAffected ? (
                               <DataTableCell className="break-words align-middle leading-6">{row.rowsAffected ?? '—'}</DataTableCell>
