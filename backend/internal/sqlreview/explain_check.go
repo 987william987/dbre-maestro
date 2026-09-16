@@ -76,7 +76,8 @@ func CheckExplainWithStats(ctx context.Context, db *sql.DB, sqlStr string, rowTh
 				Rows:  rowsEst,
 				Msg:   fmt.Sprintf("table %q uses full table scan (type=ALL, ~%d rows)", tableName, rowsEst),
 			})
-		} else if rowsEst > rowThreshold {
+		}
+		if rowsEst > rowThreshold {
 			result.Issues = append(result.Issues, ExplainIssue{
 				Table: tableName,
 				Kind:  "high_row_count",
