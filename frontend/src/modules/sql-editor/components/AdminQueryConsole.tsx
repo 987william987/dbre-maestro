@@ -289,7 +289,7 @@ export function AdminQueryConsole({ connection, database, schema, endpoint, cred
           />
         </div>
         <div className="mt-3 flex justify-end gap-2">
-          {running && connection.db_type === 'mysql' ? (
+          {running && (connection.db_type === 'mysql' || connection.db_type === 'postgres' || connection.db_type === 'postgresql') ? (
             <button
               type="button"
               onClick={stopCommand}

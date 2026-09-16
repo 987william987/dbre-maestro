@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlreview"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 type adminQueryRequest struct {
@@ -118,6 +120,22 @@ func (h *QueryHandler) readwriteCancelDBOpener(conn *model.DBConnection) sqlCanc
 	}
 }
 
+func currentPostgresBackendPID(pinned *sql.Conn) uint64 {
+	var backendPID uint64
+	if err := pinned.Raw(func(driverConn any) error {
+		stdlibConn, ok := driverConn.(*stdlib.Conn)
+		if !ok {
+			return nil
+		}
+		backendPID = uint64(stdlibConn.Conn().PgConn().PID())
+		return nil
+	}); err != nil {
+		slog.Warn("sql editor admin postgres backend pid lookup failed", "err", err)
+		return 0
+	}
+	return backendPID
+}
+
 func (h *QueryHandler) runAdminStatement(ctx context.Context, conn *model.DBConnection, password string, req adminQueryRequest, userID uint64) (map[string]any, error) {
 	if conn.DBType == "redis" {
 		cmd, args, err := sqlreview.ParseRedisCommand(req.SQL)
@@ -180,14 +198,21 @@ func (h *QueryHandler) runAdminStatement(ctx context.Context, conn *model.DBConn
 		}
 	}
 
-	// Register MySQL statements so a stuck admin command (e.g. OPTIMIZE TABLE)
-	// can be killed via POST /query/cancel, since it's no longer bounded by
-	// AppTimeout. Mirrors executeSingleSQLStatement's registration in query.go.
+	// Register MySQL/Postgres statements so a stuck admin command (e.g.
+	// OPTIMIZE TABLE, a long VACUUM) can be killed via POST /query/cancel,
+	// since it's no longer bounded by AppTimeout. Mirrors
+	// executeSingleSQLStatement / executeSinglePostgresStatement in query.go.
 	execCtx := ctx
-	if conn.DBType == "mysql" {
-		threadID := currentMySQLConnectionID(ctx, pinned)
-		queryExecutionID := strings.TrimSpace(req.QueryExecutionID)
-		if threadID > 0 && queryExecutionID != "" && h.activeQueries != nil {
+	queryExecutionID := strings.TrimSpace(req.QueryExecutionID)
+	if queryExecutionID != "" && h.activeQueries != nil {
+		var threadID, backendPID uint64
+		switch conn.DBType {
+		case "mysql":
+			threadID = currentMySQLConnectionID(ctx, pinned)
+		case "postgres", "postgresql":
+			backendPID = currentPostgresBackendPID(pinned)
+		}
+		if threadID > 0 || backendPID > 0 {
 			var cancel context.CancelFunc
 			execCtx, cancel = context.WithCancel(ctx)
 			if canceled := h.activeQueries.register(queryExecutionID, activeSQLQuery{
@@ -195,6 +220,7 @@ func (h *QueryHandler) runAdminStatement(ctx context.Context, conn *model.DBConn
 				ConnectionID:   conn.ID,
 				DBType:         conn.DBType,
 				MySQLThreadID:  threadID,
+				PostgresPID:    backendPID,
 				Statement:      statement,
 				Conn:           conn,
 				CancelDBOpener: h.readwriteCancelDBOpener(conn),

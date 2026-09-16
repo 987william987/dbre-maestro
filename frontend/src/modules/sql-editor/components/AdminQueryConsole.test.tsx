@@ -176,12 +176,33 @@ describe('AdminQueryConsole', () => {
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
   })
 
-  it('非 MySQL 連線執行中不顯示 Stop（尚未支援 kill-query）', async () => {
-    mockedExecuteAdminQuery.mockImplementation(() => new Promise(() => {}))
+  it('PostgreSQL 執行中顯示 Stop，按下後呼叫 cancelQueryExecution 並中止請求', async () => {
+    mockedExecuteAdminQuery.mockImplementation(
+      (_payload, signal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+        }),
+    )
     const postgresConnection = { ...connection, name: 'Primary PostgreSQL', db_type: 'postgres', port: 5432 }
     render(<AdminQueryConsole connection={postgresConnection} database="postgres" schema="public" endpoint="primary.local:5432" credentialRole="readwrite" onExit={vi.fn()} />)
 
-    fireEvent.change(screen.getByLabelText('Administrator command'), { target: { value: 'SELECT 1' } })
+    fireEvent.change(screen.getByLabelText('Administrator command'), { target: { value: 'VACUUM FULL large_table' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Execute' }))
+
+    const stopButton = await screen.findByRole('button', { name: 'Stop' })
+    fireEvent.click(stopButton)
+
+    expect(mockedCancelQueryExecution).toHaveBeenCalledWith(expect.any(String))
+    expect(await screen.findByText(/Stopped by user\./)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+  })
+
+  it('Redis 連線執行中不顯示 Stop（尚未支援 kill-query）', async () => {
+    mockedExecuteAdminQuery.mockImplementation(() => new Promise(() => {}))
+    const redisConnection = { ...connection, name: 'Primary Redis', db_type: 'redis', port: 6379 }
+    render(<AdminQueryConsole connection={redisConnection} database="0" schema="" endpoint="primary.local:6379" credentialRole="readwrite" onExit={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('Administrator command'), { target: { value: 'GET foo' } })
     fireEvent.click(screen.getByRole('button', { name: 'Execute' }))
 
     await waitFor(() => expect(mockedExecuteAdminQuery).toHaveBeenCalledOnce())
