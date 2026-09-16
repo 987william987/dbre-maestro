@@ -798,6 +798,48 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('pass')).toBeInTheDocument()
   })
 
+  it('同一 statement 的 warning 不會被後續 pass 覆蓋', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail(baseTicket, {
+      review_results: [
+        {
+          id: 1,
+          ticket_id: 12,
+          seq: 1,
+          sql_stmt: 'CREATE TABLE users (rank INT);',
+          phase: 'validation',
+          scan_rows: 0,
+          status: 'warn',
+          message: '禁止使用 MySQL 保留字 "rank" 作為欄位名稱',
+        },
+        {
+          id: 2,
+          ticket_id: 12,
+          seq: 1,
+          sql_stmt: 'CREATE TABLE users (rank INT);',
+          phase: 'validation',
+          scan_rows: 0,
+          status: 'pass',
+          message: null,
+        },
+      ],
+    }))
+
+    renderPage()
+
+    expect(await screen.findByText('Statement Results')).toBeInTheDocument()
+    expect(screen.getByText('warn')).toBeInTheDocument()
+    expect(screen.getByText('禁止使用 MySQL 保留字 "rank" 作為欄位名稱')).toBeInTheDocument()
+  })
+
   it('DDL 工單詳情顯示表行數與大小且隱藏 Scan Rows', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',

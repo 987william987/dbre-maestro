@@ -629,6 +629,16 @@ function isWholeTicketDMLExecutionMode(mode?: string | null) {
   return mode === 'whole_ticket'
 }
 
+function mergeReviewStatus(current?: string | null, next?: string | null) {
+  if (current === 'error' || next === 'error') {
+    return 'error'
+  }
+  if (current === 'warn' || next === 'warn') {
+    return 'warn'
+  }
+  return next ?? current ?? 'pass'
+}
+
 function buildStatementResults(detail: TicketDetail) {
   const rows = new Map<number, StatementResultRow>()
   const hidePendingExecutionStatus = detail.ticket.status === 'rejected' || detail.ticket.status === 'withdrawn'
@@ -647,7 +657,7 @@ function buildStatementResults(detail: TicketDetail) {
       sql: result.sql_stmt,
       tables: mergeReviewTables(existing?.tables, result.tables),
       scanRows: Math.max(existing?.scanRows ?? 0, result.scan_rows),
-      reviewStatus: existing?.reviewStatus === 'error' || result.status === 'error' ? 'error' : result.status,
+      reviewStatus: mergeReviewStatus(existing?.reviewStatus, result.status),
       reviewMessage: nextMessage || null,
       rowsAffected: existing?.rowsAffected ?? null,
       executionStatus: existing?.executionStatus ?? null,
