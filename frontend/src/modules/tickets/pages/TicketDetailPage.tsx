@@ -1060,6 +1060,7 @@ export function TicketDetailPage() {
   const canReject = detail?.capabilities?.can_reject ?? false
   const canWithdraw = detail?.capabilities?.can_withdraw ?? false
   const canExecute = detail?.capabilities?.can_execute ?? false
+  const canStop = detail?.capabilities?.can_stop ?? false
   const canRevoke = detail?.capabilities?.can_revoke ?? false
   const canRetryWorkflow = detail?.capabilities?.can_retry_workflow_resolution ?? false
   const exportDownloadURL = detail?.export_request?.download_url ?? null
@@ -1451,7 +1452,7 @@ export function TicketDetailPage() {
                         const rowExpandable = isExpandableSql(row.sql)
                         const rowActionBusy = actingExecutionID === row.executionID
                         const rowCanExecute = Boolean(canExecute && !isFullTicketExecutionRunMode(ticket.execution_run_mode) && !isWholeTicketDMLExecutionMode(ticket.dml_execution_mode) && (ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml') && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
-                        const rowCanStop = Boolean(canExecute && row.executionID && row.executionStatus === 'running')
+                        const rowCanStop = Boolean(canStop && row.executionID && row.executionStatus === 'running')
                         return (
                           <DataTableRow
                             key={rowKey}

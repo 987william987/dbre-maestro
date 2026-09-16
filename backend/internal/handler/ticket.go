@@ -1608,6 +1608,11 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "ticket capability check failed")
 		return
 	}
+	canStop, err := h.canStopTicket(r.Context(), ticket, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket capability check failed")
+		return
+	}
 
 	var exportDetail map[string]any
 	if ticket.TicketType == model.TicketTypeSQLExport && h.exports != nil {
@@ -1695,6 +1700,7 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"can_withdraw": canWithdraw,
 			"can_revoke":   canRevoke,
 			"can_execute":  canExecute,
+			"can_stop":     canStop,
 			"can_retry_workflow_resolution": middleware.HasPermission(r.Context(), "settings.write") &&
 				ticket.Status == model.TicketStatusNeedsAdminAttention,
 			"can_download_export": exportDetail != nil && exportDetail["download_url"] != nil,
@@ -4060,10 +4066,11 @@ func (h *TicketHandler) canStopTicket(ctx context.Context, ticket *model.Ticket,
 	if ticket.ExecutorID != nil && *ticket.ExecutorID == userID {
 		return true, nil
 	}
-	if ticket.Status == model.TicketStatusPendingExecution {
-		if allowed, err := h.canExecuteTicket(ctx, ticket, userID); err != nil || allowed {
-			return allowed, err
-		}
+	// Any executor eligible under the ticket's workflow resolution can stop it,
+	// not just whoever actually clicked "execute" — so a co-executor can still
+	// halt a run if the one who started it has gone offline.
+	if allowed, err := h.canExecuteTicket(ctx, ticket, userID); err != nil || allowed {
+		return allowed, err
 	}
 	return h.canViewFullTicketQueue(ctx, userID)
 }

@@ -14,6 +14,8 @@ vi.mock('@/modules/tickets/api', () => ({
   rejectTicket: vi.fn(),
   withdrawTicket: vi.fn(),
   executeTicket: vi.fn(),
+  executeTicketStatement: vi.fn(),
+  stopTicketStatement: vi.fn(),
   downloadTicketExport: vi.fn(),
   revokeTicket: vi.fn(),
 }))
@@ -975,6 +977,54 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('Statement Results')).toBeInTheDocument()
     expect(screen.getAllByText('Completed').length).toBeGreaterThan(0)
     expect(screen.getByText('1.250s')).toBeInTheDocument()
+  })
+
+  it('Stop 按鈕由 can_stop 決定，即使該使用者不是 can_execute 的指派執行者', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 9, username: 'co-executor', authGroups: ['dba'], authGroupDetails: [], permissions: ['tickets.execute'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      status: 'executing',
+      reviewer_id: 2,
+      reviewer_name: 'reviewer.bob',
+      executor_id: 8,
+      executor_name: 'other.executor',
+    }, {
+      executions: [
+        {
+          id: 21,
+          ticket_id: 12,
+          seq: 1,
+          sql_stmt: 'UPDATE users SET flagged = 1 WHERE id < 10;',
+          status: 'running',
+          rows_affected: 0,
+          error_msg: null,
+          started_at: '2026-06-09T10:00:00.000Z',
+          completed_at: null,
+        },
+      ],
+      capabilities: {
+        can_review: false,
+        can_reject: false,
+        can_withdraw: false,
+        can_revoke: false,
+        can_execute: false,
+        can_stop: true,
+        can_download_export: false,
+      },
+    }))
+
+    renderPage()
+
+    expect(await screen.findByText('Statement Results')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Stop/i })).toBeInTheDocument()
   })
 
   it('rejected 工單不把未執行 statement 顯示成 Pending Execution', async () => {
