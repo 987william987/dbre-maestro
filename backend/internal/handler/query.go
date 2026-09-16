@@ -57,7 +57,11 @@ func defaultSQLEditorTimeoutSettings() sqlEditorTimeoutSettings {
 
 func writeQueryExecutionError(w http.ResponseWriter, err error, operation string, timeout time.Duration) {
 	if errors.Is(err, context.DeadlineExceeded) {
-		jsonErr(w, http.StatusGatewayTimeout, fmt.Sprintf("%s timed out after %s", operation, timeout))
+		// 408, not 504: this is our own app-level deadline firing on the
+		// caller's request, not a signal that an upstream/infra hop failed —
+		// it must not trip the frontend's transient-infra-failure banner
+		// (which treats 502/503/504 as "service may be down, retry").
+		jsonErr(w, http.StatusRequestTimeout, fmt.Sprintf("%s timed out after %s", operation, timeout))
 		return
 	}
 	if errors.Is(err, context.Canceled) {

@@ -31,6 +31,7 @@ export type PlatformSettings = {
   sso_oidc_scopes: string[]
   sso_oidc_trust_mfa: boolean
   sql_editor_app_timeout_seconds: number
+  sql_editor_admin_app_timeout_seconds: number
   sql_editor_mysql_max_execution_time_ms: number
   sql_editor_postgres_statement_timeout_ms: number
   sql_export_app_timeout_seconds: number

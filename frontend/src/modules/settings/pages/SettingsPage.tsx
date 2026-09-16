@@ -37,6 +37,7 @@ type SettingsForm = {
   ssoOIDCScopes: string
   ssoOIDCTrustMFA: boolean
   sqlEditorAppTimeoutSeconds: string
+  sqlEditorAdminAppTimeoutSeconds: string
   sqlEditorMySQLMaxExecutionTimeMs: string
   sqlEditorPostgresStatementTimeoutMs: string
   sqlExportAppTimeoutSeconds: string
@@ -455,6 +456,20 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
                 label="PostgreSQL statement_timeout (ms)"
                 value={form.sqlEditorPostgresStatementTimeoutMs}
                 onChange={(value) => setForm((current) => current ? { ...current, sqlEditorPostgresStatementTimeoutMs: value } : current)}
+              />
+            </div>
+          </section>
+
+          <section className={`${section === 'query-execution' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
+            <div className="border-b border-border/80 px-4 py-3">
+              <p className="text-[14px] font-semibold text-ink">SQL Editor Admin Console Timeout</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Applies only to Administrator console (`/api/query/admin/execute`), separately from the regular SQL Editor timeout above, so long DBA operations (e.g. OPTIMIZE TABLE, VACUUM) aren&apos;t cut off by the shorter Editor default.</p>
+            </div>
+            <div className="grid gap-4 px-4 py-4 md:grid-cols-3">
+              <Field
+                label="Admin app timeout (seconds)"
+                value={form.sqlEditorAdminAppTimeoutSeconds}
+                onChange={(value) => setForm((current) => current ? { ...current, sqlEditorAdminAppTimeoutSeconds: value } : current)}
               />
             </div>
           </section>
@@ -1159,6 +1174,7 @@ function toForm(settings: PlatformSettings): SettingsForm {
     ssoOIDCScopes: settings.sso_oidc_scopes.join(', '),
     ssoOIDCTrustMFA: settings.sso_oidc_trust_mfa,
     sqlEditorAppTimeoutSeconds: String(settings.sql_editor_app_timeout_seconds),
+    sqlEditorAdminAppTimeoutSeconds: String(settings.sql_editor_admin_app_timeout_seconds),
     sqlEditorMySQLMaxExecutionTimeMs: String(settings.sql_editor_mysql_max_execution_time_ms),
     sqlEditorPostgresStatementTimeoutMs: String(settings.sql_editor_postgres_statement_timeout_ms),
     sqlExportAppTimeoutSeconds: String(settings.sql_export_app_timeout_seconds),
@@ -1224,6 +1240,7 @@ function toPayload(
     sso_oidc_scopes: splitCSV(form.ssoOIDCScopes),
     sso_oidc_trust_mfa: form.ssoOIDCTrustMFA,
     sql_editor_app_timeout_seconds: parsePositiveInt(form.sqlEditorAppTimeoutSeconds, 30),
+    sql_editor_admin_app_timeout_seconds: parsePositiveInt(form.sqlEditorAdminAppTimeoutSeconds, 300),
     sql_editor_mysql_max_execution_time_ms: parsePositiveInt(form.sqlEditorMySQLMaxExecutionTimeMs, 25000),
     sql_editor_postgres_statement_timeout_ms: parsePositiveInt(form.sqlEditorPostgresStatementTimeoutMs, 25000),
     sql_export_app_timeout_seconds: parsePositiveInt(form.sqlExportAppTimeoutSeconds, 30),

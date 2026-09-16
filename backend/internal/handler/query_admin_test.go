@@ -1,9 +1,17 @@
 package handler
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
+
+func TestLoadSQLEditorAdminAppTimeoutDefaultsWhenSettingsUnavailable(t *testing.T) {
+	h := &QueryHandler{}
+	if got := h.loadSQLEditorAdminAppTimeout(context.Background()); got != defaultAdminQueryTimeout {
+		t.Fatalf("loadSQLEditorAdminAppTimeout() = %v, want %v", got, defaultAdminQueryTimeout)
+	}
+}
 
 func TestAdminStatementReturnsRows(t *testing.T) {
 	tests := []struct {

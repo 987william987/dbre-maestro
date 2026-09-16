@@ -43,6 +43,7 @@ const (
 	settingSSOOIDCScopes                   = "sso_oidc_scopes"
 	settingSSOOIDCTrustMFA                 = "sso_oidc_trust_mfa"
 	settingSQLEditorAppTimeoutSeconds      = "sql_editor_app_timeout_seconds"
+	settingSQLEditorAdminAppTimeoutSeconds = "sql_editor_admin_app_timeout_seconds"
 	settingSQLEditorMySQLMaxExecTimeMs     = "sql_editor_mysql_max_execution_time_ms"
 	settingSQLEditorPGStatementTimeoutMs   = "sql_editor_postgres_statement_timeout_ms"
 	settingSQLExportAppTimeoutSeconds      = "sql_export_app_timeout_seconds"
@@ -105,6 +106,7 @@ func NewSettingsRepo(db *sqlx.DB, encKey []byte) *SettingsRepo {
 func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error) {
 	settings := &model.PlatformSettings{
 		SQLEditorAppTimeoutSeconds:            30,
+		SQLEditorAdminAppTimeoutSeconds:       300,
 		RequireNonSensitiveExportReview:       true,
 		SQLEditorMySQLMaxExecutionTimeMs:      25000,
 		SQLEditorPostgresStatementTimeoutMs:   25000,
@@ -299,6 +301,13 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	}
 	if sqlEditorAppTimeoutSeconds != nil {
 		settings.SQLEditorAppTimeoutSeconds = *sqlEditorAppTimeoutSeconds
+	}
+	sqlEditorAdminAppTimeoutSeconds, err := r.getInt(ctx, settingSQLEditorAdminAppTimeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
+	if sqlEditorAdminAppTimeoutSeconds != nil {
+		settings.SQLEditorAdminAppTimeoutSeconds = *sqlEditorAdminAppTimeoutSeconds
 	}
 	sqlEditorMySQLMaxExecTimeMs, err := r.getInt(ctx, settingSQLEditorMySQLMaxExecTimeMs)
 	if err != nil {
@@ -567,6 +576,9 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 		return err
 	}
 	if err := upsertInt(ctx, tx, settingSQLEditorAppTimeoutSeconds, settings.SQLEditorAppTimeoutSeconds); err != nil {
+		return err
+	}
+	if err := upsertInt(ctx, tx, settingSQLEditorAdminAppTimeoutSeconds, settings.SQLEditorAdminAppTimeoutSeconds); err != nil {
 		return err
 	}
 	if err := upsertInt(ctx, tx, settingSQLEditorMySQLMaxExecTimeMs, settings.SQLEditorMySQLMaxExecutionTimeMs); err != nil {

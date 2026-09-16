@@ -52,6 +52,8 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     sso_oidc_trust_mfa: typeof settings.sso_oidc_trust_mfa === 'boolean' ? settings.sso_oidc_trust_mfa : false,
     sql_editor_app_timeout_seconds:
       typeof settings.sql_editor_app_timeout_seconds === 'number' ? settings.sql_editor_app_timeout_seconds : 30,
+    sql_editor_admin_app_timeout_seconds:
+      typeof settings.sql_editor_admin_app_timeout_seconds === 'number' ? settings.sql_editor_admin_app_timeout_seconds : 300,
     sql_editor_mysql_max_execution_time_ms:
       typeof settings.sql_editor_mysql_max_execution_time_ms === 'number' ? settings.sql_editor_mysql_max_execution_time_ms : 25000,
     sql_editor_postgres_statement_timeout_ms:

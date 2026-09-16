@@ -70,16 +70,20 @@ func (h *QueryHandler) ExecuteAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Admin console statements (e.g. OPTIMIZE TABLE, ALTER TABLE) can legitimately
-	// run far longer than the SQL Editor's app timeout, so unlike the regular
-	// Execute path this is intentionally not bounded by AppTimeout — it only ends
-	// when the statement finishes, the client disconnects, or it's cancelled via
-	// POST /query/cancel (see the MySQL registration below).
+	// run far longer than the SQL Editor's app timeout, so this uses its own,
+	// separately configured timeout (sql_editor_admin_app_timeout_seconds)
+	// rather than sharing sql_editor_app_timeout_seconds with regular Execute.
+	// A stuck MySQL/Postgres statement can also be ended early via
+	// POST /query/cancel (see the registration below).
 	userID := middleware.UserIDFromCtx(r.Context())
-	response, err := h.runAdminStatement(r.Context(), resolved, password, req, userID)
+	adminTimeout := h.loadSQLEditorAdminAppTimeout(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), adminTimeout)
+	defer cancel()
+	response, err := h.runAdminStatement(ctx, resolved, password, req, userID)
 	duration := time.Since(start).Milliseconds()
 	if err != nil {
 		h.logAdminAudit(r, conn, "sql_editor_admin_execute_failed", false, req.SQL, duration, 0)
-		writeQueryExecutionError(w, err, "admin command", 0)
+		writeQueryExecutionError(w, err, "admin command", adminTimeout)
 		return
 	}
 	response["duration_ms"] = duration
@@ -103,6 +107,19 @@ func (h *QueryHandler) adminConnection(w http.ResponseWriter, r *http.Request, i
 		return nil, false
 	}
 	return conn, true
+}
+
+const defaultAdminQueryTimeout = 5 * time.Minute
+
+func (h *QueryHandler) loadSQLEditorAdminAppTimeout(ctx context.Context) time.Duration {
+	if h.settings == nil {
+		return defaultAdminQueryTimeout
+	}
+	platformSettings, err := h.settings.Get(ctx)
+	if err != nil || platformSettings == nil || platformSettings.SQLEditorAdminAppTimeoutSeconds <= 0 {
+		return defaultAdminQueryTimeout
+	}
+	return time.Duration(platformSettings.SQLEditorAdminAppTimeoutSeconds) * time.Second
 }
 
 func (h *QueryHandler) readwriteCancelDBOpener(conn *model.DBConnection) sqlCancelDBOpener {
@@ -199,9 +216,10 @@ func (h *QueryHandler) runAdminStatement(ctx context.Context, conn *model.DBConn
 	}
 
 	// Register MySQL/Postgres statements so a stuck admin command (e.g.
-	// OPTIMIZE TABLE, a long VACUUM) can be killed via POST /query/cancel,
-	// since it's no longer bounded by AppTimeout. Mirrors
-	// executeSingleSQLStatement / executeSinglePostgresStatement in query.go.
+	// OPTIMIZE TABLE, a long VACUUM) can be killed via POST /query/cancel
+	// before the (much larger) admin app timeout would otherwise end it.
+	// Mirrors executeSingleSQLStatement / executeSinglePostgresStatement
+	// in query.go.
 	execCtx := ctx
 	queryExecutionID := strings.TrimSpace(req.QueryExecutionID)
 	if queryExecutionID != "" && h.activeQueries != nil {

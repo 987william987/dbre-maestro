@@ -56,6 +56,7 @@ type PlatformSettings struct {
 	SSOOIDCScopes                         []string         `json:"sso_oidc_scopes"`
 	SSOOIDCTrustMFA                       bool             `json:"sso_oidc_trust_mfa"`
 	SQLEditorAppTimeoutSeconds            int              `json:"sql_editor_app_timeout_seconds"`
+	SQLEditorAdminAppTimeoutSeconds       int              `json:"sql_editor_admin_app_timeout_seconds"`
 	SQLEditorMySQLMaxExecutionTimeMs      int              `json:"sql_editor_mysql_max_execution_time_ms"`
 	SQLEditorPostgresStatementTimeoutMs   int              `json:"sql_editor_postgres_statement_timeout_ms"`
 	SQLExportAppTimeoutSeconds            int              `json:"sql_export_app_timeout_seconds"`

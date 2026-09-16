@@ -444,6 +444,10 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "sql_editor_app_timeout_seconds must be greater than 0")
 		return
 	}
+	if req.SQLEditorAdminAppTimeoutSeconds <= 0 {
+		jsonErr(w, http.StatusUnprocessableEntity, "sql_editor_admin_app_timeout_seconds must be greater than 0")
+		return
+	}
 	if req.SQLEditorMySQLMaxExecutionTimeMs <= 0 {
 		jsonErr(w, http.StatusUnprocessableEntity, "sql_editor_mysql_max_execution_time_ms must be greater than 0")
 		return
@@ -558,6 +562,7 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			"sso_oidc_scopes":                             req.SSOOIDCScopes,
 			"sso_oidc_trust_mfa":                          req.SSOOIDCTrustMFA,
 			"sql_editor_app_timeout_seconds":              req.SQLEditorAppTimeoutSeconds,
+			"sql_editor_admin_app_timeout_seconds":        req.SQLEditorAdminAppTimeoutSeconds,
 			"sql_editor_mysql_max_execution_time_ms":      req.SQLEditorMySQLMaxExecutionTimeMs,
 			"sql_editor_postgres_statement_timeout_ms":    req.SQLEditorPostgresStatementTimeoutMs,
 			"sql_export_app_timeout_seconds":              req.SQLExportAppTimeoutSeconds,
