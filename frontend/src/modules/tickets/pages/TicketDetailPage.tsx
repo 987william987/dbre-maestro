@@ -14,6 +14,7 @@ import type { AuditLog } from '@/shared/types/audit'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DataTable, DataTableBody, DataTableCell, DataTableHead, DataTableHeaderCell, DataTableRow } from '@/shared/ui/DataTable'
 import { ExpandableSql, isExpandableSql } from '@/shared/ui/ExpandableSql'
+import { ReviewMessages } from '@/shared/ui/ReviewMessages'
 import { InlineAlert } from '@/shared/ui/InlineAlert'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
@@ -629,6 +630,26 @@ function isWholeTicketDMLExecutionMode(mode?: string | null) {
   return mode === 'whole_ticket'
 }
 
+function mergeReviewStatus(current?: string | null, next?: string | null) {
+  if (current === 'error' || next === 'error') {
+    return 'error'
+  }
+  if (current === 'warn' || next === 'warn') {
+    return 'warn'
+  }
+  return next ?? current ?? 'pass'
+}
+
+function reviewStatusClass(status: string) {
+  if (status === 'pass') {
+    return 'bg-emerald-50 text-emerald-700'
+  }
+  if (status === 'warn') {
+    return 'bg-amber-50 text-amber-700'
+  }
+  return 'bg-red-50 text-danger'
+}
+
 function buildStatementResults(detail: TicketDetail) {
   const rows = new Map<number, StatementResultRow>()
   const hidePendingExecutionStatus = detail.ticket.status === 'rejected' || detail.ticket.status === 'withdrawn'
@@ -647,7 +668,7 @@ function buildStatementResults(detail: TicketDetail) {
       sql: result.sql_stmt,
       tables: mergeReviewTables(existing?.tables, result.tables),
       scanRows: Math.max(existing?.scanRows ?? 0, result.scan_rows),
-      reviewStatus: existing?.reviewStatus === 'error' || result.status === 'error' ? 'error' : result.status,
+      reviewStatus: mergeReviewStatus(existing?.reviewStatus, result.status),
       reviewMessage: nextMessage || null,
       rowsAffected: existing?.rowsAffected ?? null,
       executionStatus: existing?.executionStatus ?? null,
@@ -1039,6 +1060,7 @@ export function TicketDetailPage() {
   const canReject = detail?.capabilities?.can_reject ?? false
   const canWithdraw = detail?.capabilities?.can_withdraw ?? false
   const canExecute = detail?.capabilities?.can_execute ?? false
+  const canStop = detail?.capabilities?.can_stop ?? false
   const canRevoke = detail?.capabilities?.can_revoke ?? false
   const canRetryWorkflow = detail?.capabilities?.can_retry_workflow_resolution ?? false
   const exportDownloadURL = detail?.export_request?.download_url ?? null
@@ -1430,7 +1452,7 @@ export function TicketDetailPage() {
                         const rowExpandable = isExpandableSql(row.sql)
                         const rowActionBusy = actingExecutionID === row.executionID
                         const rowCanExecute = Boolean(canExecute && !isFullTicketExecutionRunMode(ticket.execution_run_mode) && !isWholeTicketDMLExecutionMode(ticket.dml_execution_mode) && (ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml') && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
-                        const rowCanStop = Boolean(canExecute && row.executionID && row.executionStatus === 'running')
+                        const rowCanStop = Boolean(canStop && row.executionID && row.executionStatus === 'running')
                         return (
                           <DataTableRow
                             key={rowKey}
@@ -1475,9 +1497,15 @@ export function TicketDetailPage() {
                             {showStatementScanRows ? (
                               <DataTableCell className="break-words align-middle leading-6">{formatReviewRows(row.scanRows)}</DataTableCell>
                             ) : null}
-                            <DataTableCell className="break-words align-middle leading-6">{row.reviewStatus ?? '—'}</DataTableCell>
+                            <DataTableCell className="break-words align-middle leading-6">
+                              {row.reviewStatus ? (
+                                <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${reviewStatusClass(row.reviewStatus)}`}>
+                                  {row.reviewStatus}
+                                </span>
+                              ) : '—'}
+                            </DataTableCell>
                             {showReviewMessageColumn ? (
-                              <DataTableCell className="break-words align-middle leading-6 text-muted">{row.reviewMessage || '—'}</DataTableCell>
+                              <DataTableCell className="break-words align-middle leading-6"><ReviewMessages value={row.reviewMessage} /></DataTableCell>
                             ) : null}
                             {showStatementRowsAffected ? (
                               <DataTableCell className="break-words align-middle leading-6">{row.rowsAffected ?? '—'}</DataTableCell>

@@ -217,6 +217,37 @@ func TestCheckExplainWithStats_ParsesMySQLByteRows(t *testing.T) {
 	}
 }
 
+func TestCheckExplain_FullTableScanAboveThresholdFlagsBothRules(t *testing.T) {
+	// A full table scan whose estimated rows also exceed the high_row_count
+	// threshold must be flagged for both rules independently, so that disabling
+	// full_table_scan alone doesn't silently let high_row_count go unchecked.
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	rows := sqlmock.NewRows(explainCols).AddRow(
+		int64(1), "DELETE", "member_trade_spot", nil,
+		"ALL", "idx_user_id", nil, nil,
+		nil, int64(6497228), "100.00", "Using where",
+	)
+	mock.ExpectQuery("EXPLAIN").WillReturnRows(rows)
+
+	issues, err := sqlreview.CheckExplain(context.Background(), db,
+		"DELETE FROM member_trade_spot WHERE user_id IN (1,2,3)", int64(30000))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("expected 2 issues (full_table_scan + high_row_count), got %d: %+v", len(issues), issues)
+	}
+	kinds := map[string]bool{issues[0].Kind: true, issues[1].Kind: true}
+	if !kinds["full_table_scan"] || !kinds["high_row_count"] {
+		t.Errorf("expected both full_table_scan and high_row_count, got %+v", issues)
+	}
+}
+
 func TestCheckExplain_BelowThresholdNoIssue(t *testing.T) {
 	// Rows below threshold with non-ALL type → no issue
 	db, mock, err := sqlmock.New()

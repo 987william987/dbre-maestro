@@ -69,7 +69,15 @@ func clearRequestWriteDeadline(w http.ResponseWriter, path string) {
 }
 
 func isQueryExecutionRequest(method, path string) bool {
-	return method == http.MethodPost && (path == "/api/query" || path == "/api/query/")
+	if method != http.MethodPost {
+		return false
+	}
+	switch path {
+	case "/api/query", "/api/query/", "/api/query/admin/execute", "/api/query/admin/activate":
+		return true
+	default:
+		return false
+	}
 }
 
 func isTicketExecutionRequest(method, path string) bool {
@@ -493,6 +501,7 @@ func main() {
 			r.Use(middleware.InjectPermissions(userRepo))
 			r.With(requireSettingsRead).Get("/", settingsH.Get)
 			r.With(requireSettingsRead).Get("/db-connections", settingsH.ListDBConnections)
+			r.With(requireSettingsRead).Get("/users", settingsH.ListUsers)
 			r.With(requireSettingsRead).Get("/approval-resolution", settingsH.ApprovalResolution)
 			r.With(requireSettingsRead).Get("/workflow-rules", settingsH.ListWorkflowRules)
 			r.With(requireSettingsWrite).Put("/workflow-rules", settingsH.ReplaceWorkflowRules)

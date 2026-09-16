@@ -28,8 +28,8 @@ func TestWriteQueryExecutionErrorTimeout(t *testing.T) {
 
 	writeQueryExecutionError(recorder, context.DeadlineExceeded, "query", defaultQueryTimeout)
 
-	if recorder.Code != http.StatusGatewayTimeout {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusGatewayTimeout)
+	if recorder.Code != http.StatusRequestTimeout {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusRequestTimeout)
 	}
 
 	var body map[string]string

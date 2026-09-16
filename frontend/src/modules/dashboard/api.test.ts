@@ -48,4 +48,22 @@ describe('getDashboard', () => {
       points: [],
     })
   })
+
+  it('preserves account sync status in DB metadata health', async () => {
+    const accountJob = {
+      job_name: 'db_metadata_account',
+      status: 'success',
+      updated_at: '2026-09-14T03:00:00Z',
+    }
+    mockedGet.mockResolvedValue({
+      personal: {},
+      platform: {
+        db_metadata_health: { account_job: accountJob },
+      },
+    })
+
+    const result = await getDashboard()
+
+    expect(result.platform?.db_metadata_health.account_job).toEqual(accountJob)
+  })
 })

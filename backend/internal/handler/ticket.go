@@ -25,6 +25,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/dbre-maestro/maestro/internal/sqlpolicy"
+	"github.com/dbre-maestro/maestro/internal/sqlreview"
 	ticketsm "github.com/dbre-maestro/maestro/internal/ticket"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-sql-driver/mysql"
@@ -457,7 +458,17 @@ func (h *TicketHandler) ticketWorkflowResolution(ctx context.Context, ticket *mo
 			return nil, err
 		}
 		if snapshot != nil {
-			return workflowResolutionFromSnapshot(ticket, snapshot), nil
+			resolution := workflowResolutionFromSnapshot(ticket, snapshot)
+			allowSelfReview, err := workflowBypassAllowed(ctx, h.settings, h.users, ticket.SubmitterID, workflowBypassSelfReview)
+			if err != nil {
+				return nil, err
+			}
+			allowSelfExecute, err := workflowBypassAllowed(ctx, h.settings, h.users, ticket.SubmitterID, workflowBypassSelfExecute)
+			if err != nil {
+				return nil, err
+			}
+			excludeSubmitterFromWorkflowResolutionWithBypass(ticket, resolution, allowSelfReview, allowSelfExecute)
+			return resolution, nil
 		}
 	}
 	return resolveTicketWorkflow(ctx, h.settings, h.users, ticket)
@@ -1597,6 +1608,11 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "ticket capability check failed")
 		return
 	}
+	canStop, err := h.canStopTicket(r.Context(), ticket, userID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "ticket capability check failed")
+		return
+	}
 
 	var exportDetail map[string]any
 	if ticket.TicketType == model.TicketTypeSQLExport && h.exports != nil {
@@ -1684,6 +1700,7 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 			"can_withdraw": canWithdraw,
 			"can_revoke":   canRevoke,
 			"can_execute":  canExecute,
+			"can_stop":     canStop,
 			"can_retry_workflow_resolution": middleware.HasPermission(r.Context(), "settings.write") &&
 				ticket.Status == model.TicketStatusNeedsAdminAttention,
 			"can_download_export": exportDetail != nil && exportDetail["download_url"] != nil,
@@ -3030,9 +3047,13 @@ func (h *TicketHandler) ensureTicketExecutionRows(ctx context.Context, ticket *m
 	if ticket == nil || ticket.DBConnectionID == nil {
 		return fmt.Errorf("ticket has no target db_connection")
 	}
-	parsedStatements, _, err := h.parseTicketStatements(ctx, *ticket.DBConnectionID, ticket.SQLContent)
+	parsedStatements, dialect, err := h.parseTicketStatements(ctx, *ticket.DBConnectionID, ticket.SQLContent)
 	if err != nil {
-		return err
+		if dialect != sqlparse.DialectMySQL || sqlreview.UnsupportedMySQLObjectRule(ticket.SQLContent) == "" {
+			return err
+		}
+		rawSQL := strings.TrimSpace(ticket.SQLContent)
+		parsedStatements = []sqlparse.ParsedStatement{{Seq: 1, RawSQL: rawSQL, NormalizedSQL: rawSQL, Kind: sqlparse.StatementKindCreate}}
 	}
 	rows := make([]model.TicketExecution, 0, len(parsedStatements))
 	for _, parsedStatement := range parsedStatements {
@@ -3957,8 +3978,14 @@ func (h *TicketHandler) canViewTicket(ctx context.Context, ticket *model.Ticket,
 }
 
 func (h *TicketHandler) canReviewTicket(ctx context.Context, ticket *model.Ticket, userID uint64) (bool, error) {
-	if ticket == nil || ticket.SubmitterID == userID {
+	if ticket == nil {
 		return false, nil
+	}
+	if ticket.SubmitterID == userID {
+		allowed, err := workflowBypassAllowed(ctx, h.settings, h.users, userID, workflowBypassSelfReview)
+		if err != nil || !allowed {
+			return false, err
+		}
 	}
 	if !h.canReviewWorkflowByPermission(ctx, approvalWorkflowForTicket(ticket)) {
 		return false, nil
@@ -4005,10 +4032,16 @@ func (h *TicketHandler) canExecuteTicket(ctx context.Context, ticket *model.Tick
 		return false, nil
 	}
 	if ticket.SubmitterID == userID {
-		return false, nil
+		allowed, err := workflowBypassAllowed(ctx, h.settings, h.users, userID, workflowBypassSelfExecute)
+		if err != nil || !allowed {
+			return false, err
+		}
 	}
 	if ticket.ReviewerID != nil && *ticket.ReviewerID == userID {
-		return false, nil
+		allowed, err := workflowBypassAllowed(ctx, h.settings, h.users, userID, workflowBypassMultiStep)
+		if err != nil || !allowed {
+			return false, err
+		}
 	}
 	if !middleware.HasPermission(ctx, permissionTicketExecute) {
 		return false, nil
@@ -4033,10 +4066,11 @@ func (h *TicketHandler) canStopTicket(ctx context.Context, ticket *model.Ticket,
 	if ticket.ExecutorID != nil && *ticket.ExecutorID == userID {
 		return true, nil
 	}
-	if ticket.Status == model.TicketStatusPendingExecution {
-		if allowed, err := h.canExecuteTicket(ctx, ticket, userID); err != nil || allowed {
-			return allowed, err
-		}
+	// Any executor eligible under the ticket's workflow resolution can stop it,
+	// not just whoever actually clicked "execute" — so a co-executor can still
+	// halt a run if the one who started it has gone offline.
+	if allowed, err := h.canExecuteTicket(ctx, ticket, userID); err != nil || allowed {
+		return allowed, err
 	}
 	return h.canViewFullTicketQueue(ctx, userID)
 }

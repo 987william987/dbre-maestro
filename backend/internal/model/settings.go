@@ -30,6 +30,12 @@ type PlatformSettings struct {
 	RequireNonSensitiveExportReview       bool             `json:"require_non_sensitive_export_review"`
 	ApprovalPolicies                      []ApprovalPolicy `json:"approval_policies"`
 	WorkflowRules                         []WorkflowRule   `json:"workflow_rules"`
+	WorkflowMultiStepBypassUserIDs        []uint64         `json:"workflow_multi_step_bypass_user_ids"`
+	WorkflowMultiStepBypassAuthGroups     []AuthGroup      `json:"workflow_multi_step_bypass_auth_groups"`
+	WorkflowSelfReviewBypassUserIDs       []uint64         `json:"workflow_self_review_bypass_user_ids"`
+	WorkflowSelfReviewBypassAuthGroups    []AuthGroup      `json:"workflow_self_review_bypass_auth_groups"`
+	WorkflowSelfExecuteBypassUserIDs      []uint64         `json:"workflow_self_execute_bypass_user_ids"`
+	WorkflowSelfExecuteBypassAuthGroups   []AuthGroup      `json:"workflow_self_execute_bypass_auth_groups"`
 	LarkAppID                             string           `json:"lark_app_id"`
 	LarkAppSecret                         string           `json:"lark_app_secret,omitempty"`
 	LarkAppSecretConfigured               bool             `json:"lark_app_secret_configured"`
@@ -50,6 +56,7 @@ type PlatformSettings struct {
 	SSOOIDCScopes                         []string         `json:"sso_oidc_scopes"`
 	SSOOIDCTrustMFA                       bool             `json:"sso_oidc_trust_mfa"`
 	SQLEditorAppTimeoutSeconds            int              `json:"sql_editor_app_timeout_seconds"`
+	SQLEditorAdminAppTimeoutSeconds       int              `json:"sql_editor_admin_app_timeout_seconds"`
 	SQLEditorMySQLMaxExecutionTimeMs      int              `json:"sql_editor_mysql_max_execution_time_ms"`
 	SQLEditorPostgresStatementTimeoutMs   int              `json:"sql_editor_postgres_statement_timeout_ms"`
 	SQLExportAppTimeoutSeconds            int              `json:"sql_export_app_timeout_seconds"`

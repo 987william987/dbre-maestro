@@ -11,6 +11,12 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     sensitive_query_access_reviewer_user_ids: Array.isArray(settings.sensitive_query_access_reviewer_user_ids)
       ? settings.sensitive_query_access_reviewer_user_ids
       : [],
+    workflow_multi_step_bypass_user_ids: Array.isArray(settings.workflow_multi_step_bypass_user_ids) ? settings.workflow_multi_step_bypass_user_ids : [],
+    workflow_multi_step_bypass_auth_groups: Array.isArray(settings.workflow_multi_step_bypass_auth_groups) ? settings.workflow_multi_step_bypass_auth_groups : [],
+    workflow_self_review_bypass_user_ids: Array.isArray(settings.workflow_self_review_bypass_user_ids) ? settings.workflow_self_review_bypass_user_ids : [],
+    workflow_self_review_bypass_auth_groups: Array.isArray(settings.workflow_self_review_bypass_auth_groups) ? settings.workflow_self_review_bypass_auth_groups : [],
+    workflow_self_execute_bypass_user_ids: Array.isArray(settings.workflow_self_execute_bypass_user_ids) ? settings.workflow_self_execute_bypass_user_ids : [],
+    workflow_self_execute_bypass_auth_groups: Array.isArray(settings.workflow_self_execute_bypass_auth_groups) ? settings.workflow_self_execute_bypass_auth_groups : [],
     require_non_sensitive_export_review: typeof settings.require_non_sensitive_export_review === 'boolean'
       ? settings.require_non_sensitive_export_review
       : true,
@@ -46,6 +52,8 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     sso_oidc_trust_mfa: typeof settings.sso_oidc_trust_mfa === 'boolean' ? settings.sso_oidc_trust_mfa : false,
     sql_editor_app_timeout_seconds:
       typeof settings.sql_editor_app_timeout_seconds === 'number' ? settings.sql_editor_app_timeout_seconds : 30,
+    sql_editor_admin_app_timeout_seconds:
+      typeof settings.sql_editor_admin_app_timeout_seconds === 'number' ? settings.sql_editor_admin_app_timeout_seconds : 300,
     sql_editor_mysql_max_execution_time_ms:
       typeof settings.sql_editor_mysql_max_execution_time_ms === 'number' ? settings.sql_editor_mysql_max_execution_time_ms : 25000,
     sql_editor_postgres_statement_timeout_ms:
@@ -159,4 +167,10 @@ export function listSettingsDBConnections() {
     ...response,
     connections: Array.isArray(response.connections) ? response.connections : [],
   }))
+}
+
+export function listSettingsUsers() {
+	return apiClient.get<{ users: Array<{ id: number; username: string }> }>('/settings/users').then((response) => ({
+		users: Array.isArray(response.users) ? response.users : [],
+	}))
 }

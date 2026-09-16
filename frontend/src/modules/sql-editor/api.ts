@@ -12,7 +12,7 @@ export type QueryPayload = {
   query_execution_id?: string
 }
 
-export type AdminQueryPayload = Pick<QueryPayload, 'db_connection_id' | 'sql' | 'database' | 'schema' | 'redis_db_index'>
+export type AdminQueryPayload = Pick<QueryPayload, 'db_connection_id' | 'sql' | 'database' | 'schema' | 'redis_db_index' | 'query_execution_id'>
 
 type ColumnsResponse = {
   database?: string

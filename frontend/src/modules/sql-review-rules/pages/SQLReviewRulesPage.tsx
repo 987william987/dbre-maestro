@@ -22,30 +22,71 @@ import {
 } from '@/shared/ui/DataTable'
 import { listSQLReviewRules, patchSQLReviewRule } from '@/modules/sql-review-rules/api'
 
-type DraftMap = Record<string, { enabled: boolean; threshold: string }>
+type RuleSeverity = 'error' | 'warning'
+type RuleCategory = 'engine' | 'table' | 'statement' | 'naming' | 'column' | 'schema' | 'database' | 'index' | 'system'
+type DraftMap = Record<string, { enabled: boolean; threshold: string; severity: RuleSeverity }>
 
-const RULE_METADATA: Record<string, { description: string; thresholdEditable: boolean }> = {
+const RULE_METADATA: Record<string, { description: string; thresholdEditable: boolean; category: RuleCategory }> = {
   ddl_no_comment: {
     description: 'Require CREATE TABLE statements to include a table comment.',
     thresholdEditable: false,
+    category: 'table',
   },
   dml_no_where: {
     description: 'Require UPDATE and DELETE statements to include a WHERE clause.',
     thresholdEditable: false,
+    category: 'statement',
   },
   full_table_scan: {
     description: 'Block queries when EXPLAIN detects a full table scan.',
     thresholdEditable: false,
+    category: 'statement',
   },
   high_row_count: {
     description: 'Block queries when EXPLAIN estimated rows exceed the configured threshold.',
     thresholdEditable: true,
+    category: 'statement',
   },
   require_utf8mb4: {
     description: 'Require CREATE TABLE statements to use utf8mb4.',
     thresholdEditable: false,
+    category: 'system',
   },
+  require_innodb: {
+    description: 'Require CREATE TABLE statements to use the InnoDB storage engine.',
+    thresholdEditable: false,
+    category: 'engine',
+  },
+  require_primary_key: {
+    description: 'Require every newly created table to include a primary key.',
+    thresholdEditable: false,
+    category: 'table',
+  },
+  prohibit_foreign_key: {
+    description: 'Keep referential integrity in the application layer instead of using foreign key constraints.',
+    thresholdEditable: false,
+    category: 'table',
+  },
+  prohibit_trigger: { description: 'Prohibit MySQL triggers.', thresholdEditable: false, category: 'system' },
+  prohibit_stored_function: { description: 'Prohibit MySQL stored functions.', thresholdEditable: false, category: 'system' },
+  prohibit_stored_procedure: { description: 'Prohibit MySQL stored procedures.', thresholdEditable: false, category: 'system' },
+  prohibit_view: { description: 'Prohibit creating MySQL views.', thresholdEditable: false, category: 'system' },
+  prohibit_event: { description: 'Prohibit MySQL scheduled events.', thresholdEditable: false, category: 'system' },
+  prohibit_reserved_column_name: { description: 'Prohibit MySQL reserved words as column names.', thresholdEditable: false, category: 'naming' },
 }
+
+const RULE_CATEGORIES: { key: 'all' | RuleCategory; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'engine', label: 'Engine' },
+  { key: 'table', label: 'Table' },
+  { key: 'statement', label: 'Statement' },
+  { key: 'naming', label: 'Naming' },
+  { key: 'column', label: 'Column' },
+  { key: 'schema', label: 'Schema' },
+  { key: 'database', label: 'Database' },
+  { key: 'index', label: 'Index' },
+  { key: 'system', label: 'System' },
+]
 
 const PAGE_SIZE = 20
 const ENGINE_TABS = [
@@ -59,6 +100,7 @@ export function SQLReviewRulesPage() {
   const { user } = useAuth()
   const { pushToast } = useToast()
   const [rules, setRules] = useState<SQLReviewRule[]>([])
+  const [selectedCategory, setSelectedCategory] = useState<'all' | RuleCategory>('all')
   const [offset, setOffset] = useState(0)
   const [drafts, setDrafts] = useState<DraftMap>({})
   const [loading, setLoading] = useState(true)
@@ -82,6 +124,7 @@ export function SQLReviewRulesPage() {
             {
               enabled: rule.enabled,
               threshold: rule.threshold == null ? '' : String(rule.threshold),
+              severity: rule.severity ?? 'error',
             },
           ]),
         ),
@@ -105,7 +148,7 @@ export function SQLReviewRulesPage() {
     setSavingRuleName(rule.rule_name)
     setError('')
     try {
-      const payload: { enabled?: boolean; threshold?: number | null } = {}
+      const payload: { enabled?: boolean; threshold?: number | null; severity?: RuleSeverity } = {}
       const thresholdEditable = isThresholdEditable(rule.rule_name)
       if (draft.enabled !== rule.enabled) {
         payload.enabled = draft.enabled
@@ -115,6 +158,9 @@ export function SQLReviewRulesPage() {
         if ((rule.threshold ?? null) !== nextThreshold) {
           payload.threshold = nextThreshold
         }
+      }
+      if (draft.severity !== (rule.severity ?? 'error')) {
+        payload.severity = draft.severity
       }
 
       if (Object.keys(payload).length === 0) {
@@ -129,6 +175,7 @@ export function SQLReviewRulesPage() {
         [rule.rule_name]: {
           enabled: updated.enabled,
           threshold: updated.threshold == null ? '' : String(updated.threshold),
+          severity: updated.severity ?? 'error',
         },
       }))
       pushToast('SQL review rule updated.', 'success')
@@ -139,15 +186,19 @@ export function SQLReviewRulesPage() {
     }
   }
 
-  const pagedRules = useMemo(() => rules.slice(offset, offset + PAGE_SIZE), [offset, rules])
+  const visibleRules = useMemo(
+    () => rules.filter((rule) => selectedCategory === 'all' || getRuleCategory(rule) === selectedCategory),
+    [rules, selectedCategory],
+  )
+  const pagedRules = useMemo(() => visibleRules.slice(offset, offset + PAGE_SIZE), [offset, visibleRules])
   const currentEngine = engine === 'postgresql' || engine === 'redis' ? engine : 'mysql'
   const canWrite = user?.permissions.includes('sql_review.write') ?? false
 
   useEffect(() => {
-    if (offset > 0 && offset >= rules.length) {
-      setOffset(Math.max(0, Math.floor((Math.max(rules.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
+    if (offset > 0 && offset >= visibleRules.length) {
+      setOffset(Math.max(0, Math.floor((Math.max(visibleRules.length - 1, 0)) / PAGE_SIZE) * PAGE_SIZE))
     }
-  }, [offset, rules.length])
+  }, [offset, visibleRules.length])
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
@@ -167,6 +218,30 @@ export function SQLReviewRulesPage() {
         </div>
       ) : (
       <DataTableSurface>
+          <div className="flex min-h-11 items-center gap-1 overflow-x-auto border-b border-border px-3 py-2">
+            {RULE_CATEGORIES.map((category) => {
+              const count = rules.filter((rule) => category.key === 'all' || getRuleCategory(rule) === category.key).length
+              if (category.key !== 'all' && count === 0) {
+                return null
+              }
+              const selected = selectedCategory === category.key
+              return (
+                <button
+                  key={category.key}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => {
+                    setSelectedCategory(category.key)
+                    setOffset(0)
+                  }}
+                  className={`inline-flex h-8 shrink-0 items-center gap-1.5 border-b-2 px-2 text-[12px] font-semibold transition ${selected ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-ink'}`}
+                >
+                  {category.label}
+                  <span className="tabular-nums text-[11px] text-faint">{count}</span>
+                </button>
+              )
+            })}
+          </div>
           {loading ? (
             <LoadingBlock message="Loading SQL review rules..." className="m-4 min-h-[220px] rounded-xl border-border bg-panel" />
           ) : rules.length === 0 ? (
@@ -178,6 +253,7 @@ export function SQLReviewRulesPage() {
                 <tr>
                   <DataTableHeaderCell>Rule</DataTableHeaderCell>
                   <DataTableHeaderCell>Description</DataTableHeaderCell>
+                  <DataTableHeaderCell>Severity</DataTableHeaderCell>
                   <DataTableHeaderCell>Enabled</DataTableHeaderCell>
                   <DataTableHeaderCell>Threshold</DataTableHeaderCell>
                   {canWrite ? <DataTableHeaderCell>Action</DataTableHeaderCell> : null}
@@ -190,6 +266,29 @@ export function SQLReviewRulesPage() {
                     <DataTableRow key={rule.rule_name}>
                       <DataTableCell>{rule.rule_name}</DataTableCell>
                       <DataTableCell>{getRuleDescription(rule)}</DataTableCell>
+                      <DataTableCell>
+                        <div className="inline-flex h-8 overflow-hidden rounded-md border border-border bg-white">
+                          {(['error', 'warning'] as const).map((severity) => {
+                            const selected = (draft?.severity ?? 'error') === severity
+                            return (
+                              <button
+                                key={severity}
+                                type="button"
+                                aria-label={`${rule.rule_name} severity ${severity}`}
+                                aria-pressed={selected}
+                                disabled={!canWrite || savingRuleName === rule.rule_name}
+                                onClick={() => setDrafts((current) => ({
+                                  ...current,
+                                  [rule.rule_name]: { ...current[rule.rule_name], severity },
+                                }))}
+                                className={`min-w-[66px] px-2 text-[11px] font-semibold capitalize transition disabled:cursor-not-allowed disabled:opacity-60 ${selected ? severity === 'error' ? 'bg-red-50 text-danger' : 'bg-amber-50 text-amber-700' : 'text-muted hover:bg-panel-soft'}`}
+                              >
+                                {severity}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </DataTableCell>
                       <DataTableCell>
                         <div className="inline-flex items-center gap-3">
                           <Switch
@@ -263,7 +362,7 @@ export function SQLReviewRulesPage() {
         offset={offset}
         pageSize={PAGE_SIZE}
         count={pagedRules.length}
-        total={rules.length}
+        total={visibleRules.length}
         onChange={setOffset}
       />
 
@@ -278,4 +377,9 @@ function getRuleDescription(rule: SQLReviewRule) {
 
 function isThresholdEditable(ruleName: string) {
   return RULE_METADATA[ruleName]?.thresholdEditable ?? false
+}
+
+function getRuleCategory(rule: SQLReviewRule): RuleCategory {
+  const category = rule.category ?? RULE_METADATA[rule.rule_name]?.category
+  return RULE_CATEGORIES.some((item) => item.key === category) && category !== 'all' ? category as RuleCategory : 'statement'
 }

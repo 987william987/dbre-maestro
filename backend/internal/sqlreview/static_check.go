@@ -6,8 +6,19 @@ import (
 
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	pg_query "github.com/pganalyze/pg_query_go/v6"
+	tidbparser "github.com/pingcap/tidb/pkg/parser"
 	tidbast "github.com/pingcap/tidb/pkg/parser/ast"
 )
+
+var mysqlReservedWords = func() map[string]struct{} {
+	words := make(map[string]struct{})
+	for _, keyword := range tidbparser.Keywords {
+		if keyword.Reserved {
+			words[keyword.Word] = struct{}{}
+		}
+	}
+	return words
+}()
 
 var statementRootKeywords = map[string]struct{}{
 	"ALTER":    {},
@@ -73,7 +84,7 @@ func CheckLikelyMissingStatementDelimiter(sqlStr string) error {
 }
 
 // RunStaticChecks runs all enabled static rules against a single SQL statement.
-// ruleMap keys: "dml_no_where", "ddl_no_comment", "require_utf8mb4"
+// ruleMap contains the enabled SQL review rule names.
 func RunStaticChecks(sqlStr string, ruleMap map[string]bool) []string {
 	var issues []string
 	if ruleMap["dml_no_where"] {
@@ -91,7 +102,96 @@ func RunStaticChecks(sqlStr string, ruleMap map[string]bool) []string {
 			issues = append(issues, err.Error())
 		}
 	}
+	if ruleMap["require_innodb"] && isCreateTableSQL(sqlStr) && !strings.Contains(strings.ToUpper(sqlStr), "ENGINE") {
+		issues = append(issues, "CREATE TABLE 必須使用 InnoDB 儲存引擎")
+	}
+	if ruleMap["require_primary_key"] && isCreateTableSQL(sqlStr) && !strings.Contains(strings.ToUpper(sqlStr), "PRIMARY KEY") {
+		issues = append(issues, "CREATE TABLE 必須包含主鍵")
+	}
+	if ruleMap["prohibit_foreign_key"] && strings.Contains(strings.ToUpper(sqlStr), "FOREIGN KEY") {
+		issues = append(issues, "禁止使用外鍵約束，請由應用層維護一致性")
+	}
+	objectTypes := map[string]string{
+		"prohibit_trigger": "TRIGGER", "prohibit_stored_function": "FUNCTION", "prohibit_event": "EVENT",
+	}
+	if rule := UnsupportedMySQLObjectRule(sqlStr); rule != "" && ruleMap[rule] {
+		issues = append(issues, "禁止建立 MySQL "+objectTypes[rule])
+	}
 	return issues
+}
+
+func leadingSQLKeywords(sqlStr string, limit int) string {
+	cleaned := stripSQLCommentsAndLiterals(sqlStr)
+	fields := strings.Fields(strings.ToUpper(cleaned))
+	if len(fields) > limit {
+		fields = fields[:limit]
+	}
+	return strings.Join(fields, " ")
+}
+
+// UnsupportedMySQLObjectRule identifies MySQL object types that the TiDB parser
+// does not parse but that can still be handled by SQL review policy checks.
+func UnsupportedMySQLObjectRule(sqlStr string) string {
+	switch leadingSQLKeywords(sqlStr, 2) {
+	case "CREATE TRIGGER":
+		return "prohibit_trigger"
+	case "CREATE FUNCTION":
+		return "prohibit_stored_function"
+	case "CREATE EVENT":
+		return "prohibit_event"
+	default:
+		return ""
+	}
+}
+
+func stripSQLCommentsAndLiterals(sqlStr string) string {
+	var result strings.Builder
+	quote := byte(0)
+	lineComment, blockComment := false, false
+	for i := 0; i < len(sqlStr); i++ {
+		ch := sqlStr[i]
+		next := byte(0)
+		if i+1 < len(sqlStr) {
+			next = sqlStr[i+1]
+		}
+		switch {
+		case lineComment:
+			if ch == '\n' {
+				lineComment = false
+				result.WriteByte(' ')
+			}
+		case blockComment:
+			if ch == '*' && next == '/' {
+				blockComment = false
+				i++
+				result.WriteByte(' ')
+			}
+		case quote != 0:
+			if ch == quote && (i == 0 || sqlStr[i-1] != '\\') {
+				quote = 0
+			}
+			result.WriteByte(' ')
+		case ch == '-' && next == '-':
+			lineComment = true
+			i++
+		case ch == '#':
+			lineComment = true
+		case ch == '/' && next == '*':
+			blockComment = true
+			i++
+		case ch == '\'' || ch == '"':
+			quote = ch
+			result.WriteByte(' ')
+		default:
+			result.WriteByte(ch)
+		}
+	}
+	return result.String()
+}
+
+func isCreateTableSQL(sqlStr string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(sqlStr))
+	return strings.HasPrefix(upper, "CREATE TABLE") || strings.HasPrefix(upper, "CREATE TEMPORARY TABLE")
 }
 
 func RunStaticChecksParsed(stmt sqlparse.ParsedStatement, ruleMap map[string]bool) []string {
@@ -123,6 +223,36 @@ func runMySQLStaticChecks(stmt sqlparse.ParsedStatement, astNode tidbast.StmtNod
 	}
 	if ruleMap["require_utf8mb4"] {
 		if err := checkRequireUTF8MB4AST(astNode); err != nil {
+			issues = append(issues, err.Error())
+		}
+	}
+	if ruleMap["require_innodb"] {
+		if err := checkRequireInnoDBAST(astNode); err != nil {
+			issues = append(issues, err.Error())
+		}
+	}
+	if ruleMap["require_primary_key"] {
+		if err := checkRequirePrimaryKeyAST(astNode); err != nil {
+			issues = append(issues, err.Error())
+		}
+	}
+	if ruleMap["prohibit_foreign_key"] {
+		if err := checkProhibitForeignKeyAST(astNode); err != nil {
+			issues = append(issues, err.Error())
+		}
+	}
+	if ruleMap["prohibit_stored_procedure"] {
+		if _, ok := astNode.(*tidbast.ProcedureInfo); ok {
+			issues = append(issues, "禁止建立 MySQL STORED PROCEDURE")
+		}
+	}
+	if ruleMap["prohibit_view"] {
+		if _, ok := astNode.(*tidbast.CreateViewStmt); ok {
+			issues = append(issues, "禁止建立 MySQL VIEW")
+		}
+	}
+	if ruleMap["prohibit_reserved_column_name"] {
+		if err := checkProhibitReservedColumnNameAST(astNode); err != nil {
 			issues = append(issues, err.Error())
 		}
 	}
@@ -216,6 +346,66 @@ func checkRequireUTF8MB4AST(stmt tidbast.StmtNode) error {
 
 func checkRequireUTF8MB4PostgresAST(_ *pg_query.Node) error {
 	// PostgreSQL does not support per-table utf8mb4 charset declarations.
+	return nil
+}
+
+func checkRequireInnoDBAST(stmt tidbast.StmtNode) error {
+	createStmt, ok := stmt.(*tidbast.CreateTableStmt)
+	if !ok {
+		return nil
+	}
+	for _, option := range createStmt.Options {
+		if option != nil && option.Tp == tidbast.TableOptionEngine && strings.EqualFold(option.StrValue, "InnoDB") {
+			return nil
+		}
+	}
+	return fmt.Errorf("CREATE TABLE 必須使用 InnoDB 儲存引擎")
+}
+
+func checkRequirePrimaryKeyAST(stmt tidbast.StmtNode) error {
+	createStmt, ok := stmt.(*tidbast.CreateTableStmt)
+	if !ok {
+		return nil
+	}
+	for _, constraint := range createStmt.Constraints {
+		if constraint != nil && constraint.Tp == tidbast.ConstraintPrimaryKey {
+			return nil
+		}
+	}
+	for _, column := range createStmt.Cols {
+		for _, option := range column.Options {
+			if option != nil && option.Tp == tidbast.ColumnOptionPrimaryKey {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("CREATE TABLE 必須包含主鍵")
+}
+
+func checkProhibitForeignKeyAST(stmt tidbast.StmtNode) error {
+	createStmt, ok := stmt.(*tidbast.CreateTableStmt)
+	if !ok {
+		return nil
+	}
+	for _, constraint := range createStmt.Constraints {
+		if constraint != nil && constraint.Tp == tidbast.ConstraintForeignKey {
+			return fmt.Errorf("禁止使用外鍵約束，請由應用層維護一致性")
+		}
+	}
+	return nil
+}
+
+func checkProhibitReservedColumnNameAST(stmt tidbast.StmtNode) error {
+	createStmt, ok := stmt.(*tidbast.CreateTableStmt)
+	if !ok {
+		return nil
+	}
+	for _, column := range createStmt.Cols {
+		name := strings.ToUpper(column.Name.Name.O)
+		if _, reserved := mysqlReservedWords[name]; reserved {
+			return fmt.Errorf("禁止使用 MySQL 保留字 %q 作為欄位名稱", column.Name.Name.O)
+		}
+	}
 	return nil
 }
 

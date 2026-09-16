@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Plus, Save, Trash2 } from 'lucide-react'
 import { listAuthGroups } from '@/modules/auth-groups/api'
-import { getSettings, listSettingsDBConnections, patchSettings, previewWorkflowRules } from '@/modules/settings/api'
+import { SettingsSectionTabs } from '@/modules/settings/components/SettingsSectionTabs'
+import type { SettingsSection } from '@/modules/settings/components/SettingsSectionTabs'
+import { getSettings, listSettingsDBConnections, listSettingsUsers, patchSettings, previewWorkflowRules } from '@/modules/settings/api'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import type { AuthGroupSummary } from '@/shared/types/authGroup'
@@ -35,6 +37,7 @@ type SettingsForm = {
   ssoOIDCScopes: string
   ssoOIDCTrustMFA: boolean
   sqlEditorAppTimeoutSeconds: string
+  sqlEditorAdminAppTimeoutSeconds: string
   sqlEditorMySQLMaxExecutionTimeMs: string
   sqlEditorPostgresStatementTimeoutMs: string
   sqlExportAppTimeoutSeconds: string
@@ -58,6 +61,12 @@ type SettingsForm = {
   cronTimezone: string
   approvalPolicies: ApprovalPolicy[]
   workflowRules: WorkflowRule[]
+  multiStepBypassUserIDs: number[]
+  multiStepBypassAuthGroups: string[]
+  selfReviewBypassUserIDs: number[]
+  selfReviewBypassAuthGroups: string[]
+  selfExecuteBypassUserIDs: number[]
+  selfExecuteBypassAuthGroups: string[]
 }
 
 const WORKFLOW_TICKET_TYPE_LABELS: Record<WorkflowRule['ticket_type'], string> = {
@@ -93,7 +102,7 @@ const MYSQL_ROLLBACK_ENGINE_OPTIONS: Array<{ value: PlatformSettings['mysql_roll
   { value: 'my2sql', label: 'my2sql only' },
 ]
 
-export function SettingsPage() {
+export function SettingsPage({ section = 'workflow' }: { section?: SettingsSection }) {
   const { user } = useAuth()
   const { pushToast } = useToast()
   const canWrite = user?.permissions.includes('settings.write') ?? false
@@ -101,6 +110,7 @@ export function SettingsPage() {
   const [form, setForm] = useState<SettingsForm | null>(null)
   const [connections, setConnections] = useState<Array<Pick<DBConnection, 'id' | 'name' | 'db_type' | 'host' | 'port'>>>([])
   const [authGroups, setAuthGroups] = useState<AuthGroupSummary[]>([])
+  const [users, setUsers] = useState<Array<{ id: number; username: string }>>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -117,16 +127,18 @@ export function SettingsPage() {
       setLoading(true)
       setError('')
       try {
-        const [settingsResponse, connectionsResponse, authGroupsResponse] = await Promise.all([
+        const [settingsResponse, connectionsResponse, authGroupsResponse, usersResponse] = await Promise.all([
           getSettings(),
           listSettingsDBConnections(),
           listAuthGroups(),
+          listSettingsUsers(),
         ])
         if (active) {
           setSettings(settingsResponse)
           setForm(toForm(settingsResponse))
           setConnections(connectionsResponse.connections)
           setAuthGroups(authGroupsResponse.auth_groups)
+          setUsers(usersResponse.users)
         }
       } catch (loadError) {
         if (active) {
@@ -244,12 +256,38 @@ export function SettingsPage() {
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
+      <SettingsSectionTabs />
+
       {loading || !form ? (
         <LoadingBlock message="Loading platform settings..." className="min-h-[320px] rounded-xl border-border bg-panel" />
       ) : (
         <form onSubmit={handleSubmit} className="grid gap-3">
           <fieldset disabled={!canWrite || saving} className="grid gap-3 disabled:opacity-100">
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'workflow' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
+            <div className="border-b border-border/80 px-4 py-3">
+              <p className="text-[14px] font-semibold text-ink">Workflow Safety Exceptions</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Explicitly allow trusted groups or users to bypass selected separation-of-duties checks. Empty lists preserve the default restrictions.</p>
+            </div>
+            <div className="grid gap-5 px-4 py-4 xl:grid-cols-3">
+              <div className="grid gap-3">
+                <p className="text-[13px] font-semibold text-ink">Review and execute the same ticket</p>
+                <Checklist title="Bypass groups" emptyMessage="No auth groups available." items={authGroups.map((group) => ({ id: group.name, label: group.label }))} selectedIDs={form.multiStepBypassAuthGroups} onChange={(ids) => setForm((current) => current ? { ...current, multiStepBypassAuthGroups: ids } : current)} />
+                <Checklist title="Bypass users" emptyMessage="No active users available." items={users.map((item) => ({ id: item.id, label: item.username }))} selectedIDs={form.multiStepBypassUserIDs} onChange={(ids) => setForm((current) => current ? { ...current, multiStepBypassUserIDs: ids } : current)} />
+              </div>
+              <div className="grid gap-3">
+                <p className="text-[13px] font-semibold text-ink">Review own submitted ticket</p>
+                <Checklist title="Bypass groups" emptyMessage="No auth groups available." items={authGroups.map((group) => ({ id: group.name, label: group.label }))} selectedIDs={form.selfReviewBypassAuthGroups} onChange={(ids) => setForm((current) => current ? { ...current, selfReviewBypassAuthGroups: ids } : current)} />
+                <Checklist title="Bypass users" emptyMessage="No active users available." items={users.map((item) => ({ id: item.id, label: item.username }))} selectedIDs={form.selfReviewBypassUserIDs} onChange={(ids) => setForm((current) => current ? { ...current, selfReviewBypassUserIDs: ids } : current)} />
+              </div>
+              <div className="grid gap-3">
+                <p className="text-[13px] font-semibold text-ink">Execute own submitted ticket</p>
+                <Checklist title="Bypass groups" emptyMessage="No auth groups available." items={authGroups.map((group) => ({ id: group.name, label: group.label }))} selectedIDs={form.selfExecuteBypassAuthGroups} onChange={(ids) => setForm((current) => current ? { ...current, selfExecuteBypassAuthGroups: ids } : current)} />
+                <Checklist title="Bypass users" emptyMessage="No active users available." items={users.map((item) => ({ id: item.id, label: item.username }))} selectedIDs={form.selfExecuteBypassUserIDs} onChange={(ids) => setForm((current) => current ? { ...current, selfExecuteBypassUserIDs: ids } : current)} />
+              </div>
+            </div>
+          </section>
+
+          <section className={`${section === 'integrations' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Lark Notifications</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Configure Lark app credentials for ticket notifications and Lark OAuth login. Directed delivery uses each user&apos;s configured Lark recipient. Leave App Secret blank to keep the existing secret.</p>
@@ -333,7 +371,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'integrations' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">OIDC SSO</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Configure a standard OIDC provider such as Authentik. Userinfo must include email and should include lark_union_id for directed Lark notifications.</p>
@@ -398,7 +436,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'query-execution' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">SQL Editor Timeout</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">These values apply only to SQL Editor `/api/query`. The app timeout caps the request lifetime, while MySQL and PostgreSQL values are applied at the session level before each query.</p>
@@ -422,7 +460,21 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'query-execution' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
+            <div className="border-b border-border/80 px-4 py-3">
+              <p className="text-[14px] font-semibold text-ink">SQL Editor Admin Console Timeout</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Applies only to Administrator console (`/api/query/admin/execute`), separately from the regular SQL Editor timeout above, so long DBA operations (e.g. OPTIMIZE TABLE, VACUUM) aren&apos;t cut off by the shorter Editor default.</p>
+            </div>
+            <div className="grid gap-4 px-4 py-4 md:grid-cols-3">
+              <Field
+                label="Admin app timeout (seconds)"
+                value={form.sqlEditorAdminAppTimeoutSeconds}
+                onChange={(value) => setForm((current) => current ? { ...current, sqlEditorAdminAppTimeoutSeconds: value } : current)}
+              />
+            </div>
+          </section>
+
+          <section className={`${section === 'query-execution' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">SQL Export Timeout</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">These values apply to export download queries. The app timeout caps query execution, while MySQL and PostgreSQL values are applied as session-level circuit breakers.</p>
@@ -446,7 +498,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'query-execution' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">MySQL Rollback</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">
@@ -500,7 +552,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'scans' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Database Account Scan</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Capture MySQL and PostgreSQL account, role, and grant snapshots on a cron schedule.</p>
@@ -539,7 +591,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'scans' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Inventory Scan</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Pull a cloud inventory snapshot from AWS APIs on a cron schedule. Use 5-field cron syntax, for example 0 9 * * *.</p>
@@ -574,7 +626,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'scans' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Object Scan</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Capture object snapshots on a cron schedule for the selected DB connections.</p>
@@ -661,7 +713,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border bg-panel shadow-soft">
+          <section className={`${section === 'workflow' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">
               <p className="text-[14px] font-semibold text-ink">Workflow Rules</p>
               <p className="mt-1 text-[12px] leading-5 text-muted">Route ticket approval, export approval, and execution responsibility by ticket type and DB connection.</p>
@@ -756,7 +808,7 @@ function WorkflowRuleEditor({
 
   return (
     <div className="grid gap-4 px-4 py-4">
-      <div className="grid gap-3 lg:grid-cols-[220px_minmax(260px,1fr)_minmax(260px,1fr)_100px_40px]">
+      <div className="grid gap-3 lg:grid-cols-[220px_minmax(260px,1fr)_minmax(260px,1fr)_120px_40px]">
         <Field
           label="Rule name"
           value={rule.rule_name}
@@ -822,7 +874,7 @@ function WorkflowRuleEditor({
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[220px_minmax(260px,1fr)_minmax(260px,1fr)_100px_40px]">
+      <div className="grid gap-4 lg:grid-cols-[220px_minmax(260px,1fr)_minmax(260px,1fr)_120px_40px]">
         <div className="grid content-start gap-3">
           <label className="flex items-center gap-2 text-[13px] font-semibold text-ink">
             <Switch
@@ -1042,14 +1094,14 @@ function Field({
   type?: string
 }) {
   return (
-    <label className="grid gap-2 text-[12px] font-semibold text-muted">
+    <label className="grid min-w-0 gap-2 text-[12px] font-semibold text-muted">
       <span>{label}</span>
       <input
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-10 rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
+        className="h-10 min-w-0 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
       />
     </label>
   )
@@ -1122,6 +1174,7 @@ function toForm(settings: PlatformSettings): SettingsForm {
     ssoOIDCScopes: settings.sso_oidc_scopes.join(', '),
     ssoOIDCTrustMFA: settings.sso_oidc_trust_mfa,
     sqlEditorAppTimeoutSeconds: String(settings.sql_editor_app_timeout_seconds),
+    sqlEditorAdminAppTimeoutSeconds: String(settings.sql_editor_admin_app_timeout_seconds),
     sqlEditorMySQLMaxExecutionTimeMs: String(settings.sql_editor_mysql_max_execution_time_ms),
     sqlEditorPostgresStatementTimeoutMs: String(settings.sql_editor_postgres_statement_timeout_ms),
     sqlExportAppTimeoutSeconds: String(settings.sql_export_app_timeout_seconds),
@@ -1145,6 +1198,12 @@ function toForm(settings: PlatformSettings): SettingsForm {
     cronTimezone: settings.db_metadata_cron_timezone,
     approvalPolicies: settings.approval_policies,
     workflowRules: settings.workflow_rules,
+    multiStepBypassUserIDs: settings.workflow_multi_step_bypass_user_ids,
+    multiStepBypassAuthGroups: settings.workflow_multi_step_bypass_auth_groups,
+    selfReviewBypassUserIDs: settings.workflow_self_review_bypass_user_ids,
+    selfReviewBypassAuthGroups: settings.workflow_self_review_bypass_auth_groups,
+    selfExecuteBypassUserIDs: settings.workflow_self_execute_bypass_user_ids,
+    selfExecuteBypassAuthGroups: settings.workflow_self_execute_bypass_auth_groups,
   }
 }
 
@@ -1181,6 +1240,7 @@ function toPayload(
     sso_oidc_scopes: splitCSV(form.ssoOIDCScopes),
     sso_oidc_trust_mfa: form.ssoOIDCTrustMFA,
     sql_editor_app_timeout_seconds: parsePositiveInt(form.sqlEditorAppTimeoutSeconds, 30),
+    sql_editor_admin_app_timeout_seconds: parsePositiveInt(form.sqlEditorAdminAppTimeoutSeconds, 300),
     sql_editor_mysql_max_execution_time_ms: parsePositiveInt(form.sqlEditorMySQLMaxExecutionTimeMs, 25000),
     sql_editor_postgres_statement_timeout_ms: parsePositiveInt(form.sqlEditorPostgresStatementTimeoutMs, 25000),
     sql_export_app_timeout_seconds: parsePositiveInt(form.sqlExportAppTimeoutSeconds, 30),
@@ -1214,6 +1274,12 @@ function toPayload(
         ? normalizeWorkflowRulePatch({ ...nextRule, approval_enabled: true, execution_mode: 'manual' })
         : normalizeWorkflowRulePatch(nextRule)
     }),
+    workflow_multi_step_bypass_user_ids: form.multiStepBypassUserIDs,
+    workflow_multi_step_bypass_auth_groups: form.multiStepBypassAuthGroups,
+    workflow_self_review_bypass_user_ids: form.selfReviewBypassUserIDs,
+    workflow_self_review_bypass_auth_groups: form.selfReviewBypassAuthGroups,
+    workflow_self_execute_bypass_user_ids: form.selfExecuteBypassUserIDs,
+    workflow_self_execute_bypass_auth_groups: form.selfExecuteBypassAuthGroups,
   }
 }
 

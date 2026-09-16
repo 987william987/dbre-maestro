@@ -2,11 +2,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { MySQL, PostgreSQL, sql } from '@codemirror/lang-sql'
 import { EditorView } from '@codemirror/view'
-import { Copy, Download, List, Play, Search, ShieldAlert, Table2, X } from 'lucide-react'
-import { executeAdminQuery } from '@/modules/sql-editor/api'
+import { Copy, Download, List, Play, Search, ShieldAlert, Square, Table2, X } from 'lucide-react'
+import { cancelQueryExecution, executeAdminQuery } from '@/modules/sql-editor/api'
 import { ApiError } from '@/shared/api/client'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { QueryResult } from '@/shared/types/sqlEditor'
+
+function createQueryExecutionID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `query-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
 
 type AdminConsoleEntry = {
   id: number
@@ -139,6 +146,8 @@ export function AdminQueryConsole({ connection, database, schema, endpoint, cred
   const outputRef = useRef<HTMLDivElement | null>(null)
   const latestEntryRef = useRef<HTMLElement | null>(null)
   const nextEntryID = useRef(1)
+  const runningControllerRef = useRef<AbortController | null>(null)
+  const runningQueryExecutionIDRef = useRef<string | null>(null)
   const extensions = useMemo(() => [adminEditorExtension(connection), adminSelectionTheme], [connection])
 
   useEffect(() => {
@@ -155,6 +164,10 @@ export function AdminQueryConsole({ connection, database, schema, endpoint, cred
     setHistoryIndex(null)
     historyDraft.current = ''
     setRunning(true)
+    const controller = new AbortController()
+    const queryExecutionID = createQueryExecutionID()
+    runningControllerRef.current = controller
+    runningQueryExecutionIDRef.current = queryExecutionID
     try {
       const result = await executeAdminQuery({
         db_connection_id: connection.id,
@@ -162,7 +175,8 @@ export function AdminQueryConsole({ connection, database, schema, endpoint, cred
         database: currentDatabase || undefined,
         schema: currentSchema || undefined,
         redis_db_index: connection.db_type === 'redis' && database ? Number(database) : undefined,
-      })
+        query_execution_id: queryExecutionID,
+      }, controller.signal)
       if (connection.db_type === 'mysql') {
         const nextDatabase = mysqlDatabaseFromUse(statement)
         if (nextDatabase) setCurrentDatabase(nextDatabase)
@@ -176,11 +190,25 @@ export function AdminQueryConsole({ connection, database, schema, endpoint, cred
       setEntries((current) => [...current, { id: entryID, sql: statement, result, error: '' }])
       setCommand('')
     } catch (error) {
+      if (controller.signal.aborted) {
+        setEntries((current) => [...current, { id: entryID, sql: statement, result: null, error: 'Stopped by user.' }])
+        return
+      }
       const message = error instanceof ApiError || error instanceof Error ? error.message : 'Admin command failed.'
       setEntries((current) => [...current, { id: entryID, sql: statement, result: null, error: message }])
     } finally {
+      runningControllerRef.current = null
+      runningQueryExecutionIDRef.current = null
       setRunning(false)
     }
+  }
+
+  function stopCommand() {
+    const queryExecutionID = runningQueryExecutionIDRef.current
+    if (queryExecutionID) {
+      void cancelQueryExecution(queryExecutionID).catch(() => undefined)
+    }
+    runningControllerRef.current?.abort()
   }
 
   return (
@@ -260,7 +288,17 @@ export function AdminQueryConsole({ connection, database, schema, endpoint, cred
             basicSetup={{ lineNumbers: false, foldGutter: false }}
           />
         </div>
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex justify-end gap-2">
+          {running && (connection.db_type === 'mysql' || connection.db_type === 'postgres' || connection.db_type === 'postgresql') ? (
+            <button
+              type="button"
+              onClick={stopCommand}
+              className="inline-flex h-9 items-center gap-2 border border-rose-500 bg-rose-950/40 px-4 text-[12px] font-bold text-rose-200 transition hover:bg-rose-900/60"
+            >
+              <Square className="h-4 w-4" />
+              Stop
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => void executeCommand()}

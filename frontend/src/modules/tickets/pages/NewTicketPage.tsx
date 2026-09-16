@@ -6,7 +6,8 @@ import { ApiError } from '@/shared/api/client'
 import { DataTable, DataTableBody, DataTableCell, DataTableHead, DataTableHeaderCell, DataTableRow } from '@/shared/ui/DataTable'
 import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import type { DropdownOptionGroup } from '@/shared/ui/DropdownSelect'
-import { ExpandableSql, ExpandableText, isExpandableSql } from '@/shared/ui/ExpandableSql'
+import { ExpandableSql, isExpandableSql } from '@/shared/ui/ExpandableSql'
+import { ReviewMessages } from '@/shared/ui/ReviewMessages'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataResponse } from '@/shared/types/sqlEditor'
 import type { TicketReviewResult, TicketType } from '@/shared/types/ticket'
@@ -1068,7 +1069,7 @@ export function NewTicketPage() {
                                 {result.status}
                               </span>
                             </DataTableCell>
-                            <DataTableCell className="align-top"><ExpandableText value={result.messages.join('\n')} empty="" /></DataTableCell>
+                            <DataTableCell className="align-top"><ReviewMessages value={result.messages.join('\n')} empty="" /></DataTableCell>
                           </DataTableRow>
                         )
                       })}
@@ -1151,7 +1152,7 @@ export function NewTicketPage() {
                                   {result.status}
                                 </span>
                               </DataTableCell>
-                              <DataTableCell className="align-top"><ExpandableText value={result.message} /></DataTableCell>
+                              <DataTableCell className="align-top"><ReviewMessages value={result.message} /></DataTableCell>
                             </DataTableRow>
                           )
                         })}
@@ -1223,7 +1224,7 @@ export function NewTicketPage() {
                                   {result.status}
                                 </span>
                               </DataTableCell>
-                              <DataTableCell className="align-top"><ExpandableText value={result.message} /></DataTableCell>
+                              <DataTableCell className="align-top"><ReviewMessages value={result.message} /></DataTableCell>
                             </DataTableRow>
                           )
                         })}

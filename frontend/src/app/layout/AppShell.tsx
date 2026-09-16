@@ -121,7 +121,13 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Settings',
     icon: Settings2,
     allowed: (permissions) => permissions.includes('settings.read') || permissions.includes('settings.write'),
-    to: '/settings',
+    to: '/settings/workflow',
+    children: [
+      { to: '/settings/workflow', label: 'Workflow', icon: Settings2 },
+      { to: '/settings/scans', label: 'Scans', icon: Settings2 },
+      { to: '/settings/query-execution', label: 'Query & Execution', icon: Settings2 },
+      { to: '/settings/integrations', label: 'Integrations', icon: Settings2 },
+    ],
   },
 ]
 
@@ -132,7 +138,7 @@ const NAV_GROUPS = [
   },
   {
     title: 'Governance',
-    items: ['/users', '/db-connections', '/db-metadata/inventory', '/db-metadata/objects', '/masking-rules', '/sql-review-rules/mysql', '/audit-logs', '/settings'],
+    items: ['/users', '/db-connections', '/db-metadata/inventory', '/db-metadata/objects', '/masking-rules', '/sql-review-rules/mysql', '/audit-logs', '/settings/workflow'],
   },
 ]
 
@@ -146,7 +152,7 @@ const READ_ONLY_HEADER_NOTICE_ROUTES = [
   { match: (pathname: string) => pathname === '/masking-rules', read: ['masking_rules.read'], write: ['masking_rules.write'] },
   { match: (pathname: string) => pathname.startsWith('/sql-review-rules'), read: ['sql_review.read'], write: ['sql_review.write'] },
   { match: (pathname: string) => pathname === '/audit-logs', read: ['audit_logs.read'], write: ['audit_logs.write'] },
-  { match: (pathname: string) => pathname === '/settings', read: ['settings.read'], write: ['settings.write'] },
+  { match: (pathname: string) => pathname.startsWith('/settings'), read: ['settings.read'], write: ['settings.write'] },
 ] as const
 
 function getReadOnlyHeaderNotice(pathname: string, permissions: string[]) {
@@ -314,7 +320,7 @@ const PAGE_HELP = [
     ],
   },
   {
-    match: (pathname: string) => pathname === '/settings',
+    match: (pathname: string) => pathname.startsWith('/settings'),
     title: 'Platform Settings Guide',
     items: [
       'Settings control SQL Editor timeout policy, workflow behavior, Lark integration, and DB metadata scan settings.',

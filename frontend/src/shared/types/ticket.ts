@@ -160,6 +160,7 @@ export type TicketCapabilities = {
   can_withdraw: boolean
   can_revoke: boolean
   can_execute: boolean
+  can_stop?: boolean
   can_retry_workflow_resolution?: boolean
   can_download_export: boolean
 }

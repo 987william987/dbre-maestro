@@ -57,6 +57,10 @@ function renderShell(initialEntry = '/tickets') {
             <Route path="/sql-review-rules/mysql" element={<div>sql review page</div>} />
             <Route path="/audit-logs" element={<div>audit logs page</div>} />
             <Route path="/settings" element={<div>settings page</div>} />
+            <Route path="/settings/workflow" element={<div>workflow settings page</div>} />
+            <Route path="/settings/scans" element={<div>scan settings page</div>} />
+            <Route path="/settings/query-execution" element={<div>query execution settings page</div>} />
+            <Route path="/settings/integrations" element={<div>integration settings page</div>} />
           </Route>
         </Routes>
       </ToastProvider>
@@ -213,6 +217,34 @@ describe('AppShell notifications', () => {
     expect(screen.getAllByText('DB Metadata').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Objects').length).toBeGreaterThan(0)
     expect(screen.getByText('Inventory')).toBeInTheDocument()
+  })
+
+  it('Settings 子路由會自動展開並顯示目前子頁', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'admin',
+        authGroups: ['admin'],
+        authGroupDetails: [],
+        permissions: ['settings.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/settings/scans')
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: 'Settings' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getAllByText('Settings').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Scans').length).toBeGreaterThan(0)
   })
 
   it('可手動展開與收合子導航', async () => {

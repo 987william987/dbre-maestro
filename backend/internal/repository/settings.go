@@ -17,55 +17,86 @@ import (
 )
 
 const (
-	settingSensitiveExportReviewers       = "sensitive_export_reviewer_user_ids"
-	settingSensitiveQueryAccessReviewers  = "sensitive_query_access_reviewer_user_ids"
-	settingRequireNonSensitiveExportRev   = "require_non_sensitive_export_review"
-	settingLarkAppID                      = "lark_app_id"
-	settingLarkAppSecret                  = "lark_app_secret"
-	settingLarkInteractiveCardsEnabled    = "lark_interactive_cards_enabled"
-	settingLarkCardCallbackMode           = "lark_card_callback_mode"
-	settingLarkCardVerificationToken      = "lark_card_verification_token"
-	settingLarkOAuthEnabled               = "lark_oauth_enabled"
-	settingLarkOAuthSite                  = "lark_oauth_site"
-	settingLarkOAuthRedirectURL           = "lark_oauth_redirect_url"
-	settingSSOOIDCEnabled                 = "sso_oidc_enabled"
-	settingSSOOIDCDisplayName             = "sso_oidc_display_name"
-	settingSSOOIDCIssuerURL               = "sso_oidc_issuer_url"
-	settingSSOOIDCClientID                = "sso_oidc_client_id"
-	settingSSOOIDCClientSecret            = "sso_oidc_client_secret"
-	settingSSOOIDCRedirectURL             = "sso_oidc_redirect_url"
-	settingSSOOIDCScopes                  = "sso_oidc_scopes"
-	settingSSOOIDCTrustMFA                = "sso_oidc_trust_mfa"
-	settingSQLEditorAppTimeoutSeconds     = "sql_editor_app_timeout_seconds"
-	settingSQLEditorMySQLMaxExecTimeMs    = "sql_editor_mysql_max_execution_time_ms"
-	settingSQLEditorPGStatementTimeoutMs  = "sql_editor_postgres_statement_timeout_ms"
-	settingSQLExportAppTimeoutSeconds     = "sql_export_app_timeout_seconds"
-	settingSQLExportMySQLMaxExecTimeMs    = "sql_export_mysql_max_execution_time_ms"
-	settingSQLExportPGStatementTimeoutMs  = "sql_export_postgres_statement_timeout_ms"
-	settingMySQLRollbackEnabled           = "mysql_rollback_enabled"
-	settingMySQLRollbackEngine            = "mysql_rollback_engine"
-	settingMySQLRollbackMy2SQLPath        = "mysql_rollback_my2sql_path"
-	settingMySQLRollbackTimeoutSeconds    = "mysql_rollback_generation_timeout_seconds"
-	settingMySQLRollbackMaxSQLBytes       = "mysql_rollback_max_sql_bytes"
-	settingDBMetadataInventoryEnabled     = "db_metadata_inventory_enabled"
-	settingDBMetadataInventoryRegions     = "db_metadata_inventory_regions"
-	settingDBMetadataInventoryEngines     = "db_metadata_inventory_engines"
-	settingDBMetadataInventoryCron        = "db_metadata_inventory_cron"
-	settingDBMetadataInventorySyncMins    = "db_metadata_inventory_sync_interval_minutes"
-	settingDBMetadataObjectEnabled        = "db_metadata_object_enabled"
-	settingDBMetadataObjectConnectionIDs  = "db_metadata_object_enabled_connection_ids"
-	settingDBMetadataObjectCron           = "db_metadata_object_cron"
-	settingDBMetadataObjectSyncMins       = "db_metadata_object_sync_interval_minutes"
-	settingDBMetadataAccountEnabled       = "db_metadata_account_enabled"
-	settingDBMetadataAccountConnectionIDs = "db_metadata_account_enabled_connection_ids"
-	settingDBMetadataAccountCron          = "db_metadata_account_cron"
-	settingDBMetadataAccountSyncMins      = "db_metadata_account_sync_interval_minutes"
-	settingDBMetadataCronTimezone         = "db_metadata_cron_timezone"
+	settingSensitiveExportReviewers        = "sensitive_export_reviewer_user_ids"
+	settingSensitiveQueryAccessReviewers   = "sensitive_query_access_reviewer_user_ids"
+	settingRequireNonSensitiveExportRev    = "require_non_sensitive_export_review"
+	settingWorkflowMultiStepBypassUsers    = "workflow_multi_step_bypass_user_ids"
+	settingWorkflowMultiStepBypassGroups   = "workflow_multi_step_bypass_auth_groups"
+	settingWorkflowSelfReviewBypassUsers   = "workflow_self_review_bypass_user_ids"
+	settingWorkflowSelfReviewBypassGroups  = "workflow_self_review_bypass_auth_groups"
+	settingWorkflowSelfExecuteBypassUsers  = "workflow_self_execute_bypass_user_ids"
+	settingWorkflowSelfExecuteBypassGroups = "workflow_self_execute_bypass_auth_groups"
+	settingLarkAppID                       = "lark_app_id"
+	settingLarkAppSecret                   = "lark_app_secret"
+	settingLarkInteractiveCardsEnabled     = "lark_interactive_cards_enabled"
+	settingLarkCardCallbackMode            = "lark_card_callback_mode"
+	settingLarkCardVerificationToken       = "lark_card_verification_token"
+	settingLarkOAuthEnabled                = "lark_oauth_enabled"
+	settingLarkOAuthSite                   = "lark_oauth_site"
+	settingLarkOAuthRedirectURL            = "lark_oauth_redirect_url"
+	settingSSOOIDCEnabled                  = "sso_oidc_enabled"
+	settingSSOOIDCDisplayName              = "sso_oidc_display_name"
+	settingSSOOIDCIssuerURL                = "sso_oidc_issuer_url"
+	settingSSOOIDCClientID                 = "sso_oidc_client_id"
+	settingSSOOIDCClientSecret             = "sso_oidc_client_secret"
+	settingSSOOIDCRedirectURL              = "sso_oidc_redirect_url"
+	settingSSOOIDCScopes                   = "sso_oidc_scopes"
+	settingSSOOIDCTrustMFA                 = "sso_oidc_trust_mfa"
+	settingSQLEditorAppTimeoutSeconds      = "sql_editor_app_timeout_seconds"
+	settingSQLEditorAdminAppTimeoutSeconds = "sql_editor_admin_app_timeout_seconds"
+	settingSQLEditorMySQLMaxExecTimeMs     = "sql_editor_mysql_max_execution_time_ms"
+	settingSQLEditorPGStatementTimeoutMs   = "sql_editor_postgres_statement_timeout_ms"
+	settingSQLExportAppTimeoutSeconds      = "sql_export_app_timeout_seconds"
+	settingSQLExportMySQLMaxExecTimeMs     = "sql_export_mysql_max_execution_time_ms"
+	settingSQLExportPGStatementTimeoutMs   = "sql_export_postgres_statement_timeout_ms"
+	settingMySQLRollbackEnabled            = "mysql_rollback_enabled"
+	settingMySQLRollbackEngine             = "mysql_rollback_engine"
+	settingMySQLRollbackMy2SQLPath         = "mysql_rollback_my2sql_path"
+	settingMySQLRollbackTimeoutSeconds     = "mysql_rollback_generation_timeout_seconds"
+	settingMySQLRollbackMaxSQLBytes        = "mysql_rollback_max_sql_bytes"
+	settingDBMetadataInventoryEnabled      = "db_metadata_inventory_enabled"
+	settingDBMetadataInventoryRegions      = "db_metadata_inventory_regions"
+	settingDBMetadataInventoryEngines      = "db_metadata_inventory_engines"
+	settingDBMetadataInventoryCron         = "db_metadata_inventory_cron"
+	settingDBMetadataInventorySyncMins     = "db_metadata_inventory_sync_interval_minutes"
+	settingDBMetadataObjectEnabled         = "db_metadata_object_enabled"
+	settingDBMetadataObjectConnectionIDs   = "db_metadata_object_enabled_connection_ids"
+	settingDBMetadataObjectCron            = "db_metadata_object_cron"
+	settingDBMetadataObjectSyncMins        = "db_metadata_object_sync_interval_minutes"
+	settingDBMetadataAccountEnabled        = "db_metadata_account_enabled"
+	settingDBMetadataAccountConnectionIDs  = "db_metadata_account_enabled_connection_ids"
+	settingDBMetadataAccountCron           = "db_metadata_account_cron"
+	settingDBMetadataAccountSyncMins       = "db_metadata_account_sync_interval_minutes"
+	settingDBMetadataCronTimezone          = "db_metadata_cron_timezone"
 )
 
 type SettingsRepo struct {
 	db     *sqlx.DB
 	encKey []byte
+}
+
+func (r *SettingsRepo) GetWorkflowMultiStepBypass(ctx context.Context) ([]uint64, []model.AuthGroup, error) {
+	return r.getWorkflowBypass(ctx, settingWorkflowMultiStepBypassUsers, settingWorkflowMultiStepBypassGroups)
+}
+
+func (r *SettingsRepo) GetWorkflowSelfReviewBypass(ctx context.Context) ([]uint64, []model.AuthGroup, error) {
+	return r.getWorkflowBypass(ctx, settingWorkflowSelfReviewBypassUsers, settingWorkflowSelfReviewBypassGroups)
+}
+
+func (r *SettingsRepo) GetWorkflowSelfExecuteBypass(ctx context.Context) ([]uint64, []model.AuthGroup, error) {
+	return r.getWorkflowBypass(ctx, settingWorkflowSelfExecuteBypassUsers, settingWorkflowSelfExecuteBypassGroups)
+}
+
+func (r *SettingsRepo) getWorkflowBypass(ctx context.Context, userKey, groupKey string) ([]uint64, []model.AuthGroup, error) {
+	userIDs, err := r.getUint64List(ctx, userKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	groups, err := r.getStringList(ctx, groupKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	return userIDs, stringListToAuthGroups(groups), nil
 }
 
 func NewSettingsRepo(db *sqlx.DB, encKey []byte) *SettingsRepo {
@@ -75,6 +106,7 @@ func NewSettingsRepo(db *sqlx.DB, encKey []byte) *SettingsRepo {
 func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error) {
 	settings := &model.PlatformSettings{
 		SQLEditorAppTimeoutSeconds:            30,
+		SQLEditorAdminAppTimeoutSeconds:       300,
 		RequireNonSensitiveExportReview:       true,
 		SQLEditorMySQLMaxExecutionTimeMs:      25000,
 		SQLEditorPostgresStatementTimeoutMs:   25000,
@@ -114,6 +146,33 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	}
 	settings.SensitiveExportReviewerUserIDs = exportReviewerIDs
 	settings.SensitiveQueryAccessReviewerUserIDs = sensitiveReviewerIDs
+	settings.WorkflowMultiStepBypassUserIDs, err = r.getUint64List(ctx, settingWorkflowMultiStepBypassUsers)
+	if err != nil {
+		return nil, err
+	}
+	multiStepGroups, err := r.getStringList(ctx, settingWorkflowMultiStepBypassGroups)
+	if err != nil {
+		return nil, err
+	}
+	settings.WorkflowMultiStepBypassAuthGroups = stringListToAuthGroups(multiStepGroups)
+	settings.WorkflowSelfReviewBypassUserIDs, err = r.getUint64List(ctx, settingWorkflowSelfReviewBypassUsers)
+	if err != nil {
+		return nil, err
+	}
+	selfReviewGroups, err := r.getStringList(ctx, settingWorkflowSelfReviewBypassGroups)
+	if err != nil {
+		return nil, err
+	}
+	settings.WorkflowSelfReviewBypassAuthGroups = stringListToAuthGroups(selfReviewGroups)
+	settings.WorkflowSelfExecuteBypassUserIDs, err = r.getUint64List(ctx, settingWorkflowSelfExecuteBypassUsers)
+	if err != nil {
+		return nil, err
+	}
+	selfExecuteGroups, err := r.getStringList(ctx, settingWorkflowSelfExecuteBypassGroups)
+	if err != nil {
+		return nil, err
+	}
+	settings.WorkflowSelfExecuteBypassAuthGroups = stringListToAuthGroups(selfExecuteGroups)
 	settings.ApprovalPolicies = []model.ApprovalPolicy{}
 	workflowRules, err := r.ListWorkflowRules(ctx)
 	if err != nil {
@@ -242,6 +301,13 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	}
 	if sqlEditorAppTimeoutSeconds != nil {
 		settings.SQLEditorAppTimeoutSeconds = *sqlEditorAppTimeoutSeconds
+	}
+	sqlEditorAdminAppTimeoutSeconds, err := r.getInt(ctx, settingSQLEditorAdminAppTimeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
+	if sqlEditorAdminAppTimeoutSeconds != nil {
+		settings.SQLEditorAdminAppTimeoutSeconds = *sqlEditorAdminAppTimeoutSeconds
 	}
 	sqlEditorMySQLMaxExecTimeMs, err := r.getInt(ctx, settingSQLEditorMySQLMaxExecTimeMs)
 	if err != nil {
@@ -437,6 +503,24 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 	if err := upsertBool(ctx, tx, settingRequireNonSensitiveExportRev, settings.RequireNonSensitiveExportReview); err != nil {
 		return err
 	}
+	if err := upsertUint64List(ctx, tx, settingWorkflowMultiStepBypassUsers, settings.WorkflowMultiStepBypassUserIDs); err != nil {
+		return err
+	}
+	if err := upsertStringList(ctx, tx, settingWorkflowMultiStepBypassGroups, authGroupsToStringList(settings.WorkflowMultiStepBypassAuthGroups)); err != nil {
+		return err
+	}
+	if err := upsertUint64List(ctx, tx, settingWorkflowSelfReviewBypassUsers, settings.WorkflowSelfReviewBypassUserIDs); err != nil {
+		return err
+	}
+	if err := upsertStringList(ctx, tx, settingWorkflowSelfReviewBypassGroups, authGroupsToStringList(settings.WorkflowSelfReviewBypassAuthGroups)); err != nil {
+		return err
+	}
+	if err := upsertUint64List(ctx, tx, settingWorkflowSelfExecuteBypassUsers, settings.WorkflowSelfExecuteBypassUserIDs); err != nil {
+		return err
+	}
+	if err := upsertStringList(ctx, tx, settingWorkflowSelfExecuteBypassGroups, authGroupsToStringList(settings.WorkflowSelfExecuteBypassAuthGroups)); err != nil {
+		return err
+	}
 	if err := upsertString(ctx, tx, settingLarkAppID, settings.LarkAppID); err != nil {
 		return err
 	}
@@ -492,6 +576,9 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 		return err
 	}
 	if err := upsertInt(ctx, tx, settingSQLEditorAppTimeoutSeconds, settings.SQLEditorAppTimeoutSeconds); err != nil {
+		return err
+	}
+	if err := upsertInt(ctx, tx, settingSQLEditorAdminAppTimeoutSeconds, settings.SQLEditorAdminAppTimeoutSeconds); err != nil {
 		return err
 	}
 	if err := upsertInt(ctx, tx, settingSQLEditorMySQLMaxExecTimeMs, settings.SQLEditorMySQLMaxExecutionTimeMs); err != nil {
@@ -886,6 +973,22 @@ func decodeAuthGroups(raw string) ([]model.AuthGroup, error) {
 		return nil, err
 	}
 	return normalizeAuthGroups(groups), nil
+}
+
+func stringListToAuthGroups(values []string) []model.AuthGroup {
+	groups := make([]model.AuthGroup, 0, len(values))
+	for _, value := range values {
+		groups = append(groups, model.AuthGroup(value))
+	}
+	return groups
+}
+
+func authGroupsToStringList(groups []model.AuthGroup) []string {
+	values := make([]string, 0, len(groups))
+	for _, group := range groups {
+		values = append(values, string(group))
+	}
+	return values
 }
 
 func normalizeAuthGroups(groups []model.AuthGroup) []model.AuthGroup {

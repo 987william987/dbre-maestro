@@ -5,6 +5,12 @@ export type PlatformSettings = {
   require_non_sensitive_export_review: boolean
   approval_policies: ApprovalPolicy[]
   workflow_rules: WorkflowRule[]
+  workflow_multi_step_bypass_user_ids: number[]
+  workflow_multi_step_bypass_auth_groups: string[]
+  workflow_self_review_bypass_user_ids: number[]
+  workflow_self_review_bypass_auth_groups: string[]
+  workflow_self_execute_bypass_user_ids: number[]
+  workflow_self_execute_bypass_auth_groups: string[]
   lark_app_id: string
   lark_app_secret?: string
   lark_app_secret_configured: boolean
@@ -25,6 +31,7 @@ export type PlatformSettings = {
   sso_oidc_scopes: string[]
   sso_oidc_trust_mfa: boolean
   sql_editor_app_timeout_seconds: number
+  sql_editor_admin_app_timeout_seconds: number
   sql_editor_mysql_max_execution_time_ms: number
   sql_editor_postgres_statement_timeout_ms: number
   sql_export_app_timeout_seconds: number

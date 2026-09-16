@@ -8,6 +8,7 @@ type SQLReviewRulesResponse = {
 type PatchSQLReviewRulePayload = {
   enabled?: boolean
   threshold?: number | null
+  severity?: 'error' | 'warning'
 }
 
 export async function listSQLReviewRules() {

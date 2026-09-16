@@ -659,6 +659,61 @@ func TestCanExecuteTicketRejectsReviewerEvenWhenListedAsExecutor(t *testing.T) {
 	}
 }
 
+func TestCanStopTicketAllowsCoExecutorEvenWhenAnotherExecutorStartedIt(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	submitterID := uint64(5)
+	executorAID := uint64(8)
+	executorBID := uint64(9)
+	connID := uint64(3)
+	now := time.Date(2026, 6, 22, 8, 0, 0, 0, time.UTC)
+	ticket := &model.Ticket{
+		ID:             1,
+		TicketType:     model.TicketTypeDDL,
+		Status:         model.TicketStatusExecuting,
+		SubmitterID:    submitterID,
+		ExecutorID:     &executorAID,
+		DBConnectionID: &connID,
+	}
+	ctx := context.WithValue(context.Background(), middleware.CtxPermissions, []string{permissionTicketExecute})
+	handler := &TicketHandler{tickets: repository.NewTicketRepo(sqlx.NewDb(db, "sqlmock"))}
+
+	mock.ExpectQuery(`SELECT ticket_id, workflow_rule_id, workflow_rule_name, approval_enabled,`).
+		WithArgs(ticket.ID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"ticket_id",
+			"workflow_rule_id",
+			"workflow_rule_name",
+			"approval_enabled",
+			"approval_user_ids",
+			"executor_user_ids",
+			"admin_user_ids",
+			"error_code",
+			"error_message",
+			"resolution_trace",
+			"resolved_at",
+			"created_at",
+			"updated_at",
+		}).AddRow(ticket.ID, nil, "test", true, "[6]", "[8,9]", "[]", "", "", "{}", now, now, now))
+
+	// executor A started the run (ticket.ExecutorID); executor B is a different
+	// eligible executor for this workflow rule who never clicked "execute".
+	allowed, err := handler.canStopTicket(ctx, ticket, executorBID)
+	if err != nil {
+		t.Fatalf("canStopTicket() error = %v", err)
+	}
+	if !allowed {
+		t.Fatal("a co-executor must be able to stop a run started by another eligible executor, so they can intervene if that executor goes offline")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
 func TestWorkflowResolutionExcludesSubmitter(t *testing.T) {
 	connID := uint64(3)
 	ticket := &model.Ticket{
@@ -694,6 +749,39 @@ func TestWorkflowResolutionExcludesSubmitter(t *testing.T) {
 	}
 	if resolution.ErrorCode != "" {
 		t.Fatalf("resolution should remain valid when other candidates exist, got %s", resolution.ErrorCode)
+	}
+}
+
+func TestWorkflowResolutionBypassesRemainIndependent(t *testing.T) {
+	ticket := &model.Ticket{TicketType: model.TicketTypeDDL, SubmitterID: 7}
+	resolution := &model.WorkflowResolution{
+		ApprovalEnabled: true,
+		ExecutionMode:   workflowExecutionModeManual,
+		ApprovalUserIDs: []uint64{7, 8},
+		ExecutorUserIDs: []uint64{7, 9},
+	}
+
+	excludeSubmitterFromWorkflowResolutionWithBypass(ticket, resolution, true, false)
+
+	if !uint64InSlice(7, resolution.ApprovalUserIDs) {
+		t.Fatal("self-review bypass must keep an otherwise eligible submitter in approval candidates")
+	}
+	if uint64InSlice(7, resolution.ExecutorUserIDs) {
+		t.Fatal("self-review bypass must not allow the submitter to execute their own ticket")
+	}
+
+	resolution = &model.WorkflowResolution{
+		ApprovalEnabled: true,
+		ExecutionMode:   workflowExecutionModeManual,
+		ApprovalUserIDs: []uint64{7, 8},
+		ExecutorUserIDs: []uint64{7, 9},
+	}
+	excludeSubmitterFromWorkflowResolutionWithBypass(ticket, resolution, false, true)
+	if uint64InSlice(7, resolution.ApprovalUserIDs) {
+		t.Fatal("self-execute bypass must not allow the submitter to review their own ticket")
+	}
+	if !uint64InSlice(7, resolution.ExecutorUserIDs) {
+		t.Fatal("self-execute bypass must keep an otherwise eligible submitter in executor candidates")
 	}
 }
 

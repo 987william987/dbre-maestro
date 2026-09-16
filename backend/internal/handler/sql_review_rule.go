@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"net/http"
 	"fmt"
+	"net/http"
 
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
@@ -49,15 +49,16 @@ func (h *SQLReviewRuleHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Enabled   *bool  `json:"enabled"`
-		Threshold *int64 `json:"threshold"`
+		Enabled   *bool   `json:"enabled"`
+		Threshold *int64  `json:"threshold"`
+		Severity  *string `json:"severity"`
 	}
 	if err := bindJSON(r, &req); err != nil {
 		jsonErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Enabled == nil && req.Threshold == nil {
-		jsonErr(w, http.StatusUnprocessableEntity, "at least one of enabled or threshold must be provided")
+	if req.Enabled == nil && req.Threshold == nil && req.Severity == nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "at least one of enabled, threshold, or severity must be provided")
 		return
 	}
 	if req.Threshold != nil && !sqlReviewRuleSupportsThreshold(name) {
@@ -68,9 +69,12 @@ func (h *SQLReviewRuleHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnprocessableEntity, "threshold must be non-negative")
 		return
 	}
-
+	if req.Severity != nil && *req.Severity != "error" && *req.Severity != "warning" {
+		jsonErr(w, http.StatusUnprocessableEntity, "severity must be error or warning")
+		return
+	}
 	userID := middleware.UserIDFromCtx(r.Context())
-	if err := h.rules.Patch(r.Context(), name, req.Enabled, req.Threshold, userID); err != nil {
+	if err := h.rules.Patch(r.Context(), name, req.Enabled, req.Threshold, req.Severity, userID); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "update rule failed")
 		return
 	}
@@ -83,6 +87,7 @@ func (h *SQLReviewRuleHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			"rule":      name,
 			"enabled":   req.Enabled,
 			"threshold": req.Threshold,
+			"severity":  req.Severity,
 		},
 	})
 

@@ -10,6 +10,7 @@ vi.mock('@/modules/settings/api', () => ({
   listSettingsDBConnections: vi.fn(),
   patchSettings: vi.fn(),
   previewWorkflowRules: vi.fn(),
+  listSettingsUsers: vi.fn(),
 }))
 vi.mock('@/modules/users/api', () => ({
   listUsers: vi.fn(),
@@ -23,13 +24,14 @@ vi.mock('@/shared/auth/AuthContext', () => ({
   }),
 }))
 
-import { getSettings, listSettingsDBConnections, previewWorkflowRules } from '@/modules/settings/api'
+import { getSettings, listSettingsDBConnections, listSettingsUsers, previewWorkflowRules } from '@/modules/settings/api'
 import { listAuthGroups } from '@/modules/auth-groups/api'
 import { listUsers } from '@/modules/users/api'
 
 const mockedGetSettings = vi.mocked(getSettings)
 const mockedListSettingsDBConnections = vi.mocked(listSettingsDBConnections)
 const mockedPreviewWorkflowRules = vi.mocked(previewWorkflowRules)
+const mockedListSettingsUsers = vi.mocked(listSettingsUsers)
 const mockedListUsers = vi.mocked(listUsers)
 const mockedListAuthGroups = vi.mocked(listAuthGroups)
 
@@ -56,6 +58,12 @@ function makeSettings(overrides: Partial<PlatformSettings> = {}): PlatformSettin
     sensitive_export_reviewer_user_ids: [],
     sensitive_query_access_reviewer_user_ids: [],
     require_non_sensitive_export_review: true,
+    workflow_multi_step_bypass_user_ids: [],
+    workflow_multi_step_bypass_auth_groups: [],
+    workflow_self_review_bypass_user_ids: [],
+    workflow_self_review_bypass_auth_groups: [],
+    workflow_self_execute_bypass_user_ids: [],
+    workflow_self_execute_bypass_auth_groups: [],
     approval_policies: [],
     workflow_rules: [
       {
@@ -73,6 +81,7 @@ function makeSettings(overrides: Partial<PlatformSettings> = {}): PlatformSettin
       },
     ],
     sql_editor_app_timeout_seconds: 30,
+    sql_editor_admin_app_timeout_seconds: 300,
     sql_editor_mysql_max_execution_time_ms: 25000,
     sql_editor_postgres_statement_timeout_ms: 25000,
     sql_export_app_timeout_seconds: 120,
@@ -110,6 +119,7 @@ function mockSettingsDependencies() {
     ],
   })
   mockedListUsers.mockResolvedValue({ users: [] })
+  mockedListSettingsUsers.mockResolvedValue({ users: [] })
   mockedListAuthGroups.mockResolvedValue({
     auth_groups: [
       { name: 'data_owner', label: 'Data Owner', description: '', system_defined: true, user_count: 1 },
@@ -119,10 +129,14 @@ function mockSettingsDependencies() {
 }
 
 function renderSettingsPage() {
+  return renderSettingsPageSection('workflow')
+}
+
+function renderSettingsPageSection(section: 'workflow' | 'scans' | 'query-execution' | 'integrations') {
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[`/settings/${section}`]}>
       <ToastProvider>
-        <SettingsPage />
+        <SettingsPage section={section} />
       </ToastProvider>
     </MemoryRouter>,
   )
@@ -134,8 +148,10 @@ describe('SettingsPage', () => {
     mockedListSettingsDBConnections.mockReset()
     mockedPreviewWorkflowRules.mockReset()
     mockedListUsers.mockReset()
+    mockedListSettingsUsers.mockReset()
     mockedListAuthGroups.mockReset()
     mockedPreviewWorkflowRules.mockResolvedValue({ previews: [] })
+    mockedListSettingsUsers.mockResolvedValue({ users: [] })
   })
 
   it('loads the settings page without depending on the users API', async () => {
@@ -172,6 +188,7 @@ describe('SettingsPage', () => {
         },
       ],
       sql_editor_app_timeout_seconds: 30,
+      sql_editor_admin_app_timeout_seconds: 300,
       sql_editor_mysql_max_execution_time_ms: 25000,
       sql_editor_postgres_statement_timeout_ms: 25000,
       sql_export_app_timeout_seconds: 120,
@@ -219,6 +236,7 @@ describe('SettingsPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('Workflow Rules')).toBeInTheDocument())
+    expect(screen.getByText('Workflow Safety Exceptions')).toBeInTheDocument()
     expect(screen.queryByText('Metadata Scope')).not.toBeInTheDocument()
     expect(screen.getByDisplayValue('ap-northeast-1')).toBeInTheDocument()
     expect(screen.getByDisplayValue('0 9 * * *')).toBeInTheDocument()
@@ -238,6 +256,31 @@ describe('SettingsPage', () => {
     expect(screen.queryByText('ID 12')).not.toBeInTheDocument()
     expect(screen.queryByText('db-a.internal:3306')).not.toBeInTheDocument()
     expect(mockedListUsers).not.toHaveBeenCalled()
+  })
+
+  it('groups related settings into route-backed subpages', async () => {
+    mockedGetSettings.mockResolvedValue(makeSettings())
+    mockSettingsDependencies()
+
+    renderSettingsPage()
+
+    const workflowSection = (await screen.findByText('Workflow Safety Exceptions')).closest('section')
+    const scanSection = screen.getByText('Inventory Scan').closest('section')
+    expect(workflowSection).not.toHaveClass('hidden')
+    expect(scanSection).toHaveClass('hidden')
+
+    expect(screen.getByRole('link', { name: 'Scans' })).toHaveAttribute('href', '/settings/scans')
+  })
+
+  it('shows the section selected by the route', async () => {
+    mockedGetSettings.mockResolvedValue(makeSettings())
+    mockSettingsDependencies()
+
+    renderSettingsPageSection('scans')
+
+    const scanSection = (await screen.findByText('Inventory Scan')).closest('section')
+    expect(scanSection).not.toHaveClass('hidden')
+    expect(screen.getByText('Workflow Rules').closest('section')).toHaveClass('hidden')
   })
 
   it('locks production workflow execution switches to approval required and manual execution', async () => {

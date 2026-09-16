@@ -535,9 +535,10 @@ export function DashboardPage() {
                     { label: 'Metadata Objects', value: platform.db_metadata_health.object_count },
                   ]}
                 />
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2 sm:grid-cols-3">
                   <MetadataJobRow label="Inventory Sync" status={platform.db_metadata_health.inventory_job?.status} updatedAt={platform.db_metadata_health.inventory_job?.updated_at} />
                   <MetadataJobRow label="Object Sync" status={platform.db_metadata_health.object_job?.status} updatedAt={platform.db_metadata_health.object_job?.updated_at} />
+                  <MetadataJobRow label="Account Sync" status={platform.db_metadata_health.account_job?.status} updatedAt={platform.db_metadata_health.account_job?.updated_at} />
                 </div>
                 <CountList items={platform.db_metadata_health.db_type_counts} empty="No DB connections configured." />
               </div>
