@@ -6,6 +6,15 @@ import (
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 )
 
+func TestConfiguredSeverityAllowsParserUnsupportedRules(t *testing.T) {
+	if got := configuredReviewStatus("warning"); got != "warn" {
+		t.Fatalf("warning severity status = %q, want warn", got)
+	}
+	if got := configuredReviewStatus("error"); got != "error" {
+		t.Fatalf("error severity status = %q, want error", got)
+	}
+}
+
 func TestSQLReviewRuleSupportsThreshold(t *testing.T) {
 	if !sqlReviewRuleSupportsThreshold("high_row_count") {
 		t.Fatal("expected high_row_count to support threshold")
@@ -15,17 +24,6 @@ func TestSQLReviewRuleSupportsThreshold(t *testing.T) {
 		if sqlReviewRuleSupportsThreshold(name) {
 			t.Fatalf("expected %s not to support threshold", name)
 		}
-	}
-}
-
-func TestParserUnsupportedRulesRequireErrorSeverity(t *testing.T) {
-	for _, name := range []string{"prohibit_trigger", "prohibit_stored_function", "prohibit_event"} {
-		if !sqlReviewRuleRequiresError(name) {
-			t.Fatalf("expected %s to require error severity", name)
-		}
-	}
-	if sqlReviewRuleRequiresError("prohibit_stored_procedure") {
-		t.Fatal("stored procedure is parser-supported and may use warning severity")
 	}
 }
 

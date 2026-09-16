@@ -111,16 +111,11 @@ func RunStaticChecks(sqlStr string, ruleMap map[string]bool) []string {
 	if ruleMap["prohibit_foreign_key"] && strings.Contains(strings.ToUpper(sqlStr), "FOREIGN KEY") {
 		issues = append(issues, "禁止使用外鍵約束，請由應用層維護一致性")
 	}
-	declaration := leadingSQLKeywords(sqlStr, 2)
-	prohibited := map[string]string{
-		"prohibit_trigger":         "TRIGGER",
-		"prohibit_stored_function": "FUNCTION",
-		"prohibit_event":           "EVENT",
+	objectTypes := map[string]string{
+		"prohibit_trigger": "TRIGGER", "prohibit_stored_function": "FUNCTION", "prohibit_event": "EVENT",
 	}
-	for rule, objectType := range prohibited {
-		if ruleMap[rule] && declaration == "CREATE "+objectType {
-			issues = append(issues, "禁止建立 MySQL "+objectType)
-		}
+	if rule := UnsupportedMySQLObjectRule(sqlStr); rule != "" && ruleMap[rule] {
+		issues = append(issues, "禁止建立 MySQL "+objectTypes[rule])
 	}
 	return issues
 }
@@ -132,6 +127,21 @@ func leadingSQLKeywords(sqlStr string, limit int) string {
 		fields = fields[:limit]
 	}
 	return strings.Join(fields, " ")
+}
+
+// UnsupportedMySQLObjectRule identifies MySQL object types that the TiDB parser
+// does not parse but that can still be handled by SQL review policy checks.
+func UnsupportedMySQLObjectRule(sqlStr string) string {
+	switch leadingSQLKeywords(sqlStr, 2) {
+	case "CREATE TRIGGER":
+		return "prohibit_trigger"
+	case "CREATE FUNCTION":
+		return "prohibit_stored_function"
+	case "CREATE EVENT":
+		return "prohibit_event"
+	default:
+		return ""
+	}
 }
 
 func stripSQLCommentsAndLiterals(sqlStr string) string {

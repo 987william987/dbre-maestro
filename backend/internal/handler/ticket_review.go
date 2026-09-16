@@ -95,11 +95,14 @@ func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID
 		if dialect == sqlparse.DialectMySQL {
 			if rules, listErr := h.sqlReviewRules.List(ctx); listErr == nil {
 				ruleMap := make(map[string]bool, len(rules))
+				ruleSeverity := make(map[string]string, len(rules))
 				for _, rule := range rules {
 					ruleMap[rule.RuleName] = rule.Enabled
+					ruleSeverity[rule.RuleName] = rule.Severity
 				}
-				if issues := sqlreview.RunStaticChecks(sqlContent, ruleMap); len(issues) > 0 {
-					return []ticketReviewItem{buildValidationReviewItem(1, strings.TrimSpace(sqlContent), validationMethodStaticRule, nil, "create", "system", 0, issues)}
+				if rule := sqlreview.UnsupportedMySQLObjectRule(sqlContent); rule != "" && ruleMap[rule] {
+					issues := sqlreview.RunStaticChecks(sqlContent, map[string]bool{rule: true})
+					return []ticketReviewItem{buildValidationReviewItemWithStatus(1, strings.TrimSpace(sqlContent), validationMethodStaticRule, nil, "create", "system", 0, configuredReviewStatus(ruleSeverity[rule]), issues)}
 				}
 			}
 		}

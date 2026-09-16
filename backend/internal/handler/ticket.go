@@ -25,6 +25,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 	"github.com/dbre-maestro/maestro/internal/sqlpolicy"
+	"github.com/dbre-maestro/maestro/internal/sqlreview"
 	ticketsm "github.com/dbre-maestro/maestro/internal/ticket"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-sql-driver/mysql"
@@ -3040,9 +3041,13 @@ func (h *TicketHandler) ensureTicketExecutionRows(ctx context.Context, ticket *m
 	if ticket == nil || ticket.DBConnectionID == nil {
 		return fmt.Errorf("ticket has no target db_connection")
 	}
-	parsedStatements, _, err := h.parseTicketStatements(ctx, *ticket.DBConnectionID, ticket.SQLContent)
+	parsedStatements, dialect, err := h.parseTicketStatements(ctx, *ticket.DBConnectionID, ticket.SQLContent)
 	if err != nil {
-		return err
+		if dialect != sqlparse.DialectMySQL || sqlreview.UnsupportedMySQLObjectRule(ticket.SQLContent) == "" {
+			return err
+		}
+		rawSQL := strings.TrimSpace(ticket.SQLContent)
+		parsedStatements = []sqlparse.ParsedStatement{{Seq: 1, RawSQL: rawSQL, NormalizedSQL: rawSQL, Kind: sqlparse.StatementKindCreate}}
 	}
 	rows := make([]model.TicketExecution, 0, len(parsedStatements))
 	for _, parsedStatement := range parsedStatements {

@@ -195,6 +195,20 @@ func TestUnsupportedMySQLObjectRulesUseLeadingKeywords(t *testing.T) {
 	}
 }
 
+func TestUnsupportedMySQLObjectRuleIgnoresCommentsAndLiterals(t *testing.T) {
+	for _, test := range []struct {
+		sql, want string
+	}{
+		{sql: "CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW SET @x = 1", want: "prohibit_trigger"},
+		{sql: "SELECT 'CREATE EVENT cleanup'", want: ""},
+		{sql: "-- CREATE FUNCTION f\nSELECT 1", want: ""},
+	} {
+		if got := UnsupportedMySQLObjectRule(test.sql); got != test.want {
+			t.Fatalf("UnsupportedMySQLObjectRule(%q) = %q, want %q", test.sql, got, test.want)
+		}
+	}
+}
+
 func TestReservedColumnRuleAllowsOrdinaryColumnNames(t *testing.T) {
 	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "CREATE TABLE t (id BIGINT, display_name VARCHAR(64)) ENGINE=InnoDB")
 	if err != nil {
