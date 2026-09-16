@@ -119,7 +119,7 @@ func RunStaticChecks(sqlStr string, ruleMap map[string]bool) []string {
 	}
 	for rule, objectType := range prohibited {
 		if ruleMap[rule] && declaration == "CREATE "+objectType {
-			issues = append(issues, "Creating MySQL "+objectType+" objects is prohibited")
+			issues = append(issues, "禁止建立 MySQL "+objectType)
 		}
 	}
 	return issues
@@ -233,12 +233,12 @@ func runMySQLStaticChecks(stmt sqlparse.ParsedStatement, astNode tidbast.StmtNod
 	}
 	if ruleMap["prohibit_stored_procedure"] {
 		if _, ok := astNode.(*tidbast.ProcedureInfo); ok {
-			issues = append(issues, "Creating MySQL STORED PROCEDURE objects is prohibited")
+			issues = append(issues, "禁止建立 MySQL STORED PROCEDURE")
 		}
 	}
 	if ruleMap["prohibit_view"] {
 		if _, ok := astNode.(*tidbast.CreateViewStmt); ok {
-			issues = append(issues, "Creating MySQL VIEW objects is prohibited")
+			issues = append(issues, "禁止建立 MySQL VIEW")
 		}
 	}
 	if ruleMap["prohibit_reserved_column_name"] {
@@ -393,7 +393,7 @@ func checkProhibitReservedColumnNameAST(stmt tidbast.StmtNode) error {
 	for _, column := range createStmt.Cols {
 		name := strings.ToUpper(column.Name.Name.O)
 		if _, reserved := mysqlReservedWords[name]; reserved {
-			return fmt.Errorf("MySQL reserved word %q cannot be used as a column name", column.Name.Name.O)
+			return fmt.Errorf("禁止使用 MySQL 保留字 %q 作為欄位名稱", column.Name.Name.O)
 		}
 	}
 	return nil
