@@ -435,6 +435,47 @@ func TestPrepareMySQLShadowValidationUsesStatementSchemaForExistenceCheck(t *tes
 	}
 }
 
+func TestPrepareMySQLShadowValidationSupportsRenameTable(t *testing.T) {
+	// Regression test: RENAME TABLE ... TO ... previously fell through to the
+	// switch's default case ("unsupported DDL object for shadow validation")
+	// even though every other MySQL DDL helper in this file (existence checks,
+	// shadow clone targets, rewriteMySQLDDLForShadow) already handles
+	// *tidbast.RenameTableStmt.
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(`FROM information_schema\.TABLES`).
+		WithArgs("app", "t_old").
+		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(0))
+
+	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "RENAME TABLE t_old TO t_new")
+	if err != nil {
+		t.Fatalf("parse SQL: %v", err)
+	}
+
+	handler := &TicketHandler{}
+	var tableShadowDB string
+	var tableCleanup func()
+	tableShadowPrepared := false
+	_, _, prepErr, execErr := handler.prepareMySQLShadowValidation(
+		context.Background(), db, nil, parsed.Statements[0], "app",
+		nil, nil, &tableShadowDB, &tableCleanup, &tableShadowPrepared,
+	)
+	if prepErr != nil {
+		t.Fatalf("unexpected prepErr: %v", prepErr)
+	}
+	wantErr := `table "t_old" does not exist`
+	if execErr == nil || execErr.Error() != wantErr {
+		t.Fatalf("execErr = %v, want %q", execErr, wantErr)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestInferReviewObjectTypeReturnsTableForDML(t *testing.T) {
 	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "INSERT INTO sys_menu (id) SELECT id FROM sys_menu WHERE id = 1")
 	if err != nil {

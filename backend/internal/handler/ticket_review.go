@@ -613,7 +613,7 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 	target := ddlShadowTarget{objectType: inferDDLObjectType(stmt)}
 
 	switch stmt.AST.(type) {
-	case *tidbast.CreateTableStmt, *tidbast.AlterTableStmt, *tidbast.DropTableStmt, *tidbast.TruncateTableStmt:
+	case *tidbast.CreateTableStmt, *tidbast.AlterTableStmt, *tidbast.DropTableStmt, *tidbast.TruncateTableStmt, *tidbast.RenameTableStmt:
 		if selectedDatabase == "" {
 			return target, "", fmt.Errorf("database_name is required for table validation"), nil
 		}
