@@ -611,10 +611,6 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 	tableShadowPrepared *bool,
 ) (ddlShadowTarget, string, error, error) {
 	target := ddlShadowTarget{objectType: inferDDLObjectType(stmt)}
-	rewrittenSQL, explicitDatabase, needsClone, err := rewriteMySQLDDLForShadow(stmt, selectedDatabase)
-	if err != nil {
-		return target, "", err, nil
-	}
 
 	switch stmt.AST.(type) {
 	case *tidbast.CreateTableStmt, *tidbast.AlterTableStmt, *tidbast.DropTableStmt, *tidbast.TruncateTableStmt:
@@ -624,8 +620,11 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 		if tableShadowCloneErr != nil {
 			return target, "", tableShadowCloneErr, nil
 		}
+		// Existence check must run before any rewriteMySQLDDLForShadow call: that
+		// function mutates the shared AST's schema in place, which would make this
+		// check see selectedDatabase instead of the schema the SQL actually specifies.
 		if err := validateMySQLDDLTableExistence(ctx, readonlyDB, stmt, selectedDatabase); err != nil {
-			return target, rewrittenSQL, nil, err
+			return target, "", nil, err
 		}
 		if !*tableShadowPrepared {
 			shadowName, cleanup, err := cloneMySQLDatabaseTablesToShadow(ctx, readonlyDB, metaDB, selectedDatabase, tableShadowCloneTables)
@@ -636,7 +635,7 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 			*tableCleanup = cleanup
 			*tableShadowPrepared = true
 		}
-		rewrittenSQL, _, _, err = rewriteMySQLDDLForShadow(stmt, *tableShadowDB)
+		rewrittenSQL, _, _, err := rewriteMySQLDDLForShadow(stmt, *tableShadowDB)
 		if err != nil {
 			return target, "", err, nil
 		}
@@ -645,6 +644,10 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 		}
 		return target, rewrittenSQL, nil, nil
 	case *tidbast.AlterDatabaseStmt, *tidbast.DropDatabaseStmt:
+		_, explicitDatabase, _, err := rewriteMySQLDDLForShadow(stmt, selectedDatabase)
+		if err != nil {
+			return target, "", err, nil
+		}
 		sourceDatabase := explicitDatabase
 		if sourceDatabase == "" {
 			sourceDatabase = selectedDatabase
@@ -657,7 +660,7 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 			return target, "", err, nil
 		}
 		defer cleanup()
-		rewrittenSQL, _, _, err = rewriteMySQLDDLForShadow(stmt, shadowName)
+		rewrittenSQL, _, _, err := rewriteMySQLDDLForShadow(stmt, shadowName)
 		if err != nil {
 			return target, "", err, nil
 		}
@@ -666,6 +669,10 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 		}
 		return target, rewrittenSQL, nil, nil
 	case *tidbast.CreateDatabaseStmt:
+		_, explicitDatabase, _, err := rewriteMySQLDDLForShadow(stmt, selectedDatabase)
+		if err != nil {
+			return target, "", err, nil
+		}
 		if explicitDatabase == "" {
 			return target, "", fmt.Errorf("CREATE DATABASE target name is empty"), nil
 		}
@@ -677,7 +684,7 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 			return target, "", nil, fmt.Errorf("database %q already exists", explicitDatabase)
 		}
 		shadowName := generateShadowDatabaseName("shadow_create_db")
-		rewrittenSQL, _, _, err = rewriteMySQLDDLForShadow(stmt, shadowName)
+		rewrittenSQL, _, _, err := rewriteMySQLDDLForShadow(stmt, shadowName)
 		if err != nil {
 			return target, "", err, nil
 		}
@@ -686,9 +693,6 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 		}
 		return target, rewrittenSQL, nil, nil
 	default:
-		if needsClone {
-			return target, "", fmt.Errorf("unsupported DDL object for shadow validation"), nil
-		}
 		return target, "", fmt.Errorf("unsupported DDL object for shadow validation"), nil
 	}
 }

@@ -395,6 +395,46 @@ func TestValidateMySQLDDLTableExistence(t *testing.T) {
 	}
 }
 
+func TestPrepareMySQLShadowValidationUsesStatementSchemaForExistenceCheck(t *testing.T) {
+	// Regression test: ALTER TABLE explicitly qualifies the table with "other_db",
+	// while the ticket-level selected database is "app". The existence check must
+	// query information_schema against "other_db" (what the SQL actually says),
+	// not silently fall back to the ticket's selected database.
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(`FROM information_schema\.TABLES`).
+		WithArgs("other_db", "t").
+		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(0))
+
+	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "ALTER TABLE other_db.t DROP INDEX idx_a")
+	if err != nil {
+		t.Fatalf("parse SQL: %v", err)
+	}
+
+	handler := &TicketHandler{}
+	var tableShadowDB string
+	var tableCleanup func()
+	tableShadowPrepared := false
+	_, _, prepErr, execErr := handler.prepareMySQLShadowValidation(
+		context.Background(), db, nil, parsed.Statements[0], "app",
+		nil, nil, &tableShadowDB, &tableCleanup, &tableShadowPrepared,
+	)
+	if prepErr != nil {
+		t.Fatalf("unexpected prepErr: %v", prepErr)
+	}
+	wantErr := `table "t" does not exist`
+	if execErr == nil || execErr.Error() != wantErr {
+		t.Fatalf("execErr = %v, want %q", execErr, wantErr)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestInferReviewObjectTypeReturnsTableForDML(t *testing.T) {
 	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "INSERT INTO sys_menu (id) SELECT id FROM sys_menu WHERE id = 1")
 	if err != nil {
