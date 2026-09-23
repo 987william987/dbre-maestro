@@ -104,10 +104,12 @@ TO 'maestro_app'@'%';
 若要啟用 MySQL DDL shadow validation，DBA/SRE 需在帳號建置時預先授權 app user 建立 shadow schema 內的暫存物件：
 
 ```sql
-GRANT CREATE, ALTER, DROP
+GRANT CREATE, ALTER, DROP, INSERT
 ON `shadow\_%`.*
 TO 'maestro_app'@'%';
 ```
+
+`INSERT` 是 MySQL 對 `RENAME TABLE` / `ALTER TABLE ... RENAME TO ...` 的硬性要求（RENAME TABLE requires ALTER and DROP privileges on the original table, and CREATE and INSERT privileges on the new table）。漏掉這個權限時其他 DDL 審核不受影響，只有 RENAME 類語句會在 shadow validation 執行階段報 `INSERT command denied`，初次部署容易忽略，務必與 CREATE/ALTER/DROP 一併授權。
 
 Migration 帳號只負責 `maestro` schema migration，不負責管理其他帳號授權，也不需要 `WITH GRANT OPTION`：
 

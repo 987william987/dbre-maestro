@@ -137,12 +137,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE
 ON maestro.*
 TO 'maestro_app'@'%';
 
-GRANT CREATE, ALTER, DROP
+GRANT CREATE, ALTER, DROP, INSERT
 ON `shadow\_%`.*
 TO 'maestro_app'@'%';
 ```
 
-`maestro_app` 用於 `DB_DSN`。`shadow_%` 權限供 MySQL DDL shadow validation 使用；這個授權由 DBA/SRE 預先配置，不由 migration 管理。
+`maestro_app` 用於 `DB_DSN`。`shadow_%` 權限供 MySQL DDL shadow validation 使用；這個授權由 DBA/SRE 預先配置，不由 migration 管理。`INSERT` 是 MySQL 對 `RENAME TABLE` / `ALTER TABLE ... RENAME TO ...` 的硬性要求（官方文件：RENAME TABLE requires ALTER and DROP privileges on the original table, and CREATE and INSERT privileges on the new table），漏掉這個權限時其他 DDL（ADD COLUMN、DROP INDEX 等）審核都正常，只有 RENAME 類語句會在 shadow validation 執行階段報 `INSERT command denied`，初次部署很容易忽略。
 
 ```sql
 CREATE USER 'maestro_migration'@'%' IDENTIFIED BY '<migration_password>';
