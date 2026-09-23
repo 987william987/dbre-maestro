@@ -52,7 +52,7 @@
 
 ## Redirect 與 Guard 覆蓋
 
-`/`、`/sql-review-rules`、`/settings` 與 catch-all route 是導向行為，不套用 page component 標準，但仍須各有 route integration test。目前 `app/router/guards.test.tsx` 已覆蓋登入與權限 guard；上述四個 redirect 尚待補測。`AppShell.test.tsx` 驗證導覽呈現與 route 切換，不取代上表的頁面測試。
+`/`、`/sql-review-rules`、`/settings` 與 catch-all route 是導向行為，不套用 page component 標準；其目的路徑由 `AppRedirects.test.tsx` 覆蓋。`app/router/guards.test.tsx` 覆蓋登入與權限 guard。`AppShell.test.tsx` 驗證導覽呈現與 route 切換，不取代上表的頁面測試。
 
 ## 維護規則
 
