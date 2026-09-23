@@ -6,39 +6,48 @@ import { SQLEditorPage } from '@/modules/sql-editor/pages/SQLEditorPage'
 import { clearSQLEditorWorkspaceSnapshot, getSQLEditorWorkspaceSnapshot } from '@/modules/sql-editor/workspaceMemory'
 import { ApiError } from '@/shared/api/client'
 
+const { captureCodeMirrorProps } = vi.hoisted(() => ({
+  captureCodeMirrorProps: vi.fn(),
+}))
+
 vi.mock('@uiw/react-codemirror', () => ({
-  default: ({
-    value,
-    onChange,
-    onStatistics,
-  }: {
+  default: (props: {
     value: string
+    extensions?: unknown[]
     onChange: (value: string) => void
     onStatistics?: (stats: { selectedText: boolean; selectionCode: string }) => void
-  }) => (
-    <textarea
-      aria-label="CodeMirror"
-      value={value}
-      onChange={(event) => {
-        onChange(event.target.value)
-        const selectionStart = event.target.selectionStart ?? 0
-        const selectionEnd = event.target.selectionEnd ?? 0
-        onStatistics?.({
-          selectedText: selectionEnd > selectionStart,
-          selectionCode: event.target.value.slice(selectionStart, selectionEnd),
-        })
-      }}
-      onSelect={(event) => {
-        const target = event.target as HTMLTextAreaElement
-        const selectionStart = target.selectionStart ?? 0
-        const selectionEnd = target.selectionEnd ?? 0
-        onStatistics?.({
-          selectedText: selectionEnd > selectionStart,
-          selectionCode: target.value.slice(selectionStart, selectionEnd),
-        })
-      }}
-    />
-  ),
+  }) => {
+    captureCodeMirrorProps(props)
+    const {
+      value,
+      onChange,
+      onStatistics,
+    } = props
+    return (
+      <textarea
+        aria-label="CodeMirror"
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value)
+          const selectionStart = event.target.selectionStart ?? 0
+          const selectionEnd = event.target.selectionEnd ?? 0
+          onStatistics?.({
+            selectedText: selectionEnd > selectionStart,
+            selectionCode: event.target.value.slice(selectionStart, selectionEnd),
+          })
+        }}
+        onSelect={(event) => {
+          const target = event.target as HTMLTextAreaElement
+          const selectionStart = target.selectionStart ?? 0
+          const selectionEnd = target.selectionEnd ?? 0
+          onStatistics?.({
+            selectedText: selectionEnd > selectionStart,
+            selectionCode: target.value.slice(selectionStart, selectionEnd),
+          })
+        }}
+      />
+    )
+  },
 }))
 
 vi.mock('@/shared/auth/AuthContext', () => ({
@@ -241,6 +250,25 @@ describe('SQLEditorPage', () => {
       updated_at: '2026-06-11T00:00:00Z',
     })
     mockedDeleteSavedQuery.mockResolvedValue(undefined)
+  })
+
+  it('父層重新 render 時保持 CodeMirror extensions identity，避免 editor update loop', async () => {
+    const renderPage = () => (
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>
+    )
+    const { rerender } = render(renderPage())
+
+    await screen.findByRole('button', { name: 'Run' })
+    const extensionsBeforeRerender = captureCodeMirrorProps.mock.lastCall?.[0].extensions
+    expect(extensionsBeforeRerender).toBeDefined()
+
+    rerender(renderPage())
+
+    expect(captureCodeMirrorProps.mock.lastCall?.[0].extensions).toBe(extensionsBeforeRerender)
   })
 
   it('read-only 模式不載入需要 query 權限的資料', async () => {

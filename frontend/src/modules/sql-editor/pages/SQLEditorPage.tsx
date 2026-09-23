@@ -2566,43 +2566,56 @@ export function SQLEditorPage() {
     },
     [activeColumns, activeConnection, activeSchema, activeSelectedTable, sqlCompletionSchema, sqlCompletionTables],
   )
-  const editorExtensions = [
-    ...(activeConnection?.db_type === 'redis' ? REDIS_EDITOR_EXTENSIONS : [sqlEditorSupport]),
-    Prec.highest(
-      keymap.of([
-        {
-          key: 'Mod-Enter',
-          run: () => {
-            if (activeTabRunning || !activeTab?.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())) {
+  const editorActionHandlersRef = useRef({
+    run: handleRunQuery,
+    explain: handleExplainQuery,
+    format: handleFormatSQL,
+  })
+  editorActionHandlersRef.current = {
+    run: handleRunQuery,
+    explain: handleExplainQuery,
+    format: handleFormatSQL,
+  }
+  const editorExtensions = useMemo(
+    () => [
+      ...(activeConnection?.db_type === 'redis' ? REDIS_EDITOR_EXTENSIONS : [sqlEditorSupport]),
+      Prec.highest(
+        keymap.of([
+          {
+            key: 'Mod-Enter',
+            run: () => {
+              if (activeTabRunning || !activeTab?.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())) {
+                return true
+              }
+              void editorActionHandlersRef.current.run()
               return true
-            }
-            void handleRunQuery()
-            return true
+            },
           },
-        },
-        {
-          key: 'Mod-e',
-          run: () => {
-            if (activeTabRunning || !activeTab?.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())) {
+          {
+            key: 'Mod-e',
+            run: () => {
+              if (activeTabRunning || !activeTab?.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())) {
+                return true
+              }
+              void editorActionHandlersRef.current.explain()
               return true
-            }
-            void handleExplainQuery()
-            return true
+            },
           },
-        },
-        {
-          key: 'Mod-Shift-f',
-          run: () => {
-            if (!activeTab?.sql.trim()) {
+          {
+            key: 'Mod-Shift-f',
+            run: () => {
+              if (!activeTab?.sql.trim()) {
+                return true
+              }
+              editorActionHandlersRef.current.format()
               return true
-            }
-            handleFormatSQL()
-            return true
+            },
           },
-        },
-      ]),
-    ),
-  ]
+        ]),
+      ),
+    ],
+    [activeConnection?.db_type, activeSelectedSQL, activeTab, activeTabRunning, sqlEditorSupport],
+  )
   const handleEditorChange = useCallback((value: string) => {
     updateActiveTab({ sql: value })
   }, [updateActiveTab])
