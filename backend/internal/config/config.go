@@ -34,6 +34,7 @@ type Config struct {
 	OIDCSSO                   OIDCSSOConfig
 	OIDCBearer                OIDCBearerConfig
 	PoolProfiles              map[pool.Profile]pool.ProfileConfig
+	ShadowReadonlyPoolEnabled bool
 	DBConnectionHostPolicy    netguard.Config
 }
 
@@ -122,6 +123,13 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("AWS_SM_ENABLE must be a boolean: %w", err)
 		}
 		c.AWSSecretsManagerEnabled = enabled
+	}
+	if raw := os.Getenv("DB_SHADOW_READONLY_POOL_ENABLED"); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("DB_SHADOW_READONLY_POOL_ENABLED must be a boolean: %w", err)
+		}
+		c.ShadowReadonlyPoolEnabled = enabled
 	}
 
 	jwtSecret := os.Getenv("JWT_SECRET")

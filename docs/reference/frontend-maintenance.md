@@ -63,7 +63,7 @@ SSE 使用 `openEventStream`，目前支援：
 4. 在 `frontend/src/App.tsx` 加 lazy import 與 route。
 5. 用 `RoleRoute` 指定頁面 permission。
 6. 在 AppShell 導覽中加入入口。
-7. 補 test，至少覆蓋權限 guard、主要互動或格式化邏輯。
+7. 依 [前端 Routed Page 測試覆蓋](frontend-routed-page-test-coverage.md) 指定頁面風險等級並補齊最低整合測試。
 
 ## 權限顯示規則
 
@@ -109,6 +109,8 @@ repo root 也提供：
 make test-frontend
 ```
 
+每個 route 的 page component 覆蓋狀態、最低測試標準與測試清理原則，見 [前端 Routed Page 測試覆蓋](frontend-routed-page-test-coverage.md)。
+
 ## 新增前端功能檢查表
 
 - route 是否在 `App.tsx` 註冊
@@ -119,4 +121,3 @@ make test-frontend
 - 長文字、長 SQL、長 instance name 是否不破壞版面
 - mutation 成功後是否刷新列表或更新 local state
 - 是否需要 SSE 即時更新
-

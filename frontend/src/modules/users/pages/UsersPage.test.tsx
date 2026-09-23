@@ -940,4 +940,25 @@ describe('UsersPage', () => {
     expect(screen.getByRole('option', { name: '0' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: '15' })).toBeInTheDocument()
   })
+
+  it('Query Access rule 建立失敗時保留表單並顯示錯誤', async () => {
+    mockedListUsers.mockResolvedValue({ users: [{
+      id: 2, username: 'fly', email: 'fly@example.com', lark_recipient: '', auth_groups: ['developer'],
+      db_connection_ids: [12], protected: false, is_active: true,
+      created_at: '2026-06-10T00:00:00Z', updated_at: '2026-06-10T00:00:00Z',
+    }] })
+    mockedListUserDBConnections.mockResolvedValue({ connections: [{
+      id: 12, name: 'orders-prod', db_type: 'mysql', host: 'db.internal', port: 3306, username: 'reader',
+      encryption_key_version: 1, ssl_mode: 'prefer', created_by: 1,
+      created_at: '2026-06-10T00:00:00Z', updated_at: '2026-06-10T00:00:00Z',
+    }] })
+    mockedCreateQueryAccessRule.mockRejectedValue(new Error('offline'))
+    render(<MemoryRouter><ToastProvider><UsersPage initialView="query-access" /></ToastProvider></MemoryRouter>)
+    expect(await screen.findByText('Manual Query Access Rule')).toBeInTheDocument()
+    selectOption('Query Access Subject', 'fly')
+    selectOption('Query Access DB Connection', 'orders-prod')
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(await screen.findByText('Failed to save query access rule.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Query Access Subject' })).toHaveTextContent('fly')
+  })
 })

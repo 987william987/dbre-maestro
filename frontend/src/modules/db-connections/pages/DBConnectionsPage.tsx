@@ -510,7 +510,12 @@ export function DBConnectionsPage() {
               ) : (
                 <div className="grid gap-4">
                   <CardSection title="Connection Profile" icon={<ServerCog className="h-4 w-4 text-accent" />}>
-                    <form className="grid gap-3" onSubmit={handleSubmit}>
+                    <form
+                      className="grid gap-3"
+                      onSubmit={(event) => {
+                        void handleSubmit(event)
+                      }}
+                    >
                       <label className="grid gap-1.5 text-[12px] font-medium text-muted">
                         Name
                         <input

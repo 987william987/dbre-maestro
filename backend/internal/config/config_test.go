@@ -332,6 +332,27 @@ func TestLoadOverridesPoolProfilesFromEnv(t *testing.T) {
 	}
 }
 
+func TestLoadShadowReadonlyPoolFeatureFlag(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("DB_SHADOW_READONLY_POOL_ENABLED", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.ShadowReadonlyPoolEnabled {
+		t.Fatal("ShadowReadonlyPoolEnabled = false, want true")
+	}
+}
+
+func TestLoadRejectsInvalidShadowReadonlyPoolFeatureFlag(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("DB_SHADOW_READONLY_POOL_ENABLED", "sometimes")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted invalid DB_SHADOW_READONLY_POOL_ENABLED")
+	}
+}
+
 func TestLoadOIDCBearerKeepsIssuerVerbatim(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("SSO_OIDC_BEARER_ISSUER_URL", " https://idp.example.com/application/o/edgex-cli/ ")

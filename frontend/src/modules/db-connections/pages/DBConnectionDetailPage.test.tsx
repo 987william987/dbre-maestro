@@ -66,4 +66,13 @@ describe('DBConnectionDetailPage', () => {
     expect(await screen.findByText('orders-primary')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Accounts' })).not.toBeInTheDocument()
   })
+
+  it.each([
+    ['databases', listDBConnectionDatabases],
+    ['accounts', listDBConnectionAccounts],
+  ] as const)('%s view 顯示 API 載入失敗', async (view, request) => {
+    vi.mocked(request).mockRejectedValue(new Error('offline'))
+    renderPage(view)
+    expect(await screen.findByText('Failed to load database connection details.')).toBeInTheDocument()
+  })
 })

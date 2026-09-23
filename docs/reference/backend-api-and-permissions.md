@@ -88,20 +88,25 @@
 
 | API | Gate | 備註 |
 |---|---|---|
-| `GET /api/tickets` | `requireTicketsWorkspaceRead` | 實際結果仍受 ticket access 控制 |
-| `GET /api/tickets/{id}` | `requireTicketsWorkspaceRead` | 同上 |
+| `GET /api/tickets` | `requireTicketsRead` | 實際結果仍受 ticket access 控制 |
+| `GET /api/tickets/workflow-dashboard-summary` | `requireTicketsRead` | 回傳目前使用者可見的 workflow dashboard 聚合資料 |
+| `GET /api/tickets/{id}` | `requireTicketsRead` | 實際結果仍受 ticket access 控制 |
 | `GET /api/tickets/connections` | `requireTicketsApply` | DB 清單再受 DB Scope 過濾 |
 | `GET /api/tickets/connections/{id}/databases` | `requireTicketsApply` | 目標 DB 或 Redis DB index 選單 |
 | `POST /api/tickets/review` | `requireTicketsApply` | SQL / Redis review、parser、policy、validation |
+| `POST /api/tickets/retry-workflow-resolution-batch` | `requireSettingsWrite` | 批次重試需要管理員處理的 workflow resolution |
 | `POST /api/tickets` | `requireTicketsApply` | 建立 DDL / DML / Redis / Query Access 工單；不接受 `sql_export` 與 `sensitive_query_access` |
 | `POST /api/tickets/{id}/approve` | `requireTicketWorkflowReview` | 依 ticket type 二次檢查 reviewer 權限 |
 | `POST /api/tickets/{id}/reject` | `requireTicketWorkflowReject` | reviewer 可拒絕；DDL / DML / Redis 的 DBA 也可於 `approved` / `pending_execution` 階段拒絕 |
 | `POST /api/tickets/{id}/withdraw` | `requireTicketsApply` | 僅 submitter 可於 `pending_review` 收回 |
 | `POST /api/tickets/{id}/execute` | `requireTicketsExecute` | 只適用 DDL / DML / Redis |
 | `POST /api/tickets/{id}/stop` | `requireTicketsExecute` | 停止執行中 ticket |
+| `POST /api/tickets/{id}/executions/{executionID}/execute` | `requireTicketsExecute` | 執行單一 statement；handler 仍會檢查 executor eligibility |
+| `POST /api/tickets/{id}/executions/{executionID}/stop` | `requireTicketsExecute` | 停止單一執行中的 statement；handler 仍會檢查 executor eligibility |
 | `GET /api/tickets/{id}/rollbacks/preview` | `requireTicketsApply` | 預覽已產生的 MySQL DML rollback SQL |
 | `POST /api/tickets/{id}/rollbacks/create-ticket` | `requireTicketsApply` | 用選定 rollback SQL 建立新的 DML ticket |
 | `POST /api/tickets/{id}/rollbacks/{rollbackID}/create-ticket` | `requireTicketsApply` | legacy 單筆 rollback ticket 建立 API |
+| `POST /api/tickets/{id}/retry-workflow-resolution` | `requireSettingsWrite` | 重試單一需要管理員處理的 workflow resolution |
 | `POST /api/tickets/{id}/revoke` | `requireSensitiveReview` | 只適用 sensitive access |
 
 ### SQL Editor / Query
@@ -111,6 +116,7 @@
 | `GET /api/query/connections` | `requireSQLEditorQuery` | 回傳使用者可用 DB connections |
 | `GET /api/query/constraints` | `requireSQLEditorRead` | 回傳 limit / timeout 約束，供 SQL Editor 初始 UI 使用 |
 | `POST /api/query` | `requireSQLEditorQuery` | 單 statement 唯讀查詢 |
+| `POST /api/query/cancel` | `requireSQLEditorQuery` | 取消目前使用者以 `query_execution_id` 識別的查詢 |
 | `POST /api/query/admin/activate` | `requireSQLEditorAdmin` | 啟用當次管理員 console session，檢查 DB Scope 並記錄 audit |
 | `POST /api/query/admin/execute` | `requireSQLEditorAdmin` | 以 readwrite endpoint / credential 執行單一 SQL statement 或 Redis command |
 | `POST /api/query/sensitive-access` | `requireSQLEditorSensitiveApply` | 建立 sensitive query access 工單 |
@@ -124,6 +130,7 @@
 | API | Gate |
 |---|---|
 | `GET /api/db-connections/{id}/metadata` | `requireSQLEditorQuery` |
+| `GET /api/db-connections/{id}/metadata/search-index` | `requireSQLEditorQuery` |
 | `GET /api/db-connections/{id}/metadata/{schema}/{table}/columns` | `requireSQLEditorQuery` |
 | `GET /api/db-connections/{id}/metadata/{schema}/{table}/definition` | `requireSQLEditorQuery` |
 
@@ -139,13 +146,13 @@
 
 | API | Gate | 備註 |
 |---|---|---|
-| `GET /api/scheduled-sql-reports` | `scheduled_sql_reports.read` | report 列表 |
-| `GET /api/scheduled-sql-reports/{id}` | `scheduled_sql_reports.read` | report 詳情與 run history |
-| `GET /api/scheduled-sql-reports/connections` | `scheduled_sql_reports.read` | 可用 DB connections，仍受 DB Scope 過濾 |
-| `GET /api/scheduled-sql-reports/recipients` | `scheduled_sql_reports.read` | 可選 Lark recipients |
-| `POST /api/scheduled-sql-reports` | `scheduled_sql_reports.write` | 建立 report，會檢查 query access 與敏感欄位 |
-| `PATCH /api/scheduled-sql-reports/{id}` | `scheduled_sql_reports.write` | 更新 report，會重新檢查 query access 與敏感欄位 |
-| `DELETE /api/scheduled-sql-reports/{id}` | `scheduled_sql_reports.write` | 刪除 report |
+| `GET /api/scheduled-sql-reports` | `requireScheduledSQLReportsRead` | report 列表；read 或 write permission 均可使用 |
+| `GET /api/scheduled-sql-reports/{id}` | `requireScheduledSQLReportsRead` | report 詳情與 run history；read 或 write permission 均可使用 |
+| `GET /api/scheduled-sql-reports/connections` | `requireScheduledSQLReportsRead` | 可用 DB connections，仍受 DB Scope 過濾 |
+| `GET /api/scheduled-sql-reports/recipients` | `requireScheduledSQLReportsRead` | 可選 Lark recipients |
+| `POST /api/scheduled-sql-reports` | `requireScheduledSQLReportsWrite` | 建立 report，會檢查 query access 與敏感欄位 |
+| `PATCH /api/scheduled-sql-reports/{id}` | `requireScheduledSQLReportsWrite` | 更新 report，會重新檢查 query access 與敏感欄位 |
+| `DELETE /api/scheduled-sql-reports/{id}` | `requireScheduledSQLReportsWrite` | 刪除 report |
 
 ### DB Connections
 
@@ -173,6 +180,10 @@
 
 | API | Gate |
 |---|---|
+| `GET /api/masking-rules/redis-prefixes` | `requireMaskingRulesRead` |
+| `POST /api/masking-rules/redis-prefixes` | `requireMaskingRulesWrite` |
+| `PATCH /api/masking-rules/redis-prefixes/{id}` | `requireMaskingRulesWrite` |
+| `DELETE /api/masking-rules/redis-prefixes/{id}` | `requireMaskingRulesWrite` |
 | `GET /api/masking-rules` | `requireMaskingRulesRead` |
 | `POST /api/masking-rules` | `requireMaskingRulesWrite` |
 | `PATCH /api/masking-rules/{id}` | `requireMaskingRulesWrite` |
@@ -200,6 +211,7 @@
 | `GET /api/users/db-connections` | `requireUsersRead` |
 | `GET /api/users/query-access-rules` | `requireUsersRead` |
 | `POST /api/users/query-access-rules` | `requireUsersWrite` |
+| `PUT /api/users/query-access-rules/{id}` | `requireUsersWrite` |
 | `POST /api/users/query-access-rules/{id}/revoke` | `requireUsersWrite` |
 | `POST /api/users` | `requireUsersWrite` |
 | `GET /api/users/{id}` | `requireUsersRead` |
@@ -233,6 +245,7 @@
 | `GET /api/audit-logs/export` | `requireAuditLogsWrite` |
 | `GET /api/settings` | `requireSettingsRead` |
 | `GET /api/settings/db-connections` | `requireSettingsRead` |
+| `GET /api/settings/users` | `requireSettingsRead` |
 | `GET /api/settings/approval-resolution` | `requireSettingsRead` |
 | `GET /api/settings/workflow-rules` | `requireSettingsRead` |
 | `PUT /api/settings/workflow-rules` | `requireSettingsWrite` |
@@ -241,6 +254,7 @@
 | `POST /api/settings/workflow-rules/simulate` | `requireSettingsRead` |
 | `PATCH /api/settings` | `requireSettingsWrite` |
 | `GET /api/notifications` | 已登入 |
+| `GET /api/notifications/summary` | 已登入 |
 | `POST /api/notifications/read-all` | 已登入 |
 | `POST /api/notifications/{id}/read` | 已登入 |
 | `GET /api/events/stream` | 已登入 + active |

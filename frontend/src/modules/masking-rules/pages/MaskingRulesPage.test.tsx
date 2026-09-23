@@ -169,6 +169,22 @@ describe('MaskingRulesPage', () => {
     })
   })
 
+  it('顯示 masking settings 載入失敗', async () => {
+    mockedListMaskingRules.mockRejectedValue(new Error('offline'))
+    renderPage()
+    expect(await screen.findByText('Failed to load masking settings.')).toBeInTheDocument()
+  })
+
+  it('建立 global rule 失敗時保留 drawer 並顯示錯誤', async () => {
+    mockedCreateMaskingRule.mockRejectedValue(new Error('save failed'))
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'New Rule' }))
+    fireEvent.change(screen.getByLabelText('Column Pattern'), { target: { value: 'email' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create Rule' }))
+    expect(await screen.findByText('save failed')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'New Rule' })).toBeInTheDocument()
+  })
+
   it('creates a Redis sensitive key prefix', async () => {
     mockedListRedisSensitiveKeyPrefixes
       .mockResolvedValueOnce({ prefixes: [] })

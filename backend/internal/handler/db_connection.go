@@ -495,6 +495,7 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pool.Global().Invalidate(id)
+	pool.ShadowValidationPools().Invalidate(id)
 	pool.RedisGlobal().Invalidate(id)
 
 	userID := middleware.UserIDFromCtx(r.Context())
@@ -923,6 +924,7 @@ func (h *DBConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pool.Global().Invalidate(id)
+	pool.ShadowValidationPools().Invalidate(id)
 	pool.RedisGlobal().Invalidate(id)
 
 	details := auditConnectionDetails(conn)

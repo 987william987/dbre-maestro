@@ -73,22 +73,6 @@ func (r *ExportRepo) GetByTicketID(ctx context.Context, ticketID uint64) (*model
 	return &req, err
 }
 
-// List returns export requests. If requesterID is nil, returns all (DBA/Admin view).
-func (r *ExportRepo) List(ctx context.Context, requesterID *uint64) ([]model.ExportRequest, error) {
-	var exports []model.ExportRequest
-	if requesterID == nil {
-		err := r.db.SelectContext(ctx, &exports,
-			`SELECT * FROM export_requests ORDER BY created_at DESC LIMIT 200`,
-		)
-		return exports, err
-	}
-	err := r.db.SelectContext(ctx, &exports,
-		`SELECT * FROM export_requests WHERE requester_id = ? ORDER BY created_at DESC`,
-		*requesterID,
-	)
-	return exports, err
-}
-
 // UpdateStatus updates the status and optionally sets the approver.
 func (r *ExportRepo) UpdateStatus(ctx context.Context, id uint64, status model.ExportStatus, approverID *uint64) error {
 	_, err := r.db.ExecContext(ctx,

@@ -104,10 +104,12 @@ TO 'maestro_app'@'%';
 若要啟用 MySQL DDL shadow validation，DBA/SRE 需在帳號建置時預先授權 app user 建立 shadow schema 內的暫存物件：
 
 ```sql
-GRANT CREATE, ALTER, DROP
+GRANT CREATE, ALTER, DROP, INSERT
 ON `shadow\_%`.*
 TO 'maestro_app'@'%';
 ```
+
+`INSERT` 是 MySQL 對 `RENAME TABLE` / `ALTER TABLE ... RENAME TO ...` 的硬性要求（RENAME TABLE requires ALTER and DROP privileges on the original table, and CREATE and INSERT privileges on the new table）。漏掉這個權限時其他 DDL 審核不受影響，只有 RENAME 類語句會在 shadow validation 執行階段報 `INSERT command denied`，初次部署容易忽略，務必與 CREATE/ALTER/DROP 一併授權。
 
 Migration 帳號只負責 `maestro` schema migration，不負責管理其他帳號授權，也不需要 `WITH GRANT OPTION`：
 
@@ -182,6 +184,8 @@ TO 'maestro_migration'@'%';
 | `DB_POOL_SHADOW_VALIDATION_MAX_IDLE` | `1` |
 | `DB_POOL_SHADOW_VALIDATION_CONN_MAX_LIFETIME` | `2m` |
 | `DB_POOL_SHADOW_VALIDATION_CONN_MAX_IDLE_TIME` | `1m` |
+
+`DB_SHADOW_READONLY_POOL_ENABLED` 預設為 `false`。設為 `true` 時，MySQL DDL shadow validation 會依 DB connection 與 readonly credential 重用來源連線；不影響 SQL Editor、Metadata、Export 或工單正式執行使用的 pool。
 
 ## Compose 的實際行為
 
@@ -262,10 +266,56 @@ Compose 會：
 若要在本機驗證 inventory scan：
 
 1. 在主機上配置好 AWS CLI profile
-2. `export AWS_PROFILE=your-profile`
+2. 在根目錄 `.env` 設定 `AWS_PROFILE=your-profile`，或用 shell environment 單次覆寫
 3. 執行 `make dev`
 
-Compose 會把 `${HOME}/.aws` 掛到 container，因此 app 可以沿用本機 profile。
+Compose 會把 `${HOME}/.aws` 以唯讀方式掛到 container，因此 app 可以沿用本機 profile。若 profile 使用 AWS SSO，啟動前先在主機執行：
+
+```bash
+aws sso login --profile your-profile
+```
+
+`.env` 適合固定使用同一個 profile：
+
+```dotenv
+AWS_PROFILE=your-profile
+```
+
+單次覆寫可直接執行：
+
+```bash
+AWS_PROFILE=your-profile make dev
+```
+
+Shell environment 的值優先於 `.env`。本機不要把長期 AWS access key 寫入 `.env`；EKS 應使用 IRSA，不掛載人工 profile。
+
+### SSO profile 與 static credentials 衝突
+
+同一個 profile 不應同時出現在：
+
+- `~/.aws/config` 的 SSO profile
+- `~/.aws/credentials` 的 static credentials section
+
+AWS CLI 與 Go AWS SDK 的 credential provider precedence 可能不同。AWS CLI 可能成功使用 SSO，但 Go SDK 優先讀到同名的過期 static credentials，導致 Inventory Sync 回傳：
+
+```text
+InvalidClientTokenId: The security token included in the request is invalid
+```
+
+先確認 profile 在 host 上可用：
+
+```bash
+aws sts get-caller-identity --profile your-profile
+aws rds describe-db-clusters --profile your-profile --region ap-northeast-1 --max-items 1
+```
+
+若 CLI 成功但 app 仍回 `InvalidClientTokenId`，備份 `~/.aws/credentials`，移除其中與 SSO profile 同名的 stale static credentials section，再重新登入：
+
+```bash
+aws sso login --profile your-profile
+```
+
+Inventory job 每次執行都會重新載入 AWS config，下一次排程即可使用新的 SSO credentials。若要立即確認 container 設定仍正確，可選擇執行 `docker compose up -d --force-recreate app`；不需要重新 build image。
 
 ## Lark 通知與 OAuth 設定建議
 

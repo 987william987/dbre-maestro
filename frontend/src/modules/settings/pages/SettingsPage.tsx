@@ -158,14 +158,16 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
     }
   }, [])
 
+  const workflowRules = form?.workflowRules
+
   useEffect(() => {
-    if (!form || form.workflowRules.length === 0) {
+    if (!workflowRules || workflowRules.length === 0) {
       setWorkflowPreviews([])
       return
     }
     let active = true
     const timer = window.setTimeout(() => {
-      previewWorkflowRules(form.workflowRules)
+      previewWorkflowRules(workflowRules)
         .then((response) => {
           if (active) {
             setWorkflowPreviews(response.previews)
@@ -181,7 +183,7 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
       active = false
       window.clearTimeout(timer)
     }
-  }, [form?.workflowRules])
+  }, [workflowRules])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -261,7 +263,12 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
       {loading || !form ? (
         <LoadingBlock message="Loading platform settings..." className="min-h-[320px] rounded-xl border-border bg-panel" />
       ) : (
-        <form onSubmit={handleSubmit} className="grid gap-3">
+        <form
+          onSubmit={(event) => {
+            void handleSubmit(event)
+          }}
+          className="grid gap-3"
+        >
           <fieldset disabled={!canWrite || saving} className="grid gap-3 disabled:opacity-100">
           <section className={`${section === 'workflow' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">

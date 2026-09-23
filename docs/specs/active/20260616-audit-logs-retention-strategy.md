@@ -28,7 +28,7 @@ tthw_ms:
 - migration / schema 維護成本增加
 - 未來難以在不停機前提下做歷史資料治理
 
-`TODOS.md` 裡唯一仍未完成的 `TE9` 就是這件事，因此收斂成獨立 active spec。
+舊版工程待辦裡唯一仍未完成的 `TE9` 就是這件事，因此收斂成獨立 active spec。
 
 ## Current State
 

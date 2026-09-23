@@ -40,6 +40,22 @@ describe('SQLReviewRulesPage', () => {
     })
   })
 
+  it('顯示 SQL review rules 載入失敗', async () => {
+    mockedListSQLReviewRules.mockRejectedValue(new Error('offline'))
+    render(<MemoryRouter><ToastProvider><SQLReviewRulesPage /></ToastProvider></MemoryRouter>)
+    expect(await screen.findByText('Failed to load SQL review rules.')).toBeInTheDocument()
+  })
+
+  it('更新 rule 失敗時顯示錯誤並保留修改值', async () => {
+    mockedPatchSQLReviewRule.mockRejectedValue(new Error('offline'))
+    render(<MemoryRouter><ToastProvider><SQLReviewRulesPage /></ToastProvider></MemoryRouter>)
+    expect(await screen.findByText('high_row_count')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('Row limit'), { target: { value: '5000' } })
+    fireEvent.click(screen.getByText('Save'))
+    expect(await screen.findByText('Failed to update the SQL review rule.')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('5000')).toBeInTheDocument()
+  })
+
   it('updates a SQL review rule', async () => {
     mockedPatchSQLReviewRule.mockResolvedValue({
       id: 1,

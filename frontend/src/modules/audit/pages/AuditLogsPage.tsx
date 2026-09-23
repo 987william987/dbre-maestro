@@ -137,32 +137,32 @@ export function AuditLogsPage() {
   const query = useMemo(() => ({ filters, offset }), [filters, offset])
   const debouncedQuery = useDebouncedValue(query, 300)
 
-  async function loadLogs(nextFilters: typeof filters, nextOffset: number) {
-    setLoading(true)
-    setError('')
-    const resourceFilter = resolveResourceFilter(nextFilters.resourceType, nextFilters.resourceKeyword)
-    try {
-      const response = await listAuditLogs({
-        actionType: nextFilters.actionType,
-        actorName: nextFilters.actorKeyword.trim(),
-        resourceType: resourceFilter.resourceType,
-        resourceName: resourceFilter.resourceName,
-        from: toRFC3339(nextFilters.from),
-        to: toRFC3339(nextFilters.to),
-        offset: nextOffset,
-        limit: PAGE_SIZE,
-      })
-      setLogs(response.logs)
-      setTotal(response.total)
-    } catch (loadError) {
-      setError(loadError instanceof ApiError ? loadError.message : 'Failed to load audit logs.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
-    void loadLogs(debouncedQuery.filters, debouncedQuery.offset)
+    async function loadLogs() {
+      setLoading(true)
+      setError('')
+      const resourceFilter = resolveResourceFilter(debouncedQuery.filters.resourceType, debouncedQuery.filters.resourceKeyword)
+      try {
+        const response = await listAuditLogs({
+          actionType: debouncedQuery.filters.actionType,
+          actorName: debouncedQuery.filters.actorKeyword.trim(),
+          resourceType: resourceFilter.resourceType,
+          resourceName: resourceFilter.resourceName,
+          from: toRFC3339(debouncedQuery.filters.from),
+          to: toRFC3339(debouncedQuery.filters.to),
+          offset: debouncedQuery.offset,
+          limit: PAGE_SIZE,
+        })
+        setLogs(response.logs)
+        setTotal(response.total)
+      } catch (loadError) {
+        setError(loadError instanceof ApiError ? loadError.message : 'Failed to load audit logs.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    void loadLogs()
   }, [debouncedQuery])
 
   function updateFilters(patch: Partial<typeof filters>) {
@@ -267,7 +267,9 @@ export function AuditLogsPage() {
             {canExport ? (
               <button
                 type="button"
-                onClick={handleExport}
+                onClick={() => {
+                  void handleExport()
+                }}
                 className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-page xl:ml-auto"
               >
                 <Download className="h-4 w-4" />

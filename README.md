@@ -1,152 +1,111 @@
 # DBRE Maestro
 
-DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL / DML / Redis 工單、敏感資料遮罩、資料庫連線治理、Metadata 掃描、即時通知與 RBAC 權限控管。原始碼按前後端分離，正式交付則由根目錄 `Dockerfile` 產生單一 application image：
+DBRE Maestro 是資料庫治理工作台，集中管理唯讀 SQL 查詢、DDL／DML／Redis 工單、審批、RBAC、敏感資料遮罩、資料庫連線、Metadata、通知與稽核。
 
-- `backend/`：Go API、排程工作、Meta DB 存取、外部資料庫連線與治理邏輯
-- `frontend/`：React + Vite 管理介面
-- `docs/`：產品、架構、操作與參考文件
+## 本機啟動
 
-## 功能概覽
+需要 Docker、Docker Compose 與 `make`。
 
-- `Tickets`：提交與流轉 DDL / DML / Redis / Query Access / SQL Export / Sensitive Access 工單
-- `SQL Editor`：單 statement 查詢、格式化、Explain、匯出申請、敏感查詢權限申請
-- `Scheduled Reports`：定期執行唯讀 SQL，產生 CSV 並以 Lark App 推送給指定使用者
-- `DB Connections`：管理 MySQL / PostgreSQL / Redis 連線、讀寫 endpoint 與憑證角色
-- `DB Metadata`：AWS Inventory 快照與資料庫物件快照
-- `Masking Rules`：欄位脫敏規則與 Unmask Whitelist
-- `SQL Review Rules`：依資料庫類型拆分的審核規則
-- `Users / Auth Groups / Resources`：權限、DB Scope 與資源綁定反查
-- `Settings`：SQL Editor timeout、Workflow Rules、SSO / Lark 與 DB Metadata 掃描設定
+```bash
+cp .env.example .env
+```
 
-## 文件入口
+修改 `.env` 內的 MySQL 密碼，並產生兩組不同的 Secret：
 
-- [文件總覽](docs/README.md)
-- [UI 目標設計](DESIGN.md)
-- [工程待辦](TODOS.md)
-- [專案導覽](docs/explanation/project-map.md)
-- [RD 使用手冊](docs/how-to/rd-user-guide.md)
-- [DBA/Admin 管理手冊](docs/how-to/dba-admin-user-guide.md)
-- [架構總覽](docs/explanation/architecture-overview.md)
-- [安全邊界說明](docs/explanation/security-boundaries.md)
-- [安全審計修復驗收](docs/how-to/verify-security-audit-remediation.md)
-- [線上與部署排障](docs/how-to/troubleshoot-operations.md)
-- [後端維護參考](docs/reference/backend-maintenance.md)
-- [前端維護參考](docs/reference/frontend-maintenance.md)
-- [權限模型說明](docs/explanation/permission-model.md)
-- [Workflow Rules 設定教學](docs/how-to/configure-workflow-rules.md)
-- [建立可部署的 Application Image](docs/how-to/build-application-image.md)
-- [AWS EKS 部署流程](docs/how-to/deploy-to-aws-eks.md)
-- [本機開發教學](docs/tutorials/getting-started-local-dev.md)
-- [登入安全與 Session](docs/reference/auth-and-sessions.md)
-- [SQL Editor 參考](docs/reference/sql-editor.md)
-- [Scheduled SQL Reports 參考](docs/reference/scheduled-sql-reports.md)
-- [Tickets 參考](docs/reference/tickets.md)
-- [MySQL Rollback 參考](docs/reference/mysql-rollback.md)
-- [MySQL Rollback 設定與使用](docs/how-to/configure-and-use-mysql-rollback.md)
-- [Workflow Rules 參考](docs/reference/workflow-rules.md)
-- [DB Connections 參考](docs/reference/db-connections.md)
-- [Users / RBAC 參考](docs/reference/users-and-rbac.md)
-- [Masking DSL 參考](docs/reference/masking-and-dsl.md)
-- [設定與環境變數](docs/reference/configuration.md)
+```bash
+# DBRE_ENCRYPTION_KEY：base64 編碼的 32-byte key
+make gen-key
 
-## 開發啟動
+# JWT_SECRET：獨立的高熵隨機字串
+openssl rand -base64 48
+```
 
-### 一鍵啟動整個系統
+`DBRE_ENCRYPTION_KEY` 用於加密資料庫憑證與其他敏感資料；資料寫入後不可任意更換。完整用途與輪替限制見[設定與環境變數](docs/reference/configuration.md)。
+
+啟動完整本機環境：
 
 ```bash
 make dev
 ```
 
-這會透過 Docker Compose 啟動：
-
-- `mysql`
-- `app`
-- `frontend`
-
-啟動後可使用：
-
 - 前端：`http://localhost:5173`
-- 後端 Health Check：`http://localhost:8080/api/health`
+- Backend health check：`http://localhost:8080/api/health`
+- 第一次啟動：前往 `/setup` 建立初始管理員
 
-### 只啟動後端
+完整步驟見[本機開發教學](docs/tutorials/getting-started-local-dev.md)。
 
-```bash
-make dev-backend
+### 本機 AWS Profile
+
+DB Metadata Inventory 可沿用主機上的 AWS CLI profile。在 `.env` 設定：
+
+```dotenv
+AWS_PROFILE=your-profile
 ```
 
-### 只在本機跑前端 Vite
+使用 SSO 時先登入，再執行 `make dev`：
 
 ```bash
-make dev-frontend
+aws sso login --profile your-profile
 ```
 
-此模式會把 API proxy 到本機的 `http://localhost:8080`。
+Compose 會將 `${HOME}/.aws` 以唯讀方式掛載到 app container。若 Inventory Sync 出現 `InvalidClientTokenId`，或需要檢查 SSO 與 static credentials 衝突，請看[設定與環境變數](docs/reference/configuration.md#sso-profile-與-static-credentials-衝突)。
 
-## 測試
+## 開發指令
 
-### 後端測試
+| 指令 | 用途 |
+|---|---|
+| `make dev` | 啟動 MySQL、backend 與 Vite frontend |
+| `make dev-backend` | 只啟動 MySQL 與 backend |
+| `make dev-frontend` | 在主機啟動 Vite |
+| `make db-only` | 只啟動 MySQL |
+| `make test` | 執行 Go tests |
+| `make test-frontend` | 執行前端 tests |
+| `make lint` | 執行 Go lint |
+| `docker compose down` | 停止本機 containers，保留資料 volume |
+
+前端檢查：
 
 ```bash
-make test
+cd frontend
+npm ci
+npm run lint
+npm test
+npm run build
 ```
 
-### 前端測試
+## Testnet 與 Production
+
+Testnet 與 production 的 CI/CD 都使用根目錄 multi-stage `Dockerfile` 建立單一 application image；Makefile 只作為本機開發入口，不是部署流程。
+
+需要在本機驗證同一個 image 時，從 repository 根目錄執行：
 
 ```bash
-make test-frontend
+docker build -t dbre-maestro:local .
 ```
 
-## 其他常用指令
+Image 內包含 React production assets、Go server、database migrations 與 `my2sql`。Runtime Secret 不會寫入 image，而是由部署環境透過 Kubernetes、AWS Secrets Manager 與 IRSA 注入。
 
-### 只啟動 MySQL
+Kubernetes／ArgoCD manifests 維護在外部 GitOps repositories。本 repository 負責建立 application image；部署平台負責 image tag、runtime 設定、Secret、網路、migration 與 rollout。
 
-```bash
-make db-only
-```
+- [Application image build](docs/how-to/build-application-image.md)
+- [AWS EKS 部署流程](docs/how-to/deploy-to-aws-eks.md)
 
-### 產生 32-byte 加密 key
+## 主要功能
 
-```bash
-make gen-key
-```
+- `Tickets`：DDL、DML、Redis、Query Access、SQL Export 與 Sensitive Access 工單
+- `SQL Editor`：唯讀查詢、Explain、格式化、取消與權限申請
+- `Scheduled Reports`：定期執行唯讀 SQL 並透過 Lark 推送
+- `DB Connections / Metadata`：資料源連線、AWS Inventory 與物件快照
+- `Masking / SQL Review`：敏感資料遮罩與 SQL 審核規則
+- `Users / RBAC / Settings`：使用者權限、DB Scope、Workflow 與平台設定
 
-## 環境變數
+## 文件
 
-本機使用 `make dev` 時，請在專案根目錄準備 `.env`；Docker Compose 會自動讀取它。`.env` 已被 Git ignore，只供本機使用。EKS 測試與 production 不使用 repo 內 `.env`，而是由 ArgoCD/Kubernetes 與 AWS Secrets Manager 注入設定。
-
-至少包含：
-
-- `MYSQL_APP_PASSWORD`
-- `MYSQL_ROOT_PASSWORD`
-- `DBRE_ENCRYPTION_KEY`
-- `JWT_SECRET`
-
-後端啟動時若缺少 `DBRE_ENCRYPTION_KEY` 或 `JWT_SECRET`，服務不會成功啟動。
-
-更完整的設定說明請看：
-
-- [本機與部署設定](docs/reference/configuration.md)
-- [平台 Settings 說明](docs/reference/settings.md)
-
-## AWS Profile
-
-若要在本機透過 `docker compose` 驗證 `DB Metadata inventory` 掃描，可直接沿用你本機的 AWS profile。
-
-`docker-compose.yml` 目前會：
-
-- 將 `${HOME}/.aws` 掛進 `app` container 的 `/root/.aws`
-- 傳入 `AWS_PROFILE`
-- 啟用 `AWS_SDK_LOAD_CONFIG=1`
-
-使用方式：
-
-```bash
-export AWS_PROFILE=your-profile
-docker compose up --build
-```
-
-若未指定，預設使用：
-
-```bash
-AWS_PROFILE=default
-```
+- [文件總覽](docs/README.md)
+- [專案目前狀態](docs/PROJECT_STATUS.md)
+- [專案導覽](docs/explanation/project-map.md)
+- [架構總覽](docs/explanation/architecture-overview.md)
+- [設定與環境變數](docs/reference/configuration.md)
+- [安全邊界](docs/explanation/security-boundaries.md)
+- [RD 使用手冊](docs/how-to/rd-user-guide.md)
+- [DBA／Admin 管理手冊](docs/how-to/dba-admin-user-guide.md)

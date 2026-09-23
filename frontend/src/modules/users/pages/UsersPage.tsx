@@ -291,6 +291,34 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   const [confirmState, setConfirmState] = useState<ConfirmState>(null)
 
   useEffect(() => {
+    async function bootstrap() {
+      setLoading(true)
+      setError('')
+      try {
+        const [usersResponse, connectionsResponse, authGroupDetails] = await Promise.all([
+          listUsers(),
+          listUserDBConnections(),
+          loadAuthGroupDetails(),
+        ])
+        const queryAccessRulesResponse = await listQueryAccessRules()
+        const bindingsEntries = await Promise.all(
+          connectionsResponse.connections.map(async (connection) => {
+            const bindings = await getDBConnectionBindings(connection.id)
+            return [connection.id, bindings] as const
+          }),
+        )
+        setUsers(usersResponse.users)
+        setConnections(connectionsResponse.connections)
+        setAuthGroups(authGroupDetails)
+        setQueryAccessRules(queryAccessRulesResponse.rules)
+        setConnectionBindings(Object.fromEntries(bindingsEntries))
+      } catch (loadError) {
+        setError(loadError instanceof ApiError ? loadError.message : 'Failed to load the RBAC workspace.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
     void bootstrap()
   }, [])
 
@@ -367,34 +395,6 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       active = false
     }
   }, [queryAccessRuleDraft.connectionID, queryAccessRuleDraft.databasePattern])
-
-  async function bootstrap() {
-    setLoading(true)
-    setError('')
-    try {
-      const [usersResponse, connectionsResponse, authGroupDetails] = await Promise.all([
-        listUsers(),
-        listUserDBConnections(),
-        loadAuthGroupDetails(),
-      ])
-      const queryAccessRulesResponse = await listQueryAccessRules()
-      const bindingsEntries = await Promise.all(
-        connectionsResponse.connections.map(async (connection) => {
-          const bindings = await getDBConnectionBindings(connection.id)
-          return [connection.id, bindings] as const
-        }),
-      )
-      setUsers(usersResponse.users)
-      setConnections(connectionsResponse.connections)
-      setAuthGroups(authGroupDetails)
-      setQueryAccessRules(queryAccessRulesResponse.rules)
-      setConnectionBindings(Object.fromEntries(bindingsEntries))
-    } catch (loadError) {
-      setError(loadError instanceof ApiError ? loadError.message : 'Failed to load the RBAC workspace.')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   async function loadAuthGroupDetails() {
     const summary = await listAuthGroups()
@@ -610,7 +610,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     }
   }
 
-  async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
+  function handleSaveUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!drawerState || !canWrite) {
       return
@@ -654,7 +654,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     })
   }
 
-  async function handleSaveAuthGroup(event: FormEvent<HTMLFormElement>) {
+  function handleSaveAuthGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!drawerState || !canWrite) {
       return
@@ -1278,7 +1278,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
           ) : (
             <section className="grid gap-3">
               {canWrite ? (
-              <form className="rounded-xl border border-border bg-panel p-4 shadow-soft" onSubmit={handleCreateQueryAccessRule}>
+              <form
+                className="rounded-xl border border-border bg-panel p-4 shadow-soft"
+                onSubmit={(event) => {
+                  void handleCreateQueryAccessRule(event)
+                }}
+              >
                 <div className="mb-4 flex items-center gap-2">
                   <KeyRound className="h-4 w-4 text-accent" />
                   <div>

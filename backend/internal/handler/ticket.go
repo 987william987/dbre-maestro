@@ -47,6 +47,8 @@ type TicketHandler struct {
 	masking            *maskingRuntime
 	sqlReviewRules     *repository.SQLReviewRuleRepo
 	shadowValidationDB *sqlx.DB
+	shadowReadonlyPool *pool.CredentialPoolManager
+	shadowPoolEnabled  bool
 	notifRepo          *repository.NotificationRepo
 	broker             *realtime.Broker
 	lark               *notification.Dispatcher
@@ -309,6 +311,13 @@ func WithTicketHandlerRollbacks(repo *repository.TicketRollbackRepo) TicketHandl
 	}
 }
 
+func WithTicketHandlerShadowReadonlyPool(manager *pool.CredentialPoolManager, enabled bool) TicketHandlerOption {
+	return func(h *TicketHandler) {
+		h.shadowReadonlyPool = manager
+		h.shadowPoolEnabled = enabled
+	}
+}
+
 func NewTicketHandler(
 	tickets *repository.TicketRepo,
 	queryAccess *repository.QueryAccessRepo,
@@ -341,6 +350,7 @@ func NewTicketHandler(
 		masking:            newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		sqlReviewRules:     sqlReviewRules,
 		shadowValidationDB: shadowValidationDB,
+		shadowReadonlyPool: pool.ShadowValidationPools(),
 		notifRepo:          notifRepo,
 		broker:             broker,
 		lark:               lark,
@@ -755,7 +765,9 @@ func (h *TicketHandler) ReviewSQL(w http.ResponseWriter, r *http.Request) {
 
 // POST /tickets
 func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
+	startedAt := time.Now()
 	userID := middleware.UserIDFromCtx(r.Context())
+	var validationDuration, reviewDuration, ticketPersistDuration, scopePersistDuration, reviewPersistDuration, auditDuration, workflowDuration, publishDuration time.Duration
 
 	var req struct {
 		Title                   string                      `json:"title"`
@@ -817,8 +829,11 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// SQL/Command Review
 	var reviewResults []ticketReviewItem
+	validationDuration += time.Since(startedAt)
 	if req.DBConnectionID != nil && (req.TicketType == model.TicketTypeDDL || req.TicketType == model.TicketTypeDML || req.TicketType == model.TicketTypeRedisCommand) {
+		reviewStartedAt := time.Now()
 		reviewResults = h.runTicketSQLReviewWithType(r.Context(), *req.DBConnectionID, req.TicketType, req.SQLContent, req.DatabaseName)
+		reviewDuration = time.Since(reviewStartedAt)
 		issues := make([]string, 0)
 		for _, result := range reviewResults {
 			if result.Status == "error" && result.Message != nil && strings.TrimSpace(*result.Message) != "" {
@@ -830,6 +845,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	postReviewValidationStartedAt := time.Now()
 	if req.TicketType == model.TicketTypeSensitiveQueryAccess {
 		if req.DBConnectionID == nil || len(req.Scopes) == 0 {
 			jsonErr(w, http.StatusUnprocessableEntity, "sensitive_query_access requires db_connection_id and scopes")
@@ -922,6 +938,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 			req.SQLContent = "QUERY ACCESS REQUEST"
 		}
 	}
+	validationDuration += time.Since(postReviewValidationStartedAt)
 
 	t := &model.Ticket{
 		Title:                   req.Title,
@@ -934,7 +951,9 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ApprovedDurationMinutes: req.ApprovedDurationMinutes,
 	}
 
+	ticketPersistStartedAt := time.Now()
 	created, err := h.tickets.CreateWithScopes(r.Context(), t, req.Scopes)
+	ticketPersistDuration = time.Since(ticketPersistStartedAt)
 	if err != nil {
 		slog.Error("create ticket failed",
 			"err", err,
@@ -947,6 +966,7 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.TicketType == model.TicketTypeQueryAccess && h.queryAccess != nil {
+		scopePersistStartedAt := time.Now()
 		items := make([]model.QueryAccessTicketItem, 0, len(req.Rules)+len(req.Items))
 		if len(req.Rules) > 0 {
 			for _, rule := range req.Rules {
@@ -983,8 +1003,10 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "persist query access ticket items failed")
 			return
 		}
+		scopePersistDuration = time.Since(scopePersistStartedAt)
 	}
 	if len(reviewResults) > 0 {
+		reviewPersistStartedAt := time.Now()
 		persistedResults := make([]model.TicketReviewResult, 0, len(reviewResults))
 		for _, result := range reviewResults {
 			tables := make(model.TicketReviewTables, 0, len(result.Tables))
@@ -1017,8 +1039,10 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "persist ticket review results failed")
 			return
 		}
+		reviewPersistDuration = time.Since(reviewPersistStartedAt)
 	}
 
+	auditStartedAt := time.Now()
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &userID,
 		ActorName:    middleware.UsernameFromCtx(r.Context()),
@@ -1028,13 +1052,33 @@ func (h *TicketHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Details:      h.ticketAuditDetails(r.Context(), created, nil),
 		IPAddress:    clientIP(r),
 	})
+	auditDuration = time.Since(auditStartedAt)
 
+	workflowStartedAt := time.Now()
 	created, err = h.applyWorkflowAfterCreate(r.Context(), created, &userID, clientIP(r))
+	workflowDuration = time.Since(workflowStartedAt)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "resolve ticket workflow failed")
 		return
 	}
+	publishStartedAt := time.Now()
 	h.publishTicketUpdateByID(r.Context(), created.ID, created, &userID)
+	publishDuration = time.Since(publishStartedAt)
+	slog.Info("ticket submit complete",
+		"ticket_id", created.ID,
+		"ticket_type", created.TicketType,
+		"db_connection_id", created.DBConnectionID,
+		"review_result_count", len(reviewResults),
+		"validation_ms", validationDuration.Milliseconds(),
+		"sql_review_ms", reviewDuration.Milliseconds(),
+		"ticket_persist_ms", ticketPersistDuration.Milliseconds(),
+		"scope_persist_ms", scopePersistDuration.Milliseconds(),
+		"review_persist_ms", reviewPersistDuration.Milliseconds(),
+		"audit_ms", auditDuration.Milliseconds(),
+		"workflow_ms", workflowDuration.Milliseconds(),
+		"publish_ms", publishDuration.Milliseconds(),
+		"duration_ms", time.Since(startedAt).Milliseconds(),
+	)
 	jsonCreated(w, created)
 }
 

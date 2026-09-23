@@ -299,7 +299,12 @@ export function ScheduledSQLReportsPage() {
       {notice ? <InlineAlert tone="success">{notice}</InlineAlert> : null}
 
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <form onSubmit={handleSubmit} className="rounded-lg border border-border bg-panel p-4 shadow-soft">
+        <form
+          onSubmit={(event) => {
+            void handleSubmit(event)
+          }}
+          className="rounded-lg border border-border bg-panel p-4 shadow-soft"
+        >
           <fieldset disabled={!canWrite || saving} className="disabled:opacity-100">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>

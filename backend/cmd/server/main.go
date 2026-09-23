@@ -102,6 +102,7 @@ func redactingRequestLogger(next http.Handler) http.Handler {
 		start := time.Now()
 		ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 		defer func() {
+			duration := time.Since(start)
 			status := ww.Status()
 			if status == 0 {
 				status = http.StatusOK
@@ -111,7 +112,8 @@ func redactingRequestLogger(next http.Handler) http.Handler {
 				"path", redactedRequestURI(r),
 				"status", status,
 				"bytes", ww.BytesWritten(),
-				"duration", time.Since(start),
+				"duration", duration,
+				"duration_ms", duration.Milliseconds(),
 				"remote_addr", r.RemoteAddr,
 			)
 		}()
@@ -323,7 +325,7 @@ func main() {
 	requireAuth := middleware.RequireAuth(cfg.JWTSecret, bearerAuth)
 
 	frontendReloadH := handler.NewFrontendReloadHandler()
-	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL, handler.WithTicketHandlerAppEnv(cfg.AppEnv), handler.WithTicketHandlerDBMetadata(dbMetadataRepo), handler.WithTicketHandlerRollbacks(ticketRollbackRepo))
+	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL, handler.WithTicketHandlerAppEnv(cfg.AppEnv), handler.WithTicketHandlerDBMetadata(dbMetadataRepo), handler.WithTicketHandlerRollbacks(ticketRollbackRepo), handler.WithTicketHandlerShadowReadonlyPool(pool.ShadowValidationPools(), cfg.ShadowReadonlyPoolEnabled))
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo, handler.WithDBConnectionHandlerHostPolicy(dbConnectionHostPolicy), handler.WithDBConnectionHandlerSettings(settingsRepo), handler.WithDBConnectionHandlerMetadata(dbMetadataRepo))
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL, cfg.JWTSecret)
 	auditH := handler.NewAuditHandler(auditRepo)

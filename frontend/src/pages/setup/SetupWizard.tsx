@@ -366,7 +366,12 @@ function AccountStep({
 
       <ActionRow>
         <Button variant="ghost" onClick={onBack}>← Back</Button>
-        <Button onClick={handleSubmit} disabled={loading}>
+        <Button
+          onClick={() => {
+            void handleSubmit()
+          }}
+          disabled={loading}
+        >
           {loading
             ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</>
             : 'Create account →'

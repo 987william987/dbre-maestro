@@ -3,12 +3,15 @@ package handler
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
 )
+
+const asyncLarkNotificationTimeout = 45 * time.Second
 
 type NotificationRouter struct {
 	notifs *repository.NotificationRepo
@@ -37,6 +40,10 @@ func NewNotificationRouter(notifs *repository.NotificationRepo, audit *repositor
 }
 
 func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) []uint64 {
+	return r.send(ctx, route, false)
+}
+
+func (r *NotificationRouter) send(ctx context.Context, route NotificationRoute, asyncLark bool) []uint64 {
 	recipients := routeRecipients(route.RecipientIDs, route.ActorID, route.NotifyActor)
 	inAppCreated := []uint64{}
 	inAppFailed := []uint64{}
@@ -59,51 +66,75 @@ func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) 
 		}
 	}
 
+	if r.lark != nil && len(recipients) > 0 {
+		if asyncLark {
+			asyncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), asyncLarkNotificationTimeout)
+			go func() {
+				defer cancel()
+				r.sendLark(asyncCtx, route, recipients, inAppCreated, inAppFailed)
+			}()
+		} else {
+			r.sendLark(ctx, route, recipients, inAppCreated, inAppFailed)
+		}
+		return recipients
+	}
+
+	r.recordLarkResult(ctx, route, recipients, inAppCreated, inAppFailed, notification.BatchSendResult{
+		SkippedReason: "lark_dispatcher_not_configured",
+	})
+	return recipients
+}
+
+func (r *NotificationRouter) sendLark(ctx context.Context, route NotificationRoute, recipients, inAppCreated, inAppFailed []uint64) {
+	startedAt := time.Now()
+	result := r.lark.NotifyUsers(ctx, recipients, notification.Message{Title: route.Title, Body: route.Body, TicketNo: route.TicketNo, Card: route.LarkCard})
+	r.recordLarkResult(ctx, route, recipients, inAppCreated, inAppFailed, result)
+	slog.Info("lark notification complete",
+		"type", route.NotifType,
+		"resource_type", route.ResourceType,
+		"resource_id", route.ResourceID,
+		"recipient_count", len(recipients),
+		"duration_ms", time.Since(startedAt).Milliseconds(),
+	)
+}
+
+func (r *NotificationRouter) recordLarkResult(ctx context.Context, route NotificationRoute, recipients, inAppCreated, inAppFailed []uint64, result notification.BatchSendResult) {
 	larkStatus := "skipped"
-	larkAttempts := 0
+	larkAttempts := result.Attempts
 	larkError := ""
-	larkSkippedReason := ""
-	larkDeliveries := []notification.RecipientSendResult{}
+	larkSkippedReason := result.SkippedReason
+	larkDeliveries := result.Deliveries
 	if len(recipients) == 0 {
 		larkSkippedReason = "no_recipients"
 	}
-	if r.lark != nil && len(recipients) > 0 {
-		result := r.lark.NotifyUsers(ctx, recipients, notification.Message{Title: route.Title, Body: route.Body, TicketNo: route.TicketNo, Card: route.LarkCard})
-		larkAttempts = result.Attempts
-		larkDeliveries = result.Deliveries
-		if result.Err != nil {
-			larkStatus = "failed"
-			larkError = result.Err.Error()
-			slog.Warn("notification delivery failed",
-				"type", route.NotifType,
-				"resource_type", route.ResourceType,
-				"resource_id", route.ResourceID,
-				"recipient_count", len(recipients),
-				"attempts", larkAttempts,
-				"err", larkError,
-			)
-			r.log(ctx, repository.AuditEntry{
-				ActionType:   "notification_failure",
-				ResourceType: route.ResourceType,
-				ResourceID:   &route.ResourceID,
-				Details: r.notificationAuditDetails(ctx, route, recipients, map[string]any{
-					"type":     route.NotifType,
-					"title":    route.Title,
-					"err":      larkError,
-					"attempts": larkAttempts,
-				}),
-			})
-		} else if result.Attempts == 0 {
-			larkStatus = "skipped"
-			larkSkippedReason = result.SkippedReason
-			if larkSkippedReason == "" {
-				larkSkippedReason = "lark_skipped"
-			}
-		} else {
-			larkStatus = "sent"
+	if result.Err != nil {
+		larkStatus = "failed"
+		larkError = result.Err.Error()
+		slog.Warn("notification delivery failed",
+			"type", route.NotifType,
+			"resource_type", route.ResourceType,
+			"resource_id", route.ResourceID,
+			"recipient_count", len(recipients),
+			"attempts", larkAttempts,
+			"err", larkError,
+		)
+		r.log(ctx, repository.AuditEntry{
+			ActionType:   "notification_failure",
+			ResourceType: route.ResourceType,
+			ResourceID:   &route.ResourceID,
+			Details: r.notificationAuditDetails(ctx, route, recipients, map[string]any{
+				"type":     route.NotifType,
+				"title":    route.Title,
+				"err":      larkError,
+				"attempts": larkAttempts,
+			}),
+		})
+	} else if result.Attempts == 0 {
+		if larkSkippedReason == "" {
+			larkSkippedReason = "lark_skipped"
 		}
-	} else if r.lark == nil && len(recipients) > 0 {
-		larkSkippedReason = "lark_dispatcher_not_configured"
+	} else {
+		larkStatus = "sent"
 	}
 	slog.Info("notification delivery recorded",
 		"type", route.NotifType,
@@ -159,7 +190,6 @@ func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) 
 			"notification_channel": "in_app,lark",
 		}),
 	})
-	return recipients
 }
 
 func (r *NotificationRouter) SendTicket(ctx context.Context, ticket *model.Ticket, route NotificationRoute) []uint64 {
@@ -169,7 +199,7 @@ func (r *NotificationRouter) SendTicket(ctx context.Context, ticket *model.Ticke
 		route.ResourceRef = ticket.TicketNo
 		route.TicketNo = ticket.TicketNo
 	}
-	return r.Send(ctx, route)
+	return r.send(ctx, route, true)
 }
 
 func (r *NotificationRouter) log(ctx context.Context, entry repository.AuditEntry) {

@@ -35,8 +35,8 @@ const mockedMarkAllNotificationsRead = vi.mocked(markAllNotificationsRead)
 const mockedOpenEventStream = vi.mocked(openEventStream)
 const storage = new Map<string, string>()
 
-function renderShell(initialEntry = '/tickets') {
-  return render(
+function createShell(initialEntry = '/tickets') {
+  return (
     <MemoryRouter initialEntries={[initialEntry]}>
       <ToastProvider>
         <Routes>
@@ -64,8 +64,12 @@ function renderShell(initialEntry = '/tickets') {
           </Route>
         </Routes>
       </ToastProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   )
+}
+
+function renderShell(initialEntry = '/tickets') {
+  return render(createShell(initialEntry))
 }
 
 describe('AppShell notifications', () => {
@@ -134,6 +138,27 @@ describe('AppShell notifications', () => {
     mockedMarkNotificationRead.mockResolvedValue(undefined)
     mockedMarkAllNotificationsRead.mockResolvedValue(undefined)
     mockedOpenEventStream.mockReturnValue(() => undefined)
+  })
+
+  it('user 從 null 變成 authenticated 時會安全掛載 shell', async () => {
+    const authenticated = mockedUseAuth()
+    mockedUseAuth.mockReturnValue({
+      ...authenticated,
+      status: 'anonymous',
+      isAuthenticated: false,
+      user: null,
+      accessToken: null,
+    })
+
+    const view = renderShell()
+    expect(screen.queryByText('tickets page')).not.toBeInTheDocument()
+    expect(mockedListNotifications).not.toHaveBeenCalled()
+
+    mockedUseAuth.mockReturnValue(authenticated)
+    view.rerender(createShell())
+
+    expect(await screen.findByText('tickets page')).toBeInTheDocument()
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
   })
 
   it('會顯示鈴鐺待辦總數並可展開通知下拉', async () => {
@@ -379,7 +404,11 @@ describe('AppShell notifications', () => {
     expect(sidebarSubtitle.parentElement).toHaveClass('opacity-100')
   })
 
-  it('users groups 路由會對應到 Auth Groups breadcrumb', async () => {
+  it.each([
+    { path: '/users/groups', label: 'Auth Groups' },
+    { path: '/users/resources', label: 'Resources' },
+    { path: '/users/query-access', label: 'Query Access' },
+  ])('$path 會展開 Users 導航並顯示 $label breadcrumb', async ({ path, label }) => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
       isAuthenticated: true,
@@ -399,12 +428,12 @@ describe('AppShell notifications', () => {
       clearAuth: vi.fn(),
     })
 
-    renderShell('/users/groups')
+    renderShell(path)
 
     await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
     expect(screen.getByRole('button', { name: /Users/i })).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getAllByText('Governance').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Auth Groups').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(label).length).toBeGreaterThan(0)
   })
 
   it.each([
@@ -472,57 +501,4 @@ describe('AppShell notifications', () => {
     expect(screen.queryByText('Read-only mode')).not.toBeInTheDocument()
   })
 
-  it('users resources 路由會展開 Users 導航並顯示 Resources', async () => {
-    mockedUseAuth.mockReturnValue({
-      status: 'authenticated',
-      isAuthenticated: true,
-      user: {
-        id: 1,
-        username: 'admin',
-        authGroups: ['admin'],
-        authGroupDetails: [],
-        permissions: ['users.read'],
-        dbConnectionIds: [],
-        protected: false,
-        isActive: true,
-      },
-      accessToken: 'token',
-      login: vi.fn(),
-      logout: vi.fn(),
-      clearAuth: vi.fn(),
-    })
-
-    renderShell('/users/resources')
-
-    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
-    expect(screen.getByRole('button', { name: /Users/i })).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getAllByText('Resources').length).toBeGreaterThan(0)
-  })
-
-  it('users query access 路由會展開 Users 導航並顯示 Query Access', async () => {
-    mockedUseAuth.mockReturnValue({
-      status: 'authenticated',
-      isAuthenticated: true,
-      user: {
-        id: 1,
-        username: 'admin',
-        authGroups: ['admin'],
-        authGroupDetails: [],
-        permissions: ['users.read'],
-        dbConnectionIds: [],
-        protected: false,
-        isActive: true,
-      },
-      accessToken: 'token',
-      login: vi.fn(),
-      logout: vi.fn(),
-      clearAuth: vi.fn(),
-    })
-
-    renderShell('/users/query-access')
-
-    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
-    expect(screen.getByRole('button', { name: /Users/i })).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getAllByText('Query Access').length).toBeGreaterThan(0)
-  })
 })

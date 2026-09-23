@@ -165,6 +165,9 @@ type SQLEditorWorkspaceDraft = {
   editorHeights: Record<string, string>
 }
 
+const EMPTY_CONNECTION_IDS: number[] = []
+const EMPTY_ASSET_TREE_NODES: AssetTreeNode[] = []
+const EMPTY_METADATA_COLUMNS: MetadataColumn[] = []
 const DEFAULT_SQL = 'SELECT 1;'
 const HISTORY_LIMIT = 20
 const SAVED_QUERY_LIMIT = 20
@@ -1266,7 +1269,7 @@ export function SQLEditorPage() {
   const canExport = Boolean(user?.permissions.includes('sql_editor.export'))
   const canApplySensitiveAccess = Boolean(user?.permissions.includes('sql_editor.sensitive_apply'))
   const canApplyTicket = Boolean(user?.permissions.includes('tickets.apply'))
-  const accessibleConnectionIDs = user?.dbConnectionIds ?? []
+  const accessibleConnectionIDs = user?.dbConnectionIds ?? EMPTY_CONNECTION_IDS
   const [connections, setConnections] = useState<DBConnection[]>([])
   const [connectionsLoading, setConnectionsLoading] = useState(true)
   const [connectionsError, setConnectionsError] = useState('')
@@ -1484,8 +1487,8 @@ export function SQLEditorPage() {
   const activeDatabase = activeTab?.database ?? ''
   const activeSchema = activeTab?.schema ?? ''
   const activeSelectedTable = activeTab?.selectedTable ?? null
-  const activeExplorerNodes = activeTab?.explorerNodes ?? []
-  const activeSearchTreeNodes = activeTab?.searchTreeNodes ?? []
+  const activeExplorerNodes = activeTab?.explorerNodes ?? EMPTY_ASSET_TREE_NODES
+  const activeSearchTreeNodes = activeTab?.searchTreeNodes ?? EMPTY_ASSET_TREE_NODES
   const activeExplorerSearch = activeTab?.explorerSearch ?? ''
   const activeSearchingAssets = activeTab?.searchingAssets ?? false
   const activeSearchIndexStatus = activeTab?.searchIndexStatus ?? 'idle'
@@ -1496,7 +1499,7 @@ export function SQLEditorPage() {
   const activeAssetPickerSearch = activeTab?.assetPickerSearch ?? ''
   const activeResultView = activeTab?.resultView ?? 'result'
   const activeObjectMetaTab = activeTab?.objectMetaTab ?? 'columns'
-  const activeColumns = activeTab?.columns ?? []
+  const activeColumns = activeTab?.columns ?? EMPTY_METADATA_COLUMNS
   const activeDefinition = activeTab?.definition ?? null
   const activeColumnsLoading = activeTab?.columnsLoading ?? false
   const activeDefinitionLoading = activeTab?.definitionLoading ?? false
@@ -1574,6 +1577,78 @@ export function SQLEditorPage() {
       : sensitiveAccessTabIDs.includes(requestConfirmState.tabID)
     : false
 
+  const activeTabID = activeTab?.id
+  const updateTabByID = useCallback((tabID: string, patch: Partial<EditorTab>) => {
+    setTabs((currentTabs) => currentTabs.map((tab) => {
+      if (tab.id !== tabID || !hasTabPatchChanges(tab, patch)) {
+        return tab
+      }
+      return { ...tab, ...patch }
+    }))
+  }, [])
+
+  const updateActiveTab = useCallback((patch: Partial<EditorTab>) => {
+    if (!activeTabID) {
+      return
+    }
+
+    updateTabByID(activeTabID, patch)
+  }, [activeTabID, updateTabByID])
+
+  const updateActiveTabExplorerNodes = useCallback((updater: (nodes: AssetTreeNode[]) => AssetTreeNode[]) => {
+    if (!activeTabID) {
+      return
+    }
+    setTabs((currentTabs) => currentTabs.map((tab) => (
+      tab.id === activeTabID
+        ? (() => {
+            const nextNodes = updater(tab.explorerNodes)
+            return nextNodes === tab.explorerNodes ? tab : { ...tab, explorerNodes: nextNodes }
+          })()
+        : tab
+    )))
+  }, [activeTabID])
+
+  const updateActiveTabSearchTreeNodes = useCallback((updater: (nodes: AssetTreeNode[]) => AssetTreeNode[]) => {
+    if (!activeTabID) {
+      return
+    }
+    setTabs((currentTabs) => currentTabs.map((tab) => (
+      tab.id === activeTabID
+        ? (() => {
+            const nextNodes = updater(tab.searchTreeNodes)
+            return nextNodes === tab.searchTreeNodes ? tab : { ...tab, searchTreeNodes: nextNodes }
+          })()
+        : tab
+    )))
+  }, [activeTabID])
+
+  const loadSearchIndexForTab = useCallback((tabID: string, connection: DBConnection) => {
+    updateTabByID(tabID, {
+      searchIndexStatus: 'loading',
+      searchIndexError: '',
+      searchIndexTruncated: false,
+    })
+
+    void listMetadataSearchIndex(connection.id)
+      .then((response) => {
+        updateTabByID(tabID, {
+          searchIndexStatus: 'ready',
+          searchIndexItems: response.items,
+          searchIndexTruncated: response.truncated,
+          searchIndexError: '',
+        })
+      })
+      .catch((error) => {
+        updateTabByID(tabID, {
+          searchIndexStatus: 'error',
+          searchIndexItems: [],
+          searchIndexTruncated: false,
+          searchIndexError: error instanceof ApiError ? error.message : 'Object search index is temporarily unavailable.',
+        })
+      })
+  }, [updateTabByID])
+
   useEffect(() => {
     if (connectionsLoading) {
       return
@@ -1632,7 +1707,7 @@ export function SQLEditorPage() {
     if (activeTab?.searchTreeNodes.length) {
       updateActiveTab({ searchTreeNodes: [] })
     }
-  }, [activeConnection, activeTab?.id])
+  }, [activeConnection, activeTab?.searchTreeNodes.length, updateActiveTab, updateActiveTabExplorerNodes])
 
   useEffect(() => {
     const keyword = debouncedExplorerSearch.trim()
@@ -1664,7 +1739,7 @@ export function SQLEditorPage() {
       activeSelectedTable,
     )
     updateActiveTab({ searchTreeNodes: nodes, searchingAssets: false })
-  }, [activeConnection, activeDatabase, activeSchema, activeSelectedTable, activeTab?.id, activeTab?.searchIndexItems, activeTab?.searchIndexStatus, activeTab?.searchTreeNodes.length, activeTab?.searchingAssets, debouncedExplorerSearch])
+  }, [activeConnection, activeDatabase, activeSchema, activeSelectedTable, activeTab?.id, activeTab?.searchIndexItems, activeTab?.searchIndexStatus, activeTab?.searchTreeNodes.length, activeTab?.searchingAssets, debouncedExplorerSearch, updateActiveTab])
 
   useEffect(() => {
     if (!activeExplorerSearch.trim()) {
@@ -1674,23 +1749,23 @@ export function SQLEditorPage() {
     updateActiveTabSearchTreeNodes((current) =>
       syncAssetTreeActiveStates(current, activeTab?.connectionId ?? null, activeDatabase, activeSchema, activeSelectedTable),
     )
-  }, [activeDatabase, activeExplorerSearch, activeSchema, activeSelectedTable, activeTab?.connectionId])
+  }, [activeDatabase, activeExplorerSearch, activeSchema, activeSelectedTable, activeTab?.connectionId, updateActiveTabSearchTreeNodes])
 
   useEffect(() => {
-    if (!activeTab || !activeConnection || activeTab.searchIndexStatus !== 'idle') {
+    if (!activeTabID || !activeConnection || activeSearchIndexStatus !== 'idle') {
       return
     }
-    loadSearchIndexForTab(activeTab.id, activeConnection)
-  }, [activeConnection, activeTab?.id, activeTab?.searchIndexStatus])
+    loadSearchIndexForTab(activeTabID, activeConnection)
+  }, [activeConnection, activeSearchIndexStatus, activeTabID, loadSearchIndexForTab])
 
   useEffect(() => {
     updateActiveTabExplorerNodes((current) =>
       syncAssetTreeActiveStates(current, activeTab?.connectionId ?? null, activeDatabase, activeSchema, activeSelectedTable),
     )
-  }, [activeDatabase, activeSchema, activeSelectedTable, activeTab?.connectionId, activeTab?.id])
+  }, [activeDatabase, activeSchema, activeSelectedTable, activeTab?.connectionId, activeTab?.id, updateActiveTabExplorerNodes])
 
   useEffect(() => {
-    if (!activeTab?.connectionId || !activeSelectedTable || activeConnection?.db_type === 'redis') {
+    if (!activeTabID || !activeTab?.connectionId || !activeSelectedTable || activeConnection?.db_type === 'redis') {
       return
     }
 
@@ -1717,14 +1792,14 @@ export function SQLEditorPage() {
           listMetadataDefinition(connectionId, schemaName, table, activeDatabase || undefined),
         ])
         if (active) {
-          updateTabByID(activeTab.id, {
+          updateTabByID(activeTabID, {
             columns: columnsResponse.columns,
             definition: definitionResponse,
           })
         }
       } catch (error) {
         if (active) {
-          updateTabByID(activeTab.id, {
+          updateTabByID(activeTabID, {
             metadataError: formatMetadataError(error),
             columns: [],
             definition: null,
@@ -1732,7 +1807,7 @@ export function SQLEditorPage() {
         }
       } finally {
         if (active) {
-          updateTabByID(activeTab.id, {
+          updateTabByID(activeTabID, {
             columnsLoading: false,
             definitionLoading: false,
           })
@@ -1745,78 +1820,7 @@ export function SQLEditorPage() {
     return () => {
       active = false
     }
-  }, [activeConnection?.db_type, activeDatabase, activeSelectedTable, activeTab?.connectionId, activeTab?.id])
-
-  const updateTabByID = useCallback((tabID: string, patch: Partial<EditorTab>) => {
-    setTabs((currentTabs) => currentTabs.map((tab) => {
-      if (tab.id !== tabID || !hasTabPatchChanges(tab, patch)) {
-        return tab
-      }
-      return { ...tab, ...patch }
-    }))
-  }, [])
-
-  const updateActiveTab = useCallback((patch: Partial<EditorTab>) => {
-    if (!activeTab) {
-      return
-    }
-
-    updateTabByID(activeTab.id, patch)
-  }, [activeTab, updateTabByID])
-
-  const updateActiveTabExplorerNodes = useCallback((updater: (nodes: AssetTreeNode[]) => AssetTreeNode[]) => {
-    if (!activeTab) {
-      return
-    }
-    setTabs((currentTabs) => currentTabs.map((tab) => (
-      tab.id === activeTab.id
-        ? (() => {
-            const nextNodes = updater(tab.explorerNodes)
-            return nextNodes === tab.explorerNodes ? tab : { ...tab, explorerNodes: nextNodes }
-          })()
-        : tab
-    )))
-  }, [activeTab])
-
-  const updateActiveTabSearchTreeNodes = useCallback((updater: (nodes: AssetTreeNode[]) => AssetTreeNode[]) => {
-    if (!activeTab) {
-      return
-    }
-    setTabs((currentTabs) => currentTabs.map((tab) => (
-      tab.id === activeTab.id
-        ? (() => {
-            const nextNodes = updater(tab.searchTreeNodes)
-            return nextNodes === tab.searchTreeNodes ? tab : { ...tab, searchTreeNodes: nextNodes }
-          })()
-        : tab
-    )))
-  }, [activeTab])
-
-  function loadSearchIndexForTab(tabID: string, connection: DBConnection) {
-    updateTabByID(tabID, {
-      searchIndexStatus: 'loading',
-      searchIndexError: '',
-      searchIndexTruncated: false,
-    })
-
-    void listMetadataSearchIndex(connection.id)
-      .then((response) => {
-        updateTabByID(tabID, {
-          searchIndexStatus: 'ready',
-          searchIndexItems: response.items,
-          searchIndexTruncated: response.truncated,
-          searchIndexError: '',
-        })
-      })
-      .catch((error) => {
-        updateTabByID(tabID, {
-          searchIndexStatus: 'error',
-          searchIndexItems: [],
-          searchIndexTruncated: false,
-          searchIndexError: error instanceof ApiError ? error.message : 'Object search index is temporarily unavailable.',
-        })
-      })
-  }
+  }, [activeConnection?.db_type, activeDatabase, activeSelectedTable, activeTab?.connectionId, activeTabID, updateActiveTab, updateTabByID])
 
   async function loadNodeChildren(node: AssetTreeNode) {
     const connection = connections.find((item) => item.id === node.connectionId)
@@ -2061,8 +2065,8 @@ export function SQLEditorPage() {
     }
   }
 
-  async function handleRunQuery() {
-    await executeEditorSQL('run')
+  function handleRunQuery() {
+    void executeEditorSQL('run')
   }
 
   async function handleToggleAdminMode() {
@@ -2086,8 +2090,8 @@ export function SQLEditorPage() {
     }
   }
 
-  async function handleExplainQuery() {
-    await executeEditorSQL('explain')
+  function handleExplainQuery() {
+    void executeEditorSQL('explain')
   }
 
   function handleStopQuery() {
@@ -2562,6 +2566,16 @@ export function SQLEditorPage() {
     },
     [activeColumns, activeConnection, activeSchema, activeSelectedTable, sqlCompletionSchema, sqlCompletionTables],
   )
+  const editorActionHandlersRef = useRef({
+    run: handleRunQuery,
+    explain: handleExplainQuery,
+    format: handleFormatSQL,
+  })
+  editorActionHandlersRef.current = {
+    run: handleRunQuery,
+    explain: handleExplainQuery,
+    format: handleFormatSQL,
+  }
   const editorExtensions = useMemo(
     () => [
       ...(activeConnection?.db_type === 'redis' ? REDIS_EDITOR_EXTENSIONS : [sqlEditorSupport]),
@@ -2573,7 +2587,7 @@ export function SQLEditorPage() {
               if (activeTabRunning || !activeTab?.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())) {
                 return true
               }
-              void handleRunQuery()
+              void editorActionHandlersRef.current.run()
               return true
             },
           },
@@ -2583,7 +2597,7 @@ export function SQLEditorPage() {
               if (activeTabRunning || !activeTab?.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())) {
                 return true
               }
-              void handleExplainQuery()
+              void editorActionHandlersRef.current.explain()
               return true
             },
           },
@@ -2593,7 +2607,7 @@ export function SQLEditorPage() {
               if (!activeTab?.sql.trim()) {
                 return true
               }
-              handleFormatSQL()
+              editorActionHandlersRef.current.format()
               return true
             },
           },
@@ -2612,7 +2626,7 @@ export function SQLEditorPage() {
     if (!activeTab?.result) {
       return []
     }
-    if (!activeVisibleColumnIndexes || activeVisibleColumnIndexes.length === 0) {
+    if (activeVisibleColumnIndexes === null) {
       return activeTab.result.columns.map((_, index) => index)
     }
     return activeVisibleColumnIndexes.filter((index) => index >= 0 && index < activeTab.result!.columns.length)
@@ -2875,21 +2889,11 @@ export function SQLEditorPage() {
 
   useEffect(() => {
     if (!activeTab?.result) {
-      if (activeTab?.visibleColumnIndexes !== null) {
-        updateActiveTab({ visibleColumnIndexes: null })
-      }
+      updateActiveTab({ visibleColumnIndexes: null })
       return
     }
-    const nextIndexes = activeTab.result.columns.map((_, index) => index)
-    const currentIndexes = activeTab.visibleColumnIndexes
-    const isSame =
-      Array.isArray(currentIndexes) &&
-      currentIndexes.length === nextIndexes.length &&
-      currentIndexes.every((value, index) => value === nextIndexes[index])
-    if (!isSame) {
-      updateActiveTab({ visibleColumnIndexes: nextIndexes })
-    }
-  }, [activeTab?.id, activeTab?.result])
+    updateActiveTab({ visibleColumnIndexes: activeTab.result.columns.map((_, index) => index) })
+  }, [activeTab?.result, updateActiveTab])
 
   useEffect(() => {
     if (activeResultView !== 'result' && activeResultView !== 'vertical') {
@@ -2902,7 +2906,7 @@ export function SQLEditorPage() {
     if (nextPage !== activeResultPage) {
       updateActiveTab({ resultPage: nextPage })
     }
-  }, [activeResultPage, activeResultView, activeTab?.id, activeTab?.result, totalResultPages, activeVisibleColumnIndexes])
+  }, [activeResultPage, activeResultView, activeTab?.id, activeTab?.result, totalResultPages, activeVisibleColumnIndexes, updateActiveTab])
 
   useLayoutEffect(() => {
     const explorerSection = explorerSectionRef.current
@@ -3245,7 +3249,9 @@ export function SQLEditorPage() {
                     {canAdmin ? (
                       <button
                         type="button"
-                        onClick={handleToggleAdminMode}
+                        onClick={() => {
+                          void handleToggleAdminMode()
+                        }}
                         disabled={activeTabRunning || !activeTab.connectionId}
                         className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-[13px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${activeAdminMode ? 'border-amber-500 bg-amber-500 text-black' : 'border-border bg-white text-ink hover:bg-page'}`}
                       >

@@ -6,39 +6,48 @@ import { SQLEditorPage } from '@/modules/sql-editor/pages/SQLEditorPage'
 import { clearSQLEditorWorkspaceSnapshot, getSQLEditorWorkspaceSnapshot } from '@/modules/sql-editor/workspaceMemory'
 import { ApiError } from '@/shared/api/client'
 
+const { captureCodeMirrorProps } = vi.hoisted(() => ({
+  captureCodeMirrorProps: vi.fn(),
+}))
+
 vi.mock('@uiw/react-codemirror', () => ({
-  default: ({
-    value,
-    onChange,
-    onStatistics,
-  }: {
+  default: (props: {
     value: string
+    extensions?: unknown[]
     onChange: (value: string) => void
     onStatistics?: (stats: { selectedText: boolean; selectionCode: string }) => void
-  }) => (
-    <textarea
-      aria-label="CodeMirror"
-      value={value}
-      onChange={(event) => {
-        onChange(event.target.value)
-        const selectionStart = event.target.selectionStart ?? 0
-        const selectionEnd = event.target.selectionEnd ?? 0
-        onStatistics?.({
-          selectedText: selectionEnd > selectionStart,
-          selectionCode: event.target.value.slice(selectionStart, selectionEnd),
-        })
-      }}
-      onSelect={(event) => {
-        const target = event.target as HTMLTextAreaElement
-        const selectionStart = target.selectionStart ?? 0
-        const selectionEnd = target.selectionEnd ?? 0
-        onStatistics?.({
-          selectedText: selectionEnd > selectionStart,
-          selectionCode: target.value.slice(selectionStart, selectionEnd),
-        })
-      }}
-    />
-  ),
+  }) => {
+    captureCodeMirrorProps(props)
+    const {
+      value,
+      onChange,
+      onStatistics,
+    } = props
+    return (
+      <textarea
+        aria-label="CodeMirror"
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value)
+          const selectionStart = event.target.selectionStart ?? 0
+          const selectionEnd = event.target.selectionEnd ?? 0
+          onStatistics?.({
+            selectedText: selectionEnd > selectionStart,
+            selectionCode: event.target.value.slice(selectionStart, selectionEnd),
+          })
+        }}
+        onSelect={(event) => {
+          const target = event.target as HTMLTextAreaElement
+          const selectionStart = target.selectionStart ?? 0
+          const selectionEnd = target.selectionEnd ?? 0
+          onStatistics?.({
+            selectedText: selectionEnd > selectionStart,
+            selectionCode: target.value.slice(selectionStart, selectionEnd),
+          })
+        }}
+      />
+    )
+  },
 }))
 
 vi.mock('@/shared/auth/AuthContext', () => ({
@@ -241,6 +250,25 @@ describe('SQLEditorPage', () => {
       updated_at: '2026-06-11T00:00:00Z',
     })
     mockedDeleteSavedQuery.mockResolvedValue(undefined)
+  })
+
+  it('父層重新 render 時保持 CodeMirror extensions identity，避免 editor update loop', async () => {
+    const renderPage = () => (
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>
+    )
+    const { rerender } = render(renderPage())
+
+    await screen.findByRole('button', { name: 'Run' })
+    const extensionsBeforeRerender = captureCodeMirrorProps.mock.lastCall?.[0].extensions
+    expect(extensionsBeforeRerender).toBeDefined()
+
+    rerender(renderPage())
+
+    expect(captureCodeMirrorProps.mock.lastCall?.[0].extensions).toBe(extensionsBeforeRerender)
   })
 
   it('read-only 模式不載入需要 query 權限的資料', async () => {
@@ -1657,6 +1685,44 @@ describe('SQLEditorPage', () => {
     expect(await screen.findByText('user_id')).toBeInTheDocument()
     expect(screen.getByText('account_id')).toBeInTheDocument()
     expect(screen.queryByText('t_deposit.user_id')).not.toBeInTheDocument()
+  })
+
+  it('取消結果欄位後保持隱藏，不會被同步 effect 重新選取', async () => {
+    mockedExecuteQuery.mockResolvedValue({
+      columns: ['id', 'user_id'],
+      raw_columns: ['id', 'user_id'],
+      sensitive_column_indexes: [],
+      rows: [['1', '2']],
+      row_count: 1,
+      duration_ms: 12,
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(screen.getByText('Run'))
+    await screen.findByText('user_id')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Columns' }))
+    const userIDCheckbox = screen.getByRole('checkbox', { name: 'user_id' })
+    fireEvent.click(userIDCheckbox)
+
+    expect(userIDCheckbox).not.toBeChecked()
+    expect(screen.queryByRole('columnheader', { name: 'user_id' })).not.toBeInTheDocument()
+
+    const idCheckbox = screen.getByRole('checkbox', { name: 'id' })
+    fireEvent.click(idCheckbox)
+
+    expect(idCheckbox).not.toBeChecked()
+    expect(screen.queryByRole('columnheader', { name: 'id' })).not.toBeInTheDocument()
   })
 
   it('敏感欄位會顯示提示圖示與 tooltip，且查詢結果支援分頁', async () => {

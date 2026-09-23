@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, FileText, Loader2, Minus, Plus, ScrollText, Trash2, Wand2, XCircle } from 'lucide-react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { format as formatSQL } from 'sql-formatter'
@@ -359,6 +359,8 @@ export function NewTicketPage() {
   ])
   const [queryAccessDatabasesByConnection, setQueryAccessDatabasesByConnection] = useState<Record<string, string[]>>({})
   const [queryAccessTablesByRule, setQueryAccessTablesByRule] = useState<Record<string, QueryAccessTableOption[]>>({})
+  const loadingQueryAccessConnectionIDsRef = useRef(new Set<string>())
+  const loadingQueryAccessRuleIDsRef = useRef(new Set<string>())
   const [loadingQueryAccessConnections, setLoadingQueryAccessConnections] = useState<Record<string, boolean>>({})
   const [loadingQueryAccessRuleTables, setLoadingQueryAccessRuleTables] = useState<Record<string, boolean>>({})
   const [loadingConnections, setLoadingConnections] = useState(true)
@@ -525,24 +527,11 @@ export function NewTicketPage() {
     setDatabaseName('')
   }, [isQueryAccessTicket])
 
-  useEffect(() => {
-    if (!isQueryAccessTicket) {
+  const loadQueryAccessDatabases = useCallback(async (connectionId: string) => {
+    if (connectionId === '' || queryAccessDatabasesByConnection[connectionId] || loadingQueryAccessConnectionIDsRef.current.has(connectionId)) {
       return
     }
-    queryAccessRules.forEach((rule) => {
-      if (rule.connectionId !== '') {
-        void loadQueryAccessDatabases(rule.connectionId)
-      }
-      if (rule.connectionId !== '' && rule.databasePattern !== '*') {
-        void loadQueryAccessRuleTables(rule)
-      }
-    })
-  }, [isQueryAccessTicket, queryAccessRules])
-
-  async function loadQueryAccessDatabases(connectionId: string) {
-    if (connectionId === '' || queryAccessDatabasesByConnection[connectionId]) {
-      return
-    }
+    loadingQueryAccessConnectionIDsRef.current.add(connectionId)
     setLoadingQueryAccessConnections((current) => ({ ...current, [connectionId]: true }))
     try {
       const response = await listTicketDatabases(Number(connectionId))
@@ -553,14 +542,16 @@ export function NewTicketPage() {
     } catch (loadError) {
       setError(loadError instanceof ApiError ? loadError.message : 'Failed to load query access databases.')
     } finally {
+      loadingQueryAccessConnectionIDsRef.current.delete(connectionId)
       setLoadingQueryAccessConnections((current) => ({ ...current, [connectionId]: false }))
     }
-  }
+  }, [queryAccessDatabasesByConnection])
 
-  async function loadQueryAccessRuleTables(rule: QueryAccessRuleDraft) {
-    if (rule.connectionId === '' || rule.databasePattern === '*' || queryAccessTablesByRule[rule.id]) {
+  const loadQueryAccessRuleTables = useCallback(async (rule: QueryAccessRuleDraft) => {
+    if (rule.connectionId === '' || rule.databasePattern === '*' || queryAccessTablesByRule[rule.id] || loadingQueryAccessRuleIDsRef.current.has(rule.id)) {
       return
     }
+    loadingQueryAccessRuleIDsRef.current.add(rule.id)
     setLoadingQueryAccessRuleTables((current) => ({ ...current, [rule.id]: true }))
     try {
       const response = await listMetadata(Number(rule.connectionId), { database: rule.databasePattern })
@@ -581,9 +572,24 @@ export function NewTicketPage() {
       setQueryAccessTablesByRule((current) => ({ ...current, [rule.id]: [] }))
       setError(loadError instanceof ApiError ? loadError.message : 'Failed to load query access tables.')
     } finally {
+      loadingQueryAccessRuleIDsRef.current.delete(rule.id)
       setLoadingQueryAccessRuleTables((current) => ({ ...current, [rule.id]: false }))
     }
-  }
+  }, [queryAccessTablesByRule])
+
+  useEffect(() => {
+    if (!isQueryAccessTicket) {
+      return
+    }
+    queryAccessRules.forEach((rule) => {
+      if (rule.connectionId !== '') {
+        void loadQueryAccessDatabases(rule.connectionId)
+      }
+      if (rule.connectionId !== '' && rule.databasePattern !== '*') {
+        void loadQueryAccessRuleTables(rule)
+      }
+    })
+  }, [isQueryAccessTicket, loadQueryAccessDatabases, loadQueryAccessRuleTables, queryAccessRules])
 
   function updateQueryAccessRule(ruleId: string, patch: Partial<QueryAccessRuleDraft>) {
     setQueryAccessRules((current) => current.map((rule) => {
@@ -733,7 +739,12 @@ export function NewTicketPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <form className="grid items-start gap-3" onSubmit={handleSubmit}>
+      <form
+        className="grid items-start gap-3"
+        onSubmit={(event) => {
+          void handleSubmit(event)
+        }}
+      >
         <section className="rounded-xl border border-border bg-panel shadow-soft">
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center gap-2">

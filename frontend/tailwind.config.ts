@@ -1,6 +1,6 @@
 import type { Config } from 'tailwindcss'
 
-// Monochrome palette per DESIGN.md — token names kept so existing pages restyle automatically.
+// Monochrome palette per docs/explanation/ui-design-guidelines.md; token names keep existing pages stable.
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {

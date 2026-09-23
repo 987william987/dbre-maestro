@@ -24,7 +24,7 @@ vi.mock('@/shared/auth/AuthContext', () => ({
   }),
 }))
 
-import { getSettings, listSettingsDBConnections, listSettingsUsers, previewWorkflowRules } from '@/modules/settings/api'
+import { getSettings, listSettingsDBConnections, listSettingsUsers, patchSettings, previewWorkflowRules } from '@/modules/settings/api'
 import { listAuthGroups } from '@/modules/auth-groups/api'
 import { listUsers } from '@/modules/users/api'
 
@@ -32,6 +32,7 @@ const mockedGetSettings = vi.mocked(getSettings)
 const mockedListSettingsDBConnections = vi.mocked(listSettingsDBConnections)
 const mockedPreviewWorkflowRules = vi.mocked(previewWorkflowRules)
 const mockedListSettingsUsers = vi.mocked(listSettingsUsers)
+const mockedPatchSettings = vi.mocked(patchSettings)
 const mockedListUsers = vi.mocked(listUsers)
 const mockedListAuthGroups = vi.mocked(listAuthGroups)
 
@@ -150,8 +151,29 @@ describe('SettingsPage', () => {
     mockedListUsers.mockReset()
     mockedListSettingsUsers.mockReset()
     mockedListAuthGroups.mockReset()
+    mockedPatchSettings.mockReset()
     mockedPreviewWorkflowRules.mockResolvedValue({ previews: [] })
     mockedListSettingsUsers.mockResolvedValue({ users: [] })
+  })
+
+  it('共用 save handler 會儲存目前 section 的設定', async () => {
+    const settings = makeSettings()
+    mockedGetSettings.mockResolvedValue(settings)
+    mockedPatchSettings.mockResolvedValue(settings)
+    mockSettingsDependencies()
+    renderSettingsPageSection('workflow')
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Settings' }))
+    await waitFor(() => expect(mockedPatchSettings).toHaveBeenCalled())
+    expect(await screen.findByText('Platform settings updated.')).toBeInTheDocument()
+  })
+
+  it('共用 save handler 失敗時在 integrations route 顯示錯誤', async () => {
+    mockedGetSettings.mockResolvedValue(makeSettings())
+    mockedPatchSettings.mockRejectedValue(new Error('offline'))
+    mockSettingsDependencies()
+    renderSettingsPageSection('integrations')
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Settings' }))
+    expect(await screen.findByText('Failed to update platform settings.')).toBeInTheDocument()
   })
 
   it('loads the settings page without depending on the users API', async () => {
