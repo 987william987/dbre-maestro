@@ -63,6 +63,11 @@ type mysqlDDLTableExistenceCheck struct {
 
 type mysqlShadowValidationTimings struct {
 	sourceConnection time.Duration
+	sourcePoolWait   time.Duration
+	sourcePoolOpen   time.Duration
+	sourcePoolPing   time.Duration
+	sourcePoolHit    bool
+	sourcePoolGen    uint64
 	existenceChecks  time.Duration
 	schemaInfo       time.Duration
 	listTables       time.Duration
@@ -634,6 +639,12 @@ func (h *TicketHandler) runMySQLDDLShadowValidation(
 			"statement_count", len(statements),
 			"result_count", len(items),
 			"source_connection_ms", timings.sourceConnection.Milliseconds(),
+			"source_pool_enabled", h.shadowPoolEnabled,
+			"source_pool_hit", timings.sourcePoolHit,
+			"source_pool_wait_ms", timings.sourcePoolWait.Milliseconds(),
+			"source_pool_open_ms", timings.sourcePoolOpen.Milliseconds(),
+			"source_pool_ping_ms", timings.sourcePoolPing.Milliseconds(),
+			"source_pool_generation", timings.sourcePoolGen,
 			"existence_check_ms", timings.existenceChecks.Milliseconds(),
 			"schema_info_ms", timings.schemaInfo.Milliseconds(),
 			"list_tables_ms", timings.listTables.Milliseconds(),
@@ -647,8 +658,13 @@ func (h *TicketHandler) runMySQLDDLShadowValidation(
 	}()
 
 	sourceConnectionStartedAt := time.Now()
-	readonlyDB, cleanup, _, err := h.openTicketSQLDBWithConnection(ctx, dbConnID, model.DBCredentialRoleReadonly, nil)
+	readonlyDB, cleanup, poolStats, err := h.openShadowValidationReadonlyDB(ctx, dbConnID)
 	timings.sourceConnection = time.Since(sourceConnectionStartedAt)
+	timings.sourcePoolHit = poolStats.Hit
+	timings.sourcePoolWait = poolStats.WaitDuration
+	timings.sourcePoolOpen = poolStats.OpenDuration
+	timings.sourcePoolPing = poolStats.PingDuration
+	timings.sourcePoolGen = poolStats.Generation
 	if err != nil {
 		return buildBatchValidationErrorItems(statements, validationMethodMySQLShadow, stringPtr(validationStagePrepare), "ddl", "unknown", "open metadata connection failed: "+err.Error())
 	}
@@ -687,6 +703,51 @@ func (h *TicketHandler) runMySQLDDLShadowValidation(
 		tableCleanup()
 	}
 	return items
+}
+
+func (h *TicketHandler) openShadowValidationReadonlyDB(ctx context.Context, dbConnID uint64) (*sql.DB, func(), pool.CredentialPoolStats, error) {
+	if !h.shadowPoolEnabled || h.shadowReadonlyPool == nil {
+		db, cleanup, _, err := h.openTicketSQLDBWithConnection(ctx, dbConnID, model.DBCredentialRoleReadonly, nil)
+		return db, cleanup, pool.CredentialPoolStats{}, err
+	}
+
+	key := pool.CredentialPoolKey{
+		ConnectionID: dbConnID,
+		Role:         model.DBCredentialRoleReadonly,
+		Profile:      pool.ProfileShadowValidation,
+	}
+	db, stats, err := h.shadowReadonlyPool.GetOrCreate(ctx, key,
+		func(resolveCtx context.Context) (pool.CredentialPoolDescriptor, error) {
+			conn, err := h.dbConns.GetByID(resolveCtx, dbConnID)
+			if err != nil {
+				return pool.CredentialPoolDescriptor{}, err
+			}
+			if conn == nil {
+				return pool.CredentialPoolDescriptor{}, fmt.Errorf("db connection not found")
+			}
+			resolved, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
+			if err != nil {
+				return pool.CredentialPoolDescriptor{}, err
+			}
+			driver, dsn := pool.BuildDSN(resolved, password)
+			return pool.CredentialPoolDescriptor{Driver: driver, DSN: dsn}, nil
+		},
+		func(openCtx context.Context, descriptor pool.CredentialPoolDescriptor) (pool.CredentialPoolOpenResult, error) {
+			db, err := pool.Open(descriptor.Driver, descriptor.DSN, pool.ProfileShadowValidation)
+			if err != nil {
+				return pool.CredentialPoolOpenResult{}, err
+			}
+			pingStartedAt := time.Now()
+			pingCtx, cancel := context.WithTimeout(openCtx, 5*time.Second)
+			defer cancel()
+			if err := db.PingContext(pingCtx); err != nil {
+				_ = db.Close()
+				return pool.CredentialPoolOpenResult{}, err
+			}
+			return pool.CredentialPoolOpenResult{DB: db, PingDuration: time.Since(pingStartedAt)}, nil
+		},
+	)
+	return db, func() {}, stats, err
 }
 
 type ddlShadowTarget struct {

@@ -185,6 +185,8 @@ TO 'maestro_migration'@'%';
 | `DB_POOL_SHADOW_VALIDATION_CONN_MAX_LIFETIME` | `2m` |
 | `DB_POOL_SHADOW_VALIDATION_CONN_MAX_IDLE_TIME` | `1m` |
 
+`DB_SHADOW_READONLY_POOL_ENABLED` 預設為 `false`。設為 `true` 時，MySQL DDL shadow validation 會依 DB connection 與 readonly credential 重用來源連線；不影響 SQL Editor、Metadata、Export 或工單正式執行使用的 pool。
+
 ## Compose 的實際行為
 
 `make dev` 會使用專案根目錄的 `docker-compose.yml`。Compose 會自動讀取根目錄 `.env`，並將文件列出的 process-level env 映射到 `app` container。EKS 部署不會讀取此 `.env`；EKS 的 runtime env 與 secrets 由 ArgoCD values / Kubernetes Secret 或 AWS Secrets Manager 提供。

@@ -27,6 +27,7 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 - 修正 SQL Editor 離開頁面時的 render loop，以及 Filter Columns 無反應問題。
 - 補齊 routed page 的 success、error、mutation、redirect 與已知回歸 coverage。
 - 清查舊前端測試；沒有刪除仍具獨立意圖的案例，只合併重複的 AppShell route fixtures。
+- MySQL DDL shadow validation 已具備 credential-aware readonly connection pool；功能旗標 `DB_SHADOW_READONLY_POOL_ENABLED` 預設關閉，需先在 Testnet 啟用並觀察 timing 後再推至 Production。
 
 ## 已知限制與尚未接入項目
 

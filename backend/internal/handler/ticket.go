@@ -47,6 +47,8 @@ type TicketHandler struct {
 	masking            *maskingRuntime
 	sqlReviewRules     *repository.SQLReviewRuleRepo
 	shadowValidationDB *sqlx.DB
+	shadowReadonlyPool *pool.CredentialPoolManager
+	shadowPoolEnabled  bool
 	notifRepo          *repository.NotificationRepo
 	broker             *realtime.Broker
 	lark               *notification.Dispatcher
@@ -309,6 +311,13 @@ func WithTicketHandlerRollbacks(repo *repository.TicketRollbackRepo) TicketHandl
 	}
 }
 
+func WithTicketHandlerShadowReadonlyPool(manager *pool.CredentialPoolManager, enabled bool) TicketHandlerOption {
+	return func(h *TicketHandler) {
+		h.shadowReadonlyPool = manager
+		h.shadowPoolEnabled = enabled
+	}
+}
+
 func NewTicketHandler(
 	tickets *repository.TicketRepo,
 	queryAccess *repository.QueryAccessRepo,
@@ -341,6 +350,7 @@ func NewTicketHandler(
 		masking:            newMaskingRuntime(users, maskingRules, whitelist, tickets, engine),
 		sqlReviewRules:     sqlReviewRules,
 		shadowValidationDB: shadowValidationDB,
+		shadowReadonlyPool: pool.ShadowValidationPools(),
 		notifRepo:          notifRepo,
 		broker:             broker,
 		lark:               lark,
