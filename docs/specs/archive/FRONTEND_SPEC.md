@@ -127,7 +127,7 @@ status: archived
 
 ### 5. 視覺與版面
 
-遵循 `DESIGN.md`，使用既有色彩 token、字體方向與高密度內部工具風格。
+遵循 `docs/explanation/ui-design-guidelines.md`，使用既有色彩 token、字體方向與高密度內部工具風格。
 
 本階段 UI 要求：
 

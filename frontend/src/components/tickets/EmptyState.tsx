@@ -13,7 +13,7 @@ interface EmptyStateProps {
 }
 
 // Inline SVG: 「勾選完成的工作清單」插畫
-// 設計語言：乾淨的線稿 + 品牌色底，與 DESIGN.md 的工具風格一致
+// 設計語言：乾淨的線稿 + 品牌色底，與 docs/explanation/ui-design-guidelines.md 一致
 function ChecklistIllustration() {
   return (
     <svg

@@ -7,6 +7,8 @@
 - `reference/`：準確描述 API、設定、權限、資料模型與功能行為
 - `explanation/`：說明系統為什麼這樣設計，以及核心取捨
 
+新 session 或接手開發時，先讀 [專案目前狀態](PROJECT_STATUS.md)，再依任務選擇下方 canonical 文件。
+
 ## Tutorials
 
 - [本機開發教學](tutorials/getting-started-local-dev.md)
@@ -50,7 +52,7 @@
 
 ## Explanation
 
-- [UI 目標設計](../DESIGN.md)
+- [UI 目標設計](explanation/ui-design-guidelines.md)
 - [專案導覽](explanation/project-map.md)
 - [架構總覽](explanation/architecture-overview.md)
 - [安全邊界說明](explanation/security-boundaries.md)
@@ -70,3 +72,8 @@
 - [20260611 MySQL Masking Global Whitelist Sensitive Override](specs/archive/20260611-mysql-masking-global-whitelist-sensitive-override.md)
 - [Backend RBAC API Gap Spec](specs/archive/BACKEND_RBAC_API_GAP_SPEC.md)
 - [Frontend Spec](specs/archive/FRONTEND_SPEC.md)
+
+## 工程規劃
+
+- [專案目前狀態](PROJECT_STATUS.md)
+- [工程待辦](TODOS.md)
