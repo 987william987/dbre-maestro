@@ -7,6 +7,7 @@ import { openEventStream } from '@/shared/api/client'
 import { hasAnyPermission, TICKET_WORKSPACE_PERMISSIONS } from '@/shared/auth/permissions'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
+import type { CurrentUser } from '@/shared/types/auth'
 import type { NotificationItem, NotificationSummary } from '@/shared/types/notification'
 import { useToast } from '@/shared/ui/ToastContext'
 
@@ -388,6 +389,15 @@ function findActiveNavChild(pathname: string, item: NavItem) {
 
 export function AppShell() {
   const { user, logout } = useAuth()
+
+  if (!user) {
+    return null
+  }
+
+  return <AuthenticatedAppShell user={user} logout={logout} />
+}
+
+function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: () => Promise<void> }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { pushToast } = useToast()
@@ -410,10 +420,6 @@ export function AppShell() {
   const notificationRef = useRef<HTMLDivElement | null>(null)
   const bootstrappedNotificationsRef = useRef(false)
   const seenNotificationIDsRef = useRef<Set<number>>(new Set())
-
-  if (!user) {
-    return null
-  }
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {

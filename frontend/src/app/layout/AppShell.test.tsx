@@ -35,8 +35,8 @@ const mockedMarkAllNotificationsRead = vi.mocked(markAllNotificationsRead)
 const mockedOpenEventStream = vi.mocked(openEventStream)
 const storage = new Map<string, string>()
 
-function renderShell(initialEntry = '/tickets') {
-  return render(
+function createShell(initialEntry = '/tickets') {
+  return (
     <MemoryRouter initialEntries={[initialEntry]}>
       <ToastProvider>
         <Routes>
@@ -64,8 +64,12 @@ function renderShell(initialEntry = '/tickets') {
           </Route>
         </Routes>
       </ToastProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   )
+}
+
+function renderShell(initialEntry = '/tickets') {
+  return render(createShell(initialEntry))
 }
 
 describe('AppShell notifications', () => {
@@ -134,6 +138,27 @@ describe('AppShell notifications', () => {
     mockedMarkNotificationRead.mockResolvedValue(undefined)
     mockedMarkAllNotificationsRead.mockResolvedValue(undefined)
     mockedOpenEventStream.mockReturnValue(() => undefined)
+  })
+
+  it('user 從 null 變成 authenticated 時會安全掛載 shell', async () => {
+    const authenticated = mockedUseAuth()
+    mockedUseAuth.mockReturnValue({
+      ...authenticated,
+      status: 'anonymous',
+      isAuthenticated: false,
+      user: null,
+      accessToken: null,
+    })
+
+    const view = renderShell()
+    expect(screen.queryByText('tickets page')).not.toBeInTheDocument()
+    expect(mockedListNotifications).not.toHaveBeenCalled()
+
+    mockedUseAuth.mockReturnValue(authenticated)
+    view.rerender(createShell())
+
+    expect(await screen.findByText('tickets page')).toBeInTheDocument()
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
   })
 
   it('會顯示鈴鐺待辦總數並可展開通知下拉', async () => {
