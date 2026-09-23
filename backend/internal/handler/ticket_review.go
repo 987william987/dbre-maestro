@@ -79,21 +79,66 @@ func (h *TicketHandler) runTicketSQLReview(ctx context.Context, dbConnID uint64,
 	return h.runTicketSQLReviewWithType(ctx, dbConnID, model.TicketTypeDDL, sqlContent, databaseName)
 }
 
-func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID uint64, ticketType model.TicketType, sqlContent string, databaseName *string) []ticketReviewItem {
+func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID uint64, ticketType model.TicketType, sqlContent string, databaseName *string) (results []ticketReviewItem) {
+	startedAt := time.Now()
+	var dialect sqlparse.Dialect
+	var statementCount int
+	var parseDuration, metadataDuration, ruleLoadDuration, staticDuration, explainDuration, shadowDuration time.Duration
+	defer func() {
+		errorCount := 0
+		warningCount := 0
+		for _, result := range results {
+			switch result.Status {
+			case "error":
+				errorCount++
+			case "warn", "warning":
+				warningCount++
+			}
+		}
+		slog.Info("ticket sql review complete",
+			"ticket_type", ticketType,
+			"db_connection_id", dbConnID,
+			"dialect", dialect,
+			"statement_count", statementCount,
+			"result_count", len(results),
+			"error_count", errorCount,
+			"warning_count", warningCount,
+			"parse_ms", parseDuration.Milliseconds(),
+			"metadata_ms", metadataDuration.Milliseconds(),
+			"rule_load_ms", ruleLoadDuration.Milliseconds(),
+			"static_validation_ms", staticDuration.Milliseconds(),
+			"explain_ms", explainDuration.Milliseconds(),
+			"shadow_validation_ms", shadowDuration.Milliseconds(),
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+		)
+	}()
+
 	if ticketType == model.TicketTypeRedisCommand {
+		parseStartedAt := time.Now()
 		dbIndex, err := parseRedisDatabaseIndex(databaseName)
+		parseDuration = time.Since(parseStartedAt)
 		if err != nil {
 			return []ticketReviewItem{
 				buildValidationReviewItem(1, strings.TrimSpace(sqlContent), validationMethodRedisWhitelist, nil, "redis_command", "redis_command", 0, []string{err.Error()}),
 			}
 		}
-		return h.runRedisCommandTicketReview(sqlContent, dbIndex)
+		staticStartedAt := time.Now()
+		results = h.runRedisCommandTicketReview(sqlContent, dbIndex)
+		staticDuration = time.Since(staticStartedAt)
+		statementCount = len(results)
+		return results
 	}
 
-	parsedStatements, dialect, err := h.parseTicketStatements(ctx, dbConnID, sqlContent)
+	parseStartedAt := time.Now()
+	parsedStatements, parsedDialect, err := h.parseTicketStatements(ctx, dbConnID, sqlContent)
+	parseDuration = time.Since(parseStartedAt)
+	dialect = parsedDialect
+	statementCount = len(parsedStatements)
 	if err != nil {
 		if dialect == sqlparse.DialectMySQL {
+			ruleLoadStartedAt := time.Now()
 			if rules, listErr := h.sqlReviewRules.List(ctx); listErr == nil {
+				ruleLoadDuration = time.Since(ruleLoadStartedAt)
 				ruleMap := make(map[string]bool, len(rules))
 				ruleSeverity := make(map[string]string, len(rules))
 				for _, rule := range rules {
@@ -101,19 +146,25 @@ func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID
 					ruleSeverity[rule.RuleName] = rule.Severity
 				}
 				if rule := sqlreview.UnsupportedMySQLObjectRule(sqlContent); rule != "" && ruleMap[rule] {
+					staticStartedAt := time.Now()
 					issues := sqlreview.RunStaticChecks(sqlContent, map[string]bool{rule: true})
 					for index := range issues {
 						issues[index] = formatReviewIssue(ruleSeverity[rule], issues[index])
 					}
+					staticDuration = time.Since(staticStartedAt)
 					return []ticketReviewItem{buildValidationReviewItemWithStatus(1, strings.TrimSpace(sqlContent), validationMethodStaticRule, nil, "create", "system", 0, configuredReviewStatus(ruleSeverity[rule]), issues)}
 				}
+			} else {
+				ruleLoadDuration = time.Since(ruleLoadStartedAt)
 			}
 		}
 		return buildSyntaxErrorReviewItems(err, sqlContent)
 	}
 
-	results := buildParserReviewItems(parsedStatements)
+	results = buildParserReviewItems(parsedStatements)
+	metadataStartedAt := time.Now()
 	tableMetadataBySeq := h.loadReviewTableMetadata(ctx, dbConnID, dialect, parsedStatements, nullableStringValue(databaseName))
+	metadataDuration = time.Since(metadataStartedAt)
 
 	if ticketType == model.TicketTypeDDL || ticketType == model.TicketTypeDML {
 		if err := sqlpolicy.CheckTicketStatementKinds(ticketType, parsedStatements); err != nil {
@@ -121,7 +172,9 @@ func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID
 		}
 	}
 
+	ruleLoadStartedAt := time.Now()
 	rules, err := h.sqlReviewRules.List(ctx)
+	ruleLoadDuration = time.Since(ruleLoadStartedAt)
 	if err == nil {
 		ruleMap := make(map[string]bool, len(rules))
 		ruleSeverity := make(map[string]string, len(rules))
@@ -136,14 +189,20 @@ func (h *TicketHandler) runTicketSQLReviewWithType(ctx context.Context, dbConnID
 				rowThreshold = *rule.Threshold
 			}
 		}
+		staticStartedAt := time.Now()
 		results = append(results, buildStaticValidationItems(parsedStatements, ruleMap, ruleSeverity)...)
+		staticDuration = time.Since(staticStartedAt)
 		if ticketType == model.TicketTypeDML && dialect == sqlparse.DialectMySQL {
+			explainStartedAt := time.Now()
 			results = append(results, h.runMySQLDMLExplainValidation(ctx, dbConnID, parsedStatements, databaseName, ruleMap, ruleSeverity, rowThreshold)...)
+			explainDuration = time.Since(explainStartedAt)
 		}
 	}
 
 	if ticketType == model.TicketTypeDDL && dialect == sqlparse.DialectMySQL {
+		shadowStartedAt := time.Now()
 		results = append(results, h.runMySQLDDLShadowValidation(ctx, dbConnID, parsedStatements, databaseName)...)
+		shadowDuration = time.Since(shadowStartedAt)
 	}
 
 	return applyReviewTableMetadata(results, tableMetadataBySeq)

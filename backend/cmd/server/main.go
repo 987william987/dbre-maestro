@@ -102,6 +102,7 @@ func redactingRequestLogger(next http.Handler) http.Handler {
 		start := time.Now()
 		ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 		defer func() {
+			duration := time.Since(start)
 			status := ww.Status()
 			if status == 0 {
 				status = http.StatusOK
@@ -111,7 +112,8 @@ func redactingRequestLogger(next http.Handler) http.Handler {
 				"path", redactedRequestURI(r),
 				"status", status,
 				"bytes", ww.BytesWritten(),
-				"duration", time.Since(start),
+				"duration", duration,
+				"duration_ms", duration.Milliseconds(),
 				"remote_addr", r.RemoteAddr,
 			)
 		}()
