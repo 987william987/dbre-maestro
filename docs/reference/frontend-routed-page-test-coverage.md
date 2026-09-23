@@ -33,7 +33,7 @@
 | `/users/groups` | `UsersPage` | W | `UsersPage.test.tsx` | 達標 |
 | `/users/resources` | `UsersPage` | R | `UsersPage.test.tsx` | 達標 |
 | `/users/query-access` | `UsersPage` | W | `UsersPage.test.tsx` | 補強：mutation 失敗案例 |
-| `/sql-editor` | `SQLEditorPage` | X | `SQLEditorPage.test.tsx` | 達標；保留 navigation render-loop 與 Filter Columns 回歸測試 |
+| `/sql-editor` | `SQLEditorPage` | X | `SQLEditorPage.test.tsx` | 達標；涵蓋 AppShell route 切換、navigation render-loop 與 Filter Columns 回歸 |
 | `/scheduled-sql-reports` | `ScheduledSQLReportsPage` | W | 無 | 缺少：成功、失敗、建立與 read-only 行為 |
 | `/db-connections` | `DBConnectionsPage` | W | `DBConnectionsPage.test.tsx` | 達標 |
 | `/db-connections/:id/overview` | `DBConnectionDetailPage` | R | `DBConnectionDetailPage.test.tsx` | 達標 |
