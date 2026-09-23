@@ -610,7 +610,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     }
   }
 
-  async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
+  function handleSaveUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!drawerState || !canWrite) {
       return
@@ -654,7 +654,7 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
     })
   }
 
-  async function handleSaveAuthGroup(event: FormEvent<HTMLFormElement>) {
+  function handleSaveAuthGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!drawerState || !canWrite) {
       return
@@ -1278,7 +1278,12 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
           ) : (
             <section className="grid gap-3">
               {canWrite ? (
-              <form className="rounded-xl border border-border bg-panel p-4 shadow-soft" onSubmit={handleCreateQueryAccessRule}>
+              <form
+                className="rounded-xl border border-border bg-panel p-4 shadow-soft"
+                onSubmit={(event) => {
+                  void handleCreateQueryAccessRule(event)
+                }}
+              >
                 <div className="mb-4 flex items-center gap-2">
                   <KeyRound className="h-4 w-4 text-accent" />
                   <div>

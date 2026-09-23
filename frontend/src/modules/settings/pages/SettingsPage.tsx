@@ -263,7 +263,12 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
       {loading || !form ? (
         <LoadingBlock message="Loading platform settings..." className="min-h-[320px] rounded-xl border-border bg-panel" />
       ) : (
-        <form onSubmit={handleSubmit} className="grid gap-3">
+        <form
+          onSubmit={(event) => {
+            void handleSubmit(event)
+          }}
+          className="grid gap-3"
+        >
           <fieldset disabled={!canWrite || saving} className="grid gap-3 disabled:opacity-100">
           <section className={`${section === 'workflow' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
             <div className="border-b border-border/80 px-4 py-3">

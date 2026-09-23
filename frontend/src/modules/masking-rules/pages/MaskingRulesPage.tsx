@@ -798,7 +798,12 @@ export function MaskingRulesPage() {
           title={ruleDrawer.mode === 'create' ? 'New Rule' : `Edit ${ruleDrawer.rule.column_name}`}
           onClose={closeRuleDrawer}
         >
-          <form className="grid gap-4" onSubmit={handleRuleSubmit}>
+          <form
+            className="grid gap-4"
+            onSubmit={(event) => {
+              void handleRuleSubmit(event)
+            }}
+          >
             <Field label="Column Pattern">
               <input
                 value={ruleForm.columnName}
@@ -865,7 +870,12 @@ export function MaskingRulesPage() {
           }
           onClose={closeWhitelistDrawer}
         >
-          <form className="grid gap-4" onSubmit={handleWhitelistSubmit}>
+          <form
+            className="grid gap-4"
+            onSubmit={(event) => {
+              void handleWhitelistSubmit(event)
+            }}
+          >
             <Field label="Connection">
               <DropdownSelect
                 ariaLabel="Connection"
@@ -1029,7 +1039,12 @@ export function MaskingRulesPage() {
           title={redisPrefixDrawer.mode === 'create' ? 'New Redis Prefix' : `Edit ${redisPrefixDrawer.prefix.key_prefix}`}
           onClose={closeRedisPrefixDrawer}
         >
-          <form className="grid gap-4" onSubmit={handleRedisPrefixSubmit}>
+          <form
+            className="grid gap-4"
+            onSubmit={(event) => {
+              void handleRedisPrefixSubmit(event)
+            }}
+          >
             <Field label="Redis Connection">
               <DropdownSelect
                 ariaLabel="Redis Connection"

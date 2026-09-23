@@ -285,7 +285,12 @@ export function LoginPage() {
           <p className="mt-1.5 text-sm text-muted">Enter your username and password to log in</p>
         </div>
 
-        <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            void handleSubmit(event)
+          }}
+        >
           <label className="flex flex-col gap-1.5">
             <span className="text-sm font-semibold text-ink">Username</span>
             <input
@@ -405,7 +410,9 @@ export function LoginPage() {
             <button
               type="button"
               disabled={larkDisabled}
-              onClick={handleLarkLogin}
+              onClick={() => {
+                void handleLarkLogin()
+              }}
               className={cn(
                 'mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-control border border-border px-4 text-sm font-bold transition-colors',
                 'bg-panel text-ink hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50',

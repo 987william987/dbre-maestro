@@ -2065,8 +2065,8 @@ export function SQLEditorPage() {
     }
   }
 
-  async function handleRunQuery() {
-    await executeEditorSQL('run')
+  function handleRunQuery() {
+    void executeEditorSQL('run')
   }
 
   async function handleToggleAdminMode() {
@@ -2090,8 +2090,8 @@ export function SQLEditorPage() {
     }
   }
 
-  async function handleExplainQuery() {
-    await executeEditorSQL('explain')
+  function handleExplainQuery() {
+    void executeEditorSQL('explain')
   }
 
   function handleStopQuery() {
@@ -3249,7 +3249,9 @@ export function SQLEditorPage() {
                     {canAdmin ? (
                       <button
                         type="button"
-                        onClick={handleToggleAdminMode}
+                        onClick={() => {
+                          void handleToggleAdminMode()
+                        }}
                         disabled={activeTabRunning || !activeTab.connectionId}
                         className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-[13px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${activeAdminMode ? 'border-amber-500 bg-amber-500 text-black' : 'border-border bg-white text-ink hover:bg-page'}`}
                       >

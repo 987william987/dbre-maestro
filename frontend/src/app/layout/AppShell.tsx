@@ -511,11 +511,12 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
     }
   }, [pushToast])
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     setMenuOpen(false)
     setNotificationOpen(false)
-    await logout()
-    navigate('/login', { replace: true })
+    void logout()
+      .catch(() => undefined)
+      .then(() => navigate('/login', { replace: true }))
   }
 
   async function handleMarkAllRead() {

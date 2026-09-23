@@ -267,7 +267,9 @@ export function AuditLogsPage() {
             {canExport ? (
               <button
                 type="button"
-                onClick={handleExport}
+                onClick={() => {
+                  void handleExport()
+                }}
                 className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-bold text-ink transition hover:bg-page xl:ml-auto"
               >
                 <Download className="h-4 w-4" />

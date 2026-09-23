@@ -739,7 +739,12 @@ export function NewTicketPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-3 p-3 sm:p-4">
-      <form className="grid items-start gap-3" onSubmit={handleSubmit}>
+      <form
+        className="grid items-start gap-3"
+        onSubmit={(event) => {
+          void handleSubmit(event)
+        }}
+      >
         <section className="rounded-xl border border-border bg-panel shadow-soft">
           <div className="border-b border-border/80 px-4 py-3">
             <div className="flex items-center gap-2">
