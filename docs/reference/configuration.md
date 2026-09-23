@@ -287,6 +287,34 @@ AWS_PROFILE=your-profile make dev
 
 Shell environment 的值優先於 `.env`。本機不要把長期 AWS access key 寫入 `.env`；EKS 應使用 IRSA，不掛載人工 profile。
 
+### SSO profile 與 static credentials 衝突
+
+同一個 profile 不應同時出現在：
+
+- `~/.aws/config` 的 SSO profile
+- `~/.aws/credentials` 的 static credentials section
+
+AWS CLI 與 Go AWS SDK 的 credential provider precedence 可能不同。AWS CLI 可能成功使用 SSO，但 Go SDK 優先讀到同名的過期 static credentials，導致 Inventory Sync 回傳：
+
+```text
+InvalidClientTokenId: The security token included in the request is invalid
+```
+
+先確認 profile 在 host 上可用：
+
+```bash
+aws sts get-caller-identity --profile your-profile
+aws rds describe-db-clusters --profile your-profile --region ap-northeast-1 --max-items 1
+```
+
+若 CLI 成功但 app 仍回 `InvalidClientTokenId`，備份 `~/.aws/credentials`，移除其中與 SSO profile 同名的 stale static credentials section，再重新登入：
+
+```bash
+aws sso login --profile your-profile
+```
+
+Inventory job 每次執行都會重新載入 AWS config，下一次排程即可使用新的 SSO credentials。若要立即確認 container 設定仍正確，可選擇執行 `docker compose up -d --force-recreate app`；不需要重新 build image。
+
 ## Lark 通知與 OAuth 設定建議
 
 Lark App 憑證同時用於通知與 OAuth 登入。通知目前有兩種來源，優先順序如下：
