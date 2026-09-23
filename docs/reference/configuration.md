@@ -264,10 +264,28 @@ Compose 會：
 若要在本機驗證 inventory scan：
 
 1. 在主機上配置好 AWS CLI profile
-2. `export AWS_PROFILE=your-profile`
+2. 在根目錄 `.env` 設定 `AWS_PROFILE=your-profile`，或用 shell environment 單次覆寫
 3. 執行 `make dev`
 
-Compose 會把 `${HOME}/.aws` 掛到 container，因此 app 可以沿用本機 profile。
+Compose 會把 `${HOME}/.aws` 以唯讀方式掛到 container，因此 app 可以沿用本機 profile。若 profile 使用 AWS SSO，啟動前先在主機執行：
+
+```bash
+aws sso login --profile your-profile
+```
+
+`.env` 適合固定使用同一個 profile：
+
+```dotenv
+AWS_PROFILE=your-profile
+```
+
+單次覆寫可直接執行：
+
+```bash
+AWS_PROFILE=your-profile make dev
+```
+
+Shell environment 的值優先於 `.env`。本機不要把長期 AWS access key 寫入 `.env`；EKS 應使用 IRSA，不掛載人工 profile。
 
 ## Lark 通知與 OAuth 設定建議
 

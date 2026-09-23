@@ -1,153 +1,176 @@
 # DBRE Maestro
 
-DBRE Maestro 是一個資料庫治理工作台，提供 SQL 查詢、DDL / DML / Redis 工單、敏感資料遮罩、資料庫連線治理、Metadata 掃描、即時通知與 RBAC 權限控管。原始碼按前後端分離，正式交付則由根目錄 `Dockerfile` 產生單一 application image：
+DBRE Maestro 是資料庫治理工作台，集中管理唯讀 SQL 查詢、DDL／DML／Redis 工單、審批、權限、敏感資料遮罩、資料庫連線、Metadata、通知與稽核。
 
-- `backend/`：Go API、排程工作、Meta DB 存取、外部資料庫連線與治理邏輯
-- `frontend/`：React + Vite 管理介面
-- `docs/`：產品、架構、操作與參考文件
+- `backend/`：Go API、排程工作、Meta DB 與外部資料源整合
+- `frontend/`：React、Vite、TypeScript 管理介面
+- `docs/`：操作、架構、設定與功能參考
 
-## 功能概覽
+## 快速啟動
 
-- `Tickets`：提交與流轉 DDL / DML / Redis / Query Access / SQL Export / Sensitive Access 工單
-- `SQL Editor`：單 statement 查詢、格式化、Explain、匯出申請、敏感查詢權限申請
-- `Scheduled Reports`：定期執行唯讀 SQL，產生 CSV 並以 Lark App 推送給指定使用者
-- `DB Connections`：管理 MySQL / PostgreSQL / Redis 連線、讀寫 endpoint 與憑證角色
-- `DB Metadata`：AWS Inventory 快照與資料庫物件快照
-- `Masking Rules`：欄位脫敏規則與 Unmask Whitelist
-- `SQL Review Rules`：依資料庫類型拆分的審核規則
-- `Users / Auth Groups / Resources`：權限、DB Scope 與資源綁定反查
-- `Settings`：SQL Editor timeout、Workflow Rules、SSO / Lark 與 DB Metadata 掃描設定
+需要 Docker、Docker Compose 與 `make`。
 
-## 文件入口
+1. 建立本機環境檔：
 
-- [文件總覽](docs/README.md)
-- [專案目前狀態](docs/PROJECT_STATUS.md)
-- [UI 目標設計](docs/explanation/ui-design-guidelines.md)
-- [工程待辦](docs/TODOS.md)
-- [專案導覽](docs/explanation/project-map.md)
-- [RD 使用手冊](docs/how-to/rd-user-guide.md)
-- [DBA/Admin 管理手冊](docs/how-to/dba-admin-user-guide.md)
-- [架構總覽](docs/explanation/architecture-overview.md)
-- [安全邊界說明](docs/explanation/security-boundaries.md)
-- [安全審計修復驗收](docs/how-to/verify-security-audit-remediation.md)
-- [線上與部署排障](docs/how-to/troubleshoot-operations.md)
-- [後端維護參考](docs/reference/backend-maintenance.md)
-- [前端維護參考](docs/reference/frontend-maintenance.md)
-- [權限模型說明](docs/explanation/permission-model.md)
-- [Workflow Rules 設定教學](docs/how-to/configure-workflow-rules.md)
-- [建立可部署的 Application Image](docs/how-to/build-application-image.md)
-- [AWS EKS 部署流程](docs/how-to/deploy-to-aws-eks.md)
-- [本機開發教學](docs/tutorials/getting-started-local-dev.md)
-- [登入安全與 Session](docs/reference/auth-and-sessions.md)
-- [SQL Editor 參考](docs/reference/sql-editor.md)
-- [Scheduled SQL Reports 參考](docs/reference/scheduled-sql-reports.md)
-- [Tickets 參考](docs/reference/tickets.md)
-- [MySQL Rollback 參考](docs/reference/mysql-rollback.md)
-- [MySQL Rollback 設定與使用](docs/how-to/configure-and-use-mysql-rollback.md)
-- [Workflow Rules 參考](docs/reference/workflow-rules.md)
-- [DB Connections 參考](docs/reference/db-connections.md)
-- [Users / RBAC 參考](docs/reference/users-and-rbac.md)
-- [Masking DSL 參考](docs/reference/masking-and-dsl.md)
-- [設定與環境變數](docs/reference/configuration.md)
+   ```bash
+   cp .env.example .env
+   ```
 
-## 開發啟動
+2. 修改 `.env` 內的 MySQL 密碼，並依下一節產生 `DBRE_ENCRYPTION_KEY` 與 `JWT_SECRET`。
 
-### 一鍵啟動整個系統
+3. 啟動完整開發環境：
 
-```bash
-make dev
+   ```bash
+   make dev
+   ```
+
+   這會啟動 MySQL、Go backend 與 Vite frontend。
+
+4. 開啟：
+
+   - 前端：`http://localhost:5173`
+   - Backend health check：`http://localhost:8080/api/health`
+
+第一次啟動時，前往 `/setup` 建立初始管理員。完整操作步驟見[本機開發教學](docs/tutorials/getting-started-local-dev.md)。
+
+## 本機 Secret
+
+`.env` 至少需要：
+
+```dotenv
+MYSQL_APP_PASSWORD=<本機 app user 密碼>
+MYSQL_ROOT_PASSWORD=<本機 root 密碼>
+DBRE_ENCRYPTION_KEY=<base64 編碼的 32-byte key>
+JWT_SECRET=<高熵隨機字串>
 ```
 
-這會透過 Docker Compose 啟動：
+### DBRE_ENCRYPTION_KEY
 
-- `mysql`
-- `app`
-- `frontend`
-
-啟動後可使用：
-
-- 前端：`http://localhost:5173`
-- 後端 Health Check：`http://localhost:8080/api/health`
-
-### 只啟動後端
-
-```bash
-make dev-backend
-```
-
-### 只在本機跑前端 Vite
-
-```bash
-make dev-frontend
-```
-
-此模式會把 API proxy 到本機的 `http://localhost:8080`。
-
-## 測試
-
-### 後端測試
-
-```bash
-make test
-```
-
-### 前端測試
-
-```bash
-make test-frontend
-```
-
-## 其他常用指令
-
-### 只啟動 MySQL
-
-```bash
-make db-only
-```
-
-### 產生 32-byte 加密 key
+執行：
 
 ```bash
 make gen-key
 ```
 
-## 環境變數
+將輸出填入 `.env` 的 `DBRE_ENCRYPTION_KEY`。這個 key 用於加密資料庫憑證、MFA secret、rollback SQL、Lark／OIDC secret，並衍生 masking hash pepper。
 
-本機使用 `make dev` 時，請在專案根目錄準備 `.env`；Docker Compose 會自動讀取它。`.env` 已被 Git ignore，只供本機使用。EKS 測試與 production 不使用 repo 內 `.env`，而是由 ArgoCD/Kubernetes 與 AWS Secrets Manager 注入設定。
+此值一旦用來加密資料就必須保持不變。遺失或直接更換會讓既有密文無法解密；正式環境如需輪替，必須先設計資料重加密流程。
 
-至少包含：
+### JWT_SECRET
 
-- `MYSQL_APP_PASSWORD`
-- `MYSQL_ROOT_PASSWORD`
-- `DBRE_ENCRYPTION_KEY`
-- `JWT_SECRET`
+另外產生一組獨立值：
 
-後端啟動時若缺少 `DBRE_ENCRYPTION_KEY` 或 `JWT_SECRET`，服務不會成功啟動。
+```bash
+openssl rand -base64 48
+```
 
-更完整的設定說明請看：
+將輸出填入 `.env` 的 `JWT_SECRET`。它用於 JWT 與其他簽章 token，不應和 `DBRE_ENCRYPTION_KEY` 共用。更換後，既有簽章 token 會失效。
 
-- [本機與部署設定](docs/reference/configuration.md)
-- [平台 Settings 說明](docs/reference/settings.md)
+如果沒有 OpenSSL，也可以再執行一次 `make gen-key`，將第二次產生的獨立值用作 `JWT_SECRET`。
+
+`.env` 已被 Git ignore，只供本機使用。不要把任何真實 secret 提交到 Git。
 
 ## AWS Profile
 
-若要在本機透過 `docker compose` 驗證 `DB Metadata inventory` 掃描，可直接沿用你本機的 AWS profile。
+DB Metadata Inventory 在本機可以沿用主機上的 AWS CLI profile。`docker-compose.yml` 會把 `${HOME}/.aws` 以唯讀方式掛載到 app container，並啟用 AWS shared config。
 
-`docker-compose.yml` 目前會：
-
-- 將 `${HOME}/.aws` 掛進 `app` container 的 `/root/.aws`
-- 傳入 `AWS_PROFILE`
-- 啟用 `AWS_SDK_LOAD_CONFIG=1`
-
-使用方式：
+先確認 profile 已存在且可用：
 
 ```bash
-export AWS_PROFILE=your-profile
-docker compose up --build
+aws sts get-caller-identity --profile your-profile
 ```
 
-若未指定，預設使用：
+需要 SSO 時，先登入：
 
 ```bash
-AWS_PROFILE=default
+aws sso login --profile your-profile
 ```
+
+長期使用同一個 profile 時，直接寫進根目錄 `.env`：
+
+```dotenv
+AWS_PROFILE=your-profile
+```
+
+單次覆寫則使用 shell environment；shell 值的優先序高於 `.env`：
+
+```bash
+AWS_PROFILE=your-profile make dev
+```
+
+未設定時預設使用 `default`。不要把 `AWS_ACCESS_KEY_ID` 或 `AWS_SECRET_ACCESS_KEY` 寫進 `.env`；本機使用 named profile，EKS 使用 IRSA。
+
+## 常用指令
+
+| 指令 | 用途 |
+|---|---|
+| `make dev` | 以 Docker Compose 啟動完整本機環境 |
+| `make dev-backend` | 只啟動 MySQL 與 backend |
+| `make dev-frontend` | 在主機啟動 Vite，API proxy 到 `localhost:8080` |
+| `make db-only` | 只啟動 MySQL |
+| `make test` | 執行完整 Go tests |
+| `make test-frontend` | 執行完整前端 tests |
+| `make lint` | 執行 Go lint；目前尚未包含前端 ESLint |
+| `make build` | 只編譯本機 backend binary，不建立部署 image |
+| `docker compose down` | 停止本機 containers；保留 MySQL volume |
+
+直接在主機執行 backend test／build 需要 Go 1.25；`make lint` 另外需要 `golangci-lint`。執行 frontend 指令前先安裝 Node.js 20 dependencies：
+
+```bash
+cd frontend
+npm ci
+```
+
+接著可執行前端 lint 與 production build：
+
+```bash
+npm run lint
+npm run build
+```
+
+## 建立部署 Image
+
+測試與 production 使用根目錄的 multi-stage `Dockerfile`，不是 `make build`。從 repository 根目錄執行：
+
+```bash
+docker build -t dbre-maestro:local .
+```
+
+產出的單一 application image 包含：
+
+- React production assets
+- Go server
+- Database migrations
+- `my2sql`
+
+Image 不包含環境專屬 secret。啟動 container 時必須由部署平台注入 Meta DB 連線與必要設定；EKS 建議使用 AWS Secrets Manager 與 IRSA。Kubernetes／ArgoCD manifests 維護在外部 GitOps repositories，不在本 repository。
+
+詳細流程：
+
+- [建立可部署的 Application Image](docs/how-to/build-application-image.md)
+- [部署到 AWS EKS](docs/how-to/deploy-to-aws-eks.md)
+- [設定與環境變數](docs/reference/configuration.md)
+
+## 主要功能
+
+- `Tickets`：DDL、DML、Redis、Query Access、SQL Export 與 Sensitive Access 工單
+- `SQL Editor`：唯讀查詢、Explain、格式化、查詢取消與匯出／權限申請
+- `Scheduled Reports`：定期執行唯讀 SQL，產生 CSV 並透過 Lark 推送
+- `DB Connections`：MySQL、PostgreSQL、Redis 連線與讀寫憑證角色
+- `DB Metadata`：AWS Inventory 與資料庫物件快照
+- `Masking Rules`：欄位遮罩規則與 Unmask Whitelist
+- `SQL Review Rules`：依資料庫類型套用 SQL 審核規則
+- `Users / RBAC`：使用者、Auth Groups、Permissions、Resources 與 DB Scope
+- `Settings`：Workflow、查詢執行、整合與 Metadata 掃描設定
+
+## 文件入口
+
+- [文件總覽](docs/README.md)
+- [專案目前狀態](docs/PROJECT_STATUS.md)
+- [本機開發教學](docs/tutorials/getting-started-local-dev.md)
+- [專案導覽](docs/explanation/project-map.md)
+- [架構總覽](docs/explanation/architecture-overview.md)
+- [設定與環境變數](docs/reference/configuration.md)
+- [安全邊界](docs/explanation/security-boundaries.md)
+- [RD 使用手冊](docs/how-to/rd-user-guide.md)
+- [DBA／Admin 管理手冊](docs/how-to/dba-admin-user-guide.md)
