@@ -15,9 +15,10 @@ vi.mock('@/shared/auth/AuthContext', () => ({
   }),
 }))
 
-import { listAuditLogs } from '@/modules/audit/api'
+import { exportAuditLogs, listAuditLogs } from '@/modules/audit/api'
 
 const mockedListAuditLogs = vi.mocked(listAuditLogs)
+const mockedExportAuditLogs = vi.mocked(exportAuditLogs)
 
 describe('AuditLogsPage', () => {
   beforeEach(() => {
@@ -91,5 +92,24 @@ describe('AuditLogsPage', () => {
       resourceType: 'db_connection',
       resourceName: '',
     })))
+  })
+
+  it('顯示 audit log 載入失敗', async () => {
+    mockedListAuditLogs.mockRejectedValue(new Error('offline'))
+    render(<MemoryRouter><ToastProvider><AuditLogsPage /></ToastProvider></MemoryRouter>)
+    expect(await screen.findByText('Failed to load audit logs.')).toBeInTheDocument()
+  })
+
+  it('export 會下載後端回傳的 CSV 檔名', async () => {
+    mockedListAuditLogs.mockResolvedValue({ logs: [], total: 0, limit: 20, offset: 0 })
+    mockedExportAuditLogs.mockResolvedValue(new Response('id,action', { headers: { 'content-disposition': 'attachment; filename="audit.csv"' } }))
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:audit')
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    render(<MemoryRouter><ToastProvider><AuditLogsPage /></ToastProvider></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Export' }))
+    await waitFor(() => expect(mockedExportAuditLogs).toHaveBeenCalled())
+    expect(createObjectURL).toHaveBeenCalled()
+    expect(click).toHaveBeenCalled()
   })
 })

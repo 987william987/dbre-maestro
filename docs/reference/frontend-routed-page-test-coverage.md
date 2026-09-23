@@ -32,23 +32,23 @@
 | `/users` | `UsersPage` | W | `UsersPage.test.tsx` | 達標 |
 | `/users/groups` | `UsersPage` | W | `UsersPage.test.tsx` | 達標 |
 | `/users/resources` | `UsersPage` | R | `UsersPage.test.tsx` | 達標 |
-| `/users/query-access` | `UsersPage` | W | `UsersPage.test.tsx` | 補強：mutation 失敗案例 |
+| `/users/query-access` | `UsersPage` | W | `UsersPage.test.tsx` | 達標 |
 | `/sql-editor` | `SQLEditorPage` | X | `SQLEditorPage.test.tsx` | 達標；涵蓋 AppShell route 切換、navigation render-loop 與 Filter Columns 回歸 |
 | `/scheduled-sql-reports` | `ScheduledSQLReportsPage` | W | `ScheduledSQLReportsPage.test.tsx` | 達標 |
 | `/db-connections` | `DBConnectionsPage` | W | `DBConnectionsPage.test.tsx` | 達標 |
 | `/db-connections/:id/overview` | `DBConnectionDetailPage` | R | `DBConnectionDetailPage.test.tsx` | 達標 |
-| `/db-connections/:id/databases` | `DBConnectionDetailPage` | R | `DBConnectionDetailPage.test.tsx` | 補強：API 失敗狀態 |
-| `/db-connections/:id/accounts` | `DBConnectionDetailPage` | R | `DBConnectionDetailPage.test.tsx` | 補強：API 失敗狀態 |
-| `/db-metadata/inventory` | `DBMetadataInventoryPage` | R | `DBMetadataPages.test.tsx` | 補強：API 失敗狀態 |
-| `/db-metadata/objects` | `DBMetadataObjectsPage` | R | `DBMetadataPages.test.tsx` | 補強：API 失敗狀態 |
-| `/masking-rules` | `MaskingRulesPage` | W | `MaskingRulesPage.test.tsx` | 補強：載入與 mutation 失敗案例 |
+| `/db-connections/:id/databases` | `DBConnectionDetailPage` | R | `DBConnectionDetailPage.test.tsx` | 達標 |
+| `/db-connections/:id/accounts` | `DBConnectionDetailPage` | R | `DBConnectionDetailPage.test.tsx` | 達標 |
+| `/db-metadata/inventory` | `DBMetadataInventoryPage` | R | `DBMetadataPages.test.tsx` | 達標 |
+| `/db-metadata/objects` | `DBMetadataObjectsPage` | R | `DBMetadataPages.test.tsx` | 達標 |
+| `/masking-rules` | `MaskingRulesPage` | W | `MaskingRulesPage.test.tsx` | 達標 |
 | `/masking-rules/dsl-guide` | `MaskingDSLGuidePage` | S | `MaskingDSLGuidePage.test.tsx` | 達標 |
-| `/sql-review-rules/:engine` | `SQLReviewRulesPage` | W | `SQLReviewRulesPage.test.tsx` | 補強：載入與 mutation 失敗案例 |
-| `/audit-logs` | `AuditLogsPage` | R | `AuditLogsPage.test.tsx` | 補強：API 失敗與 export 行為 |
-| `/settings/workflow` | `SettingsPage` | W | `SettingsPage.test.tsx` | 補強：儲存成功與失敗 |
-| `/settings/scans` | `SettingsPage` | W | `SettingsPage.test.tsx` | 補強：儲存成功與失敗 |
-| `/settings/query-execution` | `SettingsPage` | W | `SettingsPage.test.tsx` | 補強：儲存成功與失敗 |
-| `/settings/integrations` | `SettingsPage` | W | `SettingsPage.test.tsx` | 補強：儲存成功與失敗 |
+| `/sql-review-rules/:engine` | `SQLReviewRulesPage` | W | `SQLReviewRulesPage.test.tsx` | 達標 |
+| `/audit-logs` | `AuditLogsPage` | R | `AuditLogsPage.test.tsx` | 達標 |
+| `/settings/workflow` | `SettingsPage` | W | `SettingsPage.test.tsx` | 達標 |
+| `/settings/scans` | `SettingsPage` | W | `SettingsPage.test.tsx` | 達標 |
+| `/settings/query-execution` | `SettingsPage` | W | `SettingsPage.test.tsx` | 達標 |
+| `/settings/integrations` | `SettingsPage` | W | `SettingsPage.test.tsx` | 達標 |
 
 ## Redirect 與 Guard 覆蓋
 

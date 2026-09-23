@@ -217,4 +217,16 @@ describe('DBMetadata pages', () => {
 
     expect(screen.queryByRole('columnheader', { name: 'Index Size' })).not.toBeInTheDocument()
   })
+
+  it('inventory page 顯示 API 載入失敗', async () => {
+    mockedListInventorySnapshots.mockRejectedValue(new Error('offline'))
+    render(<MemoryRouter><DBMetadataInventoryPage /></MemoryRouter>)
+    expect(await screen.findByText('Failed to load inventory snapshots.')).toBeInTheDocument()
+  })
+
+  it('objects page 顯示 API 載入失敗', async () => {
+    mockedListDBObjectSnapshots.mockRejectedValue(new Error('offline'))
+    render(<MemoryRouter><DBMetadataObjectsPage /></MemoryRouter>)
+    expect(await screen.findByText('Failed to load database object snapshots.')).toBeInTheDocument()
+  })
 })
