@@ -2626,7 +2626,7 @@ export function SQLEditorPage() {
     if (!activeTab?.result) {
       return []
     }
-    if (!activeVisibleColumnIndexes || activeVisibleColumnIndexes.length === 0) {
+    if (activeVisibleColumnIndexes === null) {
       return activeTab.result.columns.map((_, index) => index)
     }
     return activeVisibleColumnIndexes.filter((index) => index >= 0 && index < activeTab.result!.columns.length)
@@ -2889,21 +2889,11 @@ export function SQLEditorPage() {
 
   useEffect(() => {
     if (!activeTab?.result) {
-      if (activeTab?.visibleColumnIndexes !== null) {
-        updateActiveTab({ visibleColumnIndexes: null })
-      }
+      updateActiveTab({ visibleColumnIndexes: null })
       return
     }
-    const nextIndexes = activeTab.result.columns.map((_, index) => index)
-    const currentIndexes = activeTab.visibleColumnIndexes
-    const isSame =
-      Array.isArray(currentIndexes) &&
-      currentIndexes.length === nextIndexes.length &&
-      currentIndexes.every((value, index) => value === nextIndexes[index])
-    if (!isSame) {
-      updateActiveTab({ visibleColumnIndexes: nextIndexes })
-    }
-  }, [activeTab?.id, activeTab?.result, activeTab?.visibleColumnIndexes, updateActiveTab])
+    updateActiveTab({ visibleColumnIndexes: activeTab.result.columns.map((_, index) => index) })
+  }, [activeTab?.result, updateActiveTab])
 
   useEffect(() => {
     if (activeResultView !== 'result' && activeResultView !== 'vertical') {

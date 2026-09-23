@@ -1687,6 +1687,44 @@ describe('SQLEditorPage', () => {
     expect(screen.queryByText('t_deposit.user_id')).not.toBeInTheDocument()
   })
 
+  it('取消結果欄位後保持隱藏，不會被同步 effect 重新選取', async () => {
+    mockedExecuteQuery.mockResolvedValue({
+      columns: ['id', 'user_id'],
+      raw_columns: ['id', 'user_id'],
+      sensitive_column_indexes: [],
+      rows: [['1', '2']],
+      row_count: 1,
+      duration_ms: 12,
+    })
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Asset Selector' }))
+    fireEvent.click(screen.getByText('Primary MySQL'))
+    fireEvent.click(screen.getByText('Run'))
+    await screen.findByText('user_id')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Columns' }))
+    const userIDCheckbox = screen.getByRole('checkbox', { name: 'user_id' })
+    fireEvent.click(userIDCheckbox)
+
+    expect(userIDCheckbox).not.toBeChecked()
+    expect(screen.queryByRole('columnheader', { name: 'user_id' })).not.toBeInTheDocument()
+
+    const idCheckbox = screen.getByRole('checkbox', { name: 'id' })
+    fireEvent.click(idCheckbox)
+
+    expect(idCheckbox).not.toBeChecked()
+    expect(screen.queryByRole('columnheader', { name: 'id' })).not.toBeInTheDocument()
+  })
+
   it('敏感欄位會顯示提示圖示與 tooltip，且查詢結果支援分頁', async () => {
     mockedExecuteQuery.mockResolvedValue({
       columns: ['id', 'email'],
