@@ -241,7 +241,7 @@ export function MaskingRulesPage() {
       return
     }
     void loadTables(Number(whitelistForm.dbConnectionId), whitelistForm.databaseName, '')
-  }, [whitelistDrawer, whitelistForm.dbConnectionId, whitelistForm.databaseName])
+  }, [selectedWhitelistConnection?.dbType, whitelistDrawer, whitelistForm.dbConnectionId, whitelistForm.databaseName])
 
   useEffect(() => {
     if (
@@ -258,7 +258,7 @@ export function MaskingRulesPage() {
       return
     }
     void loadTables(Number(whitelistForm.dbConnectionId), whitelistForm.databaseName, whitelistForm.schemaName)
-  }, [whitelistDrawer, whitelistForm.dbConnectionId, whitelistForm.databaseName, whitelistForm.schemaName])
+  }, [selectedWhitelistConnection?.dbType, whitelistDrawer, whitelistForm.dbConnectionId, whitelistForm.databaseName, whitelistForm.schemaName])
 
   useEffect(() => {
     if (!whitelistDrawer || !whitelistForm.dbConnectionId || !whitelistForm.databaseName || !whitelistForm.tableName) {
@@ -273,7 +273,7 @@ export function MaskingRulesPage() {
       return
     }
     void loadColumns(Number(whitelistForm.dbConnectionId), whitelistForm.databaseName, schemaName, whitelistForm.tableName)
-  }, [whitelistDrawer, whitelistForm.dbConnectionId, whitelistForm.databaseName, whitelistForm.schemaName, whitelistForm.tableName])
+  }, [selectedWhitelistConnection?.dbType, whitelistDrawer, whitelistForm.dbConnectionId, whitelistForm.databaseName, whitelistForm.schemaName, whitelistForm.tableName])
 
   useEffect(() => {
     if (rulesOffset > 0 && rulesOffset >= sortedRules.length) {

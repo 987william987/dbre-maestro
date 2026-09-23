@@ -291,6 +291,34 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
   const [confirmState, setConfirmState] = useState<ConfirmState>(null)
 
   useEffect(() => {
+    async function bootstrap() {
+      setLoading(true)
+      setError('')
+      try {
+        const [usersResponse, connectionsResponse, authGroupDetails] = await Promise.all([
+          listUsers(),
+          listUserDBConnections(),
+          loadAuthGroupDetails(),
+        ])
+        const queryAccessRulesResponse = await listQueryAccessRules()
+        const bindingsEntries = await Promise.all(
+          connectionsResponse.connections.map(async (connection) => {
+            const bindings = await getDBConnectionBindings(connection.id)
+            return [connection.id, bindings] as const
+          }),
+        )
+        setUsers(usersResponse.users)
+        setConnections(connectionsResponse.connections)
+        setAuthGroups(authGroupDetails)
+        setQueryAccessRules(queryAccessRulesResponse.rules)
+        setConnectionBindings(Object.fromEntries(bindingsEntries))
+      } catch (loadError) {
+        setError(loadError instanceof ApiError ? loadError.message : 'Failed to load the RBAC workspace.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
     void bootstrap()
   }, [])
 
@@ -367,34 +395,6 @@ export function UsersPage({ initialView = 'users' }: { initialView?: ViewMode })
       active = false
     }
   }, [queryAccessRuleDraft.connectionID, queryAccessRuleDraft.databasePattern])
-
-  async function bootstrap() {
-    setLoading(true)
-    setError('')
-    try {
-      const [usersResponse, connectionsResponse, authGroupDetails] = await Promise.all([
-        listUsers(),
-        listUserDBConnections(),
-        loadAuthGroupDetails(),
-      ])
-      const queryAccessRulesResponse = await listQueryAccessRules()
-      const bindingsEntries = await Promise.all(
-        connectionsResponse.connections.map(async (connection) => {
-          const bindings = await getDBConnectionBindings(connection.id)
-          return [connection.id, bindings] as const
-        }),
-      )
-      setUsers(usersResponse.users)
-      setConnections(connectionsResponse.connections)
-      setAuthGroups(authGroupDetails)
-      setQueryAccessRules(queryAccessRulesResponse.rules)
-      setConnectionBindings(Object.fromEntries(bindingsEntries))
-    } catch (loadError) {
-      setError(loadError instanceof ApiError ? loadError.message : 'Failed to load the RBAC workspace.')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   async function loadAuthGroupDetails() {
     const summary = await listAuthGroups()

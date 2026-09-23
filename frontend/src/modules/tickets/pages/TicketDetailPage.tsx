@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Check, ChevronDown, Download, Loader2, Minus, Play, Plus, RotateCcw, ShieldCheck, ShieldX, Square, X } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { format as formatSQL } from 'sql-formatter'
@@ -1000,6 +1000,16 @@ export function TicketDetailPage() {
     }
   }, [id, navigate])
 
+  const reloadTicket = useCallback(async (_options?: { background?: boolean }) => {
+    if (!id) {
+      return
+    }
+    const nextDetail = await getTicket(id)
+    startTransition(() => {
+      setDetail(nextDetail)
+    })
+  }, [id])
+
   useEffect(() => {
     if (!id) {
       return
@@ -1021,7 +1031,7 @@ export function TicketDetailPage() {
     return () => {
       window.removeEventListener(MAESTRO_REALTIME_EVENT, handleRealtime)
     }
-  }, [detail?.ticket, id])
+  }, [detail?.ticket, id, reloadTicket])
 
   useEffect(() => {
     const nextStatus = detail?.ticket.status ?? null
@@ -1112,16 +1122,6 @@ export function TicketDetailPage() {
     isWholeTicketDMLExecutionMode(ticket.dml_execution_mode) &&
     ticket.status === 'failed',
   )
-
-  async function reloadTicket(_options?: { background?: boolean }) {
-    if (!id) {
-      return
-    }
-    const nextDetail = await getTicket(id)
-    startTransition(() => {
-      setDetail(nextDetail)
-    })
-  }
 
   function setStatementSQLExpanded(key: string, expanded: boolean) {
     setExpandedStatementSQLs((current) => {

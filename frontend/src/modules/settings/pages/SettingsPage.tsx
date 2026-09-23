@@ -158,14 +158,16 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
     }
   }, [])
 
+  const workflowRules = form?.workflowRules
+
   useEffect(() => {
-    if (!form || form.workflowRules.length === 0) {
+    if (!workflowRules || workflowRules.length === 0) {
       setWorkflowPreviews([])
       return
     }
     let active = true
     const timer = window.setTimeout(() => {
-      previewWorkflowRules(form.workflowRules)
+      previewWorkflowRules(workflowRules)
         .then((response) => {
           if (active) {
             setWorkflowPreviews(response.previews)
@@ -181,7 +183,7 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
       active = false
       window.clearTimeout(timer)
     }
-  }, [form?.workflowRules])
+  }, [workflowRules])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
