@@ -61,6 +61,18 @@ type mysqlDDLTableExistenceCheck struct {
 	optional    bool
 }
 
+type mysqlShadowValidationTimings struct {
+	sourceConnection time.Duration
+	existenceChecks  time.Duration
+	schemaInfo       time.Duration
+	listTables       time.Duration
+	shadowCreate     time.Duration
+	loadCreateTable  time.Duration
+	cloneTables      time.Duration
+	executeDDL       time.Duration
+	cleanup          time.Duration
+}
+
 type reviewTableTarget struct {
 	database string
 	schema   string
@@ -613,8 +625,30 @@ func (h *TicketHandler) runMySQLDDLShadowValidation(
 	dbConnID uint64,
 	statements []sqlparse.ParsedStatement,
 	databaseName *string,
-) []ticketReviewItem {
+) (items []ticketReviewItem) {
+	startedAt := time.Now()
+	timings := &mysqlShadowValidationTimings{}
+	defer func() {
+		slog.Info("mysql ddl shadow validation complete",
+			"db_connection_id", dbConnID,
+			"statement_count", len(statements),
+			"result_count", len(items),
+			"source_connection_ms", timings.sourceConnection.Milliseconds(),
+			"existence_check_ms", timings.existenceChecks.Milliseconds(),
+			"schema_info_ms", timings.schemaInfo.Milliseconds(),
+			"list_tables_ms", timings.listTables.Milliseconds(),
+			"shadow_schema_create_ms", timings.shadowCreate.Milliseconds(),
+			"load_create_table_ms", timings.loadCreateTable.Milliseconds(),
+			"clone_tables_ms", timings.cloneTables.Milliseconds(),
+			"execute_ddl_ms", timings.executeDDL.Milliseconds(),
+			"cleanup_ms", timings.cleanup.Milliseconds(),
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+		)
+	}()
+
+	sourceConnectionStartedAt := time.Now()
 	readonlyDB, cleanup, _, err := h.openTicketSQLDBWithConnection(ctx, dbConnID, model.DBCredentialRoleReadonly, nil)
+	timings.sourceConnection = time.Since(sourceConnectionStartedAt)
 	if err != nil {
 		return buildBatchValidationErrorItems(statements, validationMethodMySQLShadow, stringPtr(validationStagePrepare), "ddl", "unknown", "open metadata connection failed: "+err.Error())
 	}
@@ -624,16 +658,18 @@ func (h *TicketHandler) runMySQLDDLShadowValidation(
 	if metaDB == nil {
 		metaDB = h.tickets.DB()
 	}
-	items := make([]ticketReviewItem, 0, len(statements)*2)
+	items = make([]ticketReviewItem, 0, len(statements)*2)
 
 	var tableShadowDB string
 	var tableCleanup func()
 	tableShadowPrepared := false
-	tableShadowCloneTables, tableShadowCloneErr := mysqlDDLShadowCloneTablesForValidStatements(ctx, readonlyDB, statements, nullableStringValue(databaseName))
+	existenceChecksStartedAt := time.Now()
+	tableShadowCloneTables, tableExistenceErrors, tableShadowCloneErr := mysqlDDLShadowCloneTablesForValidStatements(ctx, readonlyDB, statements, nullableStringValue(databaseName))
+	timings.existenceChecks = time.Since(existenceChecksStartedAt)
 
 	for _, stmt := range statements {
 		statementKind := string(stmt.Kind)
-		target, rewriteSQL, prepErr, execErr := h.prepareMySQLShadowValidation(ctx, readonlyDB, metaDB, stmt, nullableStringValue(databaseName), tableShadowCloneTables, tableShadowCloneErr, &tableShadowDB, &tableCleanup, &tableShadowPrepared)
+		target, rewriteSQL, prepErr, execErr := h.prepareMySQLShadowValidation(ctx, readonlyDB, metaDB, stmt, nullableStringValue(databaseName), tableShadowCloneTables, tableShadowCloneErr, tableExistenceErrors[stmt.Seq], &tableShadowDB, &tableCleanup, &tableShadowPrepared, timings)
 		if prepErr != nil {
 			items = append(items, buildValidationReviewItem(stmt.Seq, stmt.RawSQL, validationMethodMySQLShadow, stringPtr(validationStagePrepare), statementKind, target.objectType, 0, []string{sanitizeMySQLShadowValidationError(prepErr)}))
 			continue
@@ -665,9 +701,11 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 	selectedDatabase string,
 	tableShadowCloneTables []mysqlShadowCloneTable,
 	tableShadowCloneErr error,
+	tableExistenceErr error,
 	tableShadowDB *string,
 	tableCleanup *func(),
 	tableShadowPrepared *bool,
+	timings *mysqlShadowValidationTimings,
 ) (ddlShadowTarget, string, error, error) {
 	target := ddlShadowTarget{objectType: inferDDLObjectType(stmt)}
 
@@ -679,14 +717,12 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 		if tableShadowCloneErr != nil {
 			return target, "", tableShadowCloneErr, nil
 		}
-		// Existence check must run before any rewriteMySQLDDLForShadow call: that
-		// function mutates the shared AST's schema in place, which would make this
-		// check see selectedDatabase instead of the schema the SQL actually specifies.
-		if err := validateMySQLDDLTableExistence(ctx, readonlyDB, stmt, selectedDatabase); err != nil {
-			return target, "", nil, err
+		// The caller checks existence before any rewrite mutates the shared AST.
+		if tableExistenceErr != nil {
+			return target, "", nil, tableExistenceErr
 		}
 		if !*tableShadowPrepared {
-			shadowName, cleanup, err := cloneMySQLDatabaseTablesToShadow(ctx, readonlyDB, metaDB, selectedDatabase, tableShadowCloneTables)
+			shadowName, cleanup, err := cloneMySQLDatabaseTablesToShadow(ctx, readonlyDB, metaDB, selectedDatabase, tableShadowCloneTables, timings)
 			if err != nil {
 				return target, "", err, nil
 			}
@@ -698,8 +734,13 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 		if err != nil {
 			return target, "", err, nil
 		}
-		if err := executeShadowDDL(ctx, metaDB, *tableShadowDB, rewrittenSQL); err != nil {
-			return target, rewrittenSQL, nil, err
+		executeStartedAt := time.Now()
+		executeErr := executeShadowDDL(ctx, metaDB, *tableShadowDB, rewrittenSQL)
+		if timings != nil {
+			timings.executeDDL += time.Since(executeStartedAt)
+		}
+		if executeErr != nil {
+			return target, rewrittenSQL, nil, executeErr
 		}
 		return target, rewrittenSQL, nil, nil
 	case *tidbast.AlterDatabaseStmt, *tidbast.DropDatabaseStmt:
@@ -714,17 +755,24 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 		if sourceDatabase == "" {
 			return target, "", fmt.Errorf("database_name is required for database validation"), nil
 		}
-		shadowName, cleanup, err := cloneMySQLDatabaseToShadow(ctx, readonlyDB, metaDB, sourceDatabase)
+		shadowName, cleanup, err := cloneMySQLDatabaseToShadow(ctx, readonlyDB, metaDB, sourceDatabase, timings)
 		if err != nil {
 			return target, "", err, nil
 		}
-		defer cleanup()
+		defer func() {
+			cleanup()
+		}()
 		rewrittenSQL, _, _, err := rewriteMySQLDDLForShadow(stmt, shadowName)
 		if err != nil {
 			return target, "", err, nil
 		}
-		if err := executeShadowDDL(ctx, metaDB, shadowName, rewrittenSQL); err != nil {
-			return target, rewrittenSQL, nil, err
+		executeStartedAt := time.Now()
+		executeErr := executeShadowDDL(ctx, metaDB, shadowName, rewrittenSQL)
+		if timings != nil {
+			timings.executeDDL += time.Since(executeStartedAt)
+		}
+		if executeErr != nil {
+			return target, rewrittenSQL, nil, executeErr
 		}
 		return target, rewrittenSQL, nil, nil
 	case *tidbast.CreateDatabaseStmt:
@@ -735,7 +783,11 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 		if explicitDatabase == "" {
 			return target, "", fmt.Errorf("CREATE DATABASE target name is empty"), nil
 		}
+		existenceCheckStartedAt := time.Now()
 		exists, err := mysqlDatabaseExists(ctx, readonlyDB, explicitDatabase)
+		if timings != nil {
+			timings.existenceChecks += time.Since(existenceCheckStartedAt)
+		}
 		if err != nil {
 			return target, "", fmt.Errorf("check database exists failed: %w", err), nil
 		}
@@ -747,8 +799,18 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 		if err != nil {
 			return target, "", err, nil
 		}
-		if err := executeStandaloneShadowDDL(ctx, metaDB, rewrittenSQL, shadowName); err != nil {
-			return target, rewrittenSQL, nil, err
+		executeStartedAt := time.Now()
+		_, executeErr := metaDB.ExecContext(ctx, rewrittenSQL)
+		if timings != nil {
+			timings.executeDDL += time.Since(executeStartedAt)
+		}
+		if executeErr != nil {
+			return target, rewrittenSQL, nil, executeErr
+		}
+		cleanupStartedAt := time.Now()
+		_, _ = metaDB.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+quoteMySQLIdentifier(shadowName))
+		if timings != nil {
+			timings.cleanup += time.Since(cleanupStartedAt)
 		}
 		return target, rewrittenSQL, nil, nil
 	default:
@@ -756,8 +818,12 @@ func (h *TicketHandler) prepareMySQLShadowValidation(
 	}
 }
 
-func cloneMySQLDatabaseToShadow(ctx context.Context, readonlyDB *sql.DB, metaDB *sqlx.DB, sourceDatabase string) (string, func(), error) {
+func cloneMySQLDatabaseToShadow(ctx context.Context, readonlyDB *sql.DB, metaDB *sqlx.DB, sourceDatabase string, timings *mysqlShadowValidationTimings) (string, func(), error) {
+	listTablesStartedAt := time.Now()
 	tables, err := listMySQLBaseTables(ctx, readonlyDB, sourceDatabase)
+	if timings != nil {
+		timings.listTables += time.Since(listTablesStartedAt)
+	}
 	if err != nil {
 		return "", nil, err
 	}
@@ -769,21 +835,34 @@ func cloneMySQLDatabaseToShadow(ctx context.Context, readonlyDB *sql.DB, metaDB 
 			required: true,
 		})
 	}
-	return cloneMySQLDatabaseTablesToShadow(ctx, readonlyDB, metaDB, sourceDatabase, cloneTables)
+	return cloneMySQLDatabaseTablesToShadow(ctx, readonlyDB, metaDB, sourceDatabase, cloneTables, timings)
 }
 
-func cloneMySQLDatabaseTablesToShadow(ctx context.Context, readonlyDB *sql.DB, metaDB *sqlx.DB, sourceDatabase string, tables []mysqlShadowCloneTable) (string, func(), error) {
+func cloneMySQLDatabaseTablesToShadow(ctx context.Context, readonlyDB *sql.DB, metaDB *sqlx.DB, sourceDatabase string, tables []mysqlShadowCloneTable, timings *mysqlShadowValidationTimings) (string, func(), error) {
+	schemaInfoStartedAt := time.Now()
 	schemaInfo, err := loadMySQLSchemaInfo(ctx, readonlyDB, sourceDatabase)
+	if timings != nil {
+		timings.schemaInfo += time.Since(schemaInfoStartedAt)
+	}
 	if err != nil {
 		return "", nil, err
 	}
 	shadowName := generateShadowDatabaseName(sourceDatabase)
 	createSQL := fmt.Sprintf("CREATE DATABASE %s CHARACTER SET %s COLLATE %s", quoteMySQLIdentifier(shadowName), quoteMySQLIdentifier(schemaInfo.charset), quoteMySQLIdentifier(schemaInfo.collation))
-	if _, err := metaDB.ExecContext(ctx, createSQL); err != nil {
+	shadowCreateStartedAt := time.Now()
+	_, err = metaDB.ExecContext(ctx, createSQL)
+	if timings != nil {
+		timings.shadowCreate += time.Since(shadowCreateStartedAt)
+	}
+	if err != nil {
 		return "", nil, fmt.Errorf("create shadow database failed: %w", err)
 	}
 	cleanup := func() {
+		cleanupStartedAt := time.Now()
 		_, _ = metaDB.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+quoteMySQLIdentifier(shadowName))
+		if timings != nil {
+			timings.cleanup += time.Since(cleanupStartedAt)
+		}
 	}
 
 	seen := make(map[string]bool, len(tables))
@@ -801,7 +880,11 @@ func cloneMySQLDatabaseTablesToShadow(ctx context.Context, readonlyDB *sql.DB, m
 			continue
 		}
 		seen[key] = true
+		loadCreateTableStartedAt := time.Now()
 		createTableSQL, err := loadMySQLCreateTableSQL(ctx, readonlyDB, tableDatabase, tableName)
+		if timings != nil {
+			timings.loadCreateTable += time.Since(loadCreateTableStartedAt)
+		}
 		if err != nil {
 			if !table.required && isMySQLMissingTableError(err) {
 				continue
@@ -809,9 +892,14 @@ func cloneMySQLDatabaseTablesToShadow(ctx context.Context, readonlyDB *sql.DB, m
 			cleanup()
 			return "", nil, err
 		}
-		if err := executeShadowDDL(ctx, metaDB, shadowName, createTableSQL); err != nil {
+		cloneTableStartedAt := time.Now()
+		cloneErr := executeShadowDDL(ctx, metaDB, shadowName, createTableSQL)
+		if timings != nil {
+			timings.cloneTables += time.Since(cloneTableStartedAt)
+		}
+		if cloneErr != nil {
 			cleanup()
-			return "", nil, fmt.Errorf("clone table %s failed: %w", tableName, err)
+			return "", nil, fmt.Errorf("clone table %s failed: %w", tableName, cloneErr)
 		}
 	}
 	return shadowName, cleanup, nil
@@ -881,21 +969,23 @@ func mysqlDDLShadowCloneTablesForStatements(statements []sqlparse.ParsedStatemen
 	return items, nil
 }
 
-func mysqlDDLShadowCloneTablesForValidStatements(ctx context.Context, db *sql.DB, statements []sqlparse.ParsedStatement, selectedDatabase string) ([]mysqlShadowCloneTable, error) {
+func mysqlDDLShadowCloneTablesForValidStatements(ctx context.Context, db *sql.DB, statements []sqlparse.ParsedStatement, selectedDatabase string) ([]mysqlShadowCloneTable, map[int]error, error) {
 	items := make([]mysqlShadowCloneTable, 0)
+	validationErrors := make(map[int]error, len(statements))
 	for _, stmt := range statements {
 		if isMySQLTableScopedDDL(stmt) {
 			if err := validateMySQLDDLTableExistence(ctx, db, stmt, selectedDatabase); err != nil {
+				validationErrors[stmt.Seq] = err
 				continue
 			}
 		}
 		nextItems, err := mysqlDDLShadowCloneTables(stmt, selectedDatabase)
 		if err != nil {
-			return nil, err
+			return nil, validationErrors, err
 		}
 		items = append(items, nextItems...)
 	}
-	return items, nil
+	return items, validationErrors, nil
 }
 
 func isMySQLTableScopedDDL(stmt sqlparse.ParsedStatement) bool {
@@ -1137,14 +1227,6 @@ func executeShadowDDL(ctx context.Context, metaDB *sqlx.DB, shadowDatabase, sqlT
 	if _, err := conn.ExecContext(ctx, sqlText); err != nil {
 		return err
 	}
-	return nil
-}
-
-func executeStandaloneShadowDDL(ctx context.Context, metaDB *sqlx.DB, sqlText, createdDatabase string) error {
-	if _, err := metaDB.ExecContext(ctx, sqlText); err != nil {
-		return err
-	}
-	_, _ = metaDB.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+quoteMySQLIdentifier(createdDatabase))
 	return nil
 }
 

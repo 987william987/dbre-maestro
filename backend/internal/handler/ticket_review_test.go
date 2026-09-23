@@ -250,9 +250,15 @@ func TestMySQLDDLShadowCloneTablesForValidStatementsSkipsInvalidStatementDepende
 		WithArgs("app", "config_info").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 
-	got, err := mysqlDDLShadowCloneTablesForValidStatements(context.Background(), db, parsed.Statements, "app")
+	got, validationErrors, err := mysqlDDLShadowCloneTablesForValidStatements(context.Background(), db, parsed.Statements, "app")
 	if err != nil {
 		t.Fatalf("mysqlDDLShadowCloneTablesForValidStatements() error = %v", err)
+	}
+	if validationErrors[1] == nil || validationErrors[1].Error() != `table "config_infod" does not exist` {
+		t.Fatalf("validationErrors[1] = %v, want missing dependency error", validationErrors[1])
+	}
+	if validationErrors[2] != nil {
+		t.Fatalf("validationErrors[2] = %v, want nil", validationErrors[2])
 	}
 	want := []mysqlShadowCloneTable{{database: "app", table: "config_info", required: true}}
 	if len(got) != len(want) {
@@ -414,6 +420,10 @@ func TestPrepareMySQLShadowValidationUsesStatementSchemaForExistenceCheck(t *tes
 	if err != nil {
 		t.Fatalf("parse SQL: %v", err)
 	}
+	cloneTables, validationErrors, err := mysqlDDLShadowCloneTablesForValidStatements(context.Background(), db, parsed.Statements, "app")
+	if err != nil {
+		t.Fatalf("mysqlDDLShadowCloneTablesForValidStatements() error = %v", err)
+	}
 
 	handler := &TicketHandler{}
 	var tableShadowDB string
@@ -421,7 +431,7 @@ func TestPrepareMySQLShadowValidationUsesStatementSchemaForExistenceCheck(t *tes
 	tableShadowPrepared := false
 	_, _, prepErr, execErr := handler.prepareMySQLShadowValidation(
 		context.Background(), db, nil, parsed.Statements[0], "app",
-		nil, nil, &tableShadowDB, &tableCleanup, &tableShadowPrepared,
+		cloneTables, nil, validationErrors[parsed.Statements[0].Seq], &tableShadowDB, &tableCleanup, &tableShadowPrepared, nil,
 	)
 	if prepErr != nil {
 		t.Fatalf("unexpected prepErr: %v", prepErr)
@@ -455,6 +465,10 @@ func TestPrepareMySQLShadowValidationSupportsRenameTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse SQL: %v", err)
 	}
+	cloneTables, validationErrors, err := mysqlDDLShadowCloneTablesForValidStatements(context.Background(), db, parsed.Statements, "app")
+	if err != nil {
+		t.Fatalf("mysqlDDLShadowCloneTablesForValidStatements() error = %v", err)
+	}
 
 	handler := &TicketHandler{}
 	var tableShadowDB string
@@ -462,7 +476,7 @@ func TestPrepareMySQLShadowValidationSupportsRenameTable(t *testing.T) {
 	tableShadowPrepared := false
 	_, _, prepErr, execErr := handler.prepareMySQLShadowValidation(
 		context.Background(), db, nil, parsed.Statements[0], "app",
-		nil, nil, &tableShadowDB, &tableCleanup, &tableShadowPrepared,
+		cloneTables, nil, validationErrors[parsed.Statements[0].Seq], &tableShadowDB, &tableCleanup, &tableShadowPrepared, nil,
 	)
 	if prepErr != nil {
 		t.Fatalf("unexpected prepErr: %v", prepErr)
