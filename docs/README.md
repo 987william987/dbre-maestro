@@ -32,6 +32,7 @@
 - [設定與環境變數](reference/configuration.md)
 - [後端維護參考](reference/backend-maintenance.md)
 - [前端維護參考](reference/frontend-maintenance.md)
+- [前端 Routed Page 測試覆蓋](reference/frontend-routed-page-test-coverage.md)
 - [後端 API 與權限對照](reference/backend-api-and-permissions.md)
 - [登入安全與 Session](reference/auth-and-sessions.md)
 - [DB Connections](reference/db-connections.md)
