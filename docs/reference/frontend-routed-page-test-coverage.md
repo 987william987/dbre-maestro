@@ -22,10 +22,10 @@
 | Route | Page component | 等級 | 現有測試 | 狀態／缺口 |
 |---|---|---:|---|---|
 | `/login` | `LoginPage` | W | `LoginPage.test.tsx` | 達標 |
-| `/setup` | `SetupWizard` | W | 無 | 缺少：setup status、validation、建立成功與 API 失敗 |
-| `/dashboard` | `DashboardPage` | R | 僅 API／chart component test | 缺少：頁面成功、失敗與 personal/platform 分支 |
-| `/account/access-scopes` | `AccessScopesPage` | R | 無 | 缺少：成功、失敗、搜尋／renew 導覽 |
-| `/account/sessions` | `SessionsPage` | W | 無 | 缺少：成功、失敗、單筆與全部 revoke |
+| `/setup` | `SetupWizard` | W | `SetupWizard.test.tsx` | 達標 |
+| `/dashboard` | `DashboardPage` | R | `DashboardPage.test.tsx` | 達標 |
+| `/account/access-scopes` | `AccessScopesPage` | R | `AccessScopesPage.test.tsx` | 達標 |
+| `/account/sessions` | `SessionsPage` | W | `SessionsPage.test.tsx` | 達標 |
 | `/tickets` | `TicketsPage` | R | `TicketsPage.test.tsx` | 達標 |
 | `/tickets/:id` | `TicketDetailPage` | X | `TicketDetailPage.test.tsx` | 達標 |
 | `/tickets/new` | `NewTicketPage` | X | `NewTicketPage.test.tsx` | 達標 |
@@ -34,7 +34,7 @@
 | `/users/resources` | `UsersPage` | R | `UsersPage.test.tsx` | 達標 |
 | `/users/query-access` | `UsersPage` | W | `UsersPage.test.tsx` | 補強：mutation 失敗案例 |
 | `/sql-editor` | `SQLEditorPage` | X | `SQLEditorPage.test.tsx` | 達標；涵蓋 AppShell route 切換、navigation render-loop 與 Filter Columns 回歸 |
-| `/scheduled-sql-reports` | `ScheduledSQLReportsPage` | W | 無 | 缺少：成功、失敗、建立與 read-only 行為 |
+| `/scheduled-sql-reports` | `ScheduledSQLReportsPage` | W | `ScheduledSQLReportsPage.test.tsx` | 達標 |
 | `/db-connections` | `DBConnectionsPage` | W | `DBConnectionsPage.test.tsx` | 達標 |
 | `/db-connections/:id/overview` | `DBConnectionDetailPage` | R | `DBConnectionDetailPage.test.tsx` | 達標 |
 | `/db-connections/:id/databases` | `DBConnectionDetailPage` | R | `DBConnectionDetailPage.test.tsx` | 補強：API 失敗狀態 |
