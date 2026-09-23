@@ -240,17 +240,18 @@ func TestMySQLDDLShadowCloneTablesForValidStatementsSkipsInvalidStatementDepende
 		t.Fatalf("parse SQL: %v", err)
 	}
 
-	mock.ExpectQuery("SELECT COUNT\\(\\*\\).*information_schema\\.TABLES").
-		WithArgs("app", "aaa").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectQuery("SELECT COUNT\\(\\*\\).*information_schema\\.TABLES").
-		WithArgs("app", "config_infod").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectQuery("SELECT COUNT\\(\\*\\).*information_schema\\.TABLES").
-		WithArgs("app", "config_info").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`(?s)SELECT .*information_schema\.SCHEMATA.*UNION ALL.*UNION ALL`).
+		WithArgs(
+			"app", "aaa", "app", "app", "app", "aaa",
+			"app", "config_infod", "app", "app", "app", "config_infod",
+			"app", "config_info", "app", "app", "app", "config_info",
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"requested_database", "requested_table", "charset_name", "collation_name", "table_exists"}).
+			AddRow("app", "aaa", "utf8mb4", "utf8mb4_unicode_ci", false).
+			AddRow("app", "config_infod", "utf8mb4", "utf8mb4_unicode_ci", false).
+			AddRow("app", "config_info", "utf8mb4", "utf8mb4_unicode_ci", true))
 
-	got, validationErrors, err := mysqlDDLShadowCloneTablesForValidStatements(context.Background(), db, parsed.Statements, "app")
+	got, validationErrors, _, err := mysqlDDLShadowCloneTablesForValidStatements(context.Background(), db, parsed.Statements, "app")
 	if err != nil {
 		t.Fatalf("mysqlDDLShadowCloneTablesForValidStatements() error = %v", err)
 	}
@@ -373,29 +374,23 @@ func TestValidateMySQLDDLTableExistence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db, mock, err := sqlmock.New()
-			if err != nil {
-				t.Fatalf("sqlmock.New: %v", err)
-			}
-			defer db.Close()
-			mock.ExpectQuery(`FROM information_schema\.TABLES`).
-				WithArgs("app", "william").
-				WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(tt.count))
-
 			parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, tt.sql)
 			if err != nil {
 				t.Fatalf("parse SQL: %v", err)
 			}
-			err = validateMySQLDDLTableExistence(context.Background(), db, parsed.Statements[0], "app")
+			checks, err := mysqlDDLTableExistenceChecks(parsed.Statements[0], "app")
+			if err != nil {
+				t.Fatalf("mysqlDDLTableExistenceChecks(): %v", err)
+			}
+			err = validateMySQLDDLTableExistenceFromMetadata(checks, map[string]bool{
+				mysqlDDLMetadataKey("app", "william"): tt.count > 0,
+			})
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("validateMySQLDDLTableExistence() error = %v", err)
 				}
 			} else if err == nil || err.Error() != tt.wantErr {
 				t.Fatalf("validateMySQLDDLTableExistence() error = %v, want %q", err, tt.wantErr)
-			}
-			if err := mock.ExpectationsWereMet(); err != nil {
-				t.Fatalf("unmet expectations: %v", err)
 			}
 		})
 	}
@@ -412,15 +407,20 @@ func TestPrepareMySQLShadowValidationUsesStatementSchemaForExistenceCheck(t *tes
 	}
 	defer db.Close()
 
-	mock.ExpectQuery(`FROM information_schema\.TABLES`).
-		WithArgs("other_db", "t").
-		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(0))
+	mock.ExpectQuery(`(?s)SELECT .*information_schema\.SCHEMATA.*UNION ALL`).
+		WithArgs(
+			"other_db", "t", "other_db", "other_db", "other_db", "t",
+			"app", "", "app", "app", "app", "",
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"requested_database", "requested_table", "charset_name", "collation_name", "table_exists"}).
+			AddRow("other_db", "t", "utf8mb4", "utf8mb4_unicode_ci", false).
+			AddRow("app", "", "utf8mb4", "utf8mb4_unicode_ci", false))
 
 	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "ALTER TABLE other_db.t DROP INDEX idx_a")
 	if err != nil {
 		t.Fatalf("parse SQL: %v", err)
 	}
-	cloneTables, validationErrors, err := mysqlDDLShadowCloneTablesForValidStatements(context.Background(), db, parsed.Statements, "app")
+	cloneTables, validationErrors, schemaInfo, err := mysqlDDLShadowCloneTablesForValidStatements(context.Background(), db, parsed.Statements, "app")
 	if err != nil {
 		t.Fatalf("mysqlDDLShadowCloneTablesForValidStatements() error = %v", err)
 	}
@@ -431,7 +431,7 @@ func TestPrepareMySQLShadowValidationUsesStatementSchemaForExistenceCheck(t *tes
 	tableShadowPrepared := false
 	_, _, prepErr, execErr := handler.prepareMySQLShadowValidation(
 		context.Background(), db, nil, parsed.Statements[0], "app",
-		cloneTables, nil, validationErrors[parsed.Statements[0].Seq], &tableShadowDB, &tableCleanup, &tableShadowPrepared, nil,
+		cloneTables, schemaInfo, nil, validationErrors[parsed.Statements[0].Seq], &tableShadowDB, &tableCleanup, &tableShadowPrepared, nil,
 	)
 	if prepErr != nil {
 		t.Fatalf("unexpected prepErr: %v", prepErr)
@@ -457,15 +457,20 @@ func TestPrepareMySQLShadowValidationSupportsRenameTable(t *testing.T) {
 	}
 	defer db.Close()
 
-	mock.ExpectQuery(`FROM information_schema\.TABLES`).
-		WithArgs("app", "t_old").
-		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(0))
+	mock.ExpectQuery(`(?s)SELECT .*information_schema\.SCHEMATA.*UNION ALL`).
+		WithArgs(
+			"app", "t_old", "app", "app", "app", "t_old",
+			"app", "t_new", "app", "app", "app", "t_new",
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"requested_database", "requested_table", "charset_name", "collation_name", "table_exists"}).
+			AddRow("app", "t_old", "utf8mb4", "utf8mb4_unicode_ci", false).
+			AddRow("app", "t_new", "utf8mb4", "utf8mb4_unicode_ci", false))
 
 	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, "RENAME TABLE t_old TO t_new")
 	if err != nil {
 		t.Fatalf("parse SQL: %v", err)
 	}
-	cloneTables, validationErrors, err := mysqlDDLShadowCloneTablesForValidStatements(context.Background(), db, parsed.Statements, "app")
+	cloneTables, validationErrors, schemaInfo, err := mysqlDDLShadowCloneTablesForValidStatements(context.Background(), db, parsed.Statements, "app")
 	if err != nil {
 		t.Fatalf("mysqlDDLShadowCloneTablesForValidStatements() error = %v", err)
 	}
@@ -476,7 +481,7 @@ func TestPrepareMySQLShadowValidationSupportsRenameTable(t *testing.T) {
 	tableShadowPrepared := false
 	_, _, prepErr, execErr := handler.prepareMySQLShadowValidation(
 		context.Background(), db, nil, parsed.Statements[0], "app",
-		cloneTables, nil, validationErrors[parsed.Statements[0].Seq], &tableShadowDB, &tableCleanup, &tableShadowPrepared, nil,
+		cloneTables, schemaInfo, nil, validationErrors[parsed.Statements[0].Seq], &tableShadowDB, &tableCleanup, &tableShadowPrepared, nil,
 	)
 	if prepErr != nil {
 		t.Fatalf("unexpected prepErr: %v", prepErr)
