@@ -37,6 +37,62 @@
   --shadow-soft:   0 1px 2px rgba(0,0,0,0.03);
 }
 
+[data-theme='ocean'] {
+  --page:          248 250 252;
+  --panel-soft:    240 249 255;
+  --sidebar:       248 250 252;
+  --brand:         3 105 161;
+  --accent:        3 105 161;
+  --accent-soft:   224 242 254;
+  --border:        203 213 225;
+  --border-strong: 148 163 184;
+  --chart-ddl:     3 105 161;
+  --chart-dml:     14 165 233;
+  --chart-export:  99 102 241;
+}
+
+[data-theme='forest'] {
+  --page:          250 252 250;
+  --panel-soft:    240 253 244;
+  --sidebar:       248 250 248;
+  --brand:         21 128 61;
+  --accent:        21 128 61;
+  --accent-soft:   220 252 231;
+  --border:        209 224 212;
+  --border-strong: 134 171 141;
+  --chart-ddl:     21 128 61;
+  --chart-dml:     13 148 136;
+  --chart-export:  101 163 13;
+}
+
+[data-theme='amber'] {
+  --page:          255 253 250;
+  --panel-soft:    255 247 237;
+  --sidebar:       255 251 245;
+  --brand:         154 52 18;
+  --accent:        154 52 18;
+  --accent-soft:   255 237 213;
+  --border:        231 219 205;
+  --border-strong: 194 163 128;
+  --chart-ddl:     154 52 18;
+  --chart-dml:     217 119 6;
+  --chart-export:  190 24 93;
+}
+
+[data-theme='amethyst'] {
+  --page:          253 252 255;
+  --panel-soft:    245 243 255;
+  --sidebar:       250 248 255;
+  --brand:         109 40 217;
+  --accent:        109 40 217;
+  --accent-soft:   237 233 254;
+  --border:        221 214 235;
+  --border-strong: 167 139 203;
+  --chart-ddl:     109 40 217;
+  --chart-dml:     79 70 229;
+  --chart-export:  192 38 211;
+}
+
 .dark {
   color-scheme: dark;
   --page:          9 9 11;
@@ -71,6 +127,58 @@
   --chart-query:   74 222 128;
   --shadow:        0 1px 2px rgba(0,0,0,0.32);
   --shadow-soft:   0 1px 2px rgba(0,0,0,0.24);
+}
+
+.dark[data-theme='ocean'] {
+  --panel-soft:    12 40 55;
+  --sidebar:       10 22 30;
+  --brand:         3 105 161;
+  --accent:        125 211 252;
+  --accent-soft:   12 40 55;
+  --border:        39 67 82;
+  --border-strong: 71 104 122;
+  --chart-ddl:     125 211 252;
+  --chart-dml:     56 189 248;
+  --chart-export:  165 180 252;
+}
+
+.dark[data-theme='forest'] {
+  --panel-soft:    18 48 31;
+  --sidebar:       11 25 17;
+  --brand:         21 128 61;
+  --accent:        134 239 172;
+  --accent-soft:   18 48 31;
+  --border:        47 76 57;
+  --border-strong: 82 121 95;
+  --chart-ddl:     134 239 172;
+  --chart-dml:     94 234 212;
+  --chart-export:  190 242 100;
+}
+
+.dark[data-theme='amber'] {
+  --panel-soft:    55 35 20;
+  --sidebar:       27 19 13;
+  --brand:         154 52 18;
+  --accent:        253 186 116;
+  --accent-soft:   55 35 20;
+  --border:        79 58 42;
+  --border-strong: 121 88 59;
+  --chart-ddl:     253 186 116;
+  --chart-dml:     251 191 36;
+  --chart-export:  251 113 133;
+}
+
+.dark[data-theme='amethyst'] {
+  --panel-soft:    43 31 65;
+  --sidebar:       22 16 31;
+  --brand:         109 40 217;
+  --accent:        196 181 253;
+  --accent-soft:   43 31 65;
+  --border:        70 57 91;
+  --border-strong: 110 89 140;
+  --chart-ddl:     196 181 253;
+  --chart-dml:     165 180 252;
+  --chart-export:  240 171 252;
 }
 
 * {

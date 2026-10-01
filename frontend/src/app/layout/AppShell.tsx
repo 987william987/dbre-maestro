@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, Check, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, KeyRound, LayoutDashboard, LogOut, Monitor, Moon, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Sun, Ticket, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, Check, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, KeyRound, LayoutDashboard, LogOut, Monitor, Moon, Palette, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Sun, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, listNotificationSummary, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -7,7 +7,7 @@ import { openEventStream } from '@/shared/api/client'
 import { hasAnyPermission, TICKET_WORKSPACE_PERMISSIONS } from '@/shared/auth/permissions'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
-import { useTheme, type ThemeMode } from '@/shared/theme/ThemeContext'
+import { THEME_PRESETS, useTheme, type ThemeMode } from '@/shared/theme/ThemeContext'
 import type { CurrentUser } from '@/shared/types/auth'
 import type { NotificationItem, NotificationSummary } from '@/shared/types/notification'
 import { useToast } from '@/shared/ui/ToastContext'
@@ -402,10 +402,11 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
   const location = useLocation()
   const navigate = useNavigate()
   const { pushToast } = useToast()
-  const { mode, resolvedMode, setMode } = useTheme()
+  const { mode, preset, resolvedMode, setMode, setPreset } = useTheme()
   const [menuOpen, setMenuOpen] = useState(false)
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [themeOpen, setThemeOpen] = useState(false)
+  const [presetOpen, setPresetOpen] = useState(false)
   const [pageHelpOpen, setPageHelpOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -422,6 +423,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
   const menuRef = useRef<HTMLDivElement | null>(null)
   const notificationRef = useRef<HTMLDivElement | null>(null)
   const themeRef = useRef<HTMLDivElement | null>(null)
+  const presetRef = useRef<HTMLDivElement | null>(null)
   const bootstrappedNotificationsRef = useRef(false)
   const seenNotificationIDsRef = useRef<Set<number>>(new Set())
 
@@ -437,12 +439,16 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
       if (!themeRef.current?.contains(target)) {
         setThemeOpen(false)
       }
+      if (!presetRef.current?.contains(target)) {
+        setPresetOpen(false)
+      }
     }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setMenuOpen(false)
         setThemeOpen(false)
+        setPresetOpen(false)
       }
     }
 
@@ -453,6 +459,8 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [])
+
+  const selectedPreset = THEME_PRESETS.find((item) => item.value === preset) ?? THEME_PRESETS[0]
 
   useEffect(() => {
     let cancelled = false
@@ -931,6 +939,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
                 type="button"
                 onClick={() => {
                   setThemeOpen((current) => !current)
+                  setPresetOpen(false)
                   setNotificationOpen(false)
                   setMenuOpen(false)
                 }}
@@ -972,6 +981,58 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
               ) : null}
             </div>
 
+            <div ref={presetRef} className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setPresetOpen((current) => !current)
+                  setThemeOpen(false)
+                  setNotificationOpen(false)
+                  setMenuOpen(false)
+                }}
+                className={cn(
+                  'inline-flex h-8 items-center gap-2 rounded-md border border-border bg-panel px-2 text-[12px] font-medium text-ink transition-colors',
+                  presetOpen ? 'bg-panel-soft' : 'hover:bg-panel-soft',
+                )}
+                aria-label={`Color theme: ${selectedPreset.label}`}
+              >
+                <Palette className="h-4 w-4 sm:hidden" aria-hidden="true" />
+                <span className="hidden items-center -space-x-0.5 sm:flex" aria-hidden="true">
+                  {selectedPreset.swatches.map((color) => (
+                    <span key={color} className="h-3.5 w-3.5 rounded-full border border-black/10" style={{ backgroundColor: color }} />
+                  ))}
+                </span>
+                <span className="hidden lg:inline">{selectedPreset.label}</span>
+                <ChevronDown className={cn('hidden h-3.5 w-3.5 text-muted transition-transform sm:block', presetOpen && 'rotate-180')} />
+              </button>
+
+              {presetOpen ? (
+                <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 w-60 rounded-lg border border-border bg-panel p-1 shadow-card">
+                  <p className="px-2 py-1.5 text-[11px] font-semibold text-muted">Color theme</p>
+                  {THEME_PRESETS.map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => {
+                        setPreset(item.value)
+                        setPresetOpen(false)
+                      }}
+                      className="flex h-10 w-full items-center gap-3 rounded-md px-2 text-[12px] font-medium text-ink transition-colors hover:bg-panel-soft"
+                      aria-label={`${item.label} color theme`}
+                    >
+                      <span className="flex items-center -space-x-0.5" aria-hidden="true">
+                        {item.swatches.map((color) => (
+                          <span key={color} className="h-4 w-4 rounded-full border border-black/10" style={{ backgroundColor: color }} />
+                        ))}
+                      </span>
+                      <span className="flex-1 text-left">{item.label}</span>
+                      {preset === item.value ? <Check className="h-4 w-4" /> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
             <div ref={menuRef} className="relative">
               <button
                 type="button"
@@ -979,6 +1040,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
                   setMenuOpen((current) => !current)
                   setNotificationOpen(false)
                   setThemeOpen(false)
+                  setPresetOpen(false)
                 }}
                 className={cn(
                   'inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-[12px] font-medium text-ink transition-colors',

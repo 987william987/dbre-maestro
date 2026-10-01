@@ -193,6 +193,19 @@ describe('AppShell notifications', () => {
     expect(screen.getByRole('button', { name: 'Theme: Dark' })).toBeInTheDocument()
   })
 
+  it('可獨立切換並持久化色彩主題', async () => {
+    renderShell()
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Color theme: Default' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ocean color theme' }))
+
+    expect(document.documentElement).toHaveAttribute('data-theme', 'ocean')
+    expect(window.localStorage.getItem('dbre-theme-preset')).toBe('ocean')
+    expect(window.localStorage.getItem('dbre-theme-mode')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Color theme: Ocean' })).toBeInTheDocument()
+  })
+
   it('可將全部通知標示已讀', async () => {
     renderShell()
 
