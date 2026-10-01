@@ -224,7 +224,7 @@ a {
 
 @keyframes attention-pulse-surface {
   0% {
-    background-color: #ffffff;
+    background-color: rgb(var(--panel));
     border-color: rgb(var(--border));
   }
   22% {
@@ -232,7 +232,7 @@ a {
     border-color: rgb(var(--border-strong));
   }
   100% {
-    background-color: #ffffff;
+    background-color: rgb(var(--panel));
     border-color: rgb(var(--border));
   }
 }

@@ -1,6 +1,6 @@
 # 專案目前狀態
 
-> 最後更新：2026-09-23  
+> 最後更新：2026-10-01
 > 本文件提供新 session 的快速上下文，不取代程式碼、reference 文件或 Git history。
 
 ## 專案目的
@@ -11,13 +11,13 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 
 - 前端 ESLint 已導入 type-aware 設定，涵蓋 `tsconfig.app.json` 與 `tsconfig.node.json`。
 - `npm run lint`：0 errors、0 warnings。
-- `npm test`：32 test files、268 tests 全部通過。
+- `npm test`：33 test files、275 tests 全部通過。
 - `npm run build`：通過；Vite 仍有既有的單一 chunk 超過 500 kB warning。
 - 所有 28 個 render routes 已達到 routed page 最低整合測試標準。
 - `/`、`/settings`、`/sql-review-rules` 與 catch-all redirect 已有 route coverage。
 - `AppErrorBoundary` 測試會刻意將 `NotFoundError` stack trace 寫到 stderr；suite 通過時不是測試失敗。
 
-上述數字是 2026-09-23 在 commit `07d1b006` 驗證的基線。新增或刪除測試後必須更新，不應永久假設數字不變。
+上述數字是 2026-10-01 在 dark mode 收尾階段驗證的基線。新增或刪除測試後必須更新，不應永久假設數字不變。
 
 ## 最近完成
 
@@ -28,12 +28,15 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 - 補齊 routed page 的 success、error、mutation、redirect 與已知回歸 coverage。
 - 清查舊前端測試；沒有刪除仍具獨立意圖的案例，只合併重複的 AppShell route fixtures。
 - MySQL DDL shadow validation 已具備 credential-aware readonly connection pool；功能旗標 `DB_SHADOW_READONLY_POOL_ENABLED` 預設關閉，需先在 Testnet 啟用並觀察 timing 後再推至 Production。
+- 前端已支援 Light／Dark／System，並以 semantic tokens 統一路由頁面、共用 UI、圖表與一般 CodeMirror editor；Admin Query Console 刻意維持固定 one-dark。
+- 已修正 theme migration 期間的 light sidebar 樣式回歸，以及 Dashboard 行動版 KPI 卡片被內容最小寬度裁切的問題。
 
 ## 已知限制與尚未接入項目
 
 - 根目錄 `make lint` 目前只執行 Go lint，尚未納入前端 ESLint。
 - application image build 目前只執行前端 build，尚未把 ESLint 作為 image build gate。
 - 尚未導入瀏覽器 E2E 與視覺回歸測試；目前決定延後，不是遺漏。
+- 尚未提供主題色 preset；目前只有 Light／Dark／System 顯示模式。
 - 平台目前以單副本部署為前提；多副本限制見 [工程待辦](TODOS.md)。
 
 ## 下一步

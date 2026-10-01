@@ -1784,7 +1784,7 @@ describe('SQLEditorPage', () => {
 
     const emailHeader = screen.getByText('email').closest('th')
     expect(emailHeader?.querySelector('svg')).toBeInTheDocument()
-    expect(screen.getByText('email').closest('span')?.className).toContain('text-[#b9381f]')
+    expect(screen.getByText('email').closest('span')?.className).toContain('text-danger')
     expect(screen.getByText('Sensitive column')).toBeInTheDocument()
 
     const idHeader = screen.getByText('id').closest('th')

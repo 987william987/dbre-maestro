@@ -84,10 +84,10 @@ function KpiCard({
     neutral: 'bg-panel-soft text-muted',
     success: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
     warning: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
-    danger: 'bg-rose-50 text-rose-700',
+    danger: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300',
   }[tone]
   return (
-    <section className="rounded-xl border border-border bg-panel p-4 shadow-soft">
+    <section className="min-w-0 rounded-xl border border-border bg-panel p-4 shadow-soft">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[12px] font-semibold text-muted">{title}</p>
@@ -106,7 +106,7 @@ function MetricGrid({ items }: { items: Array<{ label: string; value: string | n
   const toneClass = {
     neutral: 'bg-panel-soft text-ink',
     warning: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
-    danger: 'bg-rose-50 text-rose-800',
+    danger: 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300',
     success: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300',
   }
   return (
@@ -356,7 +356,7 @@ export function DashboardPage() {
   const platform = data.platform
 
   return (
-    <div className="grid gap-4 p-3 sm:p-4">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 p-3 sm:p-4">
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -370,7 +370,7 @@ export function DashboardPage() {
         </Link>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard title="My Tickets" value={personal.total} helper="All tickets submitted by you" icon={TicketIcon} />
         <KpiCard title="Active" value={personal.active} helper="Waiting for review, execution, or running" icon={Clock3} tone="warning" />
         <KpiCard title="Completed" value={personal.completed} helper="Finished successfully" icon={CheckCircle2} tone="success" />
@@ -424,7 +424,7 @@ export function DashboardPage() {
             <h2 className="text-[15px] font-semibold text-ink">Platform Operations</h2>
           </div>
           <OperationsTrendChart trend={platform.operations_trend} />
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-2 xl:grid-cols-4">
             <KpiCard title="Platform Tickets" value={platform.ticket_summary.total} helper="All visible workflow tickets" icon={TicketIcon} />
             <KpiCard title="Platform Active" value={platform.ticket_summary.active} helper="Queue and executing workload" icon={Clock3} tone="warning" />
             <KpiCard title="Platform Failed" value={platform.ticket_summary.failed} helper="Failed, stopped, or rejected" icon={AlertTriangle} tone="danger" />
@@ -511,7 +511,7 @@ export function DashboardPage() {
               ) : (
                 <div className="grid gap-2">
                   {platform.db_connection_failures.slice(0, 8).map((conn) => (
-                    <Link key={conn.id} to="/db-connections" className="flex items-start gap-3 rounded-lg border border-rose-100 bg-rose-50/60 px-3 py-2 hover:bg-rose-50">
+                    <Link key={conn.id} to="/db-connections" className="flex items-start gap-3 rounded-lg border border-rose-100 bg-rose-50/60 px-3 py-2 hover:bg-rose-50 dark:border-rose-900 dark:bg-rose-950/40 dark:hover:bg-rose-950/60">
                       <AlertTriangle className="mt-0.5 h-4 w-4 text-danger" />
                       <span className="min-w-0">
                         <span className="block truncate text-[12px] font-semibold text-ink">{conn.name}</span>

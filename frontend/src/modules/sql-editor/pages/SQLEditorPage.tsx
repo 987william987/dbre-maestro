@@ -3441,7 +3441,7 @@ export function SQLEditorPage() {
                             {activeTab.result.columns.map((column, index) => {
                               const checked = visibleResultColumnIndexes.includes(index)
                               return (
-                                <label key={`${column}-${index}`} className={`flex items-center gap-2 text-[12px] ${sensitiveColumnIndexSet.has(index) ? 'text-[#b9381f]' : 'text-ink'}`}>
+                                <label key={`${column}-${index}`} className={`flex items-center gap-2 text-[12px] ${sensitiveColumnIndexSet.has(index) ? 'text-danger' : 'text-ink'}`}>
                                   <input
                                     type="checkbox"
                                     checked={checked}
@@ -3684,7 +3684,7 @@ export function SQLEditorPage() {
                                     className={cn(
                                       'whitespace-nowrap px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em]',
                                       fieldOffset > 0 ? 'border-t border-border' : '',
-                                      sensitiveColumnIndexSet.has(columnIndex) ? 'text-[#b9381f]' : 'text-faint',
+                                      sensitiveColumnIndexSet.has(columnIndex) ? 'text-danger' : 'text-faint',
                                     )}
                                   >
                                     {activeTab.result?.columns[columnIndex]}
@@ -3712,7 +3712,7 @@ export function SQLEditorPage() {
                               key={`${activeTab.result?.columns[columnIndex]}-${columnIndex}`}
                             >
                               {sensitiveColumnIndexSet.has(columnIndex) ? (
-                                <span className="group/sensitive relative inline-flex items-center gap-1 text-[#b9381f]">
+                                <span className="group/sensitive relative inline-flex items-center gap-1 text-danger">
                                   {activeTab.result?.columns[columnIndex]}
                                   <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-warning" />
                                   <span className="pointer-events-none absolute left-1/2 top-full z-10 mt-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white shadow-lg group-hover/sensitive:block">
