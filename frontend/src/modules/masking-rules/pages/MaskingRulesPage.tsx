@@ -850,7 +850,7 @@ export function MaskingRulesPage() {
             <button
               type="submit"
               disabled={ruleSubmitting || !ruleForm.columnName.trim()}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {ruleSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : ruleDrawer.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
               {ruleDrawer.mode === 'create' ? 'Create Rule' : 'Save Changes'}
@@ -1023,7 +1023,7 @@ export function MaskingRulesPage() {
             <button
               type="submit"
               disabled={whitelistSubmitting || !isWhitelistFormSubmittable(whitelistForm, selectedWhitelistConnection)}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {whitelistSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : whitelistDrawer.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
               {whitelistDrawer.mode === 'create' ? 'Create Whitelist' : 'Save Changes'}
@@ -1098,7 +1098,7 @@ export function MaskingRulesPage() {
             <button
               type="submit"
               disabled={redisPrefixSubmitting || !isRedisPrefixFormSubmittable(redisPrefixForm)}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {redisPrefixSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : redisPrefixDrawer.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
               {redisPrefixDrawer.mode === 'create' ? 'Create Prefix' : 'Save Changes'}
@@ -1240,7 +1240,7 @@ function ActionButton({ onClick, children }: { onClick: () => void; children: Re
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
+      className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-brand/90"
     >
       {children}
     </button>
@@ -1306,7 +1306,7 @@ function ActionCell({
         type="button"
         onClick={onDelete}
         disabled={deleting}
-        className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2.5 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
+        className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2.5 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50 dark:bg-red-950/40 dark:hover:bg-red-950/60"
       >
         {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
         Delete

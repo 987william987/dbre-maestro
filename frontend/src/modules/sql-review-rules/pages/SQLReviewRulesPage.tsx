@@ -267,7 +267,7 @@ export function SQLReviewRulesPage() {
                       <DataTableCell>{rule.rule_name}</DataTableCell>
                       <DataTableCell>{getRuleDescription(rule)}</DataTableCell>
                       <DataTableCell>
-                        <div className="inline-flex h-8 overflow-hidden rounded-md border border-border bg-white">
+                        <div className="inline-flex h-8 overflow-hidden rounded-md border border-border bg-panel">
                           {(['error', 'warning'] as const).map((severity) => {
                             const selected = (draft?.severity ?? 'error') === severity
                             return (
@@ -281,7 +281,7 @@ export function SQLReviewRulesPage() {
                                   ...current,
                                   [rule.rule_name]: { ...current[rule.rule_name], severity },
                                 }))}
-                                className={`min-w-[66px] px-2 text-[11px] font-semibold capitalize transition disabled:cursor-not-allowed disabled:opacity-60 ${selected ? severity === 'error' ? 'bg-red-50 text-danger' : 'bg-amber-50 text-amber-700' : 'text-muted hover:bg-panel-soft'}`}
+                                className={`min-w-[66px] px-2 text-[11px] font-semibold capitalize transition disabled:cursor-not-allowed disabled:opacity-60 ${selected ? severity === 'error' ? 'bg-red-50 text-danger dark:bg-red-950/40' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300' : 'text-muted hover:bg-panel-soft'}`}
                               >
                                 {severity}
                               </button>
@@ -322,7 +322,7 @@ export function SQLReviewRulesPage() {
                                 },
                               }))
                             }
-                            className="h-9 w-[120px] rounded-md border border-border bg-white px-3 text-[12px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            className="h-9 w-[120px] rounded-md border border-border bg-panel px-3 text-[12px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             placeholder="Row limit"
                           />
                         ) : (

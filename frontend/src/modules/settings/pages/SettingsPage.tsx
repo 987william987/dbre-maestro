@@ -583,7 +583,7 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
                 {connections.filter((connection) => connection.db_type === 'mysql' || connection.db_type === 'postgres').map((connection) => {
                   const checked = form.accountConnectionIDs.includes(connection.id)
                   return (
-                    <label key={connection.id} className={`flex cursor-pointer items-start gap-4 rounded-xl border px-4 py-4 transition ${checked ? 'border-slate-300 bg-slate-50' : 'border-border bg-white hover:bg-panel-soft'}`}>
+                    <label key={connection.id} className={`flex cursor-pointer items-start gap-4 rounded-xl border px-4 py-4 transition ${checked ? 'border-border-strong bg-panel-soft' : 'border-border bg-panel hover:bg-panel-soft'}`}>
                       <div className="pt-1">
                         <Switch ariaLabel={`${connection.name} selected for account scan`} checked={checked} onChange={() => setForm((current) => current ? { ...current, accountConnectionIDs: checked ? current.accountConnectionIDs.filter((id) => id !== connection.id) : [...current.accountConnectionIDs, connection.id].sort((left, right) => left - right) } : current)} />
                       </div>
@@ -683,7 +683,7 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
                       <label
                         key={connection.id}
                         className={`flex cursor-pointer items-start gap-4 rounded-xl border px-4 py-4 transition ${
-                          checked ? 'border-slate-300 bg-slate-50' : 'border-border bg-white hover:bg-panel-soft'
+                          checked ? 'border-border-strong bg-panel-soft' : 'border-border bg-panel hover:bg-panel-soft'
                         }`}
                       >
                         <div className="pt-1">
@@ -726,7 +726,7 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
               <p className="mt-1 text-[12px] leading-5 text-muted">Route ticket approval, export approval, and execution responsibility by ticket type and DB connection.</p>
             </div>
             {workflowIssues.length > 0 ? (
-              <div className="border-b border-danger/20 bg-red-50 px-4 py-3 text-[12px] font-medium leading-5 text-danger">
+              <div className="border-b border-danger/20 bg-red-50 px-4 py-3 text-[12px] font-medium leading-5 text-danger dark:bg-red-950/40">
                 {workflowIssues.join(' ')}
               </div>
             ) : null}
@@ -753,7 +753,7 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
               <button
                 type="button"
                 onClick={addWorkflowRule}
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
               >
                 <Plus className="h-4 w-4" />
                 Add Rule
@@ -768,7 +768,7 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
             <button
               type="submit"
               disabled={saving || workflowIssues.length > 0}
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Save className="h-4 w-4" />
               {saving ? 'Saving...' : 'Save Settings'}
@@ -872,7 +872,7 @@ function WorkflowRuleEditor({
           <button
             type="button"
             onClick={onRemove}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-danger/20 bg-red-50 text-danger transition hover:bg-red-100"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-danger/20 bg-red-50 text-danger transition hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-950/60"
             aria-label={`Remove workflow rule ${index + 1}`}
           >
             <Trash2 className="h-4 w-4" />
@@ -948,7 +948,7 @@ function WorkflowRuleEditor({
         <div className="hidden lg:block" aria-hidden="true" />
       </div>
       {hasDeprecatedReviewer ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-5 text-amber-800">
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-5 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
           The Reviewer auth group is deprecated. Move this rule to Data Owner or Security before the legacy group is removed.
         </div>
       ) : null}
@@ -971,7 +971,7 @@ function WorkflowRulePreviewSummary({ preview }: { preview?: WorkflowRulePreview
   const hasIssue = Boolean(preview.resolution.error_code || preview.shadowed_by_rule_id || preview.conflict_rule_ids.length > 0)
 
   return (
-    <div className={`rounded-lg border px-3 py-2 text-[12px] leading-5 ${hasIssue ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}>
+    <div className={`rounded-lg border px-3 py-2 text-[12px] leading-5 ${hasIssue ? 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300' : 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'}`}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className="font-semibold">{preview.effective ? 'Effective' : 'Not effective'}</span>
         <span>Reviewers: {reviewerNames}</span>
@@ -1108,7 +1108,7 @@ function Field({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-10 min-w-0 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-slate-400"
+        className="h-10 min-w-0 w-full rounded-lg border border-border bg-panel px-3 text-[13px] text-ink outline-none transition focus:border-border-strong"
       />
     </label>
   )
@@ -1133,7 +1133,7 @@ function Checklist<T extends string | number>({
       {items.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border bg-panel-soft px-3 py-2 text-[12px] text-muted">{emptyMessage}</p>
       ) : (
-        <div className="grid max-h-40 gap-2 overflow-y-auto rounded-lg border border-border bg-white p-2">
+        <div className="grid max-h-40 gap-2 overflow-y-auto rounded-lg border border-border bg-panel p-2">
           {items.map((item) => {
             const checked = selectedIDs.includes(item.id)
             return (

@@ -122,7 +122,7 @@ export function AccessScopesPage() {
                   <p className="text-[12px] font-semibold text-muted">Submission DB Scope</p>
                   <p className="mt-2 text-[28px] font-semibold tracking-normal text-ink">{filteredDBScopes.length}</p>
                 </div>
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-panel-soft text-muted">
                   <Database className="h-5 w-5" />
                 </span>
               </div>
@@ -133,7 +133,7 @@ export function AccessScopesPage() {
                   <p className="text-[12px] font-semibold text-muted">Active Query Access</p>
                   <p className="mt-2 text-[28px] font-semibold tracking-normal text-ink">{filteredQueryScopes.length}</p>
                 </div>
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                   <KeyRound className="h-5 w-5" />
                 </span>
               </div>
@@ -194,7 +194,7 @@ export function AccessScopesPage() {
                     </DataTableHead>
                     <DataTableBody>
                       {pagedQueryScopes.map((scope) => (
-                        <DataTableRow key={scope.id} className={scope.expiring_soon ? 'bg-amber-50/40' : undefined}>
+                        <DataTableRow key={scope.id} className={scope.expiring_soon ? 'bg-amber-50/40 dark:bg-amber-950/20' : undefined}>
                           <DataTableCell className="font-medium">{scope.connection_name || `#${scope.connection_id}`}</DataTableCell>
                           <DataTableCell className="font-mono text-[12px]">{scope.database_pattern}.{scope.table_pattern}</DataTableCell>
                           <DataTableCell>
@@ -209,7 +209,7 @@ export function AccessScopesPage() {
                           </DataTableCell>
                           <DataTableCell className="whitespace-nowrap text-right">
                             {isRenewableQueryScope(scope, renewableConnectionIDs) ? (
-                              <Link to={scope.renew_ticket_path} className="inline-flex h-8 items-center rounded-md border border-border bg-white px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft">
+                              <Link to={scope.renew_ticket_path} className="inline-flex h-8 items-center rounded-md border border-border bg-panel px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft">
                                 Renew
                               </Link>
                             ) : (

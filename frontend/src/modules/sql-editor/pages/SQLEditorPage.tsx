@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
+import { oneDark } from '@codemirror/theme-one-dark'
 import { javascript } from '@codemirror/lang-javascript'
 import { MySQL, PostgreSQL, StandardSQL, sql, type SQLNamespace } from '@codemirror/lang-sql'
 import { autocompletion, type Completion, type CompletionSource } from '@codemirror/autocomplete'
@@ -39,6 +40,7 @@ import { AttentionPulse } from '@/shared/ui/AttentionPulse'
 import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { Pagination } from '@/shared/ui/Pagination'
 import { useToast } from '@/shared/ui/ToastContext'
+import { useTheme } from '@/shared/theme/ThemeContext'
 import { ConfirmDialog } from '@/shared/ui/ConfirmDialog'
 import { DataTable, DataTableBody, DataTableCell, DataTableHead, DataTableHeaderCell, DataTableRow } from '@/shared/ui/DataTable'
 import { SearchInput } from '@/shared/ui/SearchInput'
@@ -1221,6 +1223,7 @@ function AssetTree({
 }
 
 export function SQLEditorPage() {
+  const { resolvedMode } = useTheme()
   const editorContainerRef = useRef<HTMLDivElement | null>(null)
   const editorShellRef = useRef<HTMLElement | null>(null)
   const explorerSectionRef = useRef<HTMLElement | null>(null)
@@ -3104,8 +3107,8 @@ export function SQLEditorPage() {
                 </button>
 
               {activeAssetPickerOpen ? (
-                <div className="absolute -left-3 -right-3 top-[calc(100%+8px)] z-20 rounded-lg border border-border bg-white p-3 shadow-soft">
-                  <div className="flex items-center rounded-lg border border-border bg-white px-2 transition focus-within:border-slate-400">
+                <div className="absolute -left-3 -right-3 top-[calc(100%+8px)] z-20 rounded-lg border border-border bg-panel p-3 shadow-soft">
+                  <div className="flex items-center rounded-lg border border-border bg-panel px-2 transition focus-within:border-border-strong">
                     <div className="min-w-0 flex-1">
                       <SearchInput
                         aria-label="Asset Picker Search"
@@ -3174,7 +3177,7 @@ export function SQLEditorPage() {
 
             <div className="flex min-h-0 flex-1 flex-col px-3 pt-3 pb-3">
               {activeTab?.metadataError ? <InlineAlert className="mb-2" tone="info">{activeTab.metadataError}</InlineAlert> : null}
-              <div className="flex items-center rounded-lg border border-border bg-white px-2 transition focus-within:border-slate-400">
+              <div className="flex items-center rounded-lg border border-border bg-panel px-2 transition focus-within:border-border-strong">
                 <div className="min-w-0 flex-1">
                   <SearchInput
                     aria-label="Explorer Search"
@@ -3253,7 +3256,7 @@ export function SQLEditorPage() {
                           void handleToggleAdminMode()
                         }}
                         disabled={activeTabRunning || !activeTab.connectionId}
-                        className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-[13px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${activeAdminMode ? 'border-amber-500 bg-amber-500 text-black' : 'border-border bg-white text-ink hover:bg-page'}`}
+                        className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-[13px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${activeAdminMode ? 'border-amber-500 bg-amber-500 text-black' : 'border-border bg-panel text-ink hover:bg-page'}`}
                       >
                         <ShieldAlert className="h-4 w-4" />
                         {activeAdminMode ? 'Exit admin mode' : 'Admin mode'}
@@ -3263,21 +3266,21 @@ export function SQLEditorPage() {
                       type="button"
                       onClick={handleFormatSQL}
                       disabled={!activeTab.sql.trim()}
-                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-black transition hover:bg-page disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-white"
+                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-panel px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-panel"
                     >
                       Format
-                      <span aria-hidden="true" className="text-[11px] font-normal text-black">{FORMAT_SHORTCUT_LABEL}</span>
+                      <span aria-hidden="true" className="text-[11px] font-normal text-ink">{FORMAT_SHORTCUT_LABEL}</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleExplainQuery}
                       disabled={!canQuery || activeTabRunning || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim())}
-                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-black transition hover:bg-page disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-white"
+                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-panel px-4 text-[13px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-panel"
                     >
                       {activeTabRunning ? 'Running...' : (
                         <>
                           Explain
-                          <span aria-hidden="true" className="text-[11px] font-normal text-black">{EXPLAIN_SHORTCUT_LABEL}</span>
+                          <span aria-hidden="true" className="text-[11px] font-normal text-ink">{EXPLAIN_SHORTCUT_LABEL}</span>
                         </>
                       )}
                     </button>
@@ -3287,7 +3290,7 @@ export function SQLEditorPage() {
                       disabled={activeTabRunning ? !activeTabCanStop : (!canQuery || !activeTab.connectionId || !(activeSelectedSQL.trim() || activeTab.sql.trim()))}
                       title={activeTabCanStop ? 'Stop the running query' : undefined}
                       className={`inline-flex h-9 items-center gap-2 rounded-lg px-4 text-[13px] font-bold text-white transition disabled:cursor-not-allowed disabled:bg-border disabled:text-faint ${
-                        activeTabCanStop ? 'bg-danger hover:bg-red-700' : 'bg-brand hover:bg-slate-800'
+                        activeTabCanStop ? 'bg-danger hover:bg-red-700' : 'bg-brand hover:bg-brand/90'
                       }`}
                     >
                       {activeTabCanStop ? (
@@ -3317,7 +3320,7 @@ export function SQLEditorPage() {
                     extensions={editorExtensions}
                     onChange={handleEditorChange}
                     onStatistics={handleEditorStatistics}
-                    theme="light"
+                    theme={resolvedMode === 'dark' ? oneDark : 'light'}
                     basicSetup={SQL_EDITOR_BASIC_SETUP}
                   />
                 </div>
@@ -3325,13 +3328,13 @@ export function SQLEditorPage() {
 
               <div className="flex min-h-0 flex-1 flex-col px-4 pt-2 pb-3">
                 {hasSensitiveOverride || activeTab.result?.sensitive_override_active ? (
-                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
                     <span className="font-semibold">Sensitive override active.</span> Queries and exports for this account will display unmasked data directly.
                   </div>
                 ) : null}
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-3">
-                    <div className="inline-flex items-center rounded-lg border border-border bg-white p-1">
+                    <div className="inline-flex items-center rounded-lg border border-border bg-panel p-1">
                       <button
                         type="button"
                         onClick={() => updateActiveTab({ resultView: 'result' })}
@@ -3378,7 +3381,7 @@ export function SQLEditorPage() {
                     <button
                       type="button"
                       onClick={() => updateActiveTab({ resultView: 'saved' })}
-                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Star className="h-4 w-4" />
                       Saved
@@ -3387,7 +3390,7 @@ export function SQLEditorPage() {
                       type="button"
                       onClick={openSaveQueryDialog}
                       disabled={!canQuery || !activeTab.connectionId || !activeExecutionSQL || isFavorited}
-                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isFavorited ? <StarOff className="h-4 w-4" /> : <Star className="h-4 w-4" />}
                       {isFavorited ? 'Saved' : 'Save'}
@@ -3396,7 +3399,7 @@ export function SQLEditorPage() {
                       type="button"
                       onClick={openSensitiveAccessConfirm}
                       disabled={!canApplySensitiveAccess || activeTabCreatingSensitiveAccess || !activeTab.connectionId || !activeExecutionSQL || !activeResultMatchesSQL || !activeResultHasSensitiveColumns}
-                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {activeTabCreatingSensitiveAccess ? 'Submitting...' : 'Sensitive Access'}
                     </button>
@@ -3406,7 +3409,7 @@ export function SQLEditorPage() {
                         type="button"
                         onClick={openQueryAccessTicket}
                         disabled={!activeTab.connectionId}
-                        className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Query Access
                       </button>
@@ -3417,13 +3420,13 @@ export function SQLEditorPage() {
                         type="button"
                         onClick={() => updateActiveTab({ columnFilterOpen: !activeColumnFilterOpen })}
                         disabled={!activeTab.result}
-                        className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <Filter className="h-4 w-4" />
                         Filter Columns
                       </button>
                       {activeColumnFilterOpen && activeTab.result ? (
-                        <div className="absolute right-0 top-[calc(100%+8px)] z-10 w-64 rounded-lg border border-border bg-white p-3 shadow-soft">
+                        <div className="absolute right-0 top-[calc(100%+8px)] z-10 w-64 rounded-lg border border-border bg-panel p-3 shadow-soft">
                           <div className="mb-2 flex items-center justify-between">
                             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">Visible Columns</p>
                             <button
@@ -3456,7 +3459,7 @@ export function SQLEditorPage() {
                       type="button"
                       onClick={openExportConfirm}
                       disabled={!canExport || activeTabExporting || !activeTab.connectionId || !activeExecutionSQL || !activeResultMatchesSQL}
-                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-page disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Download className="h-4 w-4" />
                       {activeTabExporting ? 'Exporting...' : 'EXPORT'}
@@ -3466,7 +3469,7 @@ export function SQLEditorPage() {
 
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted">
                   {(activeResultView === 'result' || activeResultView === 'vertical') && activeTab.result ? (
-                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
+                    <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
                       Executed in {(activeTab.result.duration_ms / 1000).toFixed(activeTab.result.duration_ms >= 1000 ? 2 : 3)}s
                     </span>
                   ) : null}
@@ -3483,7 +3486,7 @@ export function SQLEditorPage() {
                 ) : null}
 
                 <div ref={resultBlockRef}>
-                  <div translate="no" className="mt-3 min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-white">
+                  <div translate="no" className="mt-3 min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-panel">
                     {activeResultView === 'history' ? (
                       history.length === 0 ? (
                         <div className="flex h-[180px] items-center justify-center text-[12px] text-muted">
@@ -3577,7 +3580,7 @@ export function SQLEditorPage() {
                                       event.stopPropagation()
                                       setSavedQueryToDelete(entry)
                                     }}
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-white text-muted transition hover:bg-page hover:text-danger"
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-panel text-muted transition hover:bg-page hover:text-danger"
                                     aria-label={`Delete saved query ${entry.label}`}
                                   >
                                     <Trash2 className="h-4 w-4" />
@@ -3597,7 +3600,7 @@ export function SQLEditorPage() {
                     ) : (
                       <div className="flex min-h-[180px] flex-col">
                         <div className="border-b border-border px-3 py-2">
-                          <div className="inline-flex items-center rounded-lg border border-border bg-white p-1">
+                          <div className="inline-flex items-center rounded-lg border border-border bg-panel p-1">
                             <button
                               type="button"
                               onClick={() => updateActiveTab({ objectMetaTab: 'columns' })}
@@ -3808,7 +3811,7 @@ export function SQLEditorPage() {
                       'inline-flex h-8 items-center rounded-md border px-3 text-[12px] font-semibold transition',
                       sensitiveAccessDurationDialog.value.trim() === String(preset.minutes)
                         ? 'border-accent bg-accent/10 text-accent'
-                        : 'border-border bg-white text-ink hover:bg-page',
+                        : 'border-border bg-panel text-ink hover:bg-page',
                     )}
                   >
                     {preset.label}
@@ -3856,7 +3859,7 @@ export function SQLEditorPage() {
               }
 
               return (
-                <div className="rounded-xl border border-border bg-white/80 p-3">
+                <div className="rounded-xl border border-border bg-panel/80 p-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">Access Preview</p>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <div>
@@ -3884,7 +3887,7 @@ export function SQLEditorPage() {
         title={requestConfirmState?.kind === 'sensitive-access' ? 'Confirm Sensitive Access Request' : 'Confirm Export Request'}
         description={requestConfirmState ? (
           <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-white/80 p-3">
+            <div className="rounded-xl border border-border bg-panel/80 p-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">Asset Context</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <div>

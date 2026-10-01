@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, KeyRound, LayoutDashboard, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, Check, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, KeyRound, LayoutDashboard, LogOut, Monitor, Moon, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Sun, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, listNotificationSummary, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -7,6 +7,7 @@ import { openEventStream } from '@/shared/api/client'
 import { hasAnyPermission, TICKET_WORKSPACE_PERMISSIONS } from '@/shared/auth/permissions'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
+import { useTheme, type ThemeMode } from '@/shared/theme/ThemeContext'
 import type { CurrentUser } from '@/shared/types/auth'
 import type { NotificationItem, NotificationSummary } from '@/shared/types/notification'
 import { useToast } from '@/shared/ui/ToastContext'
@@ -401,8 +402,10 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
   const location = useLocation()
   const navigate = useNavigate()
   const { pushToast } = useToast()
+  const { mode, resolvedMode, setMode } = useTheme()
   const [menuOpen, setMenuOpen] = useState(false)
   const [notificationOpen, setNotificationOpen] = useState(false)
+  const [themeOpen, setThemeOpen] = useState(false)
   const [pageHelpOpen, setPageHelpOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -418,6 +421,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
   const notificationActionCount = notificationSummary.pending + notificationSummary.review_required + notificationSummary.execution_required
   const menuRef = useRef<HTMLDivElement | null>(null)
   const notificationRef = useRef<HTMLDivElement | null>(null)
+  const themeRef = useRef<HTMLDivElement | null>(null)
   const bootstrappedNotificationsRef = useRef(false)
   const seenNotificationIDsRef = useRef<Set<number>>(new Set())
 
@@ -430,11 +434,15 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
       if (!notificationRef.current?.contains(target)) {
         setNotificationOpen(false)
       }
+      if (!themeRef.current?.contains(target)) {
+        setThemeOpen(false)
+      }
     }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setMenuOpen(false)
+        setThemeOpen(false)
       }
     }
 
@@ -650,7 +658,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
   return (
     <div className="flex h-screen text-ink">
       <aside className={cn(
-        'group/sidebar relative hidden shrink-0 flex-col border-r border-border bg-sidebar transition-[width] duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)] lg:flex',
+        'group/sidebar relative hidden shrink-0 flex-col border-r border-border bg-panel transition-[width] duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)] dark:bg-sidebar lg:flex',
         sidebarCollapsed ? 'w-[72px]' : 'w-64',
       )}>
         <button
@@ -903,7 +911,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
                           onClick={() => void handleOpenNotification(notification)}
                           className={cn(
                             'grid min-w-full w-max grid-cols-[auto_max-content_max-content_max-content] items-center gap-3 border-b border-border px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-panel-soft',
-                            !notification.is_read && 'bg-white',
+                            !notification.is_read && 'bg-panel-soft',
                           )}
                         >
                           <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', notification.is_read ? 'bg-border' : 'bg-brand')} />
@@ -918,10 +926,60 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
               ) : null}
             </div>
 
+            <div ref={themeRef} className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setThemeOpen((current) => !current)
+                  setNotificationOpen(false)
+                  setMenuOpen(false)
+                }}
+                className={cn(
+                  'inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-panel text-muted transition-colors',
+                  themeOpen ? 'bg-panel-soft text-ink' : 'hover:bg-panel-soft hover:text-ink',
+                )}
+                aria-label={`Theme: ${mode[0].toUpperCase()}${mode.slice(1)}`}
+              >
+                {resolvedMode === 'dark' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+              </button>
+
+              {themeOpen ? (
+                <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 w-40 rounded-lg border border-border bg-panel p-1 shadow-card">
+                  {([
+                    { value: 'light', label: 'Light', icon: Sun },
+                    { value: 'dark', label: 'Dark', icon: Moon },
+                    { value: 'system', label: 'System', icon: Monitor },
+                  ] satisfies Array<{ value: ThemeMode; label: string; icon: typeof Sun }>).map((item) => {
+                    const Icon = item.icon
+                    return (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => {
+                          setMode(item.value)
+                          setThemeOpen(false)
+                        }}
+                        className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-[12px] font-medium text-ink transition-colors hover:bg-panel-soft"
+                        aria-label={`${item.label} theme`}
+                      >
+                        <Icon className="h-4 w-4 text-muted" />
+                        <span className="flex-1 text-left">{item.label}</span>
+                        {mode === item.value ? <Check className="h-4 w-4" /> : null}
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </div>
+
             <div ref={menuRef} className="relative">
               <button
                 type="button"
-                onClick={() => setMenuOpen((current) => !current)}
+                onClick={() => {
+                  setMenuOpen((current) => !current)
+                  setNotificationOpen(false)
+                  setThemeOpen(false)
+                }}
                 className={cn(
                   'inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-[12px] font-medium text-ink transition-colors',
                   menuOpen ? 'bg-panel-soft' : 'hover:bg-panel-soft',
@@ -1039,7 +1097,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
                     <CircleHelp className="h-4 w-4" />
                   </button>
                   {!pageHelp.href && pageHelpOpen ? (
-                    <div className="absolute left-0 top-[calc(100%+8px)] z-30 max-h-[min(640px,calc(100vh-9rem))] w-[780px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-border bg-white p-4 text-left shadow-[0_22px_45px_rgba(15,23,42,0.14)]">
+                    <div className="absolute left-0 top-[calc(100%+8px)] z-30 max-h-[min(640px,calc(100vh-9rem))] w-[780px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-border bg-panel p-4 text-left shadow-card">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-[13px] font-semibold text-ink">{pageHelp.title}</p>
@@ -1062,7 +1120,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
                 <button
                   type="button"
                   onClick={() => navigate('/masking-rules')}
-                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border bg-white px-2 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border bg-panel px-2 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" />
                   Back To Rules
@@ -1070,7 +1128,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
               ) : null}
             </div>
             {headerNotice ? (
-              <div className="inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-[12px] font-medium text-amber-800">
+              <div className="inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-[12px] font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 {headerNotice.label}
               </div>
@@ -1110,7 +1168,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
           </nav>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto bg-white">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-page">
           <Outlet />
         </main>
       </div>

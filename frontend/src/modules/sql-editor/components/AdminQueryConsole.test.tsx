@@ -1,12 +1,21 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { oneDark } from '@codemirror/theme-one-dark'
 import { AdminQueryConsole } from '@/modules/sql-editor/components/AdminQueryConsole'
 import { cancelQueryExecution, executeAdminQuery } from '@/modules/sql-editor/api'
 
+const { captureCodeMirrorProps } = vi.hoisted(() => ({
+  captureCodeMirrorProps: vi.fn(),
+}))
+
 vi.mock('@uiw/react-codemirror', () => ({
-  default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
-    <textarea aria-label="Administrator command" value={value} onChange={(event) => onChange(event.target.value)} />
-  ),
+  default: (props: { value: string; onChange: (value: string) => void; extensions?: unknown[]; theme?: unknown }) => {
+    captureCodeMirrorProps(props)
+    const { value, onChange } = props
+    return (
+      <textarea aria-label="Administrator command" value={value} onChange={(event) => onChange(event.target.value)} />
+    )
+  },
 }))
 
 vi.mock('@/modules/sql-editor/api', () => ({
@@ -36,6 +45,27 @@ describe('AdminQueryConsole', () => {
     vi.clearAllMocks()
     mockedCancelQueryExecution.mockResolvedValue({ cancel_requested: true })
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn().mockResolvedValue(undefined) }, configurable: true })
+  })
+
+  it('固定使用 oneDark 並在父層重新 render 時保持 extensions identity', () => {
+    const props = {
+      connection,
+      database: 'maestro',
+      schema: '',
+      endpoint: 'primary.local:3306',
+      credentialRole: 'readwrite',
+      onExit: vi.fn(),
+    }
+    const { rerender } = render(<AdminQueryConsole {...props} />)
+    const extensionsBeforeRerender = captureCodeMirrorProps.mock.lastCall?.[0].extensions
+
+    expect(captureCodeMirrorProps.mock.lastCall?.[0].theme).toBe(oneDark)
+    expect(extensionsBeforeRerender).toBeDefined()
+
+    rerender(<AdminQueryConsole {...props} />)
+
+    expect(captureCodeMirrorProps.mock.lastCall?.[0].theme).toBe(oneDark)
+    expect(captureCodeMirrorProps.mock.lastCall?.[0].extensions).toBe(extensionsBeforeRerender)
   })
 
   it('只透過管理員 API 執行，並在獨立 session 紀錄多筆結果', async () => {

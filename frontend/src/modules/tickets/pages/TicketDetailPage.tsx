@@ -282,7 +282,7 @@ function RollbackStatusCell({
     rollback.warning_message ? `Warning: ${rollback.warning_message}` : '',
   ].filter(Boolean).join('\n') || label
   if (rollback.status === 'generated') {
-    return <span className="text-[12px] font-semibold text-emerald-700" title={title}>{label}</span>
+    return <span className="text-[12px] font-semibold text-emerald-700 dark:text-emerald-300" title={title}>{label}</span>
   }
   if (rollback.status === 'submitted') {
     return <span className="text-[12px] font-semibold text-primary" title={title}>{label}</span>
@@ -642,12 +642,12 @@ function mergeReviewStatus(current?: string | null, next?: string | null) {
 
 function reviewStatusClass(status: string) {
   if (status === 'pass') {
-    return 'bg-emerald-50 text-emerald-700'
+    return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
   }
   if (status === 'warn') {
-    return 'bg-amber-50 text-amber-700'
+    return 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
   }
-  return 'bg-red-50 text-danger'
+  return 'bg-red-50 text-danger dark:bg-red-950/50 dark:text-red-300'
 }
 
 function buildStatementResults(detail: TicketDetail) {
@@ -852,21 +852,21 @@ function buildWorkflowSteps(
 function WorkflowStepIcon({ tone, running, label }: { tone: WorkflowStepTone; running?: boolean; label: string }) {
   if (running) {
     return (
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-slate-700" aria-label={`${label}: executing`}>
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200" aria-label={`${label}: executing`}>
         <Loader2 className="h-5 w-5 animate-spin" />
       </span>
     )
   }
   if (tone === 'done') {
     return (
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-white" aria-label={`${label}: completed`}>
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-white dark:bg-emerald-600" aria-label={`${label}: completed`}>
         <Check className="h-5 w-5" />
       </span>
     )
   }
   if (tone === 'current') {
     return (
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border-[6px] border-accent bg-white text-accent" aria-label={`${label}: current`} />
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border-[6px] border-accent bg-panel text-accent" aria-label={`${label}: current`} />
     )
   }
   if (tone === 'failed') {
@@ -877,7 +877,7 @@ function WorkflowStepIcon({ tone, running, label }: { tone: WorkflowStepTone; ru
     )
   }
   return (
-    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-300 text-white text-sm font-bold" aria-label={`${label}: upcoming`}>
+    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-300 text-white text-sm font-bold dark:bg-slate-700 dark:text-slate-200" aria-label={`${label}: upcoming`}>
       •
     </span>
   )
@@ -1273,7 +1273,7 @@ export function TicketDetailPage() {
               type="button"
               onClick={() => void openRollbackPreview()}
               disabled={rollbackPreviewLoading}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-60"
             >
               {rollbackPreviewLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
               Rollback
@@ -1283,7 +1283,7 @@ export function TicketDetailPage() {
             <button
               type="button"
               onClick={handleReapplyTicket}
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-slate-800"
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-brand/90"
             >
               <RotateCcw className="h-4 w-4" />
               Resubmit
@@ -1291,7 +1291,7 @@ export function TicketDetailPage() {
           ) : null}
           <Link
             to="/tickets"
-            className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
           >
             <ArrowLeft className="h-4 w-4" />
             Back to list
@@ -1363,7 +1363,9 @@ export function TicketDetailPage() {
                           <DataTableCell className="align-top">{item.id}</DataTableCell>
                           <DataTableCell className="align-top">
                             <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
-                              item.effect === 'deny' ? 'bg-red-50 text-danger' : 'bg-emerald-50 text-emerald-700'
+                              item.effect === 'deny'
+                                ? 'bg-red-50 text-danger dark:bg-red-950/50 dark:text-red-300'
+                                : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
                             }`}>
                               {item.effect === 'deny' ? 'Deny' : 'Allow'}
                             </span>
@@ -1536,7 +1538,7 @@ export function TicketDetailPage() {
                                   type="button"
                                   onClick={() => void runStatementAction(row.executionID!, () => stopTicketStatement(ticket.ticket_no, row.executionID!))}
                                   disabled={rowActionBusy}
-                                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-2.5 text-[12px] font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-2.5 text-[12px] font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-950/70"
                                 >
                                   {rowActionBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
                                   Stop
@@ -1576,7 +1578,7 @@ export function TicketDetailPage() {
                           <textarea
                             value={comment}
                             onChange={(event) => setComment(event.target.value)}
-                            className="min-h-[96px] rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            className="min-h-[96px] rounded-lg border border-border bg-panel px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                             placeholder={canReview ? 'Review comment or rejection reason' : 'Withdraw reason (optional)'}
                             disabled={acting !== null}
                           />
@@ -1588,7 +1590,7 @@ export function TicketDetailPage() {
                                 type="button"
                                 disabled={acting !== null}
                                 onClick={() => void runAction('approve', () => approveTicket(ticket.ticket_no, comment))}
-                                className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {acting === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                                 Approve
@@ -1597,7 +1599,7 @@ export function TicketDetailPage() {
                                 type="button"
                                 disabled={acting !== null || comment.trim() === ''}
                                 onClick={() => void runAction('reject', () => rejectTicket(ticket.ticket_no, comment.trim()))}
-                                className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-950/50 dark:text-red-300 dark:hover:bg-red-950/70"
                               >
                                 {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
                                 Reject
@@ -1609,7 +1611,7 @@ export function TicketDetailPage() {
                               type="button"
                               disabled={acting !== null}
                               onClick={() => setConfirmAction('withdraw')}
-                              className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-950/50 dark:text-red-300 dark:hover:bg-red-950/70"
                             >
                               {acting === 'withdraw' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
                               Withdraw Ticket
@@ -1643,7 +1645,7 @@ export function TicketDetailPage() {
                               <textarea
                                 value={reason}
                                 onChange={(event) => setReason(event.target.value)}
-                                className="min-h-[96px] rounded-lg border border-border bg-white px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                                className="min-h-[96px] rounded-lg border border-border bg-panel px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                                 placeholder="Execution comment or rejection reason"
                                 disabled={acting !== null}
                               />
@@ -1661,7 +1663,7 @@ export function TicketDetailPage() {
                                 }
                                 setConfirmAction('execute')
                               }}
-                              className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {acting === 'execute' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                               Execute
@@ -1671,7 +1673,7 @@ export function TicketDetailPage() {
                                 type="button"
                                 disabled={acting !== null || reason.trim() === ''}
                                 onClick={() => void runAction('reject', () => rejectTicket(ticket.ticket_no, reason.trim()))}
-                                className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-950/50 dark:text-red-300 dark:hover:bg-red-950/70"
                               >
                                 {acting === 'reject' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
                                 Reject
@@ -1684,7 +1686,7 @@ export function TicketDetailPage() {
                             type="button"
                             disabled={acting !== null || ticket.status !== 'approved' || (ticket.ticket_type !== 'sensitive_query_access' && ticket.ticket_type !== 'query_access')}
                             onClick={() => setConfirmAction('revoke')}
-                            className="inline-flex h-9 w-auto self-start items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex h-9 w-auto self-start items-center justify-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-950/50 dark:text-red-300 dark:hover:bg-red-950/70"
                           >
                             {acting === 'revoke' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldX className="h-4 w-4" />}
                             {ticket.ticket_type === 'query_access' ? 'Revoke Query Access' : 'Revoke Access'}
@@ -1700,7 +1702,7 @@ export function TicketDetailPage() {
                         type="button"
                         onClick={() => void handleDownloadExport()}
                         disabled={downloadingExport}
-                        className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-9 w-auto items-center justify-center gap-2 rounded-md bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {downloadingExport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                         {downloadingExport ? 'Downloading…' : 'Download Export'}
@@ -1804,7 +1806,7 @@ export function TicketDetailPage() {
                 {rollbackPreviewItems.map((item) => {
                   const selected = selectedRollbackIDs.has(item.rollback.id)
                   return (
-                    <div key={item.rollback.id} className="grid gap-2 rounded-lg border border-border bg-white p-3 text-left">
+                    <div key={item.rollback.id} className="grid gap-2 rounded-lg border border-border bg-panel p-3 text-left">
                       <label className="flex cursor-pointer items-center gap-2 text-[12px] font-semibold text-ink">
                         <input
                           type="checkbox"
@@ -1886,7 +1888,7 @@ export function TicketDetailPage() {
                               'inline-flex h-9 items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition',
                               executeMode === 'per_statement'
                                 ? 'border-accent bg-accent/10 text-accent'
-                                : 'border-border bg-white text-ink hover:bg-panel-soft',
+                                : 'border-border bg-panel text-ink hover:bg-panel-soft',
                             )}
                           >
                             Per statement
@@ -1898,7 +1900,7 @@ export function TicketDetailPage() {
                               'inline-flex h-9 items-center justify-center rounded-lg border px-3 text-[12px] font-semibold transition',
                               executeMode === 'whole_ticket'
                                 ? 'border-accent bg-accent/10 text-accent'
-                                : 'border-border bg-white text-ink hover:bg-panel-soft',
+                                : 'border-border bg-panel text-ink hover:bg-panel-soft',
                             )}
                           >
                             Whole ticket
@@ -1947,7 +1949,7 @@ function ScopeRow({ scope, ticket }: { scope: TicketScope; ticket: Ticket }) {
       <div className="rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px] text-ink">
         <div className="flex flex-wrap items-center gap-2.5">
           <span className="font-mono text-[12px] text-ink">{scope.column_name}</span>
-          <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">Sensitive column</span>
+          <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-300">Sensitive column</span>
         </div>
       </div>
     )
@@ -1974,9 +1976,9 @@ function ScopeRow({ scope, ticket }: { scope: TicketScope; ticket: Ticket }) {
           </span>
         ))}
         {scope.is_sensitive ? (
-          <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">Sensitive column</span>
+          <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-300">Sensitive column</span>
         ) : null}
-        <span className="rounded-full border border-border bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">
+        <span className="rounded-full border border-border bg-panel px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">
           {scope.source_kind}
         </span>
       </div>

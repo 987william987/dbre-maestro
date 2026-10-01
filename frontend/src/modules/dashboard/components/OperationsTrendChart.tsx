@@ -7,13 +7,13 @@ type TrendMode = 'all' | 'tickets' | 'queries'
 type OperationKey = Exclude<keyof DashboardOperationTrendPoint, 'date'>
 
 const SERIES: Array<{ key: OperationKey; label: string; color: string; group: Exclude<TrendMode, 'all'> }> = [
-  { key: 'ddl', label: 'DDL', color: '#18181b', group: 'tickets' },
-  { key: 'dml', label: 'DML', color: '#2563eb', group: 'tickets' },
-  { key: 'redis', label: 'Redis', color: '#d97706', group: 'tickets' },
-  { key: 'sql_export', label: 'SQL Export', color: '#7c3aed', group: 'tickets' },
-  { key: 'query_access', label: 'Query Access', color: '#0891b2', group: 'tickets' },
-  { key: 'sensitive_query_access', label: 'Sensitive Access', color: '#dc2626', group: 'tickets' },
-  { key: 'query', label: 'Queries', color: '#16a34a', group: 'queries' },
+  { key: 'ddl', label: 'DDL', color: 'rgb(var(--chart-ddl))', group: 'tickets' },
+  { key: 'dml', label: 'DML', color: 'rgb(var(--chart-dml))', group: 'tickets' },
+  { key: 'redis', label: 'Redis', color: 'rgb(var(--chart-redis))', group: 'tickets' },
+  { key: 'sql_export', label: 'SQL Export', color: 'rgb(var(--chart-export))', group: 'tickets' },
+  { key: 'query_access', label: 'Query Access', color: 'rgb(var(--chart-access))', group: 'tickets' },
+  { key: 'sensitive_query_access', label: 'Sensitive Access', color: 'rgb(var(--chart-sensitive))', group: 'tickets' },
+  { key: 'query', label: 'Queries', color: 'rgb(var(--chart-query))', group: 'queries' },
 ]
 
 const MODES: Array<{ key: TrendMode; label: string }> = [
@@ -72,7 +72,7 @@ export function OperationsTrendChart({ trend }: { trend: DashboardOperationTrend
               type="button"
               aria-pressed={mode === item.key}
               onClick={() => setMode(item.key)}
-              className={`h-7 rounded-md px-3 text-[11px] font-semibold transition ${mode === item.key ? 'bg-white text-ink shadow-sm' : 'text-muted hover:text-ink'}`}
+              className={`h-7 rounded-md px-3 text-[11px] font-semibold transition ${mode === item.key ? 'bg-panel text-ink shadow-sm' : 'text-muted hover:text-ink'}`}
             >
               {item.label}
             </button>
@@ -100,20 +100,27 @@ export function OperationsTrendChart({ trend }: { trend: DashboardOperationTrend
         <div className="relative h-[300px] min-w-0" aria-label="Daily platform operation counts">
           <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
             <LineChart data={trend.points} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
-              <CartesianGrid vertical={false} stroke="#e4e4e7" strokeDasharray="3 3" />
+              <CartesianGrid vertical={false} stroke="rgb(var(--border))" strokeDasharray="3 3" />
               <XAxis
                 dataKey="date"
                 axisLine={false}
                 tickLine={false}
                 minTickGap={28}
-                tick={{ fill: '#71717a', fontSize: 11 }}
+                tick={{ fill: 'rgb(var(--text-muted))', fontSize: 11 }}
                 tickFormatter={formatAxisDate}
               />
-              <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={42} tick={{ fill: '#71717a', fontSize: 11 }} />
+              <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={42} tick={{ fill: 'rgb(var(--text-muted))', fontSize: 11 }} />
               <Tooltip
                 labelFormatter={(label) => String(label)}
                 formatter={(value, name) => [formatCount(Number(value ?? 0)), SERIES.find((series) => series.key === name)?.label ?? String(name)]}
-                contentStyle={{ border: '1px solid #e4e4e7', borderRadius: 8, boxShadow: '0 8px 24px rgba(24,24,27,0.08)', fontSize: 12 }}
+                contentStyle={{
+                  backgroundColor: 'rgb(var(--panel))',
+                  border: '1px solid rgb(var(--border))',
+                  borderRadius: 8,
+                  boxShadow: 'var(--shadow)',
+                  color: 'rgb(var(--text))',
+                  fontSize: 12,
+                }}
               />
               {visibleSeries.map((series) => (
                 <Line
@@ -132,7 +139,7 @@ export function OperationsTrendChart({ trend }: { trend: DashboardOperationTrend
           </ResponsiveContainer>
           {!hasData ? (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <span className="rounded-md border border-border bg-white/90 px-3 py-2 text-[11px] text-muted">No operations recorded in this period.</span>
+              <span className="rounded-md border border-border bg-panel/90 px-3 py-2 text-[11px] text-muted">No operations recorded in this period.</span>
             </div>
           ) : null}
         </div>

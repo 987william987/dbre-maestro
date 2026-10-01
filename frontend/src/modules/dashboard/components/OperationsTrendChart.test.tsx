@@ -4,14 +4,24 @@ import { describe, expect, it, vi } from 'vitest'
 import { OperationsTrendChart } from '@/modules/dashboard/components/OperationsTrendChart'
 import type { DashboardOperationTrend } from '@/modules/dashboard/api'
 
+const { rechartsProps } = vi.hoisted(() => ({
+  rechartsProps: {
+    grid: vi.fn(),
+    xAxis: vi.fn(),
+    yAxis: vi.fn(),
+    tooltip: vi.fn(),
+    line: vi.fn(),
+  },
+}))
+
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   LineChart: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  CartesianGrid: () => null,
-  XAxis: () => null,
-  YAxis: () => null,
-  Tooltip: () => null,
-  Line: ({ name }: { name: string }) => <span data-testid={`line-${name}`} />,
+  CartesianGrid: (props: unknown) => { rechartsProps.grid(props); return null },
+  XAxis: (props: unknown) => { rechartsProps.xAxis(props); return null },
+  YAxis: (props: unknown) => { rechartsProps.yAxis(props); return null },
+  Tooltip: (props: unknown) => { rechartsProps.tooltip(props); return null },
+  Line: (props: { name: string }) => { rechartsProps.line(props); return <span data-testid={`line-${props.name}`} /> },
 }))
 
 const trend: DashboardOperationTrend = {
@@ -46,5 +56,22 @@ describe('OperationsTrendChart', () => {
   it('shows an explicit empty state', () => {
     render(<OperationsTrendChart trend={{ ...trend, points: [] }} />)
     expect(screen.getByText('No operations recorded in this period.')).toBeInTheDocument()
+  })
+
+  it('uses theme tokens for chart series, axes, grid, and tooltip surfaces', () => {
+    render(<OperationsTrendChart trend={trend} />)
+
+    expect(rechartsProps.grid).toHaveBeenCalledWith(expect.objectContaining({ stroke: 'rgb(var(--border))' }))
+    expect(rechartsProps.xAxis).toHaveBeenCalledWith(expect.objectContaining({ tick: { fill: 'rgb(var(--text-muted))', fontSize: 11 } }))
+    expect(rechartsProps.yAxis).toHaveBeenCalledWith(expect.objectContaining({ tick: { fill: 'rgb(var(--text-muted))', fontSize: 11 } }))
+    expect(rechartsProps.tooltip).toHaveBeenCalledWith(expect.objectContaining({
+      contentStyle: expect.objectContaining({
+        backgroundColor: 'rgb(var(--panel))',
+        border: '1px solid rgb(var(--border))',
+        color: 'rgb(var(--text))',
+      }),
+    }))
+    expect(rechartsProps.line).toHaveBeenCalledWith(expect.objectContaining({ name: 'ddl', stroke: 'rgb(var(--chart-ddl))' }))
+    expect(rechartsProps.line).toHaveBeenCalledWith(expect.objectContaining({ name: 'query', stroke: 'rgb(var(--chart-query))' }))
   })
 })

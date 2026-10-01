@@ -9,11 +9,11 @@ type InlineAlertProps = {
 
 const toneStyles = {
   error: {
-    wrapper: 'border-danger/20 bg-red-50 text-danger',
+    wrapper: 'border-danger/20 bg-red-50 text-danger dark:bg-red-950/40',
     icon: AlertCircle,
   },
   success: {
-    wrapper: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    wrapper: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300',
     icon: CheckCircle2,
   },
   info: {
@@ -21,7 +21,7 @@ const toneStyles = {
     icon: Info,
   },
   warning: {
-    wrapper: 'border-amber-200 bg-amber-50 text-amber-800',
+    wrapper: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
     icon: AlertTriangle,
   },
 } as const

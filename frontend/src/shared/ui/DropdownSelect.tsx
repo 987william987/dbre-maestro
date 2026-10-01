@@ -140,11 +140,11 @@ export function DropdownSelect({
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
         className={cn(
-          'flex min-w-0 w-full max-w-full items-center justify-between overflow-hidden rounded-lg border border-border bg-white text-left transition disabled:cursor-not-allowed disabled:opacity-60',
+          'flex min-w-0 w-full max-w-full items-center justify-between overflow-hidden rounded-lg border border-border bg-panel text-left transition disabled:cursor-not-allowed disabled:opacity-60',
           size === 'md'
             ? 'h-9 px-3 text-[12px] font-medium'
             : 'h-9 px-3 text-[12px] font-medium',
-          open ? 'border-slate-300' : 'hover:border-slate-300',
+          open ? 'border-border-strong' : 'hover:border-border-strong',
           triggerClassName,
         )}
       >
@@ -155,13 +155,13 @@ export function DropdownSelect({
       {open ? (
         <div
           className={cn(
-            'absolute top-[calc(100%+8px)] z-30 w-full overflow-hidden rounded-xl border border-border bg-white p-2 shadow-[0_22px_45px_rgba(15,23,42,0.14)]',
+            'absolute top-[calc(100%+8px)] z-30 w-full overflow-hidden rounded-xl border border-border bg-panel p-2 shadow-card',
             align === 'right' ? 'right-0' : 'left-0',
             menuClassName,
           )}
         >
           {showSearch ? (
-            <div className="relative mb-2 flex h-9 items-center rounded-lg border border-border bg-panel-soft transition focus-within:border-slate-300 focus-within:bg-white">
+            <div className="relative mb-2 flex h-9 items-center rounded-lg border border-border bg-panel-soft transition focus-within:border-border-strong focus-within:bg-panel">
               <Search className="pointer-events-none absolute left-3 h-3.5 w-3.5 text-faint" />
               <input
                 ref={searchInputRef}

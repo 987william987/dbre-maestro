@@ -313,7 +313,7 @@ export function ScheduledSQLReportsPage() {
             </div>
             <div className="flex shrink-0 items-center gap-3">
               {selectedReport && canWrite ? (
-                <button type="button" onClick={startCreate} className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft hover:bg-slate-800">
+                <button type="button" onClick={startCreate} className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft hover:bg-brand/90">
                   <Plus className="h-4 w-4" />
                   New Report
                 </button>
@@ -381,7 +381,7 @@ export function ScheduledSQLReportsPage() {
               {recipientOptions.map((recipient) => {
                 const selected = draft.recipientUserIDs.includes(recipient.id)
                 return (
-                  <button key={recipient.id} type="button" onClick={() => toggleRecipient(recipient.id)} className={`flex items-center justify-between rounded-md px-3 py-2 text-left text-[12px] transition ${selected ? 'bg-white text-ink shadow-soft' : 'text-muted hover:bg-white/70'}`}>
+                  <button key={recipient.id} type="button" onClick={() => toggleRecipient(recipient.id)} className={`flex items-center justify-between rounded-md px-3 py-2 text-left text-[12px] transition ${selected ? 'bg-panel text-ink shadow-soft' : 'text-muted hover:bg-panel/70'}`}>
                     <span className="min-w-0">
                       <span className="block truncate font-semibold">{recipient.username}</span>
                       <span className="block truncate">{recipient.email}</span>
@@ -401,7 +401,7 @@ export function ScheduledSQLReportsPage() {
           {canWrite ? (
           <div className="mt-4 flex items-center justify-end gap-2">
             {selectedReport ? (
-              <button type="button" onClick={startCreate} className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-bold text-ink shadow-soft hover:border-slate-300">
+              <button type="button" onClick={startCreate} className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-panel px-4 text-[13px] font-bold text-ink shadow-soft hover:border-border-strong">
                 <X className="h-4 w-4" />
                 Cancel
               </button>
@@ -420,7 +420,7 @@ export function ScheduledSQLReportsPage() {
             <h3 className="mb-2 text-[14px] font-semibold text-ink">Reports</h3>
             <div className="grid max-h-[360px] gap-2 overflow-auto">
               {reports.map((report) => (
-                <button key={report.id} type="button" onClick={() => void selectReport(report)} className={`rounded-lg border px-3 py-2 text-left transition ${selectedReportID === report.id ? 'border-brand bg-panel-soft' : 'border-border bg-white hover:border-slate-300'}`}>
+                <button key={report.id} type="button" onClick={() => void selectReport(report)} className={`rounded-lg border px-3 py-2 text-left transition ${selectedReportID === report.id ? 'border-brand bg-panel-soft' : 'border-border bg-panel hover:border-border-strong'}`}>
                   <div className="flex items-start justify-between gap-2">
                     <span className="min-w-0 truncate text-[13px] font-semibold text-ink">{report.name}</span>
                     <StatusBadge status={report.is_active ? 'completed' : 'stopped'} />
@@ -446,7 +446,7 @@ export function ScheduledSQLReportsPage() {
             <h3 className="mb-2 text-[14px] font-semibold text-ink">Run History</h3>
             <div className="grid max-h-[300px] gap-2 overflow-auto">
               {runs.map((run) => (
-                <div key={run.id} className="rounded-lg border border-border bg-white p-3">
+                <div key={run.id} className="rounded-lg border border-border bg-panel p-3">
                   <div className="flex items-center justify-between gap-2">
                     <StatusBadge status={run.status === 'success' ? 'completed' : run.status === 'running' ? 'executing' : 'failed'} />
                     <span className="text-[12px] text-muted">{formatDateTime(run.started_at)}</span>
@@ -490,7 +490,7 @@ function Field({ label, children, className = '' }: { label: string; children: R
   )
 }
 
-const inputClassName = 'h-10 w-full rounded-lg border border-border bg-white px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20'
+const inputClassName = 'h-10 w-full rounded-lg border border-border bg-panel px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20'
 
 function uniqueOptions(options: string[], currentValue: string) {
   const seen = new Set<string>()

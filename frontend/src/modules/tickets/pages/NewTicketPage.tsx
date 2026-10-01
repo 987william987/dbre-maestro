@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
+import { oneDark } from '@codemirror/theme-one-dark'
 import { MySQL, PostgreSQL, sql } from '@codemirror/lang-sql'
 import { CheckCircle2, FileText, Loader2, Minus, Plus, ScrollText, Trash2, Wand2, XCircle } from 'lucide-react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
@@ -10,6 +11,7 @@ import { DropdownSelect } from '@/shared/ui/DropdownSelect'
 import type { DropdownOptionGroup } from '@/shared/ui/DropdownSelect'
 import { ExpandableSql, isExpandableSql } from '@/shared/ui/ExpandableSql'
 import { ReviewMessages } from '@/shared/ui/ReviewMessages'
+import { useTheme } from '@/shared/theme/ThemeContext'
 import type { DBConnection } from '@/shared/types/dbConnection'
 import type { MetadataResponse } from '@/shared/types/sqlEditor'
 import type { TicketReviewResult, TicketType } from '@/shared/types/ticket'
@@ -331,12 +333,12 @@ function formatReviewTableSizes(tables: ReviewSummaryTable[]) {
 
 function reviewSummaryStatusClass(status: string) {
   if (status === 'pass') {
-    return 'bg-emerald-50 text-emerald-700'
+    return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
   }
   if (status === 'warn') {
-    return 'bg-amber-50 text-amber-700'
+    return 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
   }
-  return 'bg-red-50 text-danger'
+  return 'bg-red-50 text-danger dark:bg-red-950/50 dark:text-red-300'
 }
 
 function parseQueryAccessDuration(rawValue: string) {
@@ -354,6 +356,7 @@ function parseQueryAccessDuration(rawValue: string) {
 }
 
 export function NewTicketPage() {
+  const { resolvedMode } = useTheme()
   const [searchParams] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
@@ -906,7 +909,7 @@ export function NewTicketPage() {
                     type="button"
                     onClick={() => setQueryAccessRules((current) => [...current, createQueryAccessRuleDraft()])}
                     disabled={submitting}
-                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Plus className="h-4 w-4" />
                     Add Rule
@@ -934,7 +937,7 @@ export function NewTicketPage() {
                             type="button"
                             onClick={() => setQueryAccessRules((current) => current.length === 1 ? current : current.filter((item) => item.id !== rule.id))}
                             disabled={submitting || queryAccessRules.length === 1}
-                            className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-border bg-white px-2 text-[12px] font-semibold text-muted transition hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-border bg-panel px-2 text-[12px] font-semibold text-muted transition hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                             Remove
@@ -1000,7 +1003,7 @@ export function NewTicketPage() {
                     onChange={setSqlContent}
                     extensions={ticketEditorExtensions(ticketType, selectedConnection)}
                     basicSetup={TICKET_EDITOR_BASIC_SETUP}
-                    theme="light"
+                    theme={resolvedMode === 'dark' ? oneDark : 'light'}
                     minHeight="360px"
                     placeholder={ticketType === 'redis_command' ? 'Enter a Redis command...' : 'Enter SQL statements...'}
                     editable={!submitting}
@@ -1015,7 +1018,7 @@ export function NewTicketPage() {
                     type="button"
                     onClick={handleFormatSQL}
                     disabled={submitting || reviewing || sqlContent.trim() === '' || ticketType === 'redis_command'}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-panel px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Wand2 className="h-4 w-4" />
                     Format
@@ -1024,7 +1027,7 @@ export function NewTicketPage() {
                     type="button"
                     onClick={() => void handleReviewSQL()}
                     disabled={submitting || reviewing || sqlContent.trim() === '' || dbConnectionId === '' || (requiresDatabaseSelection && databaseName.trim() === '')}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-panel px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {reviewing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                     {reviewing ? 'Reviewing...' : 'SQL Review'}
@@ -1037,7 +1040,7 @@ export function NewTicketPage() {
 
         <div>
           {error ? (
-            <div className="mb-4 rounded-lg border border-danger/20 bg-red-50 px-4 py-3 text-[13px] text-danger">
+            <div className="mb-4 rounded-lg border border-danger/20 bg-red-50 px-4 py-3 text-[13px] text-danger dark:bg-red-950/50 dark:text-red-300">
               {error}
             </div>
           ) : null}
@@ -1048,7 +1051,9 @@ export function NewTicketPage() {
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-[13px] font-semibold text-ink">Review Results</p>
                   <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                    reviewPassed ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
+                    reviewPassed
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+                      : 'bg-red-50 text-danger dark:bg-red-950/50 dark:text-red-300'
                   }`}>
                     {reviewPassed ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
                     {reviewPassed ? 'Passed' : 'Failed'}
@@ -1190,7 +1195,9 @@ export function NewTicketPage() {
                               <DataTableCell className="align-top">—</DataTableCell>
                               <DataTableCell className="align-top">
                                 <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
-                                  result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
+                                  result.status === 'pass'
+                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+                                    : 'bg-red-50 text-danger dark:bg-red-950/50 dark:text-red-300'
                                 }`}>
                                   {result.status}
                                 </span>
@@ -1262,7 +1269,9 @@ export function NewTicketPage() {
                               <DataTableCell className="align-top">{result.scan_rows}</DataTableCell>
                               <DataTableCell className="align-top">
                                 <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${
-                                  result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-danger'
+                                  result.status === 'pass'
+                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+                                    : 'bg-red-50 text-danger dark:bg-red-950/50 dark:text-red-300'
                                 }`}>
                                   {result.status}
                                 </span>
@@ -1282,14 +1291,14 @@ export function NewTicketPage() {
           <div className="flex flex-wrap items-center justify-end gap-2.5 px-1 py-1">
             <Link
               to="/tickets"
-              className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-white px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
+              className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-panel px-4 text-[13px] font-semibold text-ink transition hover:bg-panel-soft"
             >
               Cancel
             </Link>
             <button
               type="submit"
               disabled={submitting || reviewing || !canSubmit}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-5 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-5 text-[13px] font-bold text-white shadow-soft transition hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               {submitting ? 'Submitting...' : 'Submit Ticket'}

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppShell } from '@/app/layout/AppShell'
+import { ThemeProvider } from '@/shared/theme/ThemeContext'
 import { ToastProvider } from '@/shared/ui/ToastContext'
 
 vi.mock('@/shared/auth/AuthContext', () => ({
@@ -38,8 +39,9 @@ const storage = new Map<string, string>()
 function createShell(initialEntry = '/tickets') {
   return (
     <MemoryRouter initialEntries={[initialEntry]}>
-      <ToastProvider>
-        <Routes>
+      <ThemeProvider>
+        <ToastProvider>
+          <Routes>
           <Route element={<AppShell />}>
             <Route path="/tickets" element={<div>tickets page</div>} />
             <Route path="/tickets/new" element={<div>new ticket page</div>} />
@@ -62,8 +64,9 @@ function createShell(initialEntry = '/tickets') {
             <Route path="/settings/query-execution" element={<div>query execution settings page</div>} />
             <Route path="/settings/integrations" element={<div>integration settings page</div>} />
           </Route>
-        </Routes>
-      </ToastProvider>
+          </Routes>
+        </ToastProvider>
+      </ThemeProvider>
     </MemoryRouter>
   )
 }
@@ -176,6 +179,18 @@ describe('AppShell notifications', () => {
     expect(screen.getByText('Execute')).toBeInTheDocument()
     expect(screen.getByText('T-101')).toBeInTheDocument()
     expect(screen.getByText('Pending review')).toBeInTheDocument()
+  })
+
+  it('可切換顯示模式並持久化選擇', async () => {
+    renderShell()
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Theme: System' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Dark theme' }))
+
+    expect(document.documentElement).toHaveClass('dark')
+    expect(window.localStorage.getItem('dbre-theme-mode')).toBe('dark')
+    expect(screen.getByRole('button', { name: 'Theme: Dark' })).toBeInTheDocument()
   })
 
   it('可將全部通知標示已讀', async () => {
@@ -390,6 +405,7 @@ describe('AppShell notifications', () => {
     await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
     const sidebarSubtitle = screen.getByText('Operations Control Plane')
     expect(sidebarSubtitle).toBeInTheDocument()
+    expect(sidebarSubtitle.closest('aside')).toHaveClass('bg-panel', 'dark:bg-sidebar')
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
 

@@ -196,7 +196,7 @@ function RuntimeErrorPanel({
               : 'This page did not render correctly. Please share the error details below for debugging.'}
           </p>
 
-          <div className="mt-5 rounded-card border border-danger/20 bg-red-50 p-4">
+          <div className="mt-5 rounded-card border border-danger/20 bg-red-50 p-4 dark:bg-red-950/40">
             <p className="font-mono text-sm font-semibold text-danger">{error.name}: {error.message}</p>
             {detail ? (
               <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words text-xs text-danger">{detail}</pre>

@@ -276,8 +276,8 @@ export function DBMetadataInventoryPage() {
                 aria-label="Visible Columns"
                 onClick={() => setColumnMenuOpen((current) => !current)}
                 className={cn(
-                  'inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-white text-ink shadow-soft transition',
-                  columnMenuOpen ? 'border-slate-300' : 'hover:border-slate-300',
+                  'inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-panel text-ink shadow-soft transition',
+                  columnMenuOpen ? 'border-border-strong' : 'hover:border-border-strong',
                 )}
               >
                 <SlidersHorizontal className="h-4 w-4" />
@@ -286,7 +286,7 @@ export function DBMetadataInventoryPage() {
 
             {columnMenuOpen ? (
               <div className="relative">
-                <div className="absolute right-0 top-2 z-20 w-[280px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-border bg-white p-2 shadow-[0_22px_45px_rgba(15,23,42,0.14)]">
+                <div className="absolute right-0 top-2 z-20 w-[280px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-border bg-panel p-2 shadow-card">
                   <div className="px-3 py-2">
                     <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-faint">Table fields</p>
                     <p className="mt-1 text-[14px] font-semibold text-ink">Column Filter</p>

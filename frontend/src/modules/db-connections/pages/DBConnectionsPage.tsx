@@ -350,7 +350,7 @@ export function DBConnectionsPage() {
           <button
             type="button"
             onClick={openCreateDrawer}
-            className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-slate-800"
+            className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-bold text-white shadow-soft transition hover:bg-brand/90"
           >
             <Plus className="h-4 w-4" />
             New Connection
@@ -378,7 +378,7 @@ export function DBConnectionsPage() {
                       <DataTableHeaderCell>
                         <div className="group relative inline-flex">
                           <span>SSL</span>
-                          <div className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-10 hidden w-52 rounded-md border border-border bg-white px-3 py-2 text-[11px] font-medium normal-case tracking-normal text-muted shadow-soft group-hover:block">
+                          <div className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-10 hidden w-52 rounded-md border border-border bg-panel px-3 py-2 text-[11px] font-medium normal-case tracking-normal text-muted shadow-soft group-hover:block">
                             Use SSL when supported, otherwise fall back to an unencrypted connection.
                           </div>
                         </div>
@@ -396,7 +396,7 @@ export function DBConnectionsPage() {
                           key={connection.id}
                           className={
                             isFailed
-                              ? 'border-red-200 bg-red-50/75 text-danger hover:bg-red-50'
+                              ? 'border-red-200 bg-red-50/75 text-danger hover:bg-red-50 dark:border-red-800 dark:bg-red-950/40 dark:hover:bg-red-950/60'
                               : undefined
                           }
                         >
@@ -452,7 +452,7 @@ export function DBConnectionsPage() {
                                   type="button"
                                   onClick={() => setPendingDeleteId(connection.id)}
                                   disabled={deletingId === connection.id}
-                                  className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2 text-[11px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50"
+                                  className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-danger/20 bg-red-50 px-2 text-[11px] font-semibold text-danger transition hover:bg-red-100 disabled:opacity-50 dark:bg-red-950/40 dark:hover:bg-red-950/60"
                                 >
                                   {deletingId === connection.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
                                   Delete
@@ -686,7 +686,7 @@ export function DBConnectionsPage() {
                         <button
                           type="submit"
                           disabled={submitting || !isFormSubmittable(form, drawerState.mode === 'edit') || Boolean(endpointPasswordError)}
-                          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13px] font-bold text-white shadow-soft transition hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : drawerState.mode === 'create' ? <Plus className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
                           {drawerState.mode === 'create' ? 'Create Connection' : 'Save Changes'}

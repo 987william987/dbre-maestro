@@ -344,7 +344,7 @@ export function LoginPage() {
                 </div>
               ) : null}
               {mfaChallenge.setupRequired && mfaChallenge.mfaSecret ? (
-                <div className="rounded-lg border border-border bg-white px-3 py-2">
+                <div className="rounded-lg border border-border bg-panel px-3 py-2">
                   <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-faint">Setup Key</p>
                   <p className="mt-1 break-all font-mono text-[12px] text-ink">{mfaChallenge.mfaSecret}</p>
                 </div>
@@ -383,7 +383,7 @@ export function LoginPage() {
             disabled={loginDisabled}
             className={cn(
               'mt-1 inline-flex h-10 items-center justify-center gap-2 rounded-control px-4 text-sm font-bold transition-colors',
-              'bg-brand text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50',
+              'bg-brand text-white hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-50',
             )}
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

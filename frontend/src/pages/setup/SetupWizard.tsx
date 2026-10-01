@@ -163,7 +163,7 @@ function Button({ variant = 'primary', className, children, ...props }: {
       className={cn(
         'inline-flex h-9 items-center justify-center gap-2 rounded-control px-4 text-sm font-bold',
         'transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
-        variant === 'primary'   && 'bg-brand text-white hover:bg-zinc-800',
+        variant === 'primary'   && 'bg-brand text-white hover:bg-brand/90',
         variant === 'secondary' && 'border border-border bg-panel text-ink hover:bg-page',
         variant === 'ghost'     && 'text-muted hover:bg-page',
         className,
@@ -359,7 +359,7 @@ function AccountStep({
       </FieldGroup>
 
       {apiError && (
-        <div className="rounded-control border border-danger/30 bg-red-50 px-3 py-2 text-xs text-danger">
+        <div className="rounded-control border border-danger/30 bg-red-50 px-3 py-2 text-xs text-danger dark:bg-red-950/40">
           {apiError}
         </div>
       )}

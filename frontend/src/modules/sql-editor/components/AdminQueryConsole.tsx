@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
+import { oneDark } from '@codemirror/theme-one-dark'
 import { MySQL, PostgreSQL, sql } from '@codemirror/lang-sql'
 import { EditorView } from '@codemirror/view'
 import { Copy, Download, List, Play, Search, ShieldAlert, Square, Table2, X } from 'lucide-react'
@@ -284,7 +285,7 @@ export function AdminQueryConsole({ connection, database, schema, endpoint, cred
             maxHeight="240px"
             extensions={extensions}
             onChange={setCommand}
-            theme="dark"
+            theme={oneDark}
             basicSetup={{ lineNumbers: false, foldGutter: false }}
           />
         </div>

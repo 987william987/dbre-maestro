@@ -296,13 +296,13 @@ export function TicketsPage() {
                 onClick={() => setColumnMenuOpen((current) => !current)}
                 className={cn(
                   'inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-panel text-ink shadow-soft transition',
-                  columnMenuOpen ? 'border-slate-300' : 'hover:border-slate-300 hover:bg-panel-soft',
+                  columnMenuOpen ? 'border-border-strong' : 'hover:border-border-strong hover:bg-panel-soft',
                 )}
               >
                 <SlidersHorizontal className="h-4 w-4" />
               </button>
               {columnMenuOpen ? (
-                <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[260px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-border bg-white p-2 shadow-[0_22px_45px_rgba(15,23,42,0.14)]">
+                <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[260px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-border bg-panel p-2 shadow-card">
                   <div className="px-3 py-2">
                     <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-faint">Table fields</p>
                     <p className="mt-1 text-[14px] font-semibold text-ink">Column Filter</p>
@@ -467,7 +467,7 @@ function FilterHint({
   return (
     <div className={`group relative ${className ?? ''}`}>
       {children}
-      <div className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-20 hidden w-full rounded-md border border-border bg-white px-3 py-2 text-[11px] font-medium text-muted shadow-soft group-hover:block">
+      <div className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-20 hidden w-full rounded-md border border-border bg-panel px-3 py-2 text-[11px] font-medium text-muted shadow-soft group-hover:block">
         {hint}
       </div>
     </div>
@@ -582,13 +582,13 @@ function DateTimeField({
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-label={placeholder}
-        className="inline-flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-border bg-white px-3 text-left text-[13px] outline-none transition hover:border-slate-300 focus:border-slate-400"
+        className="inline-flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-border bg-panel px-3 text-left text-[13px] outline-none transition hover:border-border-strong focus:border-border-strong"
       >
         <span className={value ? 'text-ink' : 'text-muted'}>{value ? formatDateTimeSummary(value) : placeholder}</span>
         <CalendarDays className="h-4 w-4 text-muted" />
       </button>
       {open ? (
-        <div className="absolute left-0 top-[calc(100%+8px)] z-30 w-[320px] rounded-xl border border-border bg-white p-3 shadow-[0_18px_50px_rgba(15,23,42,0.15)]">
+        <div className="absolute left-0 top-[calc(100%+8px)] z-30 w-[320px] rounded-xl border border-border bg-panel p-3 shadow-card">
           <div className="mb-3 flex items-center justify-between">
             <button
               type="button"

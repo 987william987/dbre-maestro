@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { oneDark } from '@codemirror/theme-one-dark'
 import { NewTicketPage } from '@/modules/tickets/pages/NewTicketPage'
 
-const { captureCodeMirrorProps, mockedNavigate } = vi.hoisted(() => ({
+const { captureCodeMirrorProps, mockedNavigate, themeState } = vi.hoisted(() => ({
   captureCodeMirrorProps: vi.fn(),
   mockedNavigate: vi.fn(),
+  themeState: { resolvedMode: 'light' as 'light' | 'dark' },
 }))
 
 vi.mock('@uiw/react-codemirror', () => ({
@@ -16,6 +18,8 @@ vi.mock('@uiw/react-codemirror', () => ({
     readOnly?: boolean
     basicSetup?: { lineNumbers?: boolean; highlightActiveLine?: boolean }
     placeholder?: string
+    extensions?: unknown[]
+    theme?: unknown
   }) => {
     captureCodeMirrorProps(props)
     return (
@@ -37,6 +41,10 @@ vi.mock('react-router-dom', async () => {
     useNavigate: () => mockedNavigate,
   }
 })
+
+vi.mock('@/shared/theme/ThemeContext', () => ({
+  useTheme: () => themeState,
+}))
 
 vi.mock('@/modules/tickets/api', () => ({
   createTicket: vi.fn(),
@@ -60,6 +68,7 @@ describe('NewTicketPage', () => {
     mockedListConnections.mockReset()
     mockedListTicketDatabases.mockReset()
     mockedReviewTicketSQL.mockReset()
+    themeState.resolvedMode = 'light'
 
     mockedListConnections.mockResolvedValue({
       connections: [
@@ -148,6 +157,26 @@ describe('NewTicketPage', () => {
 
     expect((editor as HTMLTextAreaElement).value).toContain('ALTER TABLE')
     expect(screen.getByRole('button', { name: 'Format' })).not.toBeDisabled()
+  })
+
+  it('切換顯示模式時只更新 CodeMirror theme，不重建 dialect extensions', async () => {
+    const renderPage = () => (
+      <MemoryRouter>
+        <NewTicketPage />
+      </MemoryRouter>
+    )
+    const { rerender } = render(renderPage())
+
+    expect(await screen.findByText('Ticket Info')).toBeInTheDocument()
+    const extensionsBeforeThemeChange = captureCodeMirrorProps.mock.lastCall?.[0].extensions
+    expect(captureCodeMirrorProps.mock.lastCall?.[0].theme).toBe('light')
+    expect(extensionsBeforeThemeChange).toBeDefined()
+
+    themeState.resolvedMode = 'dark'
+    rerender(renderPage())
+
+    expect(captureCodeMirrorProps.mock.lastCall?.[0].theme).toBe(oneDark)
+    expect(captureCodeMirrorProps.mock.lastCall?.[0].extensions).toBe(extensionsBeforeThemeChange)
   })
 
   it('renders English copy and target db labels without host or port', async () => {

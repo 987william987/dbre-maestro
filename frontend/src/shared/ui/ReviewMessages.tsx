@@ -10,7 +10,7 @@ function reviewMessageTone(message: string) {
     return 'text-danger'
   }
   if (message.toLowerCase().startsWith('[warn]')) {
-    return 'text-amber-700'
+    return 'text-amber-700 dark:text-amber-300'
   }
   return 'text-muted'
 }
