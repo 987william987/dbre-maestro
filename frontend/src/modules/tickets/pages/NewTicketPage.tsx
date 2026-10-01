@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import CodeMirror from '@uiw/react-codemirror'
+import { MySQL, PostgreSQL, sql } from '@codemirror/lang-sql'
 import { CheckCircle2, FileText, Loader2, Minus, Plus, ScrollText, Trash2, Wand2, XCircle } from 'lucide-react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { format as formatSQL } from 'sql-formatter'
@@ -13,6 +15,29 @@ import type { MetadataResponse } from '@/shared/types/sqlEditor'
 import type { TicketReviewResult, TicketType } from '@/shared/types/ticket'
 import { listMetadata } from '@/modules/sql-editor/api'
 import { createTicket, listConnections, listTicketDatabases, reviewTicketSQL } from '@/modules/tickets/api'
+
+const MYSQL_TICKET_EDITOR_EXTENSIONS = [sql({ dialect: MySQL })]
+const POSTGRES_TICKET_EDITOR_EXTENSIONS = [sql({ dialect: PostgreSQL })]
+const GENERIC_SQL_TICKET_EDITOR_EXTENSIONS = [sql()]
+const REDIS_TICKET_EDITOR_EXTENSIONS: never[] = []
+const TICKET_EDITOR_BASIC_SETUP = {
+  lineNumbers: true,
+  foldGutter: false,
+  highlightActiveLine: true,
+}
+
+function ticketEditorExtensions(ticketType: TicketType, connection?: DBConnection | null) {
+  if (ticketType === 'redis_command') {
+    return REDIS_TICKET_EDITOR_EXTENSIONS
+  }
+  if (connection?.db_type === 'mysql') {
+    return MYSQL_TICKET_EDITOR_EXTENSIONS
+  }
+  if (connection?.db_type === 'postgres') {
+    return POSTGRES_TICKET_EDITOR_EXTENSIONS
+  }
+  return GENERIC_SQL_TICKET_EDITOR_EXTENSIONS
+}
 
 function formatConnectionGroupLabel(dbType: string) {
   switch (dbType) {
@@ -966,16 +991,23 @@ export function NewTicketPage() {
             </div>
           ) : (
             <>
-              <label className="flex flex-col gap-1.5 px-4 py-4">
+              <div className="px-4 py-4">
                 <span className="sr-only">SQL Content</span>
-                <textarea
-                  value={sqlContent}
-                  onChange={(event) => setSqlContent(event.target.value)}
-                  className="block min-h-[360px] w-full resize-y rounded-xl border border-border bg-panel-soft px-4 py-4 font-mono text-[13px] leading-7 text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 lg:min-h-[420px]"
-                  placeholder={ticketType === 'redis_command' ? 'SET my:key "value"\nEXPIRE my:key 60' : 'ALTER TABLE ...;\nUPDATE ...;'}
-                  disabled={submitting}
-                />
-              </label>
+                <div className="overflow-hidden rounded-xl border border-border bg-panel-soft focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20 [&_.cm-editor]:min-h-[360px] lg:[&_.cm-editor]:min-h-[420px]">
+                  <CodeMirror
+                    aria-label="SQL Content"
+                    value={sqlContent}
+                    onChange={setSqlContent}
+                    extensions={ticketEditorExtensions(ticketType, selectedConnection)}
+                    basicSetup={TICKET_EDITOR_BASIC_SETUP}
+                    theme="light"
+                    minHeight="360px"
+                    placeholder={ticketType === 'redis_command' ? 'Enter a Redis command...' : 'Enter SQL statements...'}
+                    editable={!submitting}
+                    readOnly={submitting}
+                  />
+                </div>
+              </div>
 
               <div className="px-4 pb-4">
                 <div className="flex flex-wrap items-center justify-end gap-2">

@@ -3,7 +3,32 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NewTicketPage } from '@/modules/tickets/pages/NewTicketPage'
 
-const mockedNavigate = vi.fn()
+const { captureCodeMirrorProps, mockedNavigate } = vi.hoisted(() => ({
+  captureCodeMirrorProps: vi.fn(),
+  mockedNavigate: vi.fn(),
+}))
+
+vi.mock('@uiw/react-codemirror', () => ({
+  default: (props: {
+    value: string
+    onChange: (value: string) => void
+    editable?: boolean
+    readOnly?: boolean
+    basicSetup?: { lineNumbers?: boolean; highlightActiveLine?: boolean }
+    placeholder?: string
+  }) => {
+    captureCodeMirrorProps(props)
+    return (
+      <textarea
+        aria-label="SQL Content"
+        value={props.value}
+        onChange={(event) => props.onChange(event.target.value)}
+        disabled={props.editable === false || props.readOnly === true}
+        placeholder={props.placeholder}
+      />
+    )
+  },
+}))
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
@@ -29,6 +54,7 @@ const mockedReviewTicketSQL = vi.mocked(reviewTicketSQL)
 
 describe('NewTicketPage', () => {
   beforeEach(() => {
+    captureCodeMirrorProps.mockClear()
     mockedNavigate.mockReset()
     mockedCreateTicket.mockReset()
     mockedListConnections.mockReset()
@@ -101,6 +127,27 @@ describe('NewTicketPage', () => {
     mockedListTicketDatabases.mockResolvedValue({
       databases: [{ name: 'orders' }, { name: 'orders_archive' }],
     })
+  })
+
+  it('uses a line-numbered CodeMirror editor without changing SQL form state', async () => {
+    render(
+      <MemoryRouter>
+        <NewTicketPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Ticket Info')).toBeInTheDocument()
+    expect(captureCodeMirrorProps.mock.lastCall?.[0]).toMatchObject({
+      basicSetup: { lineNumbers: true, highlightActiveLine: true },
+      placeholder: 'Enter SQL statements...',
+    })
+
+    const editor = screen.getByLabelText('SQL Content')
+    fireEvent.change(editor, { target: { value: 'alter table orders add column note varchar(255);' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Format' }))
+
+    expect((editor as HTMLTextAreaElement).value).toContain('ALTER TABLE')
+    expect(screen.getByRole('button', { name: 'Format' })).not.toBeDisabled()
   })
 
   it('renders English copy and target db labels without host or port', async () => {
