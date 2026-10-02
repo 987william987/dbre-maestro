@@ -1,27 +1,68 @@
 package handler
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
 )
 
-func TestExtractMy2SQLStatementsSkipsStatsOutput(t *testing.T) {
-	raw := `
-binlog              starttime            stoptime             startpos   stoppos    rows
-
-binlog              starttime            stoptime             startpos   stoppos    inserts   updates   deletes   database   table
-mysql-bin.000001    2026-08-06_08:07:08  2026-08-06_08:07:08  20558018   20558113   0         0         1         william    test_n
-
-INSERT INTO ` + "`william`.`test_n` (`id`) VALUES (1);" + `
+func TestRunMy2SQLRollbackMapsRunnerResult(t *testing.T) {
+	tempDir := t.TempDir()
+	script := filepath.Join(tempDir, "fake-my2sql")
+	scriptBody := `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo "my2sql-test-version"
+  exit 0
+fi
+IFS= read -r password
+output_dir=""
+previous=""
+for argument in "$@"; do
+  if [ "$previous" = "-output-dir" ]; then output_dir="$argument"; fi
+  previous="$argument"
+done
+printf 'DELETE FROM ` + "`app`.`items`" + ` WHERE ` + "`id`" + `=1;\n' > "$output_dir/result.sql"
 `
+	if err := os.WriteFile(script, []byte(scriptBody), 0o700); err != nil {
+		t.Fatalf("write fake my2sql: %v", err)
+	}
+	database := "app"
+	rowsAffected := int64(1)
 
-	got := extractMy2SQLStatements(raw)
-	want := "INSERT INTO `william`.`test_n` (`id`) VALUES (1);"
-	if got != want {
-		t.Fatalf("unexpected rollback sql\nwant: %q\n got: %q", want, got)
+	generated, err := runMy2SQLRollback(
+		context.Background(),
+		&model.PlatformSettings{
+			MySQLRollbackMy2SQLPath:               script,
+			MySQLRollbackGenerationTimeoutSeconds: 5,
+			MySQLRollbackMaxSQLBytes:              1024,
+		},
+		&model.DBConnection{Host: "mysql.internal", Port: 3306, Username: "binlog_reader"},
+		"secret-value",
+		repository.RollbackRange{StartFile: "mysql-bin.000001", StartPos: 4, EndFile: "mysql-bin.000001", EndPos: 900},
+		&database,
+		&rowsAffected,
+		"prior backup parser fallback: unsupported statement",
+	)
+	if err != nil {
+		t.Fatalf("runMy2SQLRollback() error = %v", err)
+	}
+	if generated.Generator != "my2sql" || generated.GeneratorVersion != "my2sql-test-version" {
+		t.Fatalf("unexpected generator metadata: %#v", generated)
+	}
+	if generated.SQL != "DELETE FROM `app`.`items` WHERE `id`=1;" || generated.StatementCount != 1 {
+		t.Fatalf("unexpected generated SQL: %#v", generated)
+	}
+	if generated.Confidence != "high" {
+		t.Fatalf("confidence = %q, want high", generated.Confidence)
+	}
+	if !strings.HasPrefix(generated.Warning, "prior backup parser fallback: unsupported statement.") {
+		t.Fatalf("warning did not preserve fallback context: %q", generated.Warning)
 	}
 }
 

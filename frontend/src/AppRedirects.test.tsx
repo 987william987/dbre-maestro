@@ -11,7 +11,7 @@ vi.mock('@/shared/auth/AuthContext', () => ({
       username: 'admin',
       authGroups: ['admin'],
       authGroupDetails: [],
-      permissions: ['settings.read', 'sql_review.read'],
+      permissions: ['settings.read', 'sql_review.read', 'binlog_exports.read'],
       dbConnectionIds: [],
       protected: false,
       isActive: true,
@@ -36,6 +36,9 @@ vi.mock('@/modules/settings/pages/SettingsPage', () => ({
 }))
 vi.mock('@/modules/sql-review-rules/pages/SQLReviewRulesPage', () => ({
   SQLReviewRulesPage: () => <div>SQL review destination</div>,
+}))
+vi.mock('@/modules/binlog-export/pages/BinlogExportPage', () => ({
+  BinlogExportPage: () => <div>Binlog export destination</div>,
 }))
 
 async function renderAt(path: string, destination: string) {
@@ -63,6 +66,11 @@ describe('App redirects', () => {
   it('/sql-review-rules 導向 mysql rules', async () => {
     await renderAt('/sql-review-rules', 'SQL review destination')
     await waitFor(() => expect(window.location.pathname).toBe('/sql-review-rules/mysql'))
+  })
+
+  it('/dba-tools/binlog-export 會載入 Binlog Export 頁面', async () => {
+    await renderAt('/dba-tools/binlog-export', 'Binlog export destination')
+    expect(window.location.pathname).toBe('/dba-tools/binlog-export')
   })
 
   it('未知路徑經由首頁 redirect 導向 dashboard', async () => {

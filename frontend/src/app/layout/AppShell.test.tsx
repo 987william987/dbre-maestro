@@ -48,6 +48,7 @@ function createShell(initialEntry = '/tickets') {
             <Route path="/tickets/:id" element={<div>ticket detail page</div>} />
             <Route path="/sql-editor" element={<div>sql editor page</div>} />
             <Route path="/scheduled-sql-reports" element={<div>scheduled reports page</div>} />
+            <Route path="/dba-tools/binlog-export" element={<div>binlog export page</div>} />
             <Route path="/users" element={<div>users page</div>} />
             <Route path="/users/groups" element={<div>auth groups page</div>} />
             <Route path="/users/resources" element={<div>resources page</div>} />
@@ -393,6 +394,35 @@ describe('AppShell notifications', () => {
     expect(screen.getByText(/Select a DB connection/)).toBeInTheDocument()
   })
 
+  it('binlog export breadcrumb 會顯示頁面說明 popover', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'dba',
+        authGroups: ['dba'],
+        authGroupDetails: [],
+        permissions: ['binlog_exports.read', 'binlog_exports.execute'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/dba-tools/binlog-export')
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Show Binlog Export Guide' }))
+
+    expect(screen.getByText('Binlog Export Guide')).toBeInTheDocument()
+    expect(screen.getByText(/Limit the export to a database and tables/)).toBeInTheDocument()
+  })
+
   it('桌面側欄可以收合成 icon rail 並再展開', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
@@ -470,6 +500,7 @@ describe('AppShell notifications', () => {
     { path: '/tickets/TK-1', read: 'tickets.read', label: 'Tickets' },
     { path: '/sql-editor', read: 'sql_editor.read', label: 'SQL Editor' },
     { path: '/scheduled-sql-reports', read: 'scheduled_sql_reports.read', label: 'Scheduled Reports' },
+    { path: '/dba-tools/binlog-export', read: 'binlog_exports.read', label: 'Binlog Export' },
     { path: '/users', read: 'users.read', label: 'Users' },
     { path: '/users/groups', read: 'users.read', label: 'Auth Groups' },
     { path: '/db-connections', read: 'db_connections.read', label: 'DB Connections' },

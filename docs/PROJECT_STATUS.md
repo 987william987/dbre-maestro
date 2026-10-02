@@ -11,9 +11,9 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 
 - 前端 ESLint 已導入 type-aware 設定，涵蓋 `tsconfig.app.json` 與 `tsconfig.node.json`。
 - `npm run lint`：0 errors、0 warnings。
-- `npm test`：33 test files、278 tests 全部通過。
+- `npm test`：34 test files、303 tests 全部通過。
 - `npm run build`：通過；Vite 仍有既有的單一 chunk 超過 500 kB warning。
-- 所有 28 個 render routes 已達到 routed page 最低整合測試標準。
+- 所有 29 個 render routes 已達到 routed page 最低整合測試標準。
 - `/`、`/settings`、`/sql-review-rules` 與 catch-all redirect 已有 route coverage。
 - `AppErrorBoundary` 測試會刻意將 `NotFoundError` stack trace 寫到 stderr；suite 通過時不是測試失敗。
 
@@ -31,6 +31,8 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 - 前端已支援 Light／Dark／System，並以 semantic tokens 統一路由頁面、共用 UI、圖表與一般 CodeMirror editor；Admin Query Console 刻意維持固定 one-dark。
 - 色彩主題已支援 Default／Ocean／Forest／Amber／Amethyst，與 Light／Dark／System 獨立保存並可任意組合。
 - 已修正 theme migration 期間的 light sidebar 樣式回歸，以及 Dashboard 行動版 KPI 卡片被內容最小寬度裁切的問題。
+- MySQL Binlog Export 已完成 T1-T7：共用 `my2sql` adapter、job/artifact schema、range snapshot、受控 worker、scoped API、含 preview／expiry／timestamp probe 的前端頁面，以及 runner、worker、repository、handler security 與 routed-page 自動測試。真實 MySQL integration fixture 屬 T8 驗收資產，目前已提前完成 Position／Time snapshot 驗證。
+- Binlog timestamp probe 已改為前端逐檔串行、後端以 Go MySQL replication client 只讀取第一個 event 時間；不依賴 `mysqlbinlog` 或 MariaDB runtime。實測 Aurora 單檔約 0.84–1.01 秒，單檔 timeout 不會因 inventory 檔案數增加而擴大。
 
 ## 已知限制與尚未接入項目
 
@@ -41,11 +43,12 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 
 ## 下一步
 
-目前沒有進行中的功能修改。後續工作依需求選擇：
+MySQL Binlog Export 的 T1-T7 已完成。下一階段進入 T8 最終驗收：
 
-1. 評估將前端 lint gate 接入 Makefile 與 application image build。
-2. 需要更高 UI 信心時，再分階段導入 Playwright E2E 與視覺回歸。
-3. 長期技術債與部署準備事項見 [工程待辦](TODOS.md)。
+1. 本機 Docker/MySQL ROW/FULL fixture 已重驗 Position／Time／stats；T8 剩餘工作是在 Testnet 進行部署後 smoke test。
+2. 評估將前端 lint gate 接入 Makefile 與 application image build。
+3. 需要更高 UI 信心時，再分階段導入 Playwright E2E 與視覺回歸。
+4. 長期技術債與部署準備事項見 [工程待辦](TODOS.md)。
 
 ## Canonical 文件
 

@@ -16,6 +16,9 @@ export function defaultRouteForPermissions(userPermissions: string[]) {
   if (userPermissions.includes('scheduled_sql_reports.read') || userPermissions.includes('scheduled_sql_reports.write')) {
     return '/scheduled-sql-reports'
   }
+  if (userPermissions.includes('binlog_exports.read')) {
+    return '/dba-tools/binlog-export'
+  }
   if (userPermissions.includes('users.read') || userPermissions.includes('users.write')) {
     return '/users'
   }

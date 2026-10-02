@@ -1,20 +1,16 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/my2sql"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sqlparse"
@@ -1134,148 +1130,46 @@ func runMy2SQLRollback(ctx context.Context, settings *model.PlatformSettings, co
 	if maxBytes <= 0 {
 		maxBytes = 5 * 1024 * 1024
 	}
-	commandCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-	defer cancel()
-
-	outputDir, err := os.MkdirTemp("", "maestro-my2sql-*")
-	if err != nil {
-		return repository.GeneratedRollback{}, fmt.Errorf("create my2sql output dir failed")
-	}
-	defer os.RemoveAll(outputDir)
-
-	args := []string{
-		"-mode", "repl",
-		"-work-type", "rollback",
-		"-user", conn.Username,
-		"-password", password,
-		"-host", conn.Host,
-		"-port", strconv.Itoa(int(conn.Port)),
-		"-start-file", binlogRange.StartFile,
-		"-start-pos", strconv.FormatUint(binlogRange.StartPos, 10),
-		"-stop-file", binlogRange.EndFile,
-		"-stop-pos", strconv.FormatUint(binlogRange.EndPos, 10),
-		"-output-dir", outputDir,
-	}
+	var databases []string
 	if databaseName != nil && strings.TrimSpace(*databaseName) != "" {
-		args = append(args, "-databases", strings.TrimSpace(*databaseName))
+		databases = []string{strings.TrimSpace(*databaseName)}
 	}
-	cmd := exec.CommandContext(commandCtx, strings.TrimSpace(settings.MySQLRollbackMy2SQLPath), args...)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return repository.GeneratedRollback{}, fmt.Errorf("my2sql rollback generation failed: %s", truncate(strings.TrimSpace(stderr.String()), 500))
-	}
-	rollbackSQL, err := collectMy2SQLOutput(outputDir, stdout.String(), maxBytes)
+	result, err := my2sql.Run(ctx, my2sql.Request{
+		BinaryPath: strings.TrimSpace(settings.MySQLRollbackMy2SQLPath),
+		WorkType:   my2sql.WorkTypeRollback,
+		Host:       conn.Host,
+		Port:       conn.Port,
+		Username:   conn.Username,
+		Password:   password,
+		Range: my2sql.PositionRange{
+			StartFile: binlogRange.StartFile,
+			StartPos:  binlogRange.StartPos,
+			EndFile:   binlogRange.EndFile,
+			EndPos:    binlogRange.EndPos,
+		},
+		Databases: databases,
+		Timeout:   time.Duration(timeout) * time.Second,
+		MaxBytes:  maxBytes,
+	})
 	if err != nil {
 		return repository.GeneratedRollback{}, err
 	}
-	if strings.TrimSpace(rollbackSQL) == "" {
-		return repository.GeneratedRollback{}, fmt.Errorf("my2sql produced empty rollback sql")
-	}
-	statementCount := countSQLStatements(rollbackSQL)
 	confidence := "medium"
 	warning := "Review generated rollback SQL before execution; binlog range may include concurrent changes on the same objects."
 	if strings.TrimSpace(fallback) != "" {
 		warning = strings.TrimSpace(fallback) + ". " + warning
 	}
-	if rowsAffected != nil && *rowsAffected >= 0 && statementCount > 0 && int64(statementCount) == *rowsAffected {
+	if rowsAffected != nil && *rowsAffected >= 0 && result.StatementCount > 0 && int64(result.StatementCount) == *rowsAffected {
 		confidence = "high"
 	}
-	version := my2SQLVersion(ctx, strings.TrimSpace(settings.MySQLRollbackMy2SQLPath))
 	return repository.GeneratedRollback{
 		Generator:        "my2sql",
-		GeneratorVersion: version,
-		SQL:              rollbackSQL,
-		StatementCount:   statementCount,
+		GeneratorVersion: result.Version,
+		SQL:              result.SQL,
+		StatementCount:   result.StatementCount,
 		Confidence:       confidence,
 		Warning:          warning,
 	}, nil
-}
-
-func collectMy2SQLOutput(outputDir string, stdout string, maxBytes int) (string, error) {
-	files := []string{}
-	if entries, err := os.ReadDir(outputDir); err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			files = append(files, filepath.Join(outputDir, entry.Name()))
-		}
-	}
-	sort.Strings(files)
-	var out strings.Builder
-	for _, name := range files {
-		data, err := os.ReadFile(name)
-		if err != nil {
-			continue
-		}
-		if out.Len() > 0 {
-			out.WriteString("\n")
-		}
-		out.Write(data)
-	}
-	if sqlOnly := extractMy2SQLStatements(out.String()); sqlOnly != "" {
-		if len([]byte(sqlOnly)) > maxBytes {
-			return "", fmt.Errorf("generated rollback sql exceeds size limit")
-		}
-		return sqlOnly, nil
-	}
-	if sqlOnly := extractMy2SQLStatements(stdout); sqlOnly != "" {
-		if len([]byte(sqlOnly)) > maxBytes {
-			return "", fmt.Errorf("generated rollback sql exceeds size limit")
-		}
-		return sqlOnly, nil
-	}
-	return "", fmt.Errorf("my2sql produced no rollback sql statements")
-}
-
-func extractMy2SQLStatements(raw string) string {
-	var statements []string
-	var current strings.Builder
-	inStatement := false
-	for _, line := range strings.Split(raw, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if !inStatement && !isMy2SQLStatementStart(trimmed) {
-			continue
-		}
-		if current.Len() > 0 {
-			current.WriteString("\n")
-		}
-		current.WriteString(trimmed)
-		inStatement = true
-		if strings.HasSuffix(trimmed, ";") {
-			statements = append(statements, strings.TrimSpace(current.String()))
-			current.Reset()
-			inStatement = false
-		}
-	}
-	if strings.TrimSpace(current.String()) != "" {
-		statements = append(statements, strings.TrimSpace(current.String()))
-	}
-	return strings.Join(statements, "\n\n")
-}
-
-func isMy2SQLStatementStart(line string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(line))
-	return strings.HasPrefix(upper, "INSERT ") ||
-		strings.HasPrefix(upper, "UPDATE ") ||
-		strings.HasPrefix(upper, "DELETE ") ||
-		strings.HasPrefix(upper, "REPLACE ")
-}
-
-func my2SQLVersion(ctx context.Context, path string) string {
-	commandCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(commandCtx, path, "-v").CombinedOutput()
-	if err != nil {
-		return ""
-	}
-	return truncate(strings.TrimSpace(string(out)), 120)
 }
 
 func mysqlRollbackStatementKind(sqlText string) (sqlparse.StatementKind, error) {
@@ -1289,20 +1183,6 @@ func mysqlRollbackStatementKind(sqlText string) (sqlparse.StatementKind, error) 
 	default:
 		return "", fmt.Errorf("only mysql insert/update/delete statements are supported")
 	}
-}
-
-func countSQLStatements(sqlText string) int {
-	parsed, err := sqlparse.ParseSQL(sqlparse.DialectMySQL, sqlText)
-	if err == nil && len(parsed.Statements) > 0 {
-		return len(parsed.Statements)
-	}
-	count := 0
-	for _, part := range strings.Split(sqlText, ";") {
-		if strings.TrimSpace(part) != "" {
-			count++
-		}
-	}
-	return count
 }
 
 func firstNonEmptyRollbackString(values ...string) string {

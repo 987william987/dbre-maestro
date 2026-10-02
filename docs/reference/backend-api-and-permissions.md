@@ -10,6 +10,7 @@
 | New Ticket | `/tickets/new` | `tickets.apply` |
 | SQL Editor | `/sql-editor` | `sql_editor.read` |
 | Scheduled Reports | `/scheduled-sql-reports` | `scheduled_sql_reports.read` 或 `scheduled_sql_reports.write` |
+| MySQL Binlog Export | `/dba-tools/binlog-export` | `binlog_exports.read` |
 | Account Sessions | `/account/sessions` | 已登入 |
 | Users | `/users` | `users.read` 或 `users.write` |
 | Auth Groups | `/users/groups` | `users.read` 或 `users.write` |
@@ -54,6 +55,8 @@
 | `scheduled_sql_reports.read` | 進入 Scheduled SQL Reports，查看報表與 run history |
 | `scheduled_sql_reports.write` | 建立、更新、啟用、停用、刪除 Scheduled SQL Reports |
 | `global.sensitive` | 永久繞過 masking |
+| `binlog_exports.read` | 查看 scoped MySQL connections、binlog inventory、export jobs 與 artifacts |
+| `binlog_exports.execute` | 建立、取消與重試 scoped MySQL Binlog Export jobs |
 
 ## Admin / All Permissions 工程規範
 
@@ -141,6 +144,27 @@
 | `POST /api/exports` | `sql_editor.export` | 從 SQL Editor 建立 export ticket，需填寫導出原因 |
 | `GET /api/exports/{id}/download` | authenticated user | 24 小時內可重複下載；限 requester、approver 或 `sql_editor.export_review`；每個使用者對每個 export 每分鐘最多 5 次 |
 | `GET /api/exports/download/{token}` | authenticated user | legacy download route；不再由新 UI 產生 |
+
+### MySQL Binlog Export
+
+所有 routes 都需要登入、active user、對應 permission，並在 handler 內再次檢查 DB Scope。
+
+| API | Gate | 備註 |
+|---|---|---|
+| `GET /api/binlog-exports` | `binlog_exports.read` | 只回傳使用者目前 DB Scope 內的 jobs |
+| `GET /api/binlog-exports/connections` | `binlog_exports.read` | 只回傳 scoped active MySQL connections |
+| `GET /api/binlog-exports/connections/{connectionID}/binlogs` | `binlog_exports.read` + DB Scope | 使用 rollback credential 執行 `SHOW BINARY LOGS` |
+| `POST /api/binlog-exports/connections/{connectionID}/binlogs/timestamps` | `binlog_exports.read` + DB Scope | body 為 `{ "file": "..." }`；以 Go MySQL replication client 探測單檔第一個 event 時間 |
+| `GET /api/binlog-exports/connections/{connectionID}/databases` | `binlog_exports.read` + DB Scope | 排除 MySQL system schemas |
+| `GET /api/binlog-exports/connections/{connectionID}/tables?database=...` | `binlog_exports.read` + DB Scope | 只列 base tables |
+| `POST /api/binlog-exports` | `binlog_exports.execute` + DB Scope | 建立 queued job；後端強制驗證 range、filters 與 acknowledgement |
+| `GET /api/binlog-exports/{id}` | `binlog_exports.read` + DB Scope | job detail |
+| `POST /api/binlog-exports/{id}/cancel` | `binlog_exports.execute` + DB Scope | 只允許 queued / running job |
+| `POST /api/binlog-exports/{id}/retry` | `binlog_exports.execute` + DB Scope | 只允許 failed / cancelled / interrupted job |
+| `GET /api/binlog-exports/{id}/artifacts/{kind}` | `binlog_exports.read` + DB Scope | `kind` 為 `forward_sql` 或 `rollback_sql`；過期 artifact 不可下載 |
+| `GET /api/binlog-exports/{id}/artifacts/{kind}/preview` | `binlog_exports.read` + DB Scope | 最多預覽 64 KiB，並重新檢查 expiry、checksum 與 DB Scope |
+
+Binlog Export 的 error response 固定包含 `code` 與 `error`。前端或 API consumer 應依 `code` 分支，不應解析英文訊息。
 
 ### Scheduled SQL Reports
 

@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dbre-maestro/maestro/internal/binlogexport"
 	"github.com/dbre-maestro/maestro/internal/config"
 	"github.com/dbre-maestro/maestro/internal/db"
 	"github.com/dbre-maestro/maestro/internal/handler"
@@ -237,6 +238,7 @@ func main() {
 
 	ticketRepo := repository.NewTicketRepo(metaDB)
 	ticketRollbackRepo := repository.NewTicketRollbackRepo(metaDB, cfg.EncryptionKey)
+	binlogExportRepo := repository.NewMySQLBinlogExportRepo(metaDB, cfg.EncryptionKey)
 	auditRepo := repository.NewAuditRepo(metaDB)
 	queryAccessRepo := repository.NewQueryAccessRepo(metaDB)
 	recoveries, err := ticketRepo.RecoverExecutingTickets(context.Background())
@@ -354,10 +356,12 @@ func main() {
 		handler.WithSettingsHandlerLarkCallbackReloader(larkCardCallbackManager),
 	)
 	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo, settingsRepo)
+	binlogExportH := handler.NewMySQLBinlogExportHandler(binlogExportRepo, dbConnRepo, userRepo, auditRepo, settingsRepo)
 	scheduledReportH := handler.NewScheduledSQLReportHandler(scheduledReportRepo, dbConnRepo, userRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, ticketRepo, maskingEngine, auditRepo, larkDispatcher)
 	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
 	objectJob := job.NewDBMetadataObjectJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
 	accountJob := job.NewDBMetadataAccountJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
+	binlogExportWorker := binlogexport.NewWorker(binlogExportRepo, dbConnRepo, settingsRepo, logger)
 
 	// Background scheduler: poll every 30s for due scheduled tickets
 	go runScheduler(ticketRepo, dbConnRepo, ticketH)
@@ -365,6 +369,7 @@ func main() {
 	go inventoryJob.Start(context.Background())
 	go objectJob.Start(context.Background())
 	go accountJob.Start(context.Background())
+	go binlogExportWorker.Start(context.Background())
 
 	r := chi.NewRouter()
 	r.Use(middleware.SecurityHeaders(cfg.AppEnv == "production"))
@@ -444,6 +449,24 @@ func main() {
 				middleware.RequireActiveUser(userRepo),
 				middleware.InjectPermissions(userRepo),
 			).Get("/{id}/download", exportH.DownloadByID)
+		})
+
+		r.Route("/binlog-exports", func(r chi.Router) {
+			r.Use(requireAuth)
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/", binlogExportH.List)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/connections", binlogExportH.Connections)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/connections/{connectionID}/binlogs", binlogExportH.ListBinlogs)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Post("/connections/{connectionID}/binlogs/timestamps", binlogExportH.ProbeBinlogTimestamps)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/connections/{connectionID}/databases", binlogExportH.ListDatabases)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/connections/{connectionID}/tables", binlogExportH.ListTables)
+			r.With(middleware.RequirePermission("binlog_exports.execute")).Post("/", binlogExportH.Create)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/{id}", binlogExportH.Get)
+			r.With(middleware.RequirePermission("binlog_exports.execute")).Post("/{id}/cancel", binlogExportH.Cancel)
+			r.With(middleware.RequirePermission("binlog_exports.execute")).Post("/{id}/retry", binlogExportH.Retry)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/{id}/artifacts/{kind}", binlogExportH.DownloadArtifact)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/{id}/artifacts/{kind}/preview", binlogExportH.PreviewArtifact)
 		})
 
 		r.Route("/db-connections", func(r chi.Router) {
