@@ -33,10 +33,20 @@ type DBConnection struct {
 }
 
 const (
-	DBCredentialRoleReadonly  = "readonly"
-	DBCredentialRoleReadwrite = "readwrite"
-	DBCredentialRoleRollback  = "rollback"
+	DBCredentialRoleReadonly   = "readonly"
+	DBCredentialRoleReadwrite  = "readwrite"
+	DBCredentialRoleRollback   = "rollback"
+	DBCredentialRoleOperations = "operations"
 )
+
+func IsDBCredentialRole(role string) bool {
+	switch strings.TrimSpace(role) {
+	case DBCredentialRoleReadonly, DBCredentialRoleReadwrite, DBCredentialRoleRollback, DBCredentialRoleOperations:
+		return true
+	default:
+		return false
+	}
+}
 
 type DBConnectionCredential struct {
 	ID                   uint64    `db:"id"                     json:"id"`

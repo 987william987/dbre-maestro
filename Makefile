@@ -1,4 +1,4 @@
-.PHONY: dev dev-backend dev-frontend db-only build test test-frontend test-binlog-export-integration migrate lint
+.PHONY: dev dev-backend dev-frontend db-only build test test-frontend test-binlog-export-integration test-session-management-integration migrate lint
 
 dev:
 	docker compose up --build
@@ -23,6 +23,9 @@ test-frontend:
 
 test-binlog-export-integration:
 	bash backend/test/integration/binlog_export.sh
+
+test-session-management-integration:
+	bash backend/test/integration/session_management.sh
 
 lint:
 	cd backend && golangci-lint run ./...

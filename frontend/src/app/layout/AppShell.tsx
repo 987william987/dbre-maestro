@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, Check, ChevronDown, CircleHelp, Database, DatabaseBackup, DatabaseZap, FileClock, FilePlus2, KeyRound, LayoutDashboard, LogOut, Monitor, Moon, Palette, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Sun, Ticket, Users } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, Check, ChevronDown, CircleHelp, Database, DatabaseBackup, DatabaseZap, FileClock, FilePlus2, KeyRound, LayoutDashboard, LogOut, Monitor, Moon, Palette, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Sun, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, listNotificationSummary, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -67,6 +67,13 @@ const NAV_ITEMS: NavItem[] = [
     icon: DatabaseBackup,
     allowed: (permissions) => permissions.includes('binlog_exports.read'),
     to: '/dba-tools/binlog-export',
+  },
+  {
+    key: 'session-management',
+    label: 'Session Management',
+    icon: Activity,
+    allowed: (permissions) => permissions.includes('db_sessions.read'),
+    to: '/dba-tools/sessions-management',
   },
   {
     key: 'users',
@@ -147,7 +154,7 @@ const NAV_GROUPS = [
   },
   {
     title: 'DBA Tools',
-    items: ['/dba-tools/binlog-export'],
+    items: ['/dba-tools/binlog-export', '/dba-tools/sessions-management'],
   },
   {
     title: 'Governance',
@@ -161,6 +168,7 @@ const READ_ONLY_HEADER_NOTICE_ROUTES = [
   { match: (pathname: string) => pathname === '/sql-editor', read: ['sql_editor.read'], write: ['sql_editor.query', 'sql_editor.admin', 'sql_editor.export', 'sql_editor.sensitive_apply'] },
   { match: (pathname: string) => pathname === '/scheduled-sql-reports', read: ['scheduled_sql_reports.read'], write: ['scheduled_sql_reports.write'] },
   { match: (pathname: string) => pathname === '/dba-tools/binlog-export', read: ['binlog_exports.read'], write: ['binlog_exports.execute'] },
+  { match: (pathname: string) => pathname === '/dba-tools/sessions-management', read: ['db_sessions.read'], write: ['db_sessions.kill', 'db_sessions.loop_kill'] },
   { match: (pathname: string) => pathname.startsWith('/users'), read: ['users.read'], write: ['users.write'] },
   { match: (pathname: string) => pathname === '/db-connections' || pathname.startsWith('/db-connections/'), read: ['db_connections.read', 'db_connections.overview', 'db_connections.databases', 'db_connections.accounts'], write: ['db_connections.write'] },
   { match: (pathname: string) => pathname === '/masking-rules', read: ['masking_rules.read'], write: ['masking_rules.write'] },
@@ -265,6 +273,16 @@ const PAGE_HELP = [
       'Limit the export to a database and tables whenever possible to reduce load.',
       'Probe times reads the first event from each file; the next file starts the previous file end boundary.',
       'The active binlog has no fixed end time. Completed jobs provide separate forward and rollback artifacts.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/dba-tools/sessions-management',
+    title: 'Session Management Guide',
+    items: [
+      'Select a DB connection with an operations credential, then choose a live AWS physical node or enter a manual target.',
+      'AWS topology is loaded directly from AWS and only clusters owned by the selected DB connection are available.',
+      'Manual targets are checked against the configured host and CIDR policy on every request.',
+      'Protected system and tool-owned sessions are visible but cannot be acted on.',
     ],
   },
   {

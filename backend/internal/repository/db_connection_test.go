@@ -6,8 +6,41 @@ import (
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/jmoiron/sqlx"
 )
+
+func TestDBConnectionRepoReplaceCredentialsKeepsPasswordOnlyOperationsCredential(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	repo := NewDBConnectionRepo(sqlx.NewDb(db, "sqlmock"), []byte("01234567890123456789012345678901"))
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM db_connection_credentials WHERE db_connection_id = ?`)).
+		WithArgs(uint64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "db_connection_id", "credential_role", "username", "password_encrypted", "encryption_key_version", "created_at", "updated_at"}))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM db_connection_credentials WHERE db_connection_id = ?`)).
+		WithArgs(uint64(7)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(`INSERT INTO db_connection_credentials`).
+		WithArgs(uint64(7), model.DBCredentialRoleOperations, "", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	err = repo.ReplaceCredentials(context.Background(), 7, []model.DBConnectionCredentialInput{{
+		CredentialRole: model.DBCredentialRoleOperations,
+		Password:       "redis-secret",
+	}})
+	if err != nil {
+		t.Fatalf("ReplaceCredentials() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
 
 func TestDBConnectionRepoDeleteCleansConfigurationReferences(t *testing.T) {
 	db, mock, err := sqlmock.New()

@@ -7,7 +7,7 @@ DB Connections 模組管理平台可使用的資料源。它不是單純保存�
 - 定義可被 SQL Editor、Tickets、Metadata 使用的資料源
 - 保存資料庫類型、預設 database、SSL mode
 - 拆分 readonly / readwrite endpoint
-- 管理 readonly / readwrite credential
+- 管理 readonly / readwrite / rollback / operations credential
 - 作為 DB Scope 綁定單位
 
 ## 頁面入口
@@ -49,8 +49,21 @@ DB Connections 模組管理平台可使用的資料源。它不是單純保存�
 - `readonly`
 - `readwrite`
 - `rollback`
+- `operations`
 
 MySQL / PostgreSQL 通常都需要 readonly credential；readwrite credential 則提供 ticket execute 使用。
+
+Session Management 使用獨立的 operations credential，避免擴張 readonly / readwrite 帳號權限。MySQL / PostgreSQL 應填寫專用帳號；Redis ACL 未啟用 username 時可只填 password。operations credential 使用 readwrite endpoint，若未配置則不影響既有功能。
+
+operations account 應依 engine 授予最小可見性與 signal 權限：
+
+| Engine | 建議能力 |
+|---|---|
+| MySQL 8 / Aurora MySQL | 查看完整 process list，以及取消 query／終止 connection 的管理能力；實際 grant 依 MySQL 或 AWS 受管角色限制配置 |
+| PostgreSQL / Aurora PostgreSQL | 讀取所有 session 統計與 signal backend；通常以 `pg_read_all_stats`、`pg_signal_backend` 為基線 |
+| Redis / ElastiCache | `CLIENT ID`、`CLIENT LIST`、`CLIENT KILL`；使用 Redis ACL 時只開放上述子命令 |
+
+受管服務可授予的角色名稱與 self-managed engine 不完全相同，部署時應用專用測試帳號驗證 list、cancel 與 terminate，不應直接沿用 application readwrite 帳號或管理員帳號。
 
 MySQL rollback generation 會使用 rollback credential 讀取 binlog 或產生 `my2sql` rollback SQL。若使用 `prior_backup` engine，備份表是在 ticket execution 的 readwrite connection 上建立，因此不依賴 rollback credential；但 `hybrid` fallback 到 `my2sql` 時仍需要 rollback credential。
 
@@ -96,7 +109,7 @@ Redis 也可使用同樣的 role 概念，但實際命令能力仍由目標實�
 
 目前行為：
 
-- 若未指定 `credential_role`，會測 `readonly` 與 `readwrite`
+- 若未指定 `credential_role`，會測 `readonly`、`readwrite`，以及已配置的 `operations`
 - 回傳逐角色結果
 - 同時更新 `last_test_status`、`last_test_error`、`last_tested_at`
 

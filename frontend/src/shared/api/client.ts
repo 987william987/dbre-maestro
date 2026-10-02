@@ -142,7 +142,7 @@ async function request<T>(path: string, init: RequestInit = {}, canRetry = true,
 }
 
 export const apiClient = {
-  get: <T>(path: string) => request<T>(path),
+  get: <T>(path: string, options?: { signal?: AbortSignal }) => request<T>(path, { signal: options?.signal }),
   download: async (path: string) => {
     const headers = new Headers()
     const token = config.getAccessToken()

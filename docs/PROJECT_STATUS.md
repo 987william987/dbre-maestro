@@ -1,6 +1,6 @@
 # 專案目前狀態
 
-> 最後更新：2026-10-01
+> 最後更新：2026-10-02
 > 本文件提供新 session 的快速上下文，不取代程式碼、reference 文件或 Git history。
 
 ## 專案目的
@@ -11,13 +11,13 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 
 - 前端 ESLint 已導入 type-aware 設定，涵蓋 `tsconfig.app.json` 與 `tsconfig.node.json`。
 - `npm run lint`：0 errors、0 warnings。
-- `npm test`：34 test files、303 tests 全部通過。
+- `npm test`：35 test files、322 tests 全部通過。
 - `npm run build`：通過；Vite 仍有既有的單一 chunk 超過 500 kB warning。
 - 所有 29 個 render routes 已達到 routed page 最低整合測試標準。
 - `/`、`/settings`、`/sql-review-rules` 與 catch-all redirect 已有 route coverage。
 - `AppErrorBoundary` 測試會刻意將 `NotFoundError` stack trace 寫到 stderr；suite 通過時不是測試失敗。
 
-上述數字是 2026-10-01 在 dark mode 收尾階段驗證的基線。新增或刪除測試後必須更新，不應永久假設數字不變。
+上述數字是 2026-10-02 在 Session Management S7 完成時驗證的基線。新增或刪除測試後必須更新，不應永久假設數字不變。
 
 ## 最近完成
 
@@ -33,6 +33,14 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 - 已修正 theme migration 期間的 light sidebar 樣式回歸，以及 Dashboard 行動版 KPI 卡片被內容最小寬度裁切的問題。
 - MySQL Binlog Export 已完成 T1-T7：共用 `my2sql` adapter、job/artifact schema、range snapshot、受控 worker、scoped API、含 preview／expiry／timestamp probe 的前端頁面，以及 runner、worker、repository、handler security 與 routed-page 自動測試。真實 MySQL integration fixture 屬 T8 驗收資產，目前已提前完成 Position／Time snapshot 驗證。
 - Binlog timestamp probe 已改為前端逐檔串行、後端以 Go MySQL replication client 只讀取第一個 event 時間；不依賴 `mysqlbinlog` 或 MariaDB runtime。實測 Aurora 單檔約 0.84–1.01 秒，單檔 timeout 不會因 inventory 檔案數增加而擴大。
+- Session Management S1 foundation 已完成：目標 route 為 `/dba-tools/sessions-management`；已加入獨立 operations credential、DB Connection UI/API 支援，以及 `read`／`kill`／`loop_kill` 三級權限。
+- Session Management S2 已完成：後端會依 DB Connection engine 與 Settings 內的 AWS regions 即時呼叫 RDS／ElastiCache API；cluster 與 topology 回應必須由 connection 的 readonly/readwrite endpoint 證明 ownership。自訂 CNAME 或非 AWS target 不回退 inventory snapshot，後續 session 操作必須走每次套用 host/CIDR policy 的 manual target validation。
+- Session Management S3 已完成：MySQL processlist、PostgreSQL `pg_stat_activity` 與 Redis `CLIENT LIST` 皆透過獨立 operations credential 讀取；AWS physical node 由短效 topology snapshot 解析，manual target 每次重驗 host policy。`/dba-tools/sessions-management` 已提供 target selection、手動 refresh、filter、truncation 與 protected session 顯示。
+- Session Management S4 已完成：MySQL／PostgreSQL 支援單筆 Cancel Query 與 Terminate Session，Redis 支援 Disconnect Client。Destructive action 強制重新驗證 AWS topology 或 manual host policy，再讀取 session 比對 identity；PostgreSQL 額外比對 `backend_start`。protected session 一律拒絕，結果寫入不含原始 SQL 的 audit。
+- Session Management S5 已完成：MySQL／PostgreSQL 支援 database、SQL prefix 與 minimum age 限定的 preview／一次性批次 Cancel Query。60 秒 token 綁定 actor、connection、target 與 preview identity snapshot；執行時重新驗證 live target 與每筆 session，preview 後新出現或 identity 改變的 session 不會被取消。Token store 有數量上限且不保留 raw SQL。
+- Session Management S6 已完成：loop-kill job 持久化於 Meta DB，以 `db_sessions.loop_kill` 控制建立／停止；具 interval、duration、max kills、同 physical node 單一 active job 與連續三次錯誤停止限制。Worker 每輪重驗 connection、operations credential 與 live target；原始 prefix 僅加密保留到終態，server restart 會把 running job 標記 interrupted 而不恢復。
+- Session Management S7 已完成：頁面提供手動／2／5／10／30 秒刷新、hidden tab／離頁／target 切換時的 timer 與 request cleanup、session filters 與 client-side pagination、prefix preview／一次性 cancel、loop job 建立／列表／停止，以及 Redis／read-only／protected／truncated／empty／error states。
+- Session Management S8 已完成：新增隔離 MySQL 8／PostgreSQL 16／Redis 7 integration fixtures，實際驗證 session list 與 cancel／terminate／disconnect，且只 signal 測試自行記錄 ID 的 session；安全 unit tests、Go／前端完整 gate 與 canonical 文件均已同步。
 
 ## 已知限制與尚未接入項目
 
@@ -43,12 +51,11 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 
 ## 下一步
 
-MySQL Binlog Export 的 T1-T7 已完成。下一階段進入 T8 最終驗收：
+MySQL Binlog Export 與 Session Management S1-S8 均已完成；Session Management 的現行基線見 [active spec](specs/active/20261002-session-management-spec.md)。
 
-1. 本機 Docker/MySQL ROW/FULL fixture 已重驗 Position／Time／stats；T8 剩餘工作是在 Testnet 進行部署後 smoke test。
-2. 評估將前端 lint gate 接入 Makefile 與 application image build。
-3. 需要更高 UI 信心時，再分階段導入 Playwright E2E 與視覺回歸。
-4. 長期技術債與部署準備事項見 [工程待辦](TODOS.md)。
+1. 評估將前端 lint gate 接入 Makefile 與 application image build。
+2. 需要更高 UI 信心時，再分階段導入 Playwright E2E 與視覺回歸。
+3. 長期技術債與部署準備事項見 [工程待辦](TODOS.md)。
 
 ## Canonical 文件
 

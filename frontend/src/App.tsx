@@ -22,6 +22,7 @@ const MaskingRulesPage = lazy(() => import('@/modules/masking-rules/pages/Maskin
 const SettingsPage = lazy(() => import('@/modules/settings/pages/SettingsPage').then((module) => ({ default: module.SettingsPage })))
 const ScheduledSQLReportsPage = lazy(() => import('@/modules/scheduled-sql-reports/pages/ScheduledSQLReportsPage').then((module) => ({ default: module.ScheduledSQLReportsPage })))
 const BinlogExportPage = lazy(() => import('@/modules/binlog-export/pages/BinlogExportPage').then((module) => ({ default: module.BinlogExportPage })))
+const SessionManagementPage = lazy(() => import('@/modules/session-management/pages/SessionManagementPage').then((module) => ({ default: module.SessionManagementPage })))
 const SQLEditorPage = lazy(() => import('@/modules/sql-editor/pages/SQLEditorPage').then((module) => ({ default: module.SQLEditorPage })))
 const SQLReviewRulesPage = lazy(() => import('@/modules/sql-review-rules/pages/SQLReviewRulesPage').then((module) => ({ default: module.SQLReviewRulesPage })))
 const TicketDetailPage = lazy(() => import('@/modules/tickets/pages/TicketDetailPage').then((module) => ({ default: module.TicketDetailPage })))
@@ -79,6 +80,9 @@ export default function App() {
               </Route>
               <Route element={<RoleRoute allowedPermissions={['binlog_exports.read']} />}>
                 <Route path="/dba-tools/binlog-export" element={<BinlogExportPage />} />
+              </Route>
+              <Route element={<RoleRoute allowedPermissions={['db_sessions.read']} />}>
+                <Route path="/dba-tools/sessions-management" element={<SessionManagementPage />} />
               </Route>
               <Route element={<RoleRoute allowedPermissions={['db_connections.read', 'db_connections.write', 'db_connections.overview', 'db_connections.databases', 'db_connections.accounts']} />}>
                 <Route path="/db-connections" element={<DBConnectionsPage />} />

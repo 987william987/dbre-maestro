@@ -45,6 +45,8 @@ type ConnectionForm = {
   readwritePassword: string
   rollbackUsername: string
   rollbackPassword: string
+  operationsUsername: string
+  operationsPassword: string
   sslMode: 'prefer' | 'disable' | 'require'
 }
 
@@ -67,6 +69,8 @@ const EMPTY_FORM: ConnectionForm = {
   readwritePassword: '',
   rollbackUsername: '',
   rollbackPassword: '',
+  operationsUsername: '',
+  operationsPassword: '',
   sslMode: 'prefer',
 }
 
@@ -152,6 +156,8 @@ export function DBConnectionsPage() {
       readwritePassword: '',
       rollbackUsername: findCredentialUsername(connection, 'rollback') ?? '',
       rollbackPassword: '',
+      operationsUsername: findCredentialUsername(connection, 'operations') ?? '',
+      operationsPassword: '',
       sslMode: normalizeSSLMode(connection.ssl_mode),
     })
   }
@@ -220,7 +226,7 @@ export function DBConnectionsPage() {
           : connection
       )))
       if (result.ok) {
-        pushToast(`${connectionName} connection test succeeded for readonly and readwrite`, 'success', { placement: 'center' })
+        pushToast(`${connectionName} connection test succeeded for ${formatTestedCredentialRoles(result)}`, 'success', { placement: 'center' })
       } else {
         pushToast(`${connectionName} connection test failed: ${formatConnectionTestFailure(result)}`, 'error', { placement: 'center', durationMs: 4200 })
       }
@@ -670,9 +676,32 @@ export function DBConnectionsPage() {
                         </div>
                       ) : null}
 
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                          Operations Username
+                          <input
+                            value={form.operationsUsername}
+                            onChange={(event) => setForm((current) => ({ ...current, operationsUsername: event.target.value }))}
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            disabled={submitting || drawerReadOnly}
+                          />
+                        </label>
+                        <label className="grid gap-1.5 text-[12px] font-medium text-muted">
+                          Operations Password
+                          <input
+                            value={form.operationsPassword}
+                            type="password"
+                            onChange={(event) => setForm((current) => ({ ...current, operationsPassword: event.target.value }))}
+                            placeholder={drawerState.mode === 'edit' ? 'Leave blank to keep existing operations password' : ''}
+                            className="h-10 rounded-lg border border-border bg-panel-soft px-3 text-[13px] text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
+                            disabled={submitting || drawerReadOnly}
+                          />
+                        </label>
+                      </div>
+
                       <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
                         <p className="font-semibold text-ink">Credential Policy</p>
-                        <p className="mt-1">SQL Editor and DB Metadata use `readonly`; ticket execution uses `readwrite`; MySQL rollback generation uses `rollback` on the writer endpoint. In edit mode, leaving a password blank keeps the current password only when the corresponding endpoint is unchanged.</p>
+                        <p className="mt-1">SQL Editor and DB Metadata use `readonly`; ticket execution uses `readwrite`; MySQL rollback generation uses `rollback`; Session Management uses `operations`. In edit mode, leaving a password blank keeps the current password only when the corresponding endpoint is unchanged.</p>
                       </div>
 
                       <div className="rounded-lg border border-border bg-panel-soft px-3 py-3 text-[12px] text-muted">
@@ -766,6 +795,7 @@ function toPayload(form: ConnectionForm) {
       { credential_role: 'readonly', username: form.readonlyUsername.trim(), password: form.readonlyPassword },
       { credential_role: 'readwrite', username: form.readwriteUsername.trim(), password: form.readwritePassword },
       { credential_role: 'rollback', username: form.rollbackUsername.trim(), password: form.rollbackPassword },
+      { credential_role: 'operations', username: form.operationsUsername.trim(), password: form.operationsPassword },
     ].filter((item) => item.username || item.password),
   }
 }
@@ -842,8 +872,19 @@ function formatDBType(dbType: string) {
   return 'MySQL'
 }
 
-function findCredentialUsername(connection: DBConnection, role: 'readonly' | 'readwrite' | 'rollback') {
+function findCredentialUsername(connection: DBConnection, role: 'readonly' | 'readwrite' | 'rollback' | 'operations') {
   return connection.credentials?.find((item) => item.credential_role === role)?.username
+}
+
+function formatTestedCredentialRoles(result: { results?: Array<{ credential_role: string }> }) {
+  const roles = result.results?.map((item) => item.credential_role).filter(Boolean) ?? []
+  if (roles.length === 2) {
+    return roles.join(' and ')
+  }
+  if (roles.length > 2) {
+    return `${roles.slice(0, -1).join(', ')}, and ${roles[roles.length - 1]}`
+  }
+  return roles[0] ?? 'configured credentials'
 }
 
 function formatReadonlyConnectionTarget(connection: DBConnection) {

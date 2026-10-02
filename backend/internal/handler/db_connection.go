@@ -236,6 +236,10 @@ func (h *DBConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	credentials := normalizeCredentialPayloads(req.Credentials)
+	if invalidRole := invalidCredentialRole(credentials); invalidRole != "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "unsupported credential role: "+invalidRole)
+		return
+	}
 	if req.DBType != "redis" && req.Username == "" && !hasCredentialRole(credentials, model.DBCredentialRoleReadonly) {
 		jsonErr(w, http.StatusUnprocessableEntity, "readonly username is required for mysql/postgres connections")
 		return
@@ -315,6 +319,9 @@ func (h *DBConnectionHandler) Test(w http.ResponseWriter, r *http.Request) {
 
 	results := make([]dbConnectionEndpointTestResult, 0, 2)
 	roles := []string{model.DBCredentialRoleReadonly, model.DBCredentialRoleReadwrite}
+	if hasConfiguredCredentialRole(conn.Credentials, model.DBCredentialRoleOperations) {
+		roles = append(roles, model.DBCredentialRoleOperations)
+	}
 	overallOK := true
 	failures := make([]string, 0, len(roles))
 	for _, targetRole := range roles {
@@ -466,6 +473,10 @@ func (h *DBConnectionHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	credentials := normalizeCredentialPayloads(existingCredentials(existing, req.Credentials))
+	if invalidRole := invalidCredentialRole(credentials); invalidRole != "" {
+		jsonErr(w, http.StatusUnprocessableEntity, "unsupported credential role: "+invalidRole)
+		return
+	}
 	if err := validateEndpointCredentialRefresh(existing, readonlyHost, readonlyPort, readwriteHost, readwritePort, req.Password, credentials); err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -779,6 +790,9 @@ func validateEndpointCredentialRefresh(existing *model.DBConnection, readonlyHos
 	if endpointChanged(existing.EffectiveReadwriteHost(), existing.EffectiveReadwritePort(), readwriteHost, readwritePort) && !credentialPasswordProvided(credentials, model.DBCredentialRoleReadwrite, legacyPasswordProvided) {
 		return errStr("readwrite endpoint changed; readwrite password is required")
 	}
+	if endpointChanged(existing.EffectiveReadwriteHost(), existing.EffectiveReadwritePort(), readwriteHost, readwritePort) && credentialConfiguredWithoutPassword(credentials, model.DBCredentialRoleOperations) {
+		return errStr("readwrite endpoint changed; operations password is required")
+	}
 	return nil
 }
 
@@ -804,6 +818,15 @@ func credentialPasswordProvided(credentials []model.DBConnectionCredentialInput,
 		return false
 	}
 	return legacyPasswordProvided
+}
+
+func credentialConfiguredWithoutPassword(credentials []model.DBConnectionCredentialInput, role string) bool {
+	for _, credential := range credentials {
+		if credential.CredentialRole == role {
+			return credential.Password == ""
+		}
+	}
+	return false
 }
 
 func (h *DBConnectionHandler) writeTestResult(w http.ResponseWriter, r *http.Request, connectionID uint64, ok bool, message string, results []dbConnectionEndpointTestResult) {
@@ -866,6 +889,24 @@ func hasCredentialRole(credentials []model.DBConnectionCredentialInput, role str
 		}
 	}
 	return false
+}
+
+func hasConfiguredCredentialRole(credentials []model.DBConnectionCredential, role string) bool {
+	for _, credential := range credentials {
+		if credential.CredentialRole == role && credential.HasPassword {
+			return true
+		}
+	}
+	return false
+}
+
+func invalidCredentialRole(credentials []model.DBConnectionCredentialInput) string {
+	for _, credential := range credentials {
+		if !model.IsDBCredentialRole(credential.CredentialRole) {
+			return credential.CredentialRole
+		}
+	}
+	return ""
 }
 
 func extractCredentialRoles(credentials []model.DBConnectionCredentialInput) []string {
