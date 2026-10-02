@@ -171,16 +171,16 @@ Binlog Export 的 error response 固定包含 `code` 與 `error`。前端或 API
 
 ### Session Management
 
-目前已提供 AWS live topology discovery、唯讀 session list、單一 session 操作、一次性 prefix cancel、bounded loop-kill job，以及 auto refresh、filters 與分頁 UI。所有 routes 都要求登入、active user、對應 permission 與 DB Scope。AWS regions 取自 Settings 的 `db_metadata_inventory_regions`，但資料直接來自操作當下的 AWS API，不讀取或回退 inventory snapshot。
+目前已提供 AWS topology discovery、唯讀 session list、單一 session 操作、一次性 prefix cancel、bounded loop-kill job，以及 auto refresh、filters 與分頁 UI。所有 routes 都要求登入、active user、對應 permission 與 DB Scope。AWS regions 取自 Settings 的 `db_metadata_inventory_regions`；頁面首次載入與手動 Refresh clusters 直接查詢 AWS API，後續操作使用 server snapshot，不讀取或回退 Metadata Inventory snapshot。
 
 | API | Gate | 備註 |
 |---|---|---|
-| `GET /api/dba-tools/session-management/aws/clusters?connection_id={id}` | `db_sessions.read` + DB Scope | 只回傳 readonly/readwrite endpoint 能證明歸屬的 RDS/Aurora 或 ElastiCache cluster |
-| `GET /api/dba-tools/session-management/aws/topology?connection_id={id}&region={region}&cluster_id={id}` | `db_sessions.read` + DB Scope + ownership revalidation | 即時重新查詢指定 cluster 並回傳 physical nodes；AWS 失敗時 fail loud |
+| `GET /api/dba-tools/session-management/aws/clusters?connection_id={id}&refresh=true` | `db_sessions.read` + DB Scope | `refresh=true` 直接掃描 AWS 並替換 Session Management snapshot；只回傳 readonly/readwrite endpoint 能證明歸屬的 cluster |
+| `GET /api/dba-tools/session-management/aws/topology?connection_id={id}&region={region}&cluster_id={id}` | `db_sessions.read` + DB Scope + cached ownership validation | 從最近一次 Session Management AWS snapshot 回傳 physical nodes |
 | `GET /api/dba-tools/session-management/connections` | `db_sessions.read` + DB Scope | 回傳 MySQL／PostgreSQL／Redis connection 與 operations credential 配置狀態 |
-| `POST /api/dba-tools/session-management/sessions` | `db_sessions.read` + DB Scope + target validation | 以 operations credential 讀取最多 1,000 筆 live sessions；AWS node 使用短效 live topology snapshot，manual target 每次重驗 host policy |
-| `POST /api/dba-tools/session-management/sessions/{id}/cancel` | `db_sessions.kill` + DB Scope + target/identity revalidation | MySQL／PostgreSQL cancel query；Redis 不支援。AWS target 強制重新呼叫 AWS API，manual target 重驗 host policy |
-| `POST /api/dba-tools/session-management/sessions/{id}/terminate` | `db_sessions.kill` + DB Scope + target/identity revalidation | MySQL／PostgreSQL terminate session；Redis disconnect client。AWS target 強制重新呼叫 AWS API，manual target 重驗 host policy |
+| `POST /api/dba-tools/session-management/sessions` | `db_sessions.read` + DB Scope + target validation | 以 operations credential 讀取最多 1,000 筆 live sessions；AWS node 使用 Session Management snapshot，manual target 每次重驗 host policy |
+| `POST /api/dba-tools/session-management/sessions/{id}/cancel` | `db_sessions.kill` + DB Scope + target/identity revalidation | MySQL／PostgreSQL cancel query；Redis 不支援。AWS target 使用 Session Management snapshot，manual target 重驗 host policy |
+| `POST /api/dba-tools/session-management/sessions/{id}/terminate` | `db_sessions.kill` + DB Scope + target/identity revalidation | MySQL／PostgreSQL terminate session；Redis disconnect client。AWS target 使用 Session Management snapshot，manual target 重驗 host policy |
 | `POST /api/dba-tools/session-management/prefix/preview` | `db_sessions.kill` + DB Scope + target validation | MySQL／PostgreSQL only；database 必填，prefix 至少 16 個非空白字元，只匹配 active/running、未 protected 且達 minimum age 的 session。回傳 60 秒一次性 token、去 literal shape/hash 與匹配 identity |
 | `POST /api/dba-tools/session-management/prefix/cancel` | `db_sessions.kill` + DB Scope + live target/preview revalidation | token 綁定 actor、connection 與 target 且只能消耗一次；只 cancel preview 當時已存在且 identity、database、prefix、active state、minimum age 仍符合的 sessions |
 | `GET /api/dba-tools/session-management/loop-jobs?limit={n}&offset={n}` | `db_sessions.read` + DB Scope | 回傳 scope 內 jobs；不回傳 encrypted prefix |

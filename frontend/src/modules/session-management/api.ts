@@ -20,8 +20,8 @@ export async function listSessionConnections() {
   const response = await apiClient.get<{ items: SessionConnection[] }>('/dba-tools/session-management/connections')
   return Array.isArray(response.items) ? response.items : []
 }
-export async function listAWSClusters(connectionID: number) {
-  const response = await apiClient.get<{ items: SessionCluster[] }>(`/dba-tools/session-management/aws/clusters?connection_id=${connectionID}`)
+export async function listAWSClusters(connectionID: number, refresh = false) {
+  const response = await apiClient.get<{ items: SessionCluster[] }>(`/dba-tools/session-management/aws/clusters?connection_id=${connectionID}${refresh ? '&refresh=true' : ''}`)
   return Array.isArray(response.items) ? response.items : []
 }
 export function getAWSTopology(connectionID: number, region: string, clusterID: string) {

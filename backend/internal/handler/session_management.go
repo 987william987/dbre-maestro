@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/sessionmanagement"
 	"github.com/go-chi/chi/v5"
@@ -107,6 +109,15 @@ func (h *SessionManagementHandler) TerminateSession(w http.ResponseWriter, r *ht
 
 func (h *SessionManagementHandler) signalSession(w http.ResponseWriter, r *http.Request, action string) {
 	startedAt := time.Now()
+	var targetSnapshotResolve, sessionRevalidate, signalDuration, auditDuration time.Duration
+	var poolHit bool
+	outcome := "failed"
+	defer func() {
+		slog.Info("session management: signal completed", "action", action,
+			"target_snapshot_resolve_ms", targetSnapshotResolve.Milliseconds(), "session_revalidate_ms", sessionRevalidate.Milliseconds(),
+			"signal_ms", signalDuration.Milliseconds(), "audit_ms", auditDuration.Milliseconds(),
+			"pool_hit", poolHit, "outcome", outcome, "total_duration_ms", time.Since(startedAt).Milliseconds())
+	}()
 	sessionID := strings.TrimSpace(chi.URLParam(r, "id"))
 	if sessionID == "" {
 		jsonErr(w, http.StatusBadRequest, "session id is required")
@@ -127,42 +138,74 @@ func (h *SessionManagementHandler) signalSession(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
+	targetStartedAt := time.Now()
 	resolved, password, ok := h.resolveTarget(w, r, conn, req.sessionTargetRequest, true)
+	targetSnapshotResolve = time.Since(targetStartedAt)
 	if !ok {
 		return
 	}
+	audit := func(current *sessionmanagement.Session, result, reason string) {
+		auditStartedAt := time.Now()
+		h.auditSignal(r, conn, resolved, sessionID, action, current, result, reason, startedAt)
+		auditDuration += time.Since(auditStartedAt)
+	}
 	if strings.EqualFold(conn.DBType, "redis") && action == "cancel" {
-		h.auditSignal(r, conn, resolved, sessionID, action, nil, "rejected", "unsupported action", startedAt)
+		outcome = "rejected"
+		audit(nil, "rejected", "unsupported action")
 		jsonErr(w, http.StatusUnprocessableEntity, "Redis sessions only support disconnect")
 		return
 	}
-	result, err := sessionmanagement.ListSessions(r.Context(), resolved, password)
+	sessionStartedAt := time.Now()
+	var result sessionmanagement.SessionResult
+	var sqlDB *sql.DB
+	var err error
+	if strings.EqualFold(conn.DBType, "redis") {
+		result, err = sessionmanagement.ListSessions(r.Context(), resolved, password)
+	} else {
+		var stats pool.CredentialPoolStats
+		sqlDB, stats, err = sessionmanagement.OperationsDB(r.Context(), conn.ID, resolved, password)
+		poolHit = stats.Hit
+		if err == nil {
+			result, err = sessionmanagement.ListSQLSessions(r.Context(), sqlDB, resolved)
+		}
+	}
+	sessionRevalidate = time.Since(sessionStartedAt)
 	if err != nil {
-		h.auditSignal(r, conn, resolved, sessionID, action, nil, "failed", "revalidation failed", startedAt)
+		audit(nil, "failed", "revalidation failed")
 		jsonErr(w, http.StatusBadGateway, "revalidate database session failed")
 		return
 	}
 	current := findSession(result.Items, sessionID)
 	if current == nil || !sessionIdentityMatches(*current, req.Expected) {
-		h.auditSignal(r, conn, resolved, sessionID, action, current, "skipped", "stale session identity", startedAt)
+		outcome = "skipped"
+		audit(current, "skipped", "stale session identity")
 		jsonErr(w, http.StatusConflict, "session changed or no longer exists")
 		return
 	}
 	if current.Protected {
-		h.auditSignal(r, conn, resolved, sessionID, action, current, "rejected", current.ProtectedReason, startedAt)
+		outcome = "rejected"
+		audit(current, "rejected", current.ProtectedReason)
 		jsonErr(w, http.StatusForbidden, "protected sessions cannot be modified")
 		return
 	}
-	if err := sessionmanagement.SignalSession(r.Context(), resolved, password, sessionID, action); err != nil {
-		h.auditSignal(r, conn, resolved, sessionID, action, current, "failed", "database signal failed", startedAt)
+	signalStartedAt := time.Now()
+	if sqlDB != nil {
+		err = sessionmanagement.SignalSQLSession(r.Context(), sqlDB, resolved, sessionID, action)
+	} else {
+		err = sessionmanagement.SignalSession(r.Context(), resolved, password, sessionID, action)
+	}
+	signalDuration = time.Since(signalStartedAt)
+	if err != nil {
+		audit(current, "failed", "database signal failed")
 		jsonErr(w, http.StatusBadGateway, "database session action failed")
 		return
 	}
-	h.auditSignal(r, conn, resolved, sessionID, action, current, "succeeded", "", startedAt)
+	audit(current, "succeeded", "")
+	outcome = "succeeded"
 	jsonOK(w, map[string]any{"ok": true})
 }
 
-func (h *SessionManagementHandler) resolveTarget(w http.ResponseWriter, r *http.Request, conn *model.DBConnection, req sessionTargetRequest, live bool) (*model.DBConnection, string, bool) {
+func (h *SessionManagementHandler) resolveTarget(w http.ResponseWriter, r *http.Request, conn *model.DBConnection, req sessionTargetRequest, _ bool) (*model.DBConnection, string, bool) {
 	resolved, password, err := h.connections.ResolveCredential(conn, model.DBCredentialRoleOperations)
 	if err != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "operations credential is not configured")
@@ -176,11 +219,7 @@ func (h *SessionManagementHandler) resolveTarget(w http.ResponseWriter, r *http.
 			return nil, "", false
 		}
 		var node *sessionmanagement.Node
-		if live {
-			node, err = h.topology.ResolveOwnedNodeLive(r.Context(), conn, settings.DBMetadataInventoryRegions, req.Region, req.ClusterID, req.NodeID)
-		} else {
-			node, err = h.topology.ResolveOwnedNode(r.Context(), conn, settings.DBMetadataInventoryRegions, req.Region, req.ClusterID, req.NodeID)
-		}
+		node, err = h.topology.ResolveOwnedNode(r.Context(), conn, settings.DBMetadataInventoryRegions, req.Region, req.ClusterID, req.NodeID)
 		if errors.Is(err, sessionmanagement.ErrTargetNotOwned) {
 			jsonErr(w, http.StatusForbidden, "AWS target is not owned by DB connection")
 			return nil, "", false
@@ -244,7 +283,13 @@ func (h *SessionManagementHandler) AWSClusters(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	items, err := h.topology.OwnedClusters(r.Context(), conn, regions)
+	var items []sessionmanagement.Cluster
+	var err error
+	if r.URL.Query().Get("refresh") == "true" {
+		items, err = h.topology.RefreshOwnedClusters(r.Context(), conn, regions)
+	} else {
+		items, err = h.topology.OwnedClusters(r.Context(), conn, regions)
+	}
 	if err != nil {
 		jsonErr(w, http.StatusBadGateway, "load live AWS clusters failed")
 		return

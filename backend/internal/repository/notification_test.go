@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -41,5 +42,23 @@ func TestNotificationHealthStatsScansSnakeCaseColumns(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("mock expectations not met: %v", err)
+	}
+}
+
+func TestRecordLarkTicketCardUpdateKeepsPreviousRenderStateOnFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repo := NewNotificationRepo(sqlx.NewDb(db, "sqlmock"))
+	mock.ExpectExec(`UPDATE lark_ticket_cards SET update_status = 'update_failed'`).
+		WithArgs("temporary lark failure", sqlmock.AnyArg(), uint64(9)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := repo.RecordLarkTicketCardUpdate(context.Background(), 9, "executing", errors.New("temporary lark failure")); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

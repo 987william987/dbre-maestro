@@ -50,7 +50,7 @@ describe('SessionManagementPage', () => {
     render(<SessionManagementPage />)
     await screen.findByText('Session Management')
     choose('DB Connection', 'Orders (mysql)')
-    await waitFor(() => expect(listClusters).toHaveBeenCalledWith(7))
+    await waitFor(() => expect(listClusters).toHaveBeenCalledWith(7, true))
     choose('Cluster', 'orders (ap-northeast-1)')
     await waitFor(() => expect(getTopology).toHaveBeenCalledWith(7, 'ap-northeast-1', 'orders'))
     choose('Physical Node', 'orders-1 · writer')
@@ -59,6 +59,19 @@ describe('SessionManagementPage', () => {
     await waitFor(() => expect(readSessions).toHaveBeenCalledWith({ connection_id: 7, mode: 'aws', region: 'ap-northeast-1', cluster_id: 'orders', node_id: 'orders-1' }, expect.any(AbortSignal)))
     expect(await screen.findByText('SELECT * FROM orders')).toBeInTheDocument()
     expect(screen.getByText('tool-owned session')).toBeInTheDocument()
+  })
+
+  it('只有首次載入與手動刷新會重新掃描 AWS clusters', async () => {
+    render(<SessionManagementPage />)
+    await screen.findByText('Session Management')
+    choose('DB Connection', 'Orders (mysql)')
+    await waitFor(() => expect(listClusters).toHaveBeenCalledTimes(1))
+    choose('Cluster', 'orders (ap-northeast-1)')
+    await waitFor(() => expect(getTopology).toHaveBeenCalledTimes(1))
+    expect(listClusters).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh clusters' }))
+    await waitFor(() => expect(listClusters).toHaveBeenCalledTimes(2))
+    expect(listClusters).toHaveBeenLastCalledWith(7, true)
   })
 
   it('manual target 送出 host 與 port，由後端執行 policy validation', async () => {

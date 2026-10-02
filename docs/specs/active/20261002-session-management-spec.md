@@ -7,7 +7,7 @@
 
 提供 DBA 一個統一工作區，即時查看 MySQL、PostgreSQL 與 Redis 實體節點上的 sessions，並在明確權限、目標重驗證與完整審計下取消 query、終止 session，或建立有期限的 SQL prefix 循環取消工作。
 
-本功能不是一般 SQL console，也不依賴 Metadata Inventory snapshot。AWS topology 以操作當下的 AWS API 回應為準；非 AWS 節點由使用者在當次操作輸入。
+本功能不是一般 SQL console，也不依賴 Metadata Inventory snapshot。AWS topology 在頁面首次載入與使用者手動 Refresh clusters 時直接向 AWS API 取得，頁面後續操作使用該次 server snapshot；非 AWS 節點由使用者在當次操作輸入。
 
 ## 已確認決策
 
@@ -40,7 +40,7 @@ Session Management Handler
    selected physical node
 ```
 
-AWS cluster 必須能由所選 DB Connection 的 readonly/readwrite endpoint 驗證歸屬；使用自訂 CNAME 或非 AWS endpoint 時走 manual target。AWS API 失敗時 fail loud，不回退 inventory snapshot。普通 session refresh 不重打 AWS；使用者刷新 topology 或執行 kill 前才強制重新查詢並確認 node 仍屬於 cluster。
+AWS cluster 必須能由所選 DB Connection 的 readonly/readwrite endpoint 驗證歸屬；使用自訂 CNAME 或非 AWS endpoint 時走 manual target。AWS API 失敗時 fail loud，不回退 Metadata Inventory snapshot。只有頁面首次載入與 Refresh clusters 會掃描 AWS；選 cluster、session refresh 與 destructive action 使用該次 snapshot。若 target 已不存在，DB connect/signal 必須 fail loud。
 
 ## Engine 能力
 

@@ -195,7 +195,7 @@ func (w *LoopWorker) runIteration(ctx context.Context, job *model.SessionLoopJob
 		if err != nil || settings == nil {
 			return 0, errors.New("settings unavailable")
 		}
-		node, err := w.topology.ResolveOwnedNodeLive(ctx, conn, settings.DBMetadataInventoryRegions, job.Region, job.ClusterID, job.NodeID)
+		node, err := w.topology.ResolveOwnedNode(ctx, conn, settings.DBMetadataInventoryRegions, job.Region, job.ClusterID, job.NodeID)
 		if err != nil {
 			return 0, errors.New("AWS target unavailable")
 		}

@@ -38,6 +38,44 @@ type SessionResult struct {
 	Truncated bool      `json:"truncated"`
 }
 
+var operationsPools = pool.NewCredentialPoolManager()
+
+func OperationsDB(ctx context.Context, connectionID uint64, conn *model.DBConnection, password string) (*sql.DB, pool.CredentialPoolStats, error) {
+	driver, dsn := pool.BuildDSN(conn, password)
+	key := pool.CredentialPoolKey{ConnectionID: connectionID, Role: model.DBCredentialRoleOperations, Profile: pool.ProfileSessionOperations}
+	return operationsPools.GetOrCreate(ctx, key,
+		func(context.Context) (pool.CredentialPoolDescriptor, error) {
+			return pool.CredentialPoolDescriptor{Driver: driver, DSN: dsn}, nil
+		},
+		func(openCtx context.Context, descriptor pool.CredentialPoolDescriptor) (pool.CredentialPoolOpenResult, error) {
+			started := time.Now()
+			db, err := pool.Open(descriptor.Driver, descriptor.DSN, pool.ProfileSessionOperations)
+			if err != nil {
+				return pool.CredentialPoolOpenResult{}, err
+			}
+			// A single connection keeps the session used for self-protection identical
+			// to the connection that sends the signal.
+			db.SetMaxOpenConns(1)
+			db.SetMaxIdleConns(1)
+			if err := db.PingContext(openCtx); err != nil {
+				_ = db.Close()
+				return pool.CredentialPoolOpenResult{}, err
+			}
+			return pool.CredentialPoolOpenResult{DB: db, PingDuration: time.Since(started)}, nil
+		})
+}
+
+func ListSQLSessions(ctx context.Context, db *sql.DB, conn *model.DBConnection) (SessionResult, error) {
+	switch strings.ToLower(strings.TrimSpace(conn.DBType)) {
+	case "mysql":
+		return listMySQLSessionsDB(ctx, db)
+	case "postgres", "postgresql":
+		return listPostgresSessionsDB(ctx, db)
+	default:
+		return SessionResult{}, errors.New("SQL session pool does not support this DB type")
+	}
+}
+
 func ListSessions(ctx context.Context, conn *model.DBConnection, password string) (SessionResult, error) {
 	switch strings.ToLower(strings.TrimSpace(conn.DBType)) {
 	case "mysql":
@@ -58,12 +96,11 @@ func listMySQLSessions(ctx context.Context, conn *model.DBConnection, password s
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
-	connection, err := db.Conn(ctx)
-	if err != nil {
-		return SessionResult{}, err
-	}
-	defer connection.Close()
-	rows, err := connection.QueryContext(ctx, `SELECT ID, USER, HOST, COALESCE(DB, ''), COMMAND, TIME, COALESCE(STATE, ''), COALESCE(INFO, ''), ID = CONNECTION_ID() FROM information_schema.PROCESSLIST ORDER BY TIME DESC LIMIT 1001`)
+	return listMySQLSessionsDB(ctx, db)
+}
+
+func listMySQLSessionsDB(ctx context.Context, db *sql.DB) (SessionResult, error) {
+	rows, err := db.QueryContext(ctx, `SELECT ID, USER, HOST, COALESCE(DB, ''), COMMAND, TIME, COALESCE(STATE, ''), COALESCE(INFO, ''), ID = CONNECTION_ID() FROM information_schema.PROCESSLIST ORDER BY TIME DESC LIMIT 1001`)
 	if err != nil {
 		return SessionResult{}, fmt.Errorf("query MySQL processlist: %w", err)
 	}
@@ -92,6 +129,10 @@ func listPostgresSessions(ctx context.Context, conn *model.DBConnection, passwor
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
+	return listPostgresSessionsDB(ctx, db)
+}
+
+func listPostgresSessionsDB(ctx context.Context, db *sql.DB) (SessionResult, error) {
 	rows, err := db.QueryContext(ctx, `SELECT pid, COALESCE(usename, ''), COALESCE(datname, ''), COALESCE(client_addr::text, ''), COALESCE(state, ''), GREATEST(0, EXTRACT(EPOCH FROM (clock_timestamp() - COALESCE(query_start, backend_start)))), COALESCE(query, ''), COALESCE(backend_type, ''), COALESCE(backend_start::text, ''), pid = pg_backend_pid() FROM pg_stat_activity ORDER BY query_start NULLS LAST LIMIT 1001`)
 	if err != nil {
 		return SessionResult{}, fmt.Errorf("query PostgreSQL activity: %w", err)
@@ -230,6 +271,44 @@ func SignalSession(ctx context.Context, conn *model.DBConnection, password, sess
 		return signalRedis(ctx, conn, password, sessionID)
 	default:
 		return errors.New("unsupported DB type")
+	}
+}
+
+func SignalSQLSession(ctx context.Context, db *sql.DB, conn *model.DBConnection, sessionID, action string) error {
+	if action != "cancel" && action != "terminate" {
+		return errors.New("unsupported session action")
+	}
+	switch strings.ToLower(strings.TrimSpace(conn.DBType)) {
+	case "mysql":
+		id, err := strconv.ParseUint(sessionID, 10, 64)
+		if err != nil {
+			return err
+		}
+		verb := "QUERY"
+		if action == "terminate" {
+			verb = "CONNECTION"
+		}
+		_, err = db.ExecContext(ctx, fmt.Sprintf("KILL %s %d", verb, id))
+		return err
+	case "postgres", "postgresql":
+		id, err := strconv.ParseInt(sessionID, 10, 32)
+		if err != nil {
+			return err
+		}
+		fn := "pg_cancel_backend"
+		if action == "terminate" {
+			fn = "pg_terminate_backend"
+		}
+		var ok bool
+		if err := db.QueryRowContext(ctx, "SELECT "+fn+"($1)", id).Scan(&ok); err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("database rejected session signal")
+		}
+		return nil
+	default:
+		return errors.New("SQL session pool does not support this DB type")
 	}
 }
 

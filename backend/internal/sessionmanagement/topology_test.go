@@ -34,7 +34,7 @@ func TestOwnedClustersOnlyReturnsEndpointOwnedCluster(t *testing.T) {
 	service := NewService(discoverer, nil)
 	conn := &model.DBConnection{DBType: "mysql", ReadwriteHost: "WRITER.EXAMPLE.RDS.AMAZONAWS.COM."}
 
-	items, err := service.OwnedClusters(context.Background(), conn, []string{"ap-northeast-1"})
+	items, err := service.RefreshOwnedClusters(context.Background(), conn, []string{"ap-northeast-1"})
 	if err != nil {
 		t.Fatalf("OwnedClusters() error = %v", err)
 	}
@@ -58,7 +58,7 @@ func TestOwnedClustersFailsLoudWhenAWSDiscoveryFails(t *testing.T) {
 	service := NewService(discoverer, nil)
 	conn := &model.DBConnection{DBType: "redis", ReadonlyHost: "redis.example"}
 
-	items, err := service.OwnedClusters(context.Background(), conn, []string{"ap-northeast-1"})
+	items, err := service.RefreshOwnedClusters(context.Background(), conn, []string{"ap-northeast-1"})
 	if err == nil || items != nil || discoverer.calls != 1 {
 		t.Fatalf("OwnedClusters() = (%#v, %v), calls=%d; want loud failure", items, err, discoverer.calls)
 	}
@@ -68,7 +68,7 @@ func TestResolveOwnedNodeReusesRecentTopologySnapshot(t *testing.T) {
 	discoverer := &fakeDiscoverer{items: []Cluster{{ID: "orders", Endpoint: "orders.cluster", Nodes: []Node{{ID: "orders-1", Host: "orders-1.node", Port: 3306}}}}}
 	service := NewService(discoverer, nil)
 	conn := &model.DBConnection{DBType: "mysql", ReadonlyHost: "orders.cluster"}
-	if _, err := service.OwnedClusters(context.Background(), conn, []string{"ap-northeast-1"}); err != nil {
+	if _, err := service.RefreshOwnedClusters(context.Background(), conn, []string{"ap-northeast-1"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.ResolveOwnedNode(context.Background(), conn, []string{"ap-northeast-1"}, "ap-northeast-1", "orders", "orders-1"); err != nil {
@@ -76,6 +76,31 @@ func TestResolveOwnedNodeReusesRecentTopologySnapshot(t *testing.T) {
 	}
 	if discoverer.calls != 1 {
 		t.Fatalf("AWS discovery calls = %d, want 1 within topology cache TTL", discoverer.calls)
+	}
+}
+
+func TestRefreshOwnedClustersIsTheOnlyForcedInventoryScan(t *testing.T) {
+	discoverer := &fakeDiscoverer{items: []Cluster{{ID: "orders", Endpoint: "orders.cluster", Nodes: []Node{{ID: "orders-1", Host: "orders-1.node", Port: 3306}}}}}
+	service := NewService(discoverer, nil)
+	conn := &model.DBConnection{DBType: "mysql", ReadonlyHost: "orders.cluster"}
+	regions := []string{"ap-northeast-1"}
+	if _, err := service.RefreshOwnedClusters(context.Background(), conn, regions); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ResolveOwnedNode(context.Background(), conn, regions, "ap-northeast-1", "orders", "orders-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.OwnedTopology(context.Background(), conn, regions, "ap-northeast-1", "orders"); err != nil {
+		t.Fatal(err)
+	}
+	if discoverer.calls != 1 {
+		t.Fatalf("AWS inventory scans = %d, want 1", discoverer.calls)
+	}
+	if _, err := service.RefreshOwnedClusters(context.Background(), conn, regions); err != nil {
+		t.Fatal(err)
+	}
+	if discoverer.calls != 2 {
+		t.Fatalf("AWS inventory scans after refresh = %d, want 2", discoverer.calls)
 	}
 }
 

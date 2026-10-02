@@ -57,6 +57,8 @@ type TicketHandler struct {
 	activeExecutions   *activeSQLQueryRegistry
 	rollbackJobsMu     sync.Mutex
 	rollbackJobs       map[uint64]*ticketRollbackJobLimiter
+	larkCardSyncMu     sync.Mutex
+	larkCardSyncLocks  map[uint64]*ticketCardSyncLock
 	appBaseURL         string
 	appEnv             string
 }
@@ -64,6 +66,11 @@ type TicketHandler struct {
 type ticketRollbackJobLimiter struct {
 	slots chan struct{}
 	refs  int
+}
+
+type ticketCardSyncLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 type ticketResponse struct {
@@ -358,8 +365,10 @@ func NewTicketHandler(
 		forbiddenLimiter:   newRequestRateLimiter(20, time.Minute),
 		activeExecutions:   newActiveSQLQueryRegistry(),
 		rollbackJobs:       make(map[uint64]*ticketRollbackJobLimiter),
+		larkCardSyncLocks:  make(map[uint64]*ticketCardSyncLock),
 		appBaseURL:         strings.TrimRight(appBaseURL, "/"),
 	}
+	h.notifications.SetTicketCardSentHook(func(_ context.Context, ticketID uint64) { h.queueLarkTicketCardSync(ticketID) })
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -529,6 +538,9 @@ func (h *TicketHandler) dispatchTicketNotification(
 	actorID *uint64,
 	detail string,
 ) {
+	if ticket != nil {
+		h.queueLarkTicketCardSync(ticket.ID)
+	}
 	policy, ok := ticketNotificationPolicies[event]
 	if !ok {
 		return
@@ -2737,6 +2749,7 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "ticket already taken by another executor")
 		return
 	}
+	h.queueLarkTicketCardSync(id)
 	ticket.ExecutionRunMode = &runMode
 	if dmlExecutionMode != nil {
 		ticket.DMLExecutionMode = dmlExecutionMode
@@ -2829,6 +2842,7 @@ func (h *TicketHandler) ExecuteStatement(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusConflict, "ticket is already running by full execution")
 		return
 	}
+	h.queueLarkTicketCardSync(ticket.ID)
 	mode := model.TicketExecutionRunModeManualStatement
 	ticket.ExecutionRunMode = &mode
 

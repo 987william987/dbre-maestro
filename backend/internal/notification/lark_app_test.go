@@ -43,7 +43,7 @@ func TestSendToRecipientUsesOpenID(t *testing.T) {
 				if !strings.Contains(payload, `"receive_id":"ou_test_recipient"`) {
 					t.Fatalf("receive_id payload mismatch: %s", payload)
 				}
-				return jsonResponse(http.StatusOK, `{"code":0,"msg":"success"}`), nil
+				return jsonResponse(http.StatusOK, `{"code":0,"msg":"success","data":{"message_id":"om_review_1"}}`), nil
 			default:
 				t.Fatalf("unexpected request: %s", req.URL.String())
 				return nil, nil
@@ -58,8 +58,37 @@ func TestSendToRecipientUsesOpenID(t *testing.T) {
 	if result.Attempts != 1 {
 		t.Fatalf("Attempts = %d, want 1", result.Attempts)
 	}
+	if result.MessageID != "om_review_1" {
+		t.Fatalf("MessageID = %q, want om_review_1", result.MessageID)
+	}
 	if !seenMessageRequest {
 		t.Fatal("expected message request to be sent")
+	}
+}
+
+func TestUpdateMessagePatchesExistingInteractiveCard(t *testing.T) {
+	client := NewClient(Config{Mode: ModeApp, AppID: "cli_test", AppSecret: "secret_test"})
+	client.http = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.String() {
+		case "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal":
+			return jsonResponse(http.StatusOK, `{"code":0,"tenant_access_token":"tenant-token","expire":7200}`), nil
+		case "https://open.larksuite.com/open-apis/im/v1/messages/om_review_1":
+			if req.Method != http.MethodPatch {
+				t.Fatalf("method = %s, want PATCH", req.Method)
+			}
+			body, _ := io.ReadAll(req.Body)
+			if !strings.Contains(string(body), `\"content\":`) || !strings.Contains(string(body), `工單已完成`) {
+				t.Fatalf("unexpected update payload: %s", body)
+			}
+			return jsonResponse(http.StatusOK, `{"code":0,"msg":"success"}`), nil
+		default:
+			t.Fatalf("unexpected request: %s", req.URL.String())
+			return nil, nil
+		}
+	})}
+	result := client.UpdateMessage(context.Background(), "om_review_1", Card{Title: "工單已完成"})
+	if result.Err != nil || result.Attempts != 1 {
+		t.Fatalf("UpdateMessage() = %#v", result)
 	}
 }
 

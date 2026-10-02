@@ -24,6 +24,7 @@ type RecipientSendResult struct {
 	Attempts      int
 	Err           error
 	SkippedReason string
+	MessageID     string
 }
 
 type BatchSendResult struct {
@@ -103,6 +104,7 @@ func (d *Dispatcher) NotifyUsers(ctx context.Context, userIDs []uint64, msg Mess
 				Attempts:      result.Attempts,
 				Err:           result.Err,
 				SkippedReason: result.SkippedReason,
+				MessageID:     result.MessageID,
 			})
 		}
 		if result.Err != nil {
@@ -117,6 +119,17 @@ func (d *Dispatcher) NotifyUsers(ctx context.Context, userIDs []uint64, msg Mess
 		}
 	}
 	return BatchSendResult{Attempts: totalAttempts, Deliveries: deliveries}
+}
+
+func (d *Dispatcher) UpdateMessage(ctx context.Context, messageID string, card Card) SendResult {
+	client, mode, err := d.resolveClient(ctx)
+	if err != nil {
+		return SendResult{Err: err}
+	}
+	if client == nil || mode != ModeApp {
+		return SendResult{SkippedReason: "lark_app_not_configured"}
+	}
+	return client.UpdateMessage(ctx, messageID, card)
 }
 
 func (d *Dispatcher) SendFileToUsers(ctx context.Context, userIDs []uint64, filename string, data []byte) SendResult {

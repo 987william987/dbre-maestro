@@ -27,6 +27,46 @@ type NotificationDelivery struct {
 	ErrorMessage     string
 }
 
+type LarkTicketCard struct {
+	ID               uint64 `db:"id"`
+	TicketID         uint64 `db:"ticket_id"`
+	UserID           uint64 `db:"user_id"`
+	CardStage        string `db:"card_stage"`
+	MessageID        string `db:"message_id"`
+	LastTicketStatus string `db:"last_ticket_status"`
+}
+
+func (r *NotificationRepo) UpsertLarkTicketCard(ctx context.Context, card LarkTicketCard) error {
+	now := timeutil.NowUTC()
+	_, err := r.db.ExecContext(ctx, `INSERT INTO lark_ticket_cards
+		(ticket_id, user_id, card_stage, message_id, last_ticket_status, update_status, update_attempts, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?)
+		ON DUPLICATE KEY UPDATE message_id = VALUES(message_id), last_ticket_status = VALUES(last_ticket_status), update_status = 'active', update_attempts = 0, last_error = NULL, updated_at = VALUES(updated_at)`,
+		card.TicketID, card.UserID, card.CardStage, card.MessageID, card.LastTicketStatus, now, now)
+	if err != nil {
+		return fmt.Errorf("upsert lark ticket card: %w", err)
+	}
+	return nil
+}
+
+func (r *NotificationRepo) ListLarkTicketCards(ctx context.Context, ticketID uint64, cardStage string) ([]LarkTicketCard, error) {
+	items := []LarkTicketCard{}
+	if err := r.db.SelectContext(ctx, &items, `SELECT id, ticket_id, user_id, card_stage, message_id, last_ticket_status
+		FROM lark_ticket_cards WHERE ticket_id = ? AND card_stage = ? ORDER BY id`, ticketID, cardStage); err != nil {
+		return nil, fmt.Errorf("list lark ticket cards: %w", err)
+	}
+	return items, nil
+}
+
+func (r *NotificationRepo) RecordLarkTicketCardUpdate(ctx context.Context, id uint64, ticketStatus string, updateErr error) error {
+	if updateErr != nil {
+		_, err := r.db.ExecContext(ctx, `UPDATE lark_ticket_cards SET update_status = 'update_failed', update_attempts = update_attempts + 1, last_error = ?, updated_at = ? WHERE id = ?`, updateErr.Error(), timeutil.NowUTC(), id)
+		return err
+	}
+	_, err := r.db.ExecContext(ctx, `UPDATE lark_ticket_cards SET last_ticket_status = ?, update_status = 'synced', last_error = NULL, updated_at = ? WHERE id = ?`, ticketStatus, timeutil.NowUTC(), id)
+	return err
+}
+
 type NotificationHealthStats struct {
 	LarkFailed7d                int64                    `db:"lark_failed_7d" json:"lark_failed_7d"`
 	InteractiveCallbackFailed7d int64                    `db:"interactive_callback_failed_7d" json:"interactive_callback_failed_7d"`

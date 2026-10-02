@@ -71,6 +71,10 @@
 
 `audit_logs` 用於追蹤一次通知事件的整體 routing 結果；`notification_deliveries` 用於查詢單一 user / channel 的 delivery 狀態。
 
+### `lark_ticket_cards`
+
+此表追蹤已成功送出的工單互動卡片，以便在狀態改變後 PATCH 原訊息。`card_stage` 區分 `review` 與 `execution`；同一使用者可各有一張或多張卡，不會改變原本的通知收件者解析。`last_ticket_status` 保存的是該 stage 最後成功同步的 render state；PATCH 失敗時保留舊值並記錄 `update_failed`、attempts 與錯誤，避免把失敗誤判為已同步。
+
 ## 常用統計口徑
 
 ### Platform Operations 每日趨勢

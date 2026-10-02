@@ -3,7 +3,9 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
@@ -161,6 +163,8 @@ func larkTicketSummaryTitleForCardContext(status model.TicketStatus, cardStage s
 		return "審批已完成"
 	case larkTicketCardStageExecution:
 		switch status {
+		case model.TicketStatusExecuting:
+			return "工單執行中"
 		case model.TicketStatusRejected:
 			return "工單已拒絕"
 		case model.TicketStatusFailed, model.TicketStatusStopped, model.TicketStatusInterrupted:
@@ -172,6 +176,120 @@ func larkTicketSummaryTitleForCardContext(status model.TicketStatus, cardStage s
 		}
 	default:
 		return larkTicketSummaryTitle(status)
+	}
+}
+
+func (h *TicketHandler) queueLarkTicketCardSync(ticketID uint64) {
+	if h == nil || h.notifRepo == nil || h.lark == nil || ticketID == 0 {
+		return
+	}
+	go h.syncLarkTicketCardsByID(context.Background(), ticketID)
+}
+
+func (h *TicketHandler) syncLarkTicketCardsByID(ctx context.Context, ticketID uint64) {
+	if h == nil || h.tickets == nil || h.notifRepo == nil || h.lark == nil {
+		return
+	}
+	release := h.lockLarkTicketCardSync(ticketID)
+	defer release()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	ticket, err := h.tickets.GetByID(ctx, ticketID)
+	if err != nil || ticket == nil {
+		if err != nil {
+			slog.Warn("load ticket for lark card sync failed", "ticket_id", ticketID, "err", err)
+		}
+		return
+	}
+	for _, stage := range []string{larkTicketCardStageReview, larkTicketCardStageExecution} {
+		renderState, statusLabel := larkTicketCardRenderState(stage, ticket.Status)
+		if renderState == "" {
+			continue
+		}
+		cards, err := h.notifRepo.ListLarkTicketCards(ctx, ticket.ID, stage)
+		if err != nil {
+			slog.Warn("list lark ticket cards failed", "ticket_id", ticket.ID, "stage", stage, "err", err)
+			continue
+		}
+		seen := map[string]notification.SendResult{}
+		for _, saved := range cards {
+			if saved.LastTicketStatus == renderState {
+				continue
+			}
+			result, ok := seen[saved.MessageID]
+			if !ok {
+				handled := larkTicketCardContextHandled(ticket, stage, false)
+				card := buildLarkTicketSummaryCard(ctx, h.dbConns, h.users, h.appBaseURL, ticket, statusLabel, stage, handled)
+				result = h.lark.UpdateMessage(ctx, saved.MessageID, *card)
+				seen[saved.MessageID] = result
+			}
+			updateErr := result.Err
+			if updateErr == nil && result.Attempts == 0 {
+				updateErr = fmt.Errorf("lark card update skipped: %s", result.SkippedReason)
+			}
+			if err := h.notifRepo.RecordLarkTicketCardUpdate(ctx, saved.ID, renderState, updateErr); err != nil {
+				slog.Warn("record lark ticket card update failed", "ticket_id", ticket.ID, "card_id", saved.ID, "err", err)
+			}
+			if updateErr != nil {
+				slog.Warn("lark ticket card update failed", "ticket_id", ticket.ID, "stage", stage, "message_id", saved.MessageID, "err", updateErr)
+			}
+		}
+	}
+}
+
+func (h *TicketHandler) lockLarkTicketCardSync(ticketID uint64) func() {
+	h.larkCardSyncMu.Lock()
+	lock := h.larkCardSyncLocks[ticketID]
+	if lock == nil {
+		lock = &ticketCardSyncLock{}
+		h.larkCardSyncLocks[ticketID] = lock
+	}
+	lock.refs++
+	h.larkCardSyncMu.Unlock()
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		h.larkCardSyncMu.Lock()
+		lock.refs--
+		if lock.refs == 0 {
+			delete(h.larkCardSyncLocks, ticketID)
+		}
+		h.larkCardSyncMu.Unlock()
+	}
+}
+
+func larkTicketCardRenderState(stage string, status model.TicketStatus) (string, string) {
+	switch stage {
+	case larkTicketCardStageReview:
+		switch status {
+		case model.TicketStatusPendingReview:
+			return "pending_review", "待審核"
+		case model.TicketStatusRejected:
+			return "review_rejected", "已拒絕"
+		case model.TicketStatusWithdrawn:
+			return "review_withdrawn", "已收回"
+		default:
+			return "review_approved", "已審批"
+		}
+	case larkTicketCardStageExecution:
+		switch status {
+		case model.TicketStatusApproved, model.TicketStatusPendingExecution:
+			return "pending_execution", "待執行"
+		case model.TicketStatusExecuting:
+			return "executing", "執行中"
+		case model.TicketStatusCompleted:
+			return "completed", "執行成功"
+		case model.TicketStatusFailed, model.TicketStatusInterrupted:
+			return "failed", "執行失敗"
+		case model.TicketStatusStopped:
+			return "stopped", "已停止"
+		case model.TicketStatusRejected:
+			return "execution_rejected", "已拒絕"
+		default:
+			return "", ""
+		}
+	default:
+		return "", ""
 	}
 }
 

@@ -14,11 +14,12 @@ import (
 const asyncLarkNotificationTimeout = 45 * time.Second
 
 type NotificationRouter struct {
-	notifs *repository.NotificationRepo
-	audit  *repository.AuditRepo
-	users  *repository.UserRepo
-	broker *realtime.Broker
-	lark   *notification.Dispatcher
+	notifs   *repository.NotificationRepo
+	audit    *repository.AuditRepo
+	users    *repository.UserRepo
+	broker   *realtime.Broker
+	lark     *notification.Dispatcher
+	cardSent func(context.Context, uint64)
 }
 
 type NotificationRoute struct {
@@ -37,6 +38,10 @@ type NotificationRoute struct {
 
 func NewNotificationRouter(notifs *repository.NotificationRepo, audit *repository.AuditRepo, users *repository.UserRepo, broker *realtime.Broker, lark *notification.Dispatcher) *NotificationRouter {
 	return &NotificationRouter{notifs: notifs, audit: audit, users: users, broker: broker, lark: lark}
+}
+
+func (r *NotificationRouter) SetTicketCardSentHook(hook func(context.Context, uint64)) {
+	r.cardSent = hook
 }
 
 func (r *NotificationRouter) Send(ctx context.Context, route NotificationRoute) []uint64 {
@@ -148,6 +153,7 @@ func (r *NotificationRouter) recordLarkResult(ctx context.Context, route Notific
 		"lark_skipped_reason", larkSkippedReason,
 	)
 	if len(larkDeliveries) > 0 {
+		cardRecorded := false
 		for _, delivery := range larkDeliveries {
 			status := "sent"
 			errorMessage := ""
@@ -162,6 +168,20 @@ func (r *NotificationRouter) recordLarkResult(ctx context.Context, route Notific
 				}
 			}
 			r.recordDelivery(ctx, route, delivery.UserID, "lark", status, delivery.Attempts, errorMessage)
+			if r.notifs != nil && status == "sent" && delivery.MessageID != "" && route.ResourceType == "ticket" && route.LarkCard != nil {
+				stage := larkTicketCardStageForNotification(route.NotifType)
+				if stage == larkTicketCardStageReview || stage == larkTicketCardStageExecution {
+					err := r.notifs.UpsertLarkTicketCard(ctx, repository.LarkTicketCard{TicketID: route.ResourceID, UserID: delivery.UserID, CardStage: stage, MessageID: delivery.MessageID})
+					if err != nil {
+						slog.Warn("persist lark ticket card failed", "ticket_id", route.ResourceID, "user_id", delivery.UserID, "stage", stage, "err", err)
+					} else {
+						cardRecorded = true
+					}
+				}
+			}
+		}
+		if cardRecorded && r.cardSent != nil {
+			r.cardSent(ctx, route.ResourceID)
 		}
 	} else {
 		for _, userID := range recipients {

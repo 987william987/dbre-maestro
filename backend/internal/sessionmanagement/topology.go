@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/elasticache"
@@ -54,8 +53,7 @@ type Service struct {
 }
 
 type cachedTopology struct {
-	items     []Cluster
-	expiresAt time.Time
+	items []Cluster
 }
 
 func NewService(discoverer Discoverer, hostPolicy *netguard.Policy) *Service {
@@ -63,13 +61,21 @@ func NewService(discoverer Discoverer, hostPolicy *netguard.Policy) *Service {
 }
 
 func (s *Service) OwnedClusters(ctx context.Context, conn *model.DBConnection, regions []string) ([]Cluster, error) {
+	return s.ownedClusters(ctx, conn, regions, false)
+}
+
+func (s *Service) RefreshOwnedClusters(ctx context.Context, conn *model.DBConnection, regions []string) ([]Cluster, error) {
+	return s.ownedClusters(ctx, conn, regions, true)
+}
+
+func (s *Service) ownedClusters(ctx context.Context, conn *model.DBConnection, regions []string, force bool) ([]Cluster, error) {
 	engine, err := topologyEngine(conn)
 	if err != nil {
 		return nil, err
 	}
 	items := make([]Cluster, 0)
 	for _, region := range normalizedRegions(regions) {
-		clusters, err := s.discover(ctx, region, engine, true)
+		clusters, err := s.discover(ctx, region, engine, force)
 		if err != nil {
 			return nil, fmt.Errorf("discover AWS topology in %s: %w", region, err)
 		}
@@ -92,7 +98,7 @@ func (s *Service) OwnedTopology(ctx context.Context, conn *model.DBConnection, r
 	if err != nil {
 		return nil, err
 	}
-	clusters, err := s.discover(ctx, region, engine, true)
+	clusters, err := s.cached(region, engine)
 	if err != nil {
 		return nil, fmt.Errorf("discover AWS topology in %s: %w", region, err)
 	}
@@ -108,11 +114,7 @@ func (s *Service) ResolveOwnedNode(ctx context.Context, conn *model.DBConnection
 	return s.resolveOwnedNode(ctx, conn, regions, region, clusterID, nodeID, false)
 }
 
-func (s *Service) ResolveOwnedNodeLive(ctx context.Context, conn *model.DBConnection, regions []string, region, clusterID, nodeID string) (*Node, error) {
-	return s.resolveOwnedNode(ctx, conn, regions, region, clusterID, nodeID, true)
-}
-
-func (s *Service) resolveOwnedNode(ctx context.Context, conn *model.DBConnection, regions []string, region, clusterID, nodeID string, force bool) (*Node, error) {
+func (s *Service) resolveOwnedNode(ctx context.Context, conn *model.DBConnection, regions []string, region, clusterID, nodeID string, _ bool) (*Node, error) {
 	region, clusterID, nodeID = strings.TrimSpace(region), strings.TrimSpace(clusterID), strings.TrimSpace(nodeID)
 	if region == "" || clusterID == "" || nodeID == "" || !contains(normalizedRegions(regions), region) {
 		return nil, ErrTargetNotOwned
@@ -121,7 +123,7 @@ func (s *Service) resolveOwnedNode(ctx context.Context, conn *model.DBConnection
 	if err != nil {
 		return nil, err
 	}
-	clusters, err := s.discover(ctx, region, engine, force)
+	clusters, err := s.cached(region, engine)
 	if err != nil {
 		return nil, fmt.Errorf("discover AWS topology in %s: %w", region, err)
 	}
@@ -144,18 +146,29 @@ func (s *Service) discover(ctx context.Context, region, engine string, force boo
 		s.mu.Lock()
 		cached, ok := s.cache[key]
 		s.mu.Unlock()
-		if ok && time.Now().Before(cached.expiresAt) {
+		if ok {
 			return cached.items, nil
 		}
+		return nil, ErrTargetNotOwned
 	}
 	items, err := s.discoverer.Discover(ctx, region, engine)
 	if err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
-	s.cache[key] = cachedTopology{items: items, expiresAt: time.Now().Add(30 * time.Second)}
+	s.cache[key] = cachedTopology{items: items}
 	s.mu.Unlock()
 	return items, nil
+}
+
+func (s *Service) cached(region, engine string) ([]Cluster, error) {
+	s.mu.Lock()
+	cached, ok := s.cache[region+"|"+engine]
+	s.mu.Unlock()
+	if !ok {
+		return nil, ErrTargetNotOwned
+	}
+	return cached.items, nil
 }
 
 func (s *Service) ValidateManualTarget(ctx context.Context, host string, port uint16) (netguard.CheckReport, error) {
