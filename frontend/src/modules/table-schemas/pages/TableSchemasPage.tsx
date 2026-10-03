@@ -92,7 +92,7 @@ export function TableSchemasPage() {
   if (loading) return <div className="p-3 sm:p-4"><LoadingBlock message="Loading table schemas..." className="min-h-[360px] rounded-lg border-border bg-panel" /></div>
   return <div className="space-y-4 p-3 sm:p-4 lg:p-6">
     {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}{notice ? <InlineAlert tone="success">{notice}</InlineAlert> : null}
-    <section className="overflow-hidden rounded-lg border border-border bg-panel">
+    <section className="rounded-lg border border-border bg-panel">
       <header className="flex items-center gap-3 border-b border-border px-4 py-3"><span className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-panel-soft text-muted">{tab === 'export' ? <Download className="h-4 w-4" /> : <Database className="h-4 w-4" />}</span><h1 className="text-lg font-semibold text-ink">Table Schemas</h1></header>
       <PageTabs className="px-4" items={[{ key: 'export', label: 'Export', active: tab === 'export', onClick: () => setTab('export') }, { key: 'sync', label: 'Sync', active: tab === 'sync', onClick: () => setTab('sync') }]} />
       <div className="grid gap-4 p-4 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.2fr)]">
