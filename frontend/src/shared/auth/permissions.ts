@@ -22,6 +22,9 @@ export function defaultRouteForPermissions(userPermissions: string[]) {
   if (userPermissions.includes('db_sessions.read')) {
     return '/dba-tools/sessions-management'
   }
+  if (userPermissions.includes('table_schemas.read')) {
+    return '/dba-tools/table-schemas'
+  }
   if (userPermissions.includes('users.read') || userPermissions.includes('users.write')) {
     return '/users'
   }

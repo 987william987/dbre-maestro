@@ -11,7 +11,7 @@ vi.mock('@/shared/auth/AuthContext', () => ({
       username: 'admin',
       authGroups: ['admin'],
       authGroupDetails: [],
-      permissions: ['settings.read', 'sql_review.read', 'binlog_exports.read'],
+      permissions: ['settings.read', 'sql_review.read', 'binlog_exports.read', 'table_schemas.read'],
       dbConnectionIds: [],
       protected: false,
       isActive: true,
@@ -39,6 +39,9 @@ vi.mock('@/modules/sql-review-rules/pages/SQLReviewRulesPage', () => ({
 }))
 vi.mock('@/modules/binlog-export/pages/BinlogExportPage', () => ({
   BinlogExportPage: () => <div>Binlog export destination</div>,
+}))
+vi.mock('@/modules/table-schemas/pages/TableSchemasPage', () => ({
+  TableSchemasPage: () => <div>Table schemas destination</div>,
 }))
 
 async function renderAt(path: string, destination: string) {
@@ -71,6 +74,11 @@ describe('App redirects', () => {
   it('/dba-tools/binlog-export 會載入 Binlog Export 頁面', async () => {
     await renderAt('/dba-tools/binlog-export', 'Binlog export destination')
     expect(window.location.pathname).toBe('/dba-tools/binlog-export')
+  })
+
+  it('/dba-tools/table-schemas 會載入 Table Schemas 頁面', async () => {
+    await renderAt('/dba-tools/table-schemas', 'Table schemas destination')
+    expect(window.location.pathname).toBe('/dba-tools/table-schemas')
   })
 
   it('未知路徑經由首頁 redirect 導向 dashboard', async () => {

@@ -143,21 +143,24 @@ async function request<T>(path: string, init: RequestInit = {}, canRetry = true,
 
 export const apiClient = {
   get: <T>(path: string, options?: { signal?: AbortSignal }) => request<T>(path, { signal: options?.signal }),
-  download: async (path: string) => {
-    const headers = new Headers()
+  download: async (path: string, options?: { method?: 'GET' | 'POST'; body?: unknown; signal?: AbortSignal }) => {
+	const headers = new Headers()
     const token = config.getAccessToken()
     const apiPath = withApiPath(path)
 
-    if (token) {
+	if (token) {
       headers.set('Authorization', `Bearer ${token}`)
-    }
+	}
+	if (options?.body !== undefined) headers.set('Content-Type', 'application/json')
 
     let response: Response
     try {
       response = await fetch(apiPath, {
-        method: 'GET',
-        headers,
-        credentials: 'same-origin',
+		method: options?.method ?? 'GET',
+		headers,
+		credentials: 'same-origin',
+		body: options?.body === undefined ? undefined : JSON.stringify(options.body),
+		signal: options?.signal,
       })
     } catch (error) {
       if (!isAbortError(error)) {
@@ -170,12 +173,15 @@ export const apiClient = {
       const refreshedToken = await config.refreshAccessToken()
       if (refreshedToken) {
         const retryHeaders = new Headers()
-        retryHeaders.set('Authorization', `Bearer ${refreshedToken}`)
+		retryHeaders.set('Authorization', `Bearer ${refreshedToken}`)
+		if (options?.body !== undefined) retryHeaders.set('Content-Type', 'application/json')
         try {
           response = await fetch(apiPath, {
-            method: 'GET',
-            headers: retryHeaders,
-            credentials: 'same-origin',
+			method: options?.method ?? 'GET',
+			headers: retryHeaders,
+			credentials: 'same-origin',
+			body: options?.body === undefined ? undefined : JSON.stringify(options.body),
+			signal: options?.signal,
           })
         } catch (error) {
           if (!isAbortError(error)) {

@@ -70,6 +70,8 @@
 - [20260612 DB Metadata Module Spec](specs/active/20260612-111500-db-metadata-module-spec.md)
 - [Dynamic RBAC Refactor Spec](specs/active/DYNAMIC_RBAC_REFACTOR_SPEC.md)
 - [Session Management 規格](specs/active/20261002-session-management-spec.md)
+- [Table Schema Management 規格](specs/active/20261002-table-schema-management-spec.md)
+- [使用 Table Schema Management](how-to/use-table-schema-management.md)
 - [20260611 SQL Editor / Export / Sensitive Access / Settings / Notifications](specs/archive/20260611-160346-sql-editor-export-sensitive-access-settings-notifications.md)
 - [20260611 API Namespace Consolidation](specs/archive/20260611-api-namespace-consolidation.md)
 - [20260611 MySQL Masking Global Whitelist Sensitive Override](specs/archive/20260611-mysql-masking-global-whitelist-sensitive-override.md)

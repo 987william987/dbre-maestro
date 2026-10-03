@@ -1,6 +1,6 @@
 # 專案目前狀態
 
-> 最後更新：2026-10-02
+> 最後更新：2026-10-03
 > 本文件提供新 session 的快速上下文，不取代程式碼、reference 文件或 Git history。
 
 ## 專案目的
@@ -11,13 +11,13 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 
 - 前端 ESLint 已導入 type-aware 設定，涵蓋 `tsconfig.app.json` 與 `tsconfig.node.json`。
 - `npm run lint`：0 errors、0 warnings。
-- `npm test`：35 test files、322 tests 全部通過。
+- `npm test`：36 test files、334 tests 全部通過。
 - `npm run build`：通過；Vite 仍有既有的單一 chunk 超過 500 kB warning。
-- 所有 29 個 render routes 已達到 routed page 最低整合測試標準。
+- 所有 30 個 render routes 已達到目前功能階段對應的 routed page 最低整合測試標準。
 - `/`、`/settings`、`/sql-review-rules` 與 catch-all redirect 已有 route coverage。
 - `AppErrorBoundary` 測試會刻意將 `NotFoundError` stack trace 寫到 stderr；suite 通過時不是測試失敗。
 
-上述數字是 2026-10-02 在 Session Management S7 完成時驗證的基線。新增或刪除測試後必須更新，不應永久假設數字不變。
+上述數字是 2026-10-03 在 Table Schema Management S8 完成時驗證的基線。新增或刪除測試後必須更新，不應永久假設數字不變。
 
 ## 最近完成
 
@@ -43,6 +43,14 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 - Session Management S8 已完成：新增隔離 MySQL 8／PostgreSQL 16／Redis 7 integration fixtures，實際驗證 session list 與 cancel／terminate／disconnect，且只 signal 測試自行記錄 ID 的 session；安全 unit tests、Go／前端完整 gate 與 canonical 文件均已同步。
 - Session Management 只在頁面首次載入或使用者手動 Refresh clusters 時掃描 AWS inventory；選 cluster、讀取 sessions 與 destructive action 共用該 snapshot。MySQL／PostgreSQL 的 session identity revalidation 與 signal 共用受控 operations credential pool，並輸出 target、session、signal、audit 與總耗時的 structured log；signal 前的 session identity 防誤殺檢查維持不變。
 - Lark 工單互動卡片會保存成功投遞的 message ID，並依 review／execution stage 非同步同步原卡片狀態；原有 reviewer／executor recipient resolution 與重疊角色收到兩張卡的邏輯不變，卡片更新失敗不影響工單交易。
+- Table Schema Management S1 foundation 已完成：新增 `table_schemas.read`／`table_schemas.sync` 權限、`internal/tableschema` limits/types/stable errors、受權限保護的 API skeleton，以及 `/dba-tools/table-schemas` route、導航與靜態頁面測試。
+- Table Schema Management S2 已完成：以 readonly credential 與 metadata pool 取得 deterministic `SHOW CREATE TABLE` snapshot；SQL-aware lexer/scanner 只改寫 table identifier 與 AUTO_INCREMENT／engine／charset／collation／row format；capability discovery 由 MySQL server 實際回報。MySQL 5.7／8.0、generated expression、quoted content、partition executable comment 與 fuzz coverage 已加入。
+- Table Schema Management S3 已完成：啟用 scoped MySQL connection、database 與 base-table metadata APIs，回傳來源 table options 與 foreign key dependencies；dependency analyzer 支援 deterministic DAG order、external dependency、跨 schema reference 與精準 cycle detection。
+- Table Schema Management S4 已完成：Export preview 與直接 `.sql` download 共用 scoped readonly pipeline，依 dependency order 產生 deterministic DDL，支援整批 transformation 與 external dependency warning；request、timeout、單表／整批輸出大小、下載檔名與 audit redaction 均有界。Sync routes 在 S4 尚未啟用，現已由 S5-S6 接通；真實 MySQL 5.7／8.0 建表驗收已於 S8 完成。
+- Table Schema Management S5 已完成：Sync preview 強制 Source readonly、Target readwrite 與雙邊 DB Scope，執行 target capability、fresh-table conflict 與 external dependency preflight；60 秒 bounded token 綁定 actor、完整 request、source DDL、dependency 與 target snapshot，僅能消耗一次。S6 建立 job 前必須透過 `RevalidateSyncPreview` 重跑完整 preflight，target conflict、missing dependency、source/capability drift 與 target scope/readwrite boundary 均有專項測試。
+- Table Schema Management S6 已完成：新增 `090_table_schema_sync_jobs` migration、job/item model 與 repository 狀態機，具同 Target Connection/Database active unique lock、原子 job/items 建立、conditional claim、queued/running cancel、fail-fast item transitions、terminal lock release 與 restart interrupt。bounded worker 依 dependency order 執行、重驗 source DDL、CREATE 後回讀 target hash，並提供 cooperative cancel、持久化終態 structured timing 與 best-effort terminal audit；create/list/detail/cancel lifecycle API 具雙邊 scope 與 ID disclosure 防護。獨立 MySQL 8 fixture 已驗證 dependency order、partial success、preview 後 target race、cancel during blocked DDL 與 parent timeout；fixture 曾抓出 `CREATE` 失敗但因既有 table 可回讀而誤標 created 的 ownership bug，現已限制只有成功執行或 context 結果不確定時才採用回讀判定。
+- Table Schema Management S7 已完成：retry API 只接受 failed／cancelled／interrupted job，並重新驗證 source DDL、dependency、external dependency、target capability、transformation 與 prior-created table ownership/hash；安全時只建立剩餘 items 的 linked job。Job list 具雙邊 connection scope、server-side count/pagination；UI 已完成 Export/Sync、searchable selection、transformation、preview/download、sync confirmation、job history/detail/cancel/retry、active polling 與 stale request cleanup。整合測試涵蓋 success、permission、empty、partial failure、cancel、retry drift、stale response、target conflict 與 dependency cycle。
+- Table Schema Management S8 已完成本機驗收與文件同步：隔離 MySQL 5.7／8.0 fixture 驗證 mixed options、generated columns、indexes、foreign keys、partition，以及同 instance／跨 instance sync preflight；Aurora Testnet 尚未在本機驗證，操作 checklist 已列入使用手冊。
 
 ## 已知限制與尚未接入項目
 
@@ -53,11 +61,12 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 
 ## 下一步
 
-MySQL Binlog Export 與 Session Management S1-S8 均已完成；Session Management 的現行基線見 [active spec](specs/active/20261002-session-management-spec.md)。
+MySQL Binlog Export、Session Management S1-S8 與 Table Schema Management S1-S8 均已完成；Table Schema Management 尚待 Aurora Testnet smoke checklist 的環境驗收，現行基線見 [active spec](specs/active/20261002-table-schema-management-spec.md)。
 
-1. 評估將前端 lint gate 接入 Makefile 與 application image build。
-2. 需要更高 UI 信心時，再分階段導入 Playwright E2E 與視覺回歸。
-3. 長期技術債與部署準備事項見 [工程待辦](TODOS.md)。
+1. 在 Aurora Testnet 執行 Table Schema Management smoke checklist 並保存驗收結果。
+2. 評估將前端 lint gate 接入 Makefile 與 application image build。
+3. 需要更高 UI 信心時，再分階段導入 Playwright E2E 與視覺回歸。
+4. 長期技術債與部署準備事項見 [工程待辦](TODOS.md)。
 
 ## Canonical 文件
 

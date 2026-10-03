@@ -8,12 +8,14 @@ export function SearchableMultiSelect({
   onChange,
   disabled = false,
   ariaLabel,
+	emptyLabel = 'All tables',
 }: {
   values: string[]
   options: string[]
   onChange: (values: string[]) => void
   disabled?: boolean
   ariaLabel: string
+	emptyLabel?: string
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -60,7 +62,7 @@ export function SearchableMultiSelect({
         className={cn('flex h-10 w-full min-w-0 items-center justify-between rounded-lg border border-border bg-panel px-3 text-left text-[12px] font-medium transition disabled:cursor-not-allowed disabled:opacity-60', open ? 'border-border-strong' : 'hover:border-border-strong')}
       >
         <span className={cn('min-w-0 flex-1 truncate pr-3', values.length ? 'text-ink' : 'text-muted')}>
-          {values.length === 0 ? 'All tables' : values.length === 1 ? values[0] : `${values.length} tables selected`}
+          {values.length === 0 ? emptyLabel : values.length === 1 ? values[0] : `${values.length} tables selected`}
         </span>
         <ChevronDown className={cn('h-4 w-4 shrink-0 text-faint transition-transform', open && 'rotate-180')} />
       </button>

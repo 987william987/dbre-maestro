@@ -11,6 +11,7 @@
 | SQL Editor | `/sql-editor` | `sql_editor.read` |
 | Scheduled Reports | `/scheduled-sql-reports` | `scheduled_sql_reports.read` 或 `scheduled_sql_reports.write` |
 | MySQL Binlog Export | `/dba-tools/binlog-export` | `binlog_exports.read` |
+| Table Schemas | `/dba-tools/table-schemas` | `table_schemas.read` |
 | Account Sessions | `/account/sessions` | 已登入 |
 | Users | `/users` | `users.read` 或 `users.write` |
 | Auth Groups | `/users/groups` | `users.read` 或 `users.write` |
@@ -60,6 +61,8 @@
 | `db_sessions.read` | Session Management AWS live topology 與即時 session 查詢 |
 | `db_sessions.kill` | Session Management 單次 cancel query、terminate session 或 disconnect Redis client |
 | `db_sessions.loop_kill` | 建立與停止有期限、受 kill 數量限制的 Session Management loop-kill job |
+| `table_schemas.read` | 進入 Table Schemas，並在後續階段預覽及下載 scoped MySQL table schema |
+| `table_schemas.sync` | 在後續階段預覽、建立、取消與重試 scoped MySQL table schema sync job |
 
 ## Admin / All Permissions 工程規範
 
@@ -194,6 +197,24 @@ Prefix preview token 僅保存在 application process memory；同 actor／conne
 Loop job 原始 normalized prefix 以 `DBRE_ENCRYPTION_KEY` 加密，只在 pending/running 期間保存；進入 completed/stopped/expired/limit_reached/failed/interrupted 任一終態時會與 active target lock 一起清除。同 physical node 由 DB unique key 保證最多一個 active job。Worker 每輪重驗 operations credential、AWS ownership 或 manual host policy；連續三輪錯誤後標記 failed。Server 啟動時會把殘留 running job 標記 interrupted，不自動恢復。
 
 真實 adapter fixture 可用 `make test-session-management-integration` 驗證。測試會啟動隔離的 MySQL 8、PostgreSQL 16 與 Redis 7 containers，只 signal 測試自行建立並預先記錄 ID 的 session，結束時刪除 containers 與 volumes。預設 host ports 為 `13316`、`15432`、`16379`，可用 `SESSION_IT_MYSQL_PORT`、`SESSION_IT_POSTGRES_PORT`、`SESSION_IT_REDIS_PORT` 覆寫。
+
+### Table Schema Management
+
+Table Schema Management 已啟用 readonly metadata、Schema Export、Sync Preview 與持久化 Sync Job。Sync preview 強制 Source readonly、Target readwrite、雙邊 DB Scope、fresh target table、external dependency 與 target capability preflight，成功時簽發 60 秒 bounded one-time token。Job 依 dependency order 執行，支援 scoped list/detail、cooperative cancel 與 ownership/hash revalidation retry。
+
+| API | Gate |
+|---|---|
+| `GET /api/dba-tools/table-schemas/connections` | `table_schemas.read` + DB Scope；列出可存取的 MySQL connections |
+| `GET /api/dba-tools/table-schemas/connections/{connectionID}/databases` | `table_schemas.read` + DB Scope；排除 MySQL system schemas |
+| `GET /api/dba-tools/table-schemas/connections/{connectionID}/tables?database={database}` | `table_schemas.read` + DB Scope；回傳 base tables、source options 與 foreign key dependencies |
+| `POST /api/dba-tools/table-schemas/export/preview` | `table_schemas.read` + DB Scope；回傳 ordered DDL、來源／輸出 options、dependency warnings |
+| `POST /api/dba-tools/table-schemas/export` | `table_schemas.read` + DB Scope；直接下載 bounded `.sql`，不建立 job 或保存 artifact |
+| `POST /api/dba-tools/table-schemas/sync/preview` | `table_schemas.sync` + Source/Target DB Scope；只讀 preflight 並簽發一次性 preview token |
+| `POST /api/dba-tools/table-schemas/sync/jobs` | `table_schemas.sync` |
+| `GET /api/dba-tools/table-schemas/sync/jobs` | `table_schemas.read` |
+| `GET /api/dba-tools/table-schemas/sync/jobs/{id}` | `table_schemas.read` |
+| `POST /api/dba-tools/table-schemas/sync/jobs/{id}/cancel` | `table_schemas.sync` |
+| `POST /api/dba-tools/table-schemas/sync/jobs/{id}/retry` | `table_schemas.sync` |
 
 ### Scheduled SQL Reports
 

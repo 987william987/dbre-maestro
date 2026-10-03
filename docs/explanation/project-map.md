@@ -20,6 +20,7 @@ DBRE Maestro 是資料庫治理平台。它把查詢、變更、權限、審批�
 | `backend/internal/job` | metadata inventory/object scan 背景 job |
 | `backend/internal/binlogexport` | MySQL Binlog Export queue、併發控制、取消與 artifact 產生流程 |
 | `backend/internal/sessionmanagement` | Session Management topology、session adapters、prefix preview/cancel 與 bounded loop-kill worker |
+| `backend/internal/tableschema` | MySQL table schema metadata、dependency analysis、DDL transformation、bounded export、sync preflight/retry 與 background worker |
 | `backend/internal/my2sql` | 共用 my2sql CLI adapter、bounded output、Forward／Rollback 與 timestamp stats probe |
 | `backend/internal/netguard` | DB Connection host allowlist / CIDR denylist policy |
 | `backend/internal/notification` | Lark App / webhook 通知 |

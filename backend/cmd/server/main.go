@@ -30,6 +30,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/secrets"
 	"github.com/dbre-maestro/maestro/internal/sessionmanagement"
+	"github.com/dbre-maestro/maestro/internal/tableschema"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/jmoiron/sqlx"
@@ -241,6 +242,7 @@ func main() {
 	ticketRollbackRepo := repository.NewTicketRollbackRepo(metaDB, cfg.EncryptionKey)
 	binlogExportRepo := repository.NewMySQLBinlogExportRepo(metaDB, cfg.EncryptionKey)
 	sessionLoopJobRepo := repository.NewSessionLoopJobRepo(metaDB, cfg.EncryptionKey)
+	tableSchemaSyncRepo := repository.NewTableSchemaSyncRepo(metaDB)
 	auditRepo := repository.NewAuditRepo(metaDB)
 	queryAccessRepo := repository.NewQueryAccessRepo(metaDB)
 	recoveries, err := ticketRepo.RecoverExecutingTickets(context.Background())
@@ -361,12 +363,14 @@ func main() {
 	binlogExportH := handler.NewMySQLBinlogExportHandler(binlogExportRepo, dbConnRepo, userRepo, auditRepo, settingsRepo)
 	sessionManagementService := sessionmanagement.NewService(sessionmanagement.NewAWSDiscoverer(), dbConnectionHostPolicy)
 	sessionManagementH := handler.NewSessionManagementHandler(dbConnRepo, userRepo, settingsRepo, sessionManagementService, auditRepo, sessionLoopJobRepo)
+	tableSchemaH := handler.NewTableSchemaHandler(dbConnRepo, userRepo, auditRepo, tableSchemaSyncRepo)
 	scheduledReportH := handler.NewScheduledSQLReportHandler(scheduledReportRepo, dbConnRepo, userRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, ticketRepo, maskingEngine, auditRepo, larkDispatcher)
 	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
 	objectJob := job.NewDBMetadataObjectJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
 	accountJob := job.NewDBMetadataAccountJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
 	binlogExportWorker := binlogexport.NewWorker(binlogExportRepo, dbConnRepo, settingsRepo, logger)
 	sessionLoopWorker := sessionmanagement.NewLoopWorker(sessionLoopJobRepo, dbConnRepo, settingsRepo, sessionManagementService, auditRepo, logger)
+	tableSchemaSyncWorker := tableschema.NewSyncWorker(tableSchemaSyncRepo, dbConnRepo, auditRepo, logger)
 
 	// Background scheduler: poll every 30s for due scheduled tickets
 	go runScheduler(ticketRepo, dbConnRepo, ticketH)
@@ -376,6 +380,7 @@ func main() {
 	go accountJob.Start(context.Background())
 	go binlogExportWorker.Start(context.Background())
 	go sessionLoopWorker.Start(context.Background())
+	go tableSchemaSyncWorker.Start(context.Background())
 
 	r := chi.NewRouter()
 	r.Use(middleware.SecurityHeaders(cfg.AppEnv == "production"))
@@ -490,6 +495,23 @@ func main() {
 			r.With(middleware.RequirePermission("db_sessions.read")).Get("/loop-jobs", sessionManagementH.ListLoopJobs)
 			r.With(middleware.RequirePermission("db_sessions.loop_kill")).Post("/loop-jobs", sessionManagementH.CreateLoopJob)
 			r.With(middleware.RequirePermission("db_sessions.loop_kill")).Post("/loop-jobs/{id}/stop", sessionManagementH.StopLoopJob)
+		})
+
+		r.Route("/dba-tools/table-schemas", func(r chi.Router) {
+			r.Use(requireAuth)
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(middleware.RequirePermission("table_schemas.read")).Get("/connections", tableSchemaH.Connections)
+			r.With(middleware.RequirePermission("table_schemas.read")).Get("/connections/{connectionID}/databases", tableSchemaH.Databases)
+			r.With(middleware.RequirePermission("table_schemas.read")).Get("/connections/{connectionID}/tables", tableSchemaH.Tables)
+			r.With(middleware.RequirePermission("table_schemas.read")).Post("/export/preview", tableSchemaH.ExportPreview)
+			r.With(middleware.RequirePermission("table_schemas.read")).Post("/export", tableSchemaH.Export)
+			r.With(middleware.RequirePermission("table_schemas.sync")).Post("/sync/preview", tableSchemaH.SyncPreview)
+			r.With(middleware.RequirePermission("table_schemas.sync")).Post("/sync/jobs", tableSchemaH.CreateSyncJob)
+			r.With(middleware.RequirePermission("table_schemas.read")).Get("/sync/jobs", tableSchemaH.ListSyncJobs)
+			r.With(middleware.RequirePermission("table_schemas.read")).Get("/sync/jobs/{id}", tableSchemaH.GetSyncJob)
+			r.With(middleware.RequirePermission("table_schemas.sync")).Post("/sync/jobs/{id}/cancel", tableSchemaH.CancelSyncJob)
+			r.With(middleware.RequirePermission("table_schemas.sync")).Post("/sync/jobs/{id}/retry", tableSchemaH.RetrySyncJob)
 		})
 
 		r.Route("/db-connections", func(r chi.Router) {

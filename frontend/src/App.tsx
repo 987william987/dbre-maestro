@@ -23,6 +23,7 @@ const SettingsPage = lazy(() => import('@/modules/settings/pages/SettingsPage').
 const ScheduledSQLReportsPage = lazy(() => import('@/modules/scheduled-sql-reports/pages/ScheduledSQLReportsPage').then((module) => ({ default: module.ScheduledSQLReportsPage })))
 const BinlogExportPage = lazy(() => import('@/modules/binlog-export/pages/BinlogExportPage').then((module) => ({ default: module.BinlogExportPage })))
 const SessionManagementPage = lazy(() => import('@/modules/session-management/pages/SessionManagementPage').then((module) => ({ default: module.SessionManagementPage })))
+const TableSchemasPage = lazy(() => import('@/modules/table-schemas/pages/TableSchemasPage').then((module) => ({ default: module.TableSchemasPage })))
 const SQLEditorPage = lazy(() => import('@/modules/sql-editor/pages/SQLEditorPage').then((module) => ({ default: module.SQLEditorPage })))
 const SQLReviewRulesPage = lazy(() => import('@/modules/sql-review-rules/pages/SQLReviewRulesPage').then((module) => ({ default: module.SQLReviewRulesPage })))
 const TicketDetailPage = lazy(() => import('@/modules/tickets/pages/TicketDetailPage').then((module) => ({ default: module.TicketDetailPage })))
@@ -83,6 +84,9 @@ export default function App() {
               </Route>
               <Route element={<RoleRoute allowedPermissions={['db_sessions.read']} />}>
                 <Route path="/dba-tools/sessions-management" element={<SessionManagementPage />} />
+              </Route>
+              <Route element={<RoleRoute allowedPermissions={['table_schemas.read']} />}>
+                <Route path="/dba-tools/table-schemas" element={<TableSchemasPage />} />
               </Route>
               <Route element={<RoleRoute allowedPermissions={['db_connections.read', 'db_connections.write', 'db_connections.overview', 'db_connections.databases', 'db_connections.accounts']} />}>
                 <Route path="/db-connections" element={<DBConnectionsPage />} />

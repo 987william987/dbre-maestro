@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, Check, ChevronDown, CircleHelp, Database, DatabaseBackup, DatabaseZap, FileClock, FilePlus2, KeyRound, LayoutDashboard, LogOut, Monitor, Moon, Palette, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Sun, Ticket, Users } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, Check, ChevronDown, CircleHelp, Database, DatabaseBackup, DatabaseZap, FileClock, FilePlus2, KeyRound, LayoutDashboard, LogOut, Monitor, Moon, Palette, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Sun, TableProperties, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, listNotificationSummary, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -74,6 +74,13 @@ const NAV_ITEMS: NavItem[] = [
     icon: Activity,
     allowed: (permissions) => permissions.includes('db_sessions.read'),
     to: '/dba-tools/sessions-management',
+  },
+  {
+    key: 'table-schemas',
+    label: 'Table Schemas',
+    icon: TableProperties,
+    allowed: (permissions) => permissions.includes('table_schemas.read'),
+    to: '/dba-tools/table-schemas',
   },
   {
     key: 'users',
@@ -154,7 +161,7 @@ const NAV_GROUPS = [
   },
   {
     title: 'DBA Tools',
-    items: ['/dba-tools/binlog-export', '/dba-tools/sessions-management'],
+    items: ['/dba-tools/binlog-export', '/dba-tools/sessions-management', '/dba-tools/table-schemas'],
   },
   {
     title: 'Governance',
@@ -169,6 +176,7 @@ const READ_ONLY_HEADER_NOTICE_ROUTES = [
   { match: (pathname: string) => pathname === '/scheduled-sql-reports', read: ['scheduled_sql_reports.read'], write: ['scheduled_sql_reports.write'] },
   { match: (pathname: string) => pathname === '/dba-tools/binlog-export', read: ['binlog_exports.read'], write: ['binlog_exports.execute'] },
   { match: (pathname: string) => pathname === '/dba-tools/sessions-management', read: ['db_sessions.read'], write: ['db_sessions.kill', 'db_sessions.loop_kill'] },
+  { match: (pathname: string) => pathname === '/dba-tools/table-schemas', read: ['table_schemas.read'], write: ['table_schemas.sync'] },
   { match: (pathname: string) => pathname.startsWith('/users'), read: ['users.read'], write: ['users.write'] },
   { match: (pathname: string) => pathname === '/db-connections' || pathname.startsWith('/db-connections/'), read: ['db_connections.read', 'db_connections.overview', 'db_connections.databases', 'db_connections.accounts'], write: ['db_connections.write'] },
   { match: (pathname: string) => pathname === '/masking-rules', read: ['masking_rules.read'], write: ['masking_rules.write'] },

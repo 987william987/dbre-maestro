@@ -49,6 +49,7 @@ function createShell(initialEntry = '/tickets') {
             <Route path="/sql-editor" element={<div>sql editor page</div>} />
             <Route path="/scheduled-sql-reports" element={<div>scheduled reports page</div>} />
             <Route path="/dba-tools/binlog-export" element={<div>binlog export page</div>} />
+            <Route path="/dba-tools/table-schemas" element={<div>table schemas page</div>} />
             <Route path="/users" element={<div>users page</div>} />
             <Route path="/users/groups" element={<div>auth groups page</div>} />
             <Route path="/users/resources" element={<div>resources page</div>} />
@@ -336,6 +337,54 @@ describe('AppShell notifications', () => {
     expect(ticketsToggle).toHaveAttribute('aria-expanded', 'true')
   })
 
+  it('Table Schemas 導航只對具有 read permission 的使用者顯示', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'dba',
+        authGroups: ['dba'],
+        authGroupDetails: [],
+        permissions: ['table_schemas.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    const view = renderShell('/dba-tools/table-schemas')
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    expect(screen.getAllByRole('link', { name: 'Table Schemas' }).length).toBeGreaterThan(0)
+
+    view.unmount()
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 2,
+        username: 'reader',
+        authGroups: ['reader'],
+        authGroupDetails: [],
+        permissions: ['tickets.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/tickets')
+    expect(screen.queryAllByRole('link', { name: 'Table Schemas' })).toHaveLength(0)
+  })
+
   it('tickets breadcrumb 會顯示頁面說明 popover', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
@@ -501,6 +550,7 @@ describe('AppShell notifications', () => {
     { path: '/sql-editor', read: 'sql_editor.read', label: 'SQL Editor' },
     { path: '/scheduled-sql-reports', read: 'scheduled_sql_reports.read', label: 'Scheduled Reports' },
     { path: '/dba-tools/binlog-export', read: 'binlog_exports.read', label: 'Binlog Export' },
+    { path: '/dba-tools/table-schemas', read: 'table_schemas.read', label: 'Table Schemas' },
     { path: '/users', read: 'users.read', label: 'Users' },
     { path: '/users/groups', read: 'users.read', label: 'Auth Groups' },
     { path: '/db-connections', read: 'db_connections.read', label: 'DB Connections' },
