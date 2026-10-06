@@ -302,16 +302,24 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	original := len(p)
-	remaining := b.limit - b.buffer.Len()
-	if remaining > 0 {
-		if len(p) > remaining {
-			p = p[:remaining]
-		}
-		_, _ = b.buffer.Write(p)
+	if b.limit <= 0 {
+		b.truncated = b.truncated || original > 0
+		return original, nil
 	}
-	if original > remaining {
+	if len(p) >= b.limit {
+		b.buffer.Reset()
+		_, _ = b.buffer.Write(p[len(p)-b.limit:])
+		b.truncated = b.truncated || original > b.limit
+		return original, nil
+	}
+	overflow := b.buffer.Len() + len(p) - b.limit
+	if overflow > 0 {
+		retained := append([]byte(nil), b.buffer.Bytes()[overflow:]...)
+		b.buffer.Reset()
+		_, _ = b.buffer.Write(retained)
 		b.truncated = true
 	}
+	_, _ = b.buffer.Write(p)
 	return original, nil
 }
 func (b *limitedBuffer) String() string  { b.mu.Lock(); defer b.mu.Unlock(); return b.buffer.String() }

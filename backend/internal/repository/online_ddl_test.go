@@ -98,7 +98,7 @@ func TestOnlineDDLRunnerLifecycleUpdatesAreConditional(t *testing.T) {
 	if err != nil || !alive {
 		t.Fatalf("alive=%v err=%v", alive, err)
 	}
-	mock.ExpectExec("UPDATE ticket_online_ddl_runs SET status = \\?, phase = 'finished'").WithArgs(onlineddl.StatusFailed, "heartbeat_failed", sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE ticket_online_ddl_runs SET status = \\?, phase = 'finished', eta_seconds = NULL").WithArgs(onlineddl.StatusFailed, "heartbeat_failed", sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
 	finished, err := repo.FinishRunning(context.Background(), 7, onlineddl.StatusFailed, "heartbeat_failed")
 	if err != nil || !finished {
 		t.Fatalf("finished=%v err=%v", finished, err)
@@ -209,7 +209,7 @@ func TestOnlineDDLCreateQueuedAtomicallyPersistsParametersAndClaimsStatement(t *
 
 func TestOnlineDDLFinishOutcomePersistsArtifactsAndReleasesLock(t *testing.T) {
 	repo, mock := newOnlineDDLRepoTest(t)
-	mock.ExpectExec("UPDATE ticket_online_ddl_runs SET status = \\?, phase = 'finished'").WithArgs(onlineddl.StatusCancelledArtifacts, onlineddl.ErrCancelledArtifacts.Error(), "verified", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE ticket_online_ddl_runs SET status = \\?, phase = 'finished', eta_seconds = NULL").WithArgs(onlineddl.StatusCancelledArtifacts, onlineddl.ErrCancelledArtifacts.Error(), "verified", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
 	ok, err := repo.FinishOutcome(context.Background(), 11, onlineddl.StatusCancelledArtifacts, onlineddl.ErrCancelledArtifacts.Error(), "verified", onlineddl.ArtifactSummary{Items: []onlineddl.Artifact{{Kind: "ghost_table", Name: "_orders_gho", Exists: true}}})
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)

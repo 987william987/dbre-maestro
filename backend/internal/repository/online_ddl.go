@@ -123,7 +123,7 @@ func (r *OnlineDDLRepo) FinishRunning(ctx context.Context, id uint64, status, er
 	if errorCode != "" {
 		code = errorCode
 	}
-	return execChanged(r.db.ExecContext(ctx, `UPDATE ticket_online_ddl_runs SET status = ?, phase = 'finished', active_connection_id = NULL, error_code = ?, version = version + 1, finished_at = ?, updated_at = ? WHERE id = ? AND status IN ('running','paused','cancel_requested')`, status, code, now, now, id))
+	return execChanged(r.db.ExecContext(ctx, `UPDATE ticket_online_ddl_runs SET status = ?, phase = 'finished', eta_seconds = NULL, active_connection_id = NULL, error_code = ?, version = version + 1, finished_at = ?, updated_at = ? WHERE id = ? AND status IN ('running','paused','cancel_requested')`, status, code, now, now, id))
 }
 
 func (r *OnlineDDLRepo) FinishOutcome(ctx context.Context, id uint64, status, errorCode, confidence string, artifacts onlineddl.ArtifactSummary) (bool, error) {
@@ -139,7 +139,7 @@ func (r *OnlineDDLRepo) FinishOutcome(ctx context.Context, id uint64, status, er
 	if errorCode != "" {
 		code = errorCode
 	}
-	return execChanged(r.db.ExecContext(ctx, `UPDATE ticket_online_ddl_runs SET status = ?, phase = 'finished', active_connection_id = NULL, error_code = ?, outcome_confidence = ?, artifact_summary = ?, version = version + 1, finished_at = ?, updated_at = ? WHERE id = ? AND status IN ('running','paused','cancel_requested')`, status, code, confidence, artifactJSON, now, now, id))
+	return execChanged(r.db.ExecContext(ctx, `UPDATE ticket_online_ddl_runs SET status = ?, phase = 'finished', eta_seconds = NULL, active_connection_id = NULL, error_code = ?, outcome_confidence = ?, artifact_summary = ?, version = version + 1, finished_at = ?, updated_at = ? WHERE id = ? AND status IN ('running','paused','cancel_requested')`, status, code, confidence, artifactJSON, now, now, id))
 }
 
 func (r *OnlineDDLRepo) SaveProgress(ctx context.Context, id uint64, progress onlineddl.ProgressSnapshot, history bool) (bool, error) {

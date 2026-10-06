@@ -209,7 +209,7 @@ echo "gh-ost 1.1.6"
 }
 
 func TestAdapterBoundsOutputAndMapsFailures(t *testing.T) {
-	large := writeFakeTool(t, `i=0; while [ "$i" -lt 200 ]; do printf '0123456789'; i=$((i+1)); done`)
+	large := writeFakeTool(t, `i=0; while [ "$i" -lt 200 ]; do printf '0123456789'; i=$((i+1)); done; printf 'LATEST'`)
 	req := toolRequest(ModeGhost)
 	req.MaxOutputBytes = 64
 	p, err := NewGhostAdapter(large).Start(context.Background(), req)
@@ -223,6 +223,9 @@ func TestAdapterBoundsOutputAndMapsFailures(t *testing.T) {
 	if !result.OutputTruncated || len(result.Stdout) != 64 {
 		t.Fatalf("result=%+v", result)
 	}
+	if !strings.HasSuffix(result.Stdout, "LATEST") {
+		t.Fatalf("bounded output did not retain the latest bytes: %q", result.Stdout)
+	}
 	failing := writeFakeTool(t, `printf 'failed super-secret-value' >&2; exit 2`)
 	p, err = NewGhostAdapter(failing).Start(context.Background(), toolRequest(ModeGhost))
 	if err != nil {
@@ -235,6 +238,21 @@ func TestAdapterBoundsOutputAndMapsFailures(t *testing.T) {
 	_, err = NewGhostAdapter(filepath.Join(t.TempDir(), "missing")).Start(context.Background(), toolRequest(ModeGhost))
 	if !errors.Is(err, ErrToolUnavailable) {
 		t.Fatalf("missing error=%v", err)
+	}
+}
+
+func TestLimitedBufferKeepsLatestProgressAfterTruncation(t *testing.T) {
+	buffer := &limitedBuffer{limit: 64 * 1024}
+	_, _ = buffer.Write([]byte("Copy: 12029000/18440576 65.2%; ETA: 2732s\n"))
+	_, _ = buffer.Write([]byte(strings.Repeat("x", 70*1024)))
+	_, _ = buffer.Write([]byte("\nCopy: 18440576/18440576 100.0%; ETA: due\n# Done\n"))
+	result := buffer.String()
+	if !buffer.Truncated() || strings.Contains(result, "65.2%") || !strings.Contains(result, "100.0%") || !strings.HasSuffix(result, "# Done\n") {
+		t.Fatalf("tail buffer result is not the latest output: truncated=%v suffix=%q", buffer.Truncated(), result[len(result)-80:])
+	}
+	progress, ok := ParseProgress(ModeGhost, result)
+	if !ok || progress.ProgressPercent == nil || *progress.ProgressPercent != 100 || progress.ETASeconds != nil {
+		t.Fatalf("latest progress was not parsed after truncation: ok=%v progress=%+v", ok, progress)
 	}
 }
 
