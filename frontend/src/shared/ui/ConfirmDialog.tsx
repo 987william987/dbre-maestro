@@ -52,7 +52,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={loading || confirmDisabled}
             className={`inline-flex h-10 items-center justify-center rounded-control px-4 text-sm font-bold text-white transition disabled:opacity-50 ${
-              tone === 'danger' ? 'bg-danger hover:bg-red-600' : 'bg-brand hover:bg-slate-800'
+              tone === 'danger' ? 'bg-danger hover:bg-danger/90' : 'bg-brand hover:bg-brand/90'
             }`}
           >
             {loading ? 'Processing…' : confirmLabel}

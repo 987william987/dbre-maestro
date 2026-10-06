@@ -2,11 +2,62 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/onlineddl"
 )
+
+type settingsToolAdapter struct {
+	mode, version string
+	err           error
+}
+
+func (a settingsToolAdapter) Mode() string                            { return a.mode }
+func (a settingsToolAdapter) Version(context.Context) (string, error) { return a.version, a.err }
+func (a settingsToolAdapter) Start(context.Context, onlineddl.ToolRequest) (onlineddl.ToolProcess, error) {
+	return nil, errors.New("not used")
+}
+
+func TestOnlineDDLReadinessExposesCanonicalVersionWithoutImplementationDetails(t *testing.T) {
+	readiness := onlineDDLReadiness(context.Background(), map[string]onlineddl.Adapter{
+		onlineddl.ModeGhost: settingsToolAdapter{mode: onlineddl.ModeGhost, version: "gh-ost version 1.1.6"},
+		onlineddl.ModePTOSC: settingsToolAdapter{mode: onlineddl.ModePTOSC, err: onlineddl.ErrToolUnavailable},
+	})
+	if !readiness[onlineddl.ModeGhost].Available || readiness[onlineddl.ModeGhost].Version != "1.1.6" {
+		t.Fatalf("unexpected gh-ost readiness: %#v", readiness[onlineddl.ModeGhost])
+	}
+	if readiness[onlineddl.ModePTOSC].Available || readiness[onlineddl.ModePTOSC].Version != "" {
+		t.Fatalf("unexpected pt-osc readiness: %#v", readiness[onlineddl.ModePTOSC])
+	}
+}
+
+func TestSettingsResponseKeepsOnlineDDLReadinessAfterMutation(t *testing.T) {
+	handler := &SettingsHandler{
+		appEnv: "development",
+		onlineDDLAdapters: map[string]onlineddl.Adapter{
+			onlineddl.ModeGhost: settingsToolAdapter{mode: onlineddl.ModeGhost, version: "gh-ost version 1.1.6"},
+			onlineddl.ModePTOSC: settingsToolAdapter{mode: onlineddl.ModePTOSC, version: "pt-online-schema-change 3.7.1"},
+		},
+	}
+	recorder := httptest.NewRecorder()
+	handler.writeSettingsResponse(recorder, context.Background(), &model.PlatformSettings{})
+
+	var response settingsResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.AppEnv != "development" || !response.OnlineDDLTools[onlineddl.ModeGhost].Available || !response.OnlineDDLTools[onlineddl.ModePTOSC].Available {
+		t.Fatalf("mutation response lost runtime readiness: %#v", response)
+	}
+	if response.OnlineDDLTools[onlineddl.ModeGhost].Version != "1.1.6" || response.OnlineDDLTools[onlineddl.ModePTOSC].Version != "3.7.1" {
+		t.Fatalf("unexpected versions: %#v", response.OnlineDDLTools)
+	}
+}
 
 func TestResolveSecretStateAllowsSavingWhenCurrentSecretExists(t *testing.T) {
 	configured, required := resolveSecretState("cli_existing", "", false, true)

@@ -95,6 +95,12 @@ function normalizeSettings(settings: PlatformSettings): PlatformSettings {
     db_metadata_account_sync_interval_minutes:
       typeof settings.db_metadata_account_sync_interval_minutes === 'number' ? settings.db_metadata_account_sync_interval_minutes : 60,
     db_metadata_cron_timezone: typeof settings.db_metadata_cron_timezone === 'string' ? settings.db_metadata_cron_timezone : 'Asia/Taipei',
+    ddl_ghost_enabled: typeof settings.ddl_ghost_enabled === 'boolean' ? settings.ddl_ghost_enabled : false,
+    ddl_ptosc_enabled: typeof settings.ddl_ptosc_enabled === 'boolean' ? settings.ddl_ptosc_enabled : false,
+    online_ddl_tools: {
+      'gh-ost': settings.online_ddl_tools?.['gh-ost'] ?? { available: false },
+      'pt-osc': settings.online_ddl_tools?.['pt-osc'] ?? { available: false },
+    },
   }
 }
 

@@ -35,6 +35,9 @@
 | `/users/query-access` | `UsersPage` | W | `UsersPage.test.tsx` | 達標 |
 | `/sql-editor` | `SQLEditorPage` | X | `SQLEditorPage.test.tsx` | 達標；涵蓋 AppShell route 切換、navigation render-loop 與 Filter Columns 回歸 |
 | `/scheduled-sql-reports` | `ScheduledSQLReportsPage` | W | `ScheduledSQLReportsPage.test.tsx` | 達標 |
+| `/dba-tools/binlog-export` | `BinlogExportPage` | X | `BinlogExportPage.test.tsx` | 達標；涵蓋 time／position payload、未篩選確認、read-only、timestamp probe、取消／重試、preview／download／expired、錯誤狀態與 terminal polling |
+| `/dba-tools/sessions-management` | `SessionManagementPage` | X | `SessionManagementPage.test.tsx` | 達標；涵蓋 AWS/manual target、request abort、auto-refresh cleanup、filters、protected/read-only、identity payload、prefix preview/cancel、loop create/stop、Redis 邊界與 mutation failure |
+| `/dba-tools/table-schemas` | `TableSchemasPage` | X | `TableSchemasPage.test.tsx` | 達標；涵蓋 Export/Sync、permission、empty、partial failure、cancel、retry drift、stale response、target conflict 與 dependency cycle |
 | `/db-connections` | `DBConnectionsPage` | W | `DBConnectionsPage.test.tsx` | 達標 |
 | `/db-connections/:id/overview` | `DBConnectionDetailPage` | R | `DBConnectionDetailPage.test.tsx` | 達標 |
 | `/db-connections/:id/databases` | `DBConnectionDetailPage` | R | `DBConnectionDetailPage.test.tsx` | 達標 |

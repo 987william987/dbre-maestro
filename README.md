@@ -83,7 +83,7 @@ Testnet 與 production 的 CI/CD 都使用根目錄 multi-stage `Dockerfile` 建
 docker build -t dbre-maestro:local .
 ```
 
-Image 內包含 React production assets、Go server、database migrations 與 `my2sql`。Runtime Secret 不會寫入 image，而是由部署環境透過 Kubernetes、AWS Secrets Manager 與 IRSA 注入。
+Image 內包含 React production assets、Go server、database migrations、`my2sql`、`gh-ost` 與 `pt-online-schema-change`。Runtime Secret 不會寫入 image，而是由部署環境透過 Kubernetes、AWS Secrets Manager 與 IRSA 注入；Online DDL 外部工具仍需由平台功能開關與執行流程啟用。
 
 Kubernetes／ArgoCD manifests 維護在外部 GitOps repositories。本 repository 負責建立 application image；部署平台負責 image tag、runtime 設定、Secret、網路、migration 與 rollout。
 

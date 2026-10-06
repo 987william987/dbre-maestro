@@ -1,0 +1,35 @@
+services:
+  mysql80-source:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: table_schema_it
+    ports:
+      - "${TABLE_SCHEMA_IT_MYSQL_PORT:-13317}:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=table_schema_it mysqladmin ping -h 127.0.0.1 -uroot --silent"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  mysql80-target:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: table_schema_it
+    ports:
+      - "${TABLE_SCHEMA_IT_MYSQL80_TARGET_PORT:-13318}:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=table_schema_it mysqladmin ping -h 127.0.0.1 -uroot --silent"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  mysql57:
+    image: mysql:5.7
+    platform: linux/amd64
+    environment:
+      MYSQL_ROOT_PASSWORD: table_schema_it
+    ports:
+      - "${TABLE_SCHEMA_IT_MYSQL57_PORT:-13319}:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=table_schema_it mysqladmin ping -h 127.0.0.1 -uroot --silent"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

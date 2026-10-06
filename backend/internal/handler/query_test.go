@@ -83,6 +83,21 @@ func TestInjectLimitSkipsRedis(t *testing.T) {
 	}
 }
 
+func TestRedisCommandArgsChangedRecordsNormalization(t *testing.T) {
+	if redisCommandArgsChanged("ZRANGE leaderboard 0 -1", "ZRANGE", []string{"leaderboard", "0", "199"}) != true {
+		t.Fatal("bounded Redis execution must be distinguishable from the original command")
+	}
+	if redisCommandArgsChanged("GET user:1", "GET", []string{"user:1"}) {
+		t.Fatal("unchanged Redis command unexpectedly marked as normalized")
+	}
+}
+
+func TestRedisCommandForAuditPreservesArgumentBoundaries(t *testing.T) {
+	if got := redisCommandForAudit("GET", []string{"user profile"}); got != `GET "user profile"` {
+		t.Fatalf("redisCommandForAudit() = %q", got)
+	}
+}
+
 func TestInjectLimitSkipsShowStatements(t *testing.T) {
 	got := injectLimit("SHOW GRANTS FOR dev;", 200, "mysql")
 	want := "SHOW GRANTS FOR dev"

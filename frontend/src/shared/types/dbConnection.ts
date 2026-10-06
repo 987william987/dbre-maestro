@@ -1,7 +1,7 @@
 export type DBConnectionCredential = {
   id: number
   db_connection_id: number
-  credential_role: 'readonly' | 'readwrite' | string
+  credential_role: 'readonly' | 'readwrite' | 'rollback' | 'operations' | string
   username: string
   encryption_key_version: number
   created_at: string

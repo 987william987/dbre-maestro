@@ -14,7 +14,7 @@
 - **卡片式版面**：淺灰頁面背景（`bg-muted/40`）+ 白色卡片，圓角 `rounded-xl`，細邊框 `border`，無陰影或極淡陰影。
 - **大量留白**：卡片內 padding 充足（`p-6`），區塊間距 `gap-4`～`gap-6`。
 - **語意色僅兩種**：綠色 = 正向趨勢（+27.9%），紅色 = 負向趨勢（-13.7%）與通知 badge。
-- **支援明暗模式與主題色切換**：CSS variables 驅動（shadcn theming），頂部欄提供 light/dark toggle 與 theme preset 選擇器。
+- **支援明暗模式與色彩主題**：CSS variables 驅動；Light／Dark／System 與 Default／Ocean／Forest／Amber／Amethyst 分別選擇並可任意組合。
 
 ## 2. 版面結構（App Shell）
 
@@ -39,7 +39,7 @@
 
 ### 2.2 Topbar（頂部欄）
 - 左：sidebar 收合鈕 + 目前 App 名稱。
-- 右：全域搜尋（觸發 `⌘K` Command Palette）、通知鈴鐺（紅色數字 badge）、明暗切換、主題色選擇器（色點 + 名稱下拉）。
+- 右：全域搜尋（觸發 `⌘K` Command Palette）、通知鈴鐺（紅色數字 badge）、Light／Dark／System 模式選單、色票主題選擇器。
 
 ### 2.3 第二層工具列
 - Breadcrumb（目前路徑）+ 頁面內搜尋框（"Search pages or run commands"）。
@@ -83,6 +83,10 @@
 | 圓角 | 卡片 `xl`、按鈕/輸入框 `md`、badge `full` |
 | 間距 | 卡片內 `p-6`，網格 `gap-4`～`gap-6` |
 
+新頁面與共用元件必須使用 `bg-page`、`bg-panel`、`bg-panel-soft`、`text-ink`、`text-muted`、`border-border` 等 semantic tokens，不可用固定 neutral 色模擬主要表面。固定色僅保留給有明確語意的狀態色、遮罩、QR code，或刻意常駐深色的工具介面。
+
+色彩主題只調整品牌色、focus、輕量表面與圖表色；success／warning／danger 的語意不可隨主題改變。新增 preset 時必須同時提供 Light 與 Dark tokens，並驗證文字與控制項對比。
+
 ## 5. 元件對照（shadcn/ui）
 
 | 用途 | 元件 |
@@ -93,12 +97,13 @@
 | 列表 | `Table`、`Tabs`、`Badge`、`Progress`、`DropdownMenu`、`Pagination`、`Select`、`Input` |
 | 表單 | `Form`（react-hook-form + zod）、`Input`、`Select`、`Textarea`、`Button` |
 | 其他 | `Avatar`、`Tooltip`、`Sheet`（行動版 sidebar）、`Sonner`（toast） |
-| SQL / 程式碼編輯 | `@uiw/react-codemirror`（已安裝；嵌入 `Card` 內，邊框與圓角沿用卡片規範，dark mode 搭配 one-dark theme） |
+| SQL / 程式碼編輯 | `@uiw/react-codemirror`（已安裝；一般 editor 跟隨 Light／Dark／System，Admin Query Console 為降低執行介面的視覺切換成本，刻意固定使用 one-dark） |
 
 ## 6. 互動與響應式
 
 - `⌘K` 開啟 Command Palette（頁面導覽 + 指令）。
 - Sidebar 可收合；行動版改用 `Sheet` 抽屜。
+- 顯示模式與色彩主題分別保存；System 跟隨作業系統，且兩者都在 React 啟動前套用，避免初始白閃或色彩跳動。
 - 主內容區為獨立捲動容器（topbar / sidebar 固定）。
 - 表格在窄螢幕允許橫向捲動或隱藏次要欄位（搭配 Manage Table）。
 - 響應式斷點：KPI 4 欄 → 2 欄 → 1 欄；圖表列 2 欄 → 1 欄；表單兩欄 → 單欄。

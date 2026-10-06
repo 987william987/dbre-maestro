@@ -91,6 +91,7 @@ type SendResult struct {
 	Attempts      int
 	Err           error
 	SkippedReason string
+	MessageID     string
 }
 
 // Send delivers a message. The caller is responsible for logging failures
@@ -166,7 +167,7 @@ func (c *Client) SendToRecipientType(ctx context.Context, recipientType string, 
 			}
 		}
 
-		status, err := c.postAppMessage(ctx, recipientType, recipient, msg)
+		status, messageID, err := c.postAppMessage(ctx, recipientType, recipient, msg)
 		if err != nil {
 			var apiErr *larkAPIError
 			if errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 {
@@ -184,7 +185,7 @@ func (c *Client) SendToRecipientType(ctx context.Context, recipientType string, 
 			continue
 		}
 		if status >= 200 && status < 300 {
-			return SendResult{Attempts: attempt}
+			return SendResult{Attempts: attempt, MessageID: messageID}
 		}
 		if status >= 400 && status < 500 {
 			return SendResult{
@@ -304,6 +305,9 @@ type larkSendMessageRequest struct {
 type larkSendMessageResponse struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
+	Data struct {
+		MessageID string `json:"message_id"`
+	} `json:"data"`
 }
 
 type larkUploadFileResponse struct {
@@ -341,10 +345,10 @@ func (c *Client) buildText(msg Message) string {
 	return text
 }
 
-func (c *Client) postAppMessage(ctx context.Context, receiveIDType, receiveID string, msg Message) (int, error) {
+func (c *Client) postAppMessage(ctx context.Context, receiveIDType, receiveID string, msg Message) (int, string, error) {
 	accessToken, err := c.getTenantAccessToken(ctx)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	msgType := "text"
@@ -354,7 +358,7 @@ func (c *Client) postAppMessage(ctx context.Context, receiveIDType, receiveID st
 		content, err = json.Marshal(BuildCardContent(*msg.Card))
 	}
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	payload, err := json.Marshal(larkSendMessageRequest{
 		ReceiveID: receiveID,
@@ -362,38 +366,38 @@ func (c *Client) postAppMessage(ctx context.Context, receiveIDType, receiveID st
 		Content:   string(content),
 	})
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	endpoint := "https://open.larksuite.com/open-apis/im/v1/messages?receive_id_type=" + url.QueryEscape(receiveIDType)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	var parsed larkSendMessageResponse
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &parsed); err != nil {
 			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-				return resp.StatusCode, &larkAPIError{
+				return resp.StatusCode, "", &larkAPIError{
 					Status: resp.StatusCode,
 					Code:   parsed.Code,
 					Body:   fmt.Sprintf("lark send message http %d: %s", resp.StatusCode, strings.TrimSpace(string(body))),
 				}
 			}
-			return 0, fmt.Errorf("decode lark message response: %w", err)
+			return 0, "", fmt.Errorf("decode lark message response: %w", err)
 		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -404,20 +408,87 @@ func (c *Client) postAppMessage(ctx context.Context, receiveIDType, receiveID st
 		if msg == "" {
 			msg = http.StatusText(resp.StatusCode)
 		}
-		return resp.StatusCode, &larkAPIError{
+		return resp.StatusCode, "", &larkAPIError{
 			Status: resp.StatusCode,
 			Code:   parsed.Code,
 			Body:   fmt.Sprintf("lark send message http %d code=%d msg=%s", resp.StatusCode, parsed.Code, msg),
 		}
 	}
 	if parsed.Code != 0 {
-		return http.StatusBadRequest, &larkAPIError{
+		return http.StatusBadRequest, "", &larkAPIError{
 			Status: http.StatusBadRequest,
 			Code:   parsed.Code,
 			Body:   fmt.Sprintf("lark app error code %d: %s", parsed.Code, parsed.Msg),
 		}
 	}
-	return resp.StatusCode, nil
+	messageID := strings.TrimSpace(parsed.Data.MessageID)
+	if msg.Card != nil && messageID == "" {
+		return resp.StatusCode, "", errors.New("lark interactive message response missing message_id")
+	}
+	return resp.StatusCode, messageID, nil
+}
+
+func (c *Client) UpdateMessage(ctx context.Context, messageID string, card Card) SendResult {
+	messageID = strings.TrimSpace(messageID)
+	if c.cfg.Mode != ModeApp || messageID == "" {
+		return SendResult{Err: errors.New("lark app message id is required")}
+	}
+	content, err := json.Marshal(BuildCardContent(card))
+	if err != nil {
+		return SendResult{Err: err}
+	}
+	payload, err := json.Marshal(map[string]string{"content": string(content)})
+	if err != nil {
+		return SendResult{Err: err}
+	}
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-time.After(retryDelays[attempt-2]):
+			case <-ctx.Done():
+				return SendResult{Attempts: attempt - 1, Err: ctx.Err()}
+			}
+		}
+		token, err := c.getTenantAccessToken(ctx)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		endpoint := "https://open.larksuite.com/open-apis/im/v1/messages/" + url.PathEscape(messageID)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPatch, endpoint, bytes.NewReader(payload))
+		if err != nil {
+			return SendResult{Attempts: attempt, Err: err}
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			continue
+		}
+		var parsed larkSendMessageResponse
+		_ = json.Unmarshal(body, &parsed)
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 && parsed.Code == 0 {
+			return SendResult{Attempts: attempt, MessageID: messageID}
+		}
+		lastErr = fmt.Errorf("lark update message http %d code=%d msg=%s", resp.StatusCode, parsed.Code, parsed.Msg)
+		apiErr := &larkAPIError{Status: resp.StatusCode, Code: parsed.Code, Body: lastErr.Error()}
+		if apiErr.isInvalidAccessToken() {
+			c.invalidateTenantAccessToken()
+			continue
+		}
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return SendResult{Attempts: attempt, Err: lastErr}
+		}
+	}
+	return SendResult{Attempts: maxAttempts, Err: lastErr}
 }
 
 func BuildCardContent(card Card) map[string]any {

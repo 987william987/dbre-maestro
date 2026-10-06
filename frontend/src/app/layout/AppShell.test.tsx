@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppShell } from '@/app/layout/AppShell'
+import { ThemeProvider } from '@/shared/theme/ThemeContext'
 import { ToastProvider } from '@/shared/ui/ToastContext'
 
 vi.mock('@/shared/auth/AuthContext', () => ({
@@ -38,14 +39,17 @@ const storage = new Map<string, string>()
 function createShell(initialEntry = '/tickets') {
   return (
     <MemoryRouter initialEntries={[initialEntry]}>
-      <ToastProvider>
-        <Routes>
+      <ThemeProvider>
+        <ToastProvider>
+          <Routes>
           <Route element={<AppShell />}>
             <Route path="/tickets" element={<div>tickets page</div>} />
             <Route path="/tickets/new" element={<div>new ticket page</div>} />
             <Route path="/tickets/:id" element={<div>ticket detail page</div>} />
             <Route path="/sql-editor" element={<div>sql editor page</div>} />
             <Route path="/scheduled-sql-reports" element={<div>scheduled reports page</div>} />
+            <Route path="/dba-tools/binlog-export" element={<div>binlog export page</div>} />
+            <Route path="/dba-tools/table-schemas" element={<div>table schemas page</div>} />
             <Route path="/users" element={<div>users page</div>} />
             <Route path="/users/groups" element={<div>auth groups page</div>} />
             <Route path="/users/resources" element={<div>resources page</div>} />
@@ -62,8 +66,9 @@ function createShell(initialEntry = '/tickets') {
             <Route path="/settings/query-execution" element={<div>query execution settings page</div>} />
             <Route path="/settings/integrations" element={<div>integration settings page</div>} />
           </Route>
-        </Routes>
-      </ToastProvider>
+          </Routes>
+        </ToastProvider>
+      </ThemeProvider>
     </MemoryRouter>
   )
 }
@@ -176,6 +181,31 @@ describe('AppShell notifications', () => {
     expect(screen.getByText('Execute')).toBeInTheDocument()
     expect(screen.getByText('T-101')).toBeInTheDocument()
     expect(screen.getByText('Pending review')).toBeInTheDocument()
+  })
+
+  it('可切換顯示模式並持久化選擇', async () => {
+    renderShell()
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Theme: System' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Dark theme' }))
+
+    expect(document.documentElement).toHaveClass('dark')
+    expect(window.localStorage.getItem('dbre-theme-mode')).toBe('dark')
+    expect(screen.getByRole('button', { name: 'Theme: Dark' })).toBeInTheDocument()
+  })
+
+  it('可獨立切換並持久化色彩主題', async () => {
+    renderShell()
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Color theme: Default' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ocean color theme' }))
+
+    expect(document.documentElement).toHaveAttribute('data-theme', 'ocean')
+    expect(window.localStorage.getItem('dbre-theme-preset')).toBe('ocean')
+    expect(window.localStorage.getItem('dbre-theme-mode')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Color theme: Ocean' })).toBeInTheDocument()
   })
 
   it('可將全部通知標示已讀', async () => {
@@ -307,6 +337,54 @@ describe('AppShell notifications', () => {
     expect(ticketsToggle).toHaveAttribute('aria-expanded', 'true')
   })
 
+  it('Table Schemas 導航只對具有 read permission 的使用者顯示', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'dba',
+        authGroups: ['dba'],
+        authGroupDetails: [],
+        permissions: ['table_schemas.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    const view = renderShell('/dba-tools/table-schemas')
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    expect(screen.getAllByRole('link', { name: 'Table Schemas' }).length).toBeGreaterThan(0)
+
+    view.unmount()
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 2,
+        username: 'reader',
+        authGroups: ['reader'],
+        authGroupDetails: [],
+        permissions: ['tickets.read'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/tickets')
+    expect(screen.queryAllByRole('link', { name: 'Table Schemas' })).toHaveLength(0)
+  })
+
   it('tickets breadcrumb 會顯示頁面說明 popover', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
@@ -365,6 +443,35 @@ describe('AppShell notifications', () => {
     expect(screen.getByText(/Select a DB connection/)).toBeInTheDocument()
   })
 
+  it('binlog export breadcrumb 會顯示頁面說明 popover', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 1,
+        username: 'dba',
+        authGroups: ['dba'],
+        authGroupDetails: [],
+        permissions: ['binlog_exports.read', 'binlog_exports.execute'],
+        dbConnectionIds: [],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    renderShell('/dba-tools/binlog-export')
+
+    await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Show Binlog Export Guide' }))
+
+    expect(screen.getByText('Binlog Export Guide')).toBeInTheDocument()
+    expect(screen.getByText(/Limit the export to a database and tables/)).toBeInTheDocument()
+  })
+
   it('桌面側欄可以收合成 icon rail 並再展開', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',
@@ -390,6 +497,7 @@ describe('AppShell notifications', () => {
     await waitFor(() => expect(mockedListNotifications).toHaveBeenCalled())
     const sidebarSubtitle = screen.getByText('Operations Control Plane')
     expect(sidebarSubtitle).toBeInTheDocument()
+    expect(sidebarSubtitle.closest('aside')).toHaveClass('bg-panel', 'dark:bg-sidebar')
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
 
@@ -441,6 +549,8 @@ describe('AppShell notifications', () => {
     { path: '/tickets/TK-1', read: 'tickets.read', label: 'Tickets' },
     { path: '/sql-editor', read: 'sql_editor.read', label: 'SQL Editor' },
     { path: '/scheduled-sql-reports', read: 'scheduled_sql_reports.read', label: 'Scheduled Reports' },
+    { path: '/dba-tools/binlog-export', read: 'binlog_exports.read', label: 'Binlog Export' },
+    { path: '/dba-tools/table-schemas', read: 'table_schemas.read', label: 'Table Schemas' },
     { path: '/users', read: 'users.read', label: 'Users' },
     { path: '/users/groups', read: 'users.read', label: 'Auth Groups' },
     { path: '/db-connections', read: 'db_connections.read', label: 'DB Connections' },

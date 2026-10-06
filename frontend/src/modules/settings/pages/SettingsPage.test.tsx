@@ -107,6 +107,8 @@ function makeSettings(overrides: Partial<PlatformSettings> = {}): PlatformSettin
     db_metadata_account_cron: '0 11 * * *',
     db_metadata_account_sync_interval_minutes: 60,
     db_metadata_cron_timezone: 'Asia/Taipei',
+    ddl_ghost_enabled: false,
+    ddl_ptosc_enabled: false,
     ...overrides,
   }
 }
@@ -157,14 +159,32 @@ describe('SettingsPage', () => {
   })
 
   it('共用 save handler 會儲存目前 section 的設定', async () => {
-    const settings = makeSettings()
+    const settings = makeSettings({ ddl_ghost_enabled: true, ddl_ptosc_enabled: true })
     mockedGetSettings.mockResolvedValue(settings)
     mockedPatchSettings.mockResolvedValue(settings)
     mockSettingsDependencies()
     renderSettingsPageSection('workflow')
     fireEvent.click(await screen.findByRole('button', { name: 'Save Settings' }))
     await waitFor(() => expect(mockedPatchSettings).toHaveBeenCalled())
+    expect(mockedPatchSettings).toHaveBeenCalledWith(expect.objectContaining({ ddl_ghost_enabled: true, ddl_ptosc_enabled: true }))
     expect(await screen.findByText('Platform settings updated.')).toBeInTheDocument()
+  })
+
+  it('query execution 顯示 Online DDL binary readiness 並可更新 enablement', async () => {
+    const settings = makeSettings({
+      ddl_ghost_enabled: false,
+      online_ddl_tools: { 'gh-ost': { available: true, version: '1.1.6' }, 'pt-osc': { available: false } },
+    })
+    mockedGetSettings.mockResolvedValue(settings)
+    mockedPatchSettings.mockResolvedValue({ ...settings, ddl_ghost_enabled: true })
+    mockSettingsDependencies()
+    renderSettingsPageSection('query-execution')
+    expect(await screen.findByText('Ready · 1.1.6')).toBeInTheDocument()
+    expect(screen.getByText('Binary unavailable in this image')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable gh-ost DDL execution' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }))
+    await waitFor(() => expect(mockedPatchSettings).toHaveBeenCalledWith(expect.objectContaining({ ddl_ghost_enabled: true })))
+    expect(screen.getByText('Ready · 1.1.6')).toBeInTheDocument()
   })
 
   it('共用 save handler 失敗時在 integrations route 顯示錯誤', async () => {

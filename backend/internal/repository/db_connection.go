@@ -368,9 +368,6 @@ func (r *DBConnectionRepo) replaceCredentialsTx(ctx context.Context, tx *sqlx.Tx
 		if strings.TrimSpace(credential.CredentialRole) == "" {
 			continue
 		}
-		if strings.TrimSpace(credential.Username) == "" {
-			continue
-		}
 		enc := []byte(nil)
 		if credential.Password == "" {
 			if current, ok := byRole[credential.CredentialRole]; ok && current.Username == credential.Username {
@@ -448,7 +445,7 @@ func collectConnectionIDs(conns []model.DBConnection) []uint64 {
 
 func applyConnectionEndpoint(conn *model.DBConnection, role string) {
 	switch strings.TrimSpace(role) {
-	case model.DBCredentialRoleReadwrite, model.DBCredentialRoleRollback:
+	case model.DBCredentialRoleReadwrite, model.DBCredentialRoleRollback, model.DBCredentialRoleOperations:
 		conn.Host = conn.EffectiveReadwriteHost()
 		conn.Port = conn.EffectiveReadwritePort()
 	default:

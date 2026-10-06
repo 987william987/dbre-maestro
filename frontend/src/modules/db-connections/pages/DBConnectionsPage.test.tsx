@@ -88,6 +88,8 @@ describe('DBConnectionsPage', () => {
     fireEvent.change(screen.getByLabelText('Readonly Port'), { target: { value: '3306' } })
     fireEvent.change(screen.getByLabelText('Readonly Username'), { target: { value: 'readonly' } })
     fireEvent.change(screen.getByLabelText('Readonly Password'), { target: { value: 'secret' } })
+    fireEvent.change(screen.getByLabelText('Operations Username'), { target: { value: 'operator' } })
+    fireEvent.change(screen.getByLabelText('Operations Password'), { target: { value: 'operations-secret' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create Connection' }))
 
     await waitFor(() => expect(mockedCreateDBConnection).toHaveBeenCalledWith({
@@ -103,7 +105,10 @@ describe('DBConnectionsPage', () => {
       username: 'readonly',
       password: 'secret',
       ssl_mode: 'prefer',
-      credentials: [{ credential_role: 'readonly', username: 'readonly', password: 'secret' }],
+      credentials: [
+        { credential_role: 'readonly', username: 'readonly', password: 'secret' },
+        { credential_role: 'operations', username: 'operator', password: 'operations-secret' },
+      ],
     }))
     await waitFor(() => expect(mockedListDBConnections).toHaveBeenCalledTimes(2))
   })

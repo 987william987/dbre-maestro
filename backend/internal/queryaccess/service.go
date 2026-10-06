@@ -166,11 +166,16 @@ func redisQueryAccessKey(command string, args []string) string {
 		return ""
 	}
 	switch strings.ToUpper(strings.TrimSpace(command)) {
-	case "GET", "GETRANGE", "HGET", "HMGET", "HSCAN", "LINDEX", "SISMEMBER", "SMISMEMBER", "SSCAN", "SRANDMEMBER", "ZSCORE", "ZMSCORE", "ZRANK", "ZCOUNT", "ZSCAN":
+	case "GET", "GETRANGE", "GETBIT", "BITCOUNT", "BITPOS", "HGET", "HMGET", "HSCAN", "HSTRLEN", "HRANDFIELD", "LINDEX", "LRANGE", "LPOS", "SISMEMBER", "SMISMEMBER", "SSCAN", "SRANDMEMBER", "ZSCORE", "ZMSCORE", "ZRANK", "ZREVRANK", "ZCOUNT", "ZLEXCOUNT", "ZRANGE", "ZREVRANGE", "ZRANGEBYSCORE", "ZREVRANGEBYSCORE", "ZRANGEBYLEX", "ZREVRANGEBYLEX", "ZRANDMEMBER", "ZSCAN", "XLEN", "XRANGE", "XREVRANGE", "GEOHASH", "GEOPOS", "GEODIST", "GEOSEARCH":
 		return args[0]
 	case "MGET":
 		if len(args) == 1 {
 			return args[0]
+		}
+		return ""
+	case "OBJECT":
+		if len(args) >= 2 {
+			return args[1]
 		}
 		return ""
 	default:

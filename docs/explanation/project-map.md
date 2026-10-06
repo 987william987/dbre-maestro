@@ -18,6 +18,10 @@ DBRE Maestro 是資料庫治理平台。它把查詢、變更、權限、審批�
 | `backend/internal/queryaccess` | query access scope 抽取與授權判斷 |
 | `backend/internal/sqlreview` | SQL / Redis review 規則檢查 |
 | `backend/internal/job` | metadata inventory/object scan 背景 job |
+| `backend/internal/binlogexport` | MySQL Binlog Export queue、併發控制、取消與 artifact 產生流程 |
+| `backend/internal/sessionmanagement` | Session Management topology、session adapters、prefix preview/cancel 與 bounded loop-kill worker |
+| `backend/internal/tableschema` | MySQL table schema metadata、dependency analysis、DDL transformation、bounded export、sync preflight/retry 與 background worker |
+| `backend/internal/my2sql` | 共用 my2sql CLI adapter、bounded output、Forward／Rollback 與 timestamp stats probe |
 | `backend/internal/netguard` | DB Connection host allowlist / CIDR denylist policy |
 | `backend/internal/notification` | Lark App / webhook 通知 |
 | `backend/internal/realtime` | process-local SSE event broker |
@@ -122,6 +126,6 @@ server 啟動後會啟動幾類 background jobs：
 | Masking | [Masking 與 DSL](../reference/masking-and-dsl.md)、`backend/internal/handler/masking_runtime.go` |
 | Scheduled Reports | [Scheduled SQL Reports](../reference/scheduled-sql-reports.md)、`backend/internal/handler/scheduled_sql_report.go` |
 | Metadata | [DB Metadata](../reference/db-metadata.md)、`backend/internal/job/db_metadata_inventory.go`、`backend/internal/job/db_metadata_object.go` |
+| Session Management | [Session Management 規格](../specs/active/20261002-session-management-spec.md)、`backend/internal/sessionmanagement`、`backend/internal/handler/session_management.go` |
 | Deployment | [部署到 AWS EKS](../how-to/deploy-to-aws-eks.md)、[設定與環境變數](../reference/configuration.md) |
 | 線上排障 | [How to 排查線上與部署問題](../how-to/troubleshoot-operations.md) |
-

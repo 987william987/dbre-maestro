@@ -9,7 +9,8 @@
 1. 執行 `npm ci` 與 `npm run build`，產生 React 靜態檔案。
 2. 編譯 Linux 版 Go server。
 3. 從固定 commit 編譯 `my2sql`。
-4. 將 server、migrations、`my2sql` 與前端靜態檔案放入 Alpine runtime image。
+4. 下載並驗證固定 checksum 的 gh-ost 與 Percona Toolkit。
+5. 將 server、migrations、`my2sql`、`gh-ost`、`pt-online-schema-change` 與前端靜態檔案放入 Alpine runtime image。
 
 最終 image 的進入點是 `/app/maestro`。Go server 預設監聽 `8080`，並從 `/app/public` 提供 React 頁面，因此不需要另外部署前端 container。
 
@@ -81,10 +82,19 @@ docker image inspect \
 docker run --rm \
   --entrypoint sh \
   dbre-maestro:local \
-  -c 'test -x /app/maestro && test -x /usr/local/bin/my2sql && test -d /app/migrations && test -d /app/public'
+  -c 'test -x /app/maestro && test -x /usr/local/bin/my2sql && test -x /usr/local/bin/gh-ost && test -x /usr/local/bin/pt-online-schema-change && test -d /app/migrations && test -d /app/public'
 ```
 
-命令以 exit code `0` 結束，代表 image 內包含 server、`my2sql`、migrations 與前端靜態檔案。這只驗證 image 結構；應用程式健康檢查仍需啟動 container 並連上 Meta DB。
+再確認 Online DDL tools 與 pt-online-schema-change 的 Perl driver 可啟動：
+
+```bash
+docker run --rm \
+  --entrypoint sh \
+  dbre-maestro:local \
+  -c 'gh-ost --version && pt-online-schema-change --version && perl -MDBI -MDBD::mysql -e "print qq(ok\\n)"'
+```
+
+命令以 exit code `0` 結束，代表 image 內包含 server、三個資料庫工具、必要 runtime、migrations 與前端靜態檔案。這只驗證 image 結構；應用程式健康檢查仍需啟動 container 並連上 Meta DB。gh-ost／pt-online-schema-change 存在不代表功能已開放；是否可由工單啟動仍受 application implementation 與 Settings 控制。
 
 ## Runtime 外部依賴
 

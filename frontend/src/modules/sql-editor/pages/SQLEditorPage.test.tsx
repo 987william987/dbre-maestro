@@ -6,14 +6,16 @@ import { SQLEditorPage } from '@/modules/sql-editor/pages/SQLEditorPage'
 import { clearSQLEditorWorkspaceSnapshot, getSQLEditorWorkspaceSnapshot } from '@/modules/sql-editor/workspaceMemory'
 import { ApiError } from '@/shared/api/client'
 
-const { captureCodeMirrorProps } = vi.hoisted(() => ({
+const { captureCodeMirrorProps, themeState } = vi.hoisted(() => ({
   captureCodeMirrorProps: vi.fn(),
+  themeState: { resolvedMode: 'light' as 'light' | 'dark' },
 }))
 
 vi.mock('@uiw/react-codemirror', () => ({
   default: (props: {
     value: string
     extensions?: unknown[]
+    theme?: unknown
     onChange: (value: string) => void
     onStatistics?: (stats: { selectedText: boolean; selectionCode: string }) => void
   }) => {
@@ -52,6 +54,10 @@ vi.mock('@uiw/react-codemirror', () => ({
 
 vi.mock('@/shared/auth/AuthContext', () => ({
   useAuth: vi.fn(),
+}))
+
+vi.mock('@/shared/theme/ThemeContext', () => ({
+  useTheme: () => themeState,
 }))
 
 vi.mock('@/modules/sql-editor/api', () => ({
@@ -105,6 +111,7 @@ describe('SQLEditorPage', () => {
     vi.clearAllMocks()
     clearSQLEditorWorkspaceSnapshot()
     storage.clear()
+    themeState.resolvedMode = 'light'
     mockedUseAuth.mockReturnValue({
       user: {
         id: 7,
@@ -269,6 +276,27 @@ describe('SQLEditorPage', () => {
     rerender(renderPage())
 
     expect(captureCodeMirrorProps.mock.lastCall?.[0].extensions).toBe(extensionsBeforeRerender)
+  })
+
+  it('切換顯示模式時只更新 CodeMirror theme，不重建 extensions', async () => {
+    const renderPage = () => (
+      <MemoryRouter>
+        <ToastProvider>
+          <SQLEditorPage />
+        </ToastProvider>
+      </MemoryRouter>
+    )
+    const { rerender } = render(renderPage())
+
+    await screen.findByRole('button', { name: 'Run' })
+    const extensionsBeforeThemeChange = captureCodeMirrorProps.mock.lastCall?.[0].extensions
+    expect(captureCodeMirrorProps.mock.lastCall?.[0].theme).toBe('light')
+
+    themeState.resolvedMode = 'dark'
+    rerender(renderPage())
+
+    expect(captureCodeMirrorProps.mock.lastCall?.[0].theme).not.toBe('light')
+    expect(captureCodeMirrorProps.mock.lastCall?.[0].extensions).toBe(extensionsBeforeThemeChange)
   })
 
   it('read-only 模式不載入需要 query 權限的資料', async () => {
@@ -1756,7 +1784,7 @@ describe('SQLEditorPage', () => {
 
     const emailHeader = screen.getByText('email').closest('th')
     expect(emailHeader?.querySelector('svg')).toBeInTheDocument()
-    expect(screen.getByText('email').closest('span')?.className).toContain('text-[#b9381f]')
+    expect(screen.getByText('email').closest('span')?.className).toContain('text-danger')
     expect(screen.getByText('Sensitive column')).toBeInTheDocument()
 
     const idHeader = screen.getByText('id').closest('th')

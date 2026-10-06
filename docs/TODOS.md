@@ -35,3 +35,15 @@
 **Context：** `TicketExecutionRegistry`、active query registry 與 SSE broker 明確是 process-local；background jobs 也由每個 app process 啟動。在完成上述改造前，單副本是必要部署前提，不應只調高 `replicaCount`。
 
 **Depends on / blocked by：** 需要先有實際擴容到多副本的計畫才需要動工，目前無明確時程。
+
+---
+
+## 3. 評估 Lark 卡片顯示 Online DDL 執行摘要
+
+**What：** 評估是否在執行階段卡片加入 gh-ost／pt-osc mode、status 或 progress 摘要。
+
+**Why：** 第一版刻意維持現有簡單工單狀態，避免 Online DDL UI 導入時同時改動通知內容與既有 reviewer／executor 卡片語意。
+
+**Context：** 2026-10-05 確認不納入 O7 與首版發佈；既有 Lark 收件人、重疊角色兩張卡、stage 與狀態同步邏輯均不得因後續實作改變。
+
+**Depends on / blocked by：** Online DDL O8 真實工具與 Testnet 驗收完成後再評估。

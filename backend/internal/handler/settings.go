@@ -12,6 +12,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/job"
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
+	"github.com/dbre-maestro/maestro/internal/onlineddl"
 	"github.com/dbre-maestro/maestro/internal/repository"
 )
 
@@ -23,9 +24,20 @@ type SettingsHandler struct {
 	audit                *repository.AuditRepo
 	appEnv               string
 	larkCallbackReloader settingsRuntimeReloader
+	onlineDDLAdapters    map[string]onlineddl.Adapter
 }
 
 type SettingsHandlerOption func(*SettingsHandler)
+
+type onlineDDLToolReadiness struct {
+	Available bool   `json:"available"`
+	Version   string `json:"version,omitempty"`
+}
+
+type settingsResponse struct {
+	*model.PlatformSettings
+	OnlineDDLTools map[string]onlineDDLToolReadiness `json:"online_ddl_tools"`
+}
 
 type settingsRuntimeReloader interface {
 	Reload(context.Context) error
@@ -41,6 +53,10 @@ func WithSettingsHandlerLarkCallbackReloader(reloader settingsRuntimeReloader) S
 	return func(h *SettingsHandler) {
 		h.larkCallbackReloader = reloader
 	}
+}
+
+func WithSettingsHandlerOnlineDDLAdapters(adapters map[string]onlineddl.Adapter) SettingsHandlerOption {
+	return func(h *SettingsHandler) { h.onlineDDLAdapters = adapters }
 }
 
 func normalizeOIDCScopes(scopes []string) []string {
@@ -92,8 +108,29 @@ func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "load settings failed")
 		return
 	}
+	h.writeSettingsResponse(w, r.Context(), settings)
+}
+
+func (h *SettingsHandler) writeSettingsResponse(w http.ResponseWriter, ctx context.Context, settings *model.PlatformSettings) {
 	settings.AppEnv = h.appEnv
-	jsonOK(w, settings)
+	jsonOK(w, settingsResponse{
+		PlatformSettings: settings,
+		OnlineDDLTools:   onlineDDLReadiness(ctx, h.onlineDDLAdapters),
+	})
+}
+
+func onlineDDLReadiness(ctx context.Context, adapters map[string]onlineddl.Adapter) map[string]onlineDDLToolReadiness {
+	tools := map[string]onlineDDLToolReadiness{}
+	for _, mode := range []string{onlineddl.ModeGhost, onlineddl.ModePTOSC} {
+		adapter := adapters[mode]
+		if adapter == nil {
+			tools[mode] = onlineDDLToolReadiness{}
+			continue
+		}
+		version, versionErr := adapter.Version(ctx)
+		tools[mode] = onlineDDLToolReadiness{Available: versionErr == nil, Version: canonicalOnlineDDLToolVersion(mode, version)}
+	}
+	return tools
 }
 
 func (h *SettingsHandler) ListDBConnections(w http.ResponseWriter, r *http.Request) {
@@ -532,8 +569,6 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	req.AppEnv = h.appEnv
-
 	actorID := middleware.UserIDFromCtx(r.Context())
 	h.audit.Log(r.Context(), repository.AuditEntry{
 		ActorID:      &actorID,
@@ -568,6 +603,8 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 			"sql_export_app_timeout_seconds":              req.SQLExportAppTimeoutSeconds,
 			"sql_export_mysql_max_execution_time_ms":      req.SQLExportMySQLMaxExecutionTimeMs,
 			"sql_export_postgres_statement_timeout_ms":    req.SQLExportPostgresStatementTimeoutMs,
+			"ddl_ghost_enabled":                           req.DDLGhostEnabled,
+			"ddl_ptosc_enabled":                           req.DDLPTOSCEnabled,
 			"db_metadata_inventory_enabled":               req.DBMetadataInventoryEnabled,
 			"db_metadata_inventory_regions":               req.DBMetadataInventoryRegions,
 			"db_metadata_inventory_engines":               req.DBMetadataInventoryEngines,
@@ -593,7 +630,7 @@ func (h *SettingsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		IPAddress: clientIP(r),
 	})
 
-	jsonOK(w, req)
+	h.writeSettingsResponse(w, r.Context(), &req)
 }
 
 func (h *SettingsHandler) validateUserExists(r *http.Request, userID uint64) error {

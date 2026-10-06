@@ -95,7 +95,7 @@ export function SessionsPage() {
               <button
                 type="button"
                 onClick={() => void loadSessions({ background: true })}
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-panel px-3 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
               >
                 <RefreshCw className="h-4 w-4" />
                 Refresh
@@ -104,7 +104,7 @@ export function SessionsPage() {
                 type="button"
                 disabled={acting !== null || sessions.length === 0}
                 onClick={() => void handleRevokeAll()}
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-danger/20 bg-red-50 px-3 text-[12px] font-semibold text-danger transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-950/40 dark:hover:bg-red-950/60"
               >
                 <Trash2 className="h-4 w-4" />
                 Revoke All
@@ -155,7 +155,7 @@ export function SessionsPage() {
                           <DataTableCell className="whitespace-nowrap">{formatDateTime(session.created_at)}</DataTableCell>
                           <DataTableCell className="whitespace-nowrap">{formatDateTime(session.expires_at)}</DataTableCell>
                           <DataTableCell className="whitespace-nowrap">
-                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] ${revoked ? 'border-slate-200 bg-slate-100 text-slate-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] ${revoked ? 'border-border bg-panel-soft text-muted' : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'}`}>
                               {revoked ? 'Revoked' : 'Active'}
                             </span>
                           </DataTableCell>
@@ -164,7 +164,7 @@ export function SessionsPage() {
                               type="button"
                               disabled={acting !== null || revoked || session.is_current}
                               onClick={() => void handleRevoke(session.id)}
-                              className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-white px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-panel px-2.5 text-[12px] font-semibold text-ink transition hover:bg-panel-soft disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                               Revoke

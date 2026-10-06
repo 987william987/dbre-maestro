@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, ChevronDown, CircleHelp, Database, DatabaseZap, FileClock, FilePlus2, KeyRound, LayoutDashboard, LogOut, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Ticket, Users } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowLeft, Bell, BriefcaseBusiness, CalendarClock, Check, ChevronDown, CircleHelp, Database, DatabaseBackup, DatabaseZap, FileClock, FilePlus2, KeyRound, LayoutDashboard, LogOut, Monitor, Moon, Palette, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, SquareTerminal, Sun, TableProperties, Ticket, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { listNotifications, listNotificationSummary, markAllNotificationsRead, markNotificationRead } from '@/modules/notifications/api'
@@ -7,6 +7,7 @@ import { openEventStream } from '@/shared/api/client'
 import { hasAnyPermission, TICKET_WORKSPACE_PERMISSIONS } from '@/shared/auth/permissions'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
+import { THEME_PRESETS, useTheme, type ThemeMode } from '@/shared/theme/ThemeContext'
 import type { CurrentUser } from '@/shared/types/auth'
 import type { NotificationItem, NotificationSummary } from '@/shared/types/notification'
 import { useToast } from '@/shared/ui/ToastContext'
@@ -59,6 +60,27 @@ const NAV_ITEMS: NavItem[] = [
     icon: CalendarClock,
     allowed: (permissions) => permissions.includes('scheduled_sql_reports.read') || permissions.includes('scheduled_sql_reports.write'),
     to: '/scheduled-sql-reports',
+  },
+  {
+    key: 'binlog-export',
+    label: 'Binlog Export',
+    icon: DatabaseBackup,
+    allowed: (permissions) => permissions.includes('binlog_exports.read'),
+    to: '/dba-tools/binlog-export',
+  },
+  {
+    key: 'session-management',
+    label: 'Session Management',
+    icon: Activity,
+    allowed: (permissions) => permissions.includes('db_sessions.read'),
+    to: '/dba-tools/sessions-management',
+  },
+  {
+    key: 'table-schemas',
+    label: 'Table Schemas',
+    icon: TableProperties,
+    allowed: (permissions) => permissions.includes('table_schemas.read'),
+    to: '/dba-tools/table-schemas',
   },
   {
     key: 'users',
@@ -138,6 +160,10 @@ const NAV_GROUPS = [
     items: ['/dashboard', '/tickets', '/tickets/new', '/sql-editor', '/scheduled-sql-reports'],
   },
   {
+    title: 'DBA Tools',
+    items: ['/dba-tools/binlog-export', '/dba-tools/sessions-management', '/dba-tools/table-schemas'],
+  },
+  {
     title: 'Governance',
     items: ['/users', '/db-connections', '/db-metadata/inventory', '/db-metadata/objects', '/masking-rules', '/sql-review-rules/mysql', '/audit-logs', '/settings/workflow'],
   },
@@ -148,6 +174,9 @@ const READ_ONLY_HEADER_NOTICE_ROUTES = [
   { match: (pathname: string) => pathname.startsWith('/tickets/') && pathname !== '/tickets/new', read: ['tickets.read'], write: ['tickets.apply', 'tickets.review', 'tickets.execute', 'sql_editor.export_review', 'sql_editor.sensitive_review'] },
   { match: (pathname: string) => pathname === '/sql-editor', read: ['sql_editor.read'], write: ['sql_editor.query', 'sql_editor.admin', 'sql_editor.export', 'sql_editor.sensitive_apply'] },
   { match: (pathname: string) => pathname === '/scheduled-sql-reports', read: ['scheduled_sql_reports.read'], write: ['scheduled_sql_reports.write'] },
+  { match: (pathname: string) => pathname === '/dba-tools/binlog-export', read: ['binlog_exports.read'], write: ['binlog_exports.execute'] },
+  { match: (pathname: string) => pathname === '/dba-tools/sessions-management', read: ['db_sessions.read'], write: ['db_sessions.kill', 'db_sessions.loop_kill'] },
+  { match: (pathname: string) => pathname === '/dba-tools/table-schemas', read: ['table_schemas.read'], write: ['table_schemas.sync'] },
   { match: (pathname: string) => pathname.startsWith('/users'), read: ['users.read'], write: ['users.write'] },
   { match: (pathname: string) => pathname === '/db-connections' || pathname.startsWith('/db-connections/'), read: ['db_connections.read', 'db_connections.overview', 'db_connections.databases', 'db_connections.accounts'], write: ['db_connections.write'] },
   { match: (pathname: string) => pathname === '/masking-rules', read: ['masking_rules.read'], write: ['masking_rules.write'] },
@@ -242,6 +271,26 @@ const PAGE_HELP = [
       'Only SELECT, WITH, and SHOW statements are accepted when saving a report.',
       'Sensitive columns are rejected during save; use ticket/export workflows for sensitive data.',
       'Recipients must be selected explicitly, and report execution follows the configured connection and database context.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/dba-tools/binlog-export',
+    title: 'Binlog Export Guide',
+    items: [
+      'Choose a time range or exact binlog positions.',
+      'Limit the export to a database and tables whenever possible to reduce load.',
+      'Probe times reads the first event from each file; the next file starts the previous file end boundary.',
+      'The active binlog has no fixed end time. Completed jobs provide separate forward and rollback artifacts.',
+    ],
+  },
+  {
+    match: (pathname: string) => pathname === '/dba-tools/sessions-management',
+    title: 'Session Management Guide',
+    items: [
+      'Select a DB connection with an operations credential, then choose a live AWS physical node or enter a manual target.',
+      'AWS topology is loaded directly from AWS and only clusters owned by the selected DB connection are available.',
+      'Manual targets are checked against the configured host and CIDR policy on every request.',
+      'Protected system and tool-owned sessions are visible but cannot be acted on.',
     ],
   },
   {
@@ -401,8 +450,11 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
   const location = useLocation()
   const navigate = useNavigate()
   const { pushToast } = useToast()
+  const { mode, preset, resolvedMode, setMode, setPreset } = useTheme()
   const [menuOpen, setMenuOpen] = useState(false)
   const [notificationOpen, setNotificationOpen] = useState(false)
+  const [themeOpen, setThemeOpen] = useState(false)
+  const [presetOpen, setPresetOpen] = useState(false)
   const [pageHelpOpen, setPageHelpOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -418,6 +470,8 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
   const notificationActionCount = notificationSummary.pending + notificationSummary.review_required + notificationSummary.execution_required
   const menuRef = useRef<HTMLDivElement | null>(null)
   const notificationRef = useRef<HTMLDivElement | null>(null)
+  const themeRef = useRef<HTMLDivElement | null>(null)
+  const presetRef = useRef<HTMLDivElement | null>(null)
   const bootstrappedNotificationsRef = useRef(false)
   const seenNotificationIDsRef = useRef<Set<number>>(new Set())
 
@@ -430,11 +484,19 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
       if (!notificationRef.current?.contains(target)) {
         setNotificationOpen(false)
       }
+      if (!themeRef.current?.contains(target)) {
+        setThemeOpen(false)
+      }
+      if (!presetRef.current?.contains(target)) {
+        setPresetOpen(false)
+      }
     }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setMenuOpen(false)
+        setThemeOpen(false)
+        setPresetOpen(false)
       }
     }
 
@@ -445,6 +507,8 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [])
+
+  const selectedPreset = THEME_PRESETS.find((item) => item.value === preset) ?? THEME_PRESETS[0]
 
   useEffect(() => {
     let cancelled = false
@@ -650,7 +714,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
   return (
     <div className="flex h-screen text-ink">
       <aside className={cn(
-        'group/sidebar relative hidden shrink-0 flex-col border-r border-border bg-sidebar transition-[width] duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)] lg:flex',
+        'group/sidebar relative hidden shrink-0 flex-col border-r border-border bg-panel transition-[width] duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)] dark:bg-sidebar lg:flex',
         sidebarCollapsed ? 'w-[72px]' : 'w-64',
       )}>
         <button
@@ -903,7 +967,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
                           onClick={() => void handleOpenNotification(notification)}
                           className={cn(
                             'grid min-w-full w-max grid-cols-[auto_max-content_max-content_max-content] items-center gap-3 border-b border-border px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-panel-soft',
-                            !notification.is_read && 'bg-white',
+                            !notification.is_read && 'bg-panel-soft',
                           )}
                         >
                           <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', notification.is_read ? 'bg-border' : 'bg-brand')} />
@@ -918,10 +982,114 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
               ) : null}
             </div>
 
+            <div ref={themeRef} className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setThemeOpen((current) => !current)
+                  setPresetOpen(false)
+                  setNotificationOpen(false)
+                  setMenuOpen(false)
+                }}
+                className={cn(
+                  'inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-panel text-muted transition-colors',
+                  themeOpen ? 'bg-panel-soft text-ink' : 'hover:bg-panel-soft hover:text-ink',
+                )}
+                aria-label={`Theme: ${mode[0].toUpperCase()}${mode.slice(1)}`}
+              >
+                {resolvedMode === 'dark' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+              </button>
+
+              {themeOpen ? (
+                <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 w-40 rounded-lg border border-border bg-panel p-1 shadow-card">
+                  {([
+                    { value: 'light', label: 'Light', icon: Sun },
+                    { value: 'dark', label: 'Dark', icon: Moon },
+                    { value: 'system', label: 'System', icon: Monitor },
+                  ] satisfies Array<{ value: ThemeMode; label: string; icon: typeof Sun }>).map((item) => {
+                    const Icon = item.icon
+                    return (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => {
+                          setMode(item.value)
+                          setThemeOpen(false)
+                        }}
+                        className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-[12px] font-medium text-ink transition-colors hover:bg-panel-soft"
+                        aria-label={`${item.label} theme`}
+                      >
+                        <Icon className="h-4 w-4 text-muted" />
+                        <span className="flex-1 text-left">{item.label}</span>
+                        {mode === item.value ? <Check className="h-4 w-4" /> : null}
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </div>
+
+            <div ref={presetRef} className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setPresetOpen((current) => !current)
+                  setThemeOpen(false)
+                  setNotificationOpen(false)
+                  setMenuOpen(false)
+                }}
+                className={cn(
+                  'inline-flex h-8 items-center gap-2 rounded-md border border-border bg-panel px-2 text-[12px] font-medium text-ink transition-colors',
+                  presetOpen ? 'bg-panel-soft' : 'hover:bg-panel-soft',
+                )}
+                aria-label={`Color theme: ${selectedPreset.label}`}
+              >
+                <Palette className="h-4 w-4 sm:hidden" aria-hidden="true" />
+                <span className="hidden items-center -space-x-0.5 sm:flex" aria-hidden="true">
+                  {selectedPreset.swatches.map((color) => (
+                    <span key={color} className="h-3.5 w-3.5 rounded-full border border-black/10" style={{ backgroundColor: color }} />
+                  ))}
+                </span>
+                <span className="hidden lg:inline">{selectedPreset.label}</span>
+                <ChevronDown className={cn('hidden h-3.5 w-3.5 text-muted transition-transform sm:block', presetOpen && 'rotate-180')} />
+              </button>
+
+              {presetOpen ? (
+                <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 w-60 rounded-lg border border-border bg-panel p-1 shadow-card">
+                  <p className="px-2 py-1.5 text-[11px] font-semibold text-muted">Color theme</p>
+                  {THEME_PRESETS.map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => {
+                        setPreset(item.value)
+                        setPresetOpen(false)
+                      }}
+                      className="flex h-10 w-full items-center gap-3 rounded-md px-2 text-[12px] font-medium text-ink transition-colors hover:bg-panel-soft"
+                      aria-label={`${item.label} color theme`}
+                    >
+                      <span className="flex items-center -space-x-0.5" aria-hidden="true">
+                        {item.swatches.map((color) => (
+                          <span key={color} className="h-4 w-4 rounded-full border border-black/10" style={{ backgroundColor: color }} />
+                        ))}
+                      </span>
+                      <span className="flex-1 text-left">{item.label}</span>
+                      {preset === item.value ? <Check className="h-4 w-4" /> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
             <div ref={menuRef} className="relative">
               <button
                 type="button"
-                onClick={() => setMenuOpen((current) => !current)}
+                onClick={() => {
+                  setMenuOpen((current) => !current)
+                  setNotificationOpen(false)
+                  setThemeOpen(false)
+                  setPresetOpen(false)
+                }}
                 className={cn(
                   'inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-[12px] font-medium text-ink transition-colors',
                   menuOpen ? 'bg-panel-soft' : 'hover:bg-panel-soft',
@@ -1039,7 +1207,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
                     <CircleHelp className="h-4 w-4" />
                   </button>
                   {!pageHelp.href && pageHelpOpen ? (
-                    <div className="absolute left-0 top-[calc(100%+8px)] z-30 max-h-[min(640px,calc(100vh-9rem))] w-[780px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-border bg-white p-4 text-left shadow-[0_22px_45px_rgba(15,23,42,0.14)]">
+                    <div className="absolute left-0 top-[calc(100%+8px)] z-30 max-h-[min(640px,calc(100vh-9rem))] w-[780px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-border bg-panel p-4 text-left shadow-card">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-[13px] font-semibold text-ink">{pageHelp.title}</p>
@@ -1062,7 +1230,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
                 <button
                   type="button"
                   onClick={() => navigate('/masking-rules')}
-                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border bg-white px-2 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
+                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border bg-panel px-2 text-[12px] font-semibold text-ink transition hover:bg-panel-soft"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" />
                   Back To Rules
@@ -1070,7 +1238,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
               ) : null}
             </div>
             {headerNotice ? (
-              <div className="inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-[12px] font-medium text-amber-800">
+              <div className="inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-[12px] font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 {headerNotice.label}
               </div>
@@ -1110,7 +1278,7 @@ function AuthenticatedAppShell({ user, logout }: { user: CurrentUser; logout: ()
           </nav>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto bg-white">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-page">
           <Outlet />
         </main>
       </div>

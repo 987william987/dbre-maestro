@@ -133,6 +133,40 @@ describe('route guards', () => {
     expect(screen.getByText('sql editor')).toBeInTheDocument()
   })
 
+  it('只有 Binlog Export 權限時，RoleRoute 會導向 DBA tool', () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: {
+        id: 4,
+        username: 'dba',
+        authGroups: ['dba'],
+        authGroupDetails: [],
+        permissions: ['binlog_exports.read'],
+        dbConnectionIds: [1],
+        protected: false,
+        isActive: true,
+      },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/audit-logs']}>
+        <Routes>
+          <Route path="/dba-tools/binlog-export" element={<div>binlog export</div>} />
+          <Route element={<RoleRoute allowedPermissions={['audit_logs.read']} />}>
+            <Route path="/audit-logs" element={<div>audit logs</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('binlog export')).toBeInTheDocument()
+  })
+
   it('audit_logs.write 也可以通過 Audit Logs 頁面守衛', () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',

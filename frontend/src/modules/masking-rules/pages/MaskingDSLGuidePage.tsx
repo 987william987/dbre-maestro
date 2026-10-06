@@ -123,7 +123,7 @@ export function MaskingDSLGuidePage() {
           <p className="mt-1 text-[12px] leading-6 text-muted">
             在後台建立一條 rule 時，實際上送出的資料結構就是下面這四個欄位：
           </p>
-          <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-white px-3 py-2 font-mono text-[11px] leading-5 text-ink">
+          <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-panel px-3 py-2 font-mono text-[11px] leading-5 text-ink">
 {`{
   "column_name": "^(email|contact_email|backup_email)$",
   "match_type": "regex",
@@ -155,7 +155,7 @@ export function MaskingDSLGuidePage() {
                   <li key={note}>{note}</li>
                 ))}
               </ul>
-              <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-white px-3 py-2 font-mono text-[11px] leading-5 text-ink">
+              <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-panel px-3 py-2 font-mono text-[11px] leading-5 text-ink">
                 {MASK_MODE_EXAMPLES[item.mode]}
               </pre>
             </div>
@@ -174,7 +174,7 @@ export function MaskingDSLGuidePage() {
               <p className="mt-1 text-[11px] leading-5 text-muted">
                 pattern: <code>{example.pattern}</code> / match: <code>{example.matchType}</code> / mode: <code>{example.maskMode}</code>
               </p>
-              <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-white px-3 py-2 font-mono text-[11px] leading-5 text-ink">
+              <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-panel px-3 py-2 font-mono text-[11px] leading-5 text-ink">
                 {example.config}
               </pre>
             </div>
@@ -195,7 +195,7 @@ export function MaskingDSLGuidePage() {
             <p className="mt-1 text-[12px] leading-6 text-muted">
               想把所有 `email` 類欄位都遮罩，可以用 regex 規則一次匹配多個欄位名：
             </p>
-            <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-white px-3 py-2 font-mono text-[11px] leading-5 text-ink">
+            <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-panel px-3 py-2 font-mono text-[11px] leading-5 text-ink">
 {`{
   "column_name": "^(email|contact_email|backup_email)$",
   "match_type": "regex",
@@ -217,7 +217,7 @@ export function MaskingDSLGuidePage() {
             <p className="mt-1 text-[12px] leading-6 text-muted">
               如果 `analytics.crm_contacts.email` 是誤傷，不應遮罩，就在 `Unmask Whitelist` 新增一條精準豁免：
             </p>
-            <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-white px-3 py-2 font-mono text-[11px] leading-5 text-ink">
+            <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-panel px-3 py-2 font-mono text-[11px] leading-5 text-ink">
 {`{
   "db_connection_id": 1,
   "database_name": "analytics",

@@ -24,8 +24,8 @@ const iconMap = {
 } as const
 
 const toneMap = {
-  success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  error: 'border-danger/20 bg-red-50 text-danger',
+  success: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+  error: 'border-danger/20 bg-red-50 text-danger dark:bg-red-950',
   info: 'border-border bg-panel text-ink',
 } as const
 

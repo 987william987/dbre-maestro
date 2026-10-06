@@ -81,13 +81,13 @@ function KpiCard({
   tone?: 'neutral' | 'success' | 'warning' | 'danger'
 }) {
   const toneClass = {
-    neutral: 'bg-slate-100 text-slate-700',
-    success: 'bg-emerald-50 text-emerald-700',
-    warning: 'bg-amber-50 text-amber-700',
-    danger: 'bg-rose-50 text-rose-700',
+    neutral: 'bg-panel-soft text-muted',
+    success: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
+    warning: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
+    danger: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300',
   }[tone]
   return (
-    <section className="rounded-xl border border-border bg-panel p-4 shadow-soft">
+    <section className="min-w-0 rounded-xl border border-border bg-panel p-4 shadow-soft">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[12px] font-semibold text-muted">{title}</p>
@@ -105,9 +105,9 @@ function KpiCard({
 function MetricGrid({ items }: { items: Array<{ label: string; value: string | number; tone?: 'neutral' | 'warning' | 'danger' | 'success' }> }) {
   const toneClass = {
     neutral: 'bg-panel-soft text-ink',
-    warning: 'bg-amber-50 text-amber-800',
-    danger: 'bg-rose-50 text-rose-800',
-    success: 'bg-emerald-50 text-emerald-800',
+    warning: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
+    danger: 'bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300',
+    success: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300',
   }
   return (
     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -149,7 +149,7 @@ function DistributionBar({ item, total }: { item: DashboardCount; total: number 
         <span className="truncate font-medium text-ink">{formatTicketType(item.key)}</span>
         <span className="text-muted">{formatCount(item.count)}</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+      <div className="h-2 overflow-hidden rounded-full bg-panel-soft">
         <div className="h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
       </div>
     </div>
@@ -221,7 +221,7 @@ function TicketTable({ tickets, empty }: { tickets: Ticket[]; empty: string }) {
 
 function MetadataJobRow({ label, status, updatedAt }: { label: string; status?: string; updatedAt?: string | null }) {
   const normalizedStatus = status || 'idle'
-  const statusClass = normalizedStatus === 'failed' ? 'border-rose-200 bg-rose-50 text-rose-700' : normalizedStatus === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-border bg-white text-muted'
+  const statusClass = normalizedStatus === 'failed' ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300' : normalizedStatus === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' : 'border-border bg-panel text-muted'
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-panel-soft px-3 py-2 text-[12px]">
       <div className="min-w-0">
@@ -255,7 +255,7 @@ function AccessTable({ scopes, renewableConnectionIDs }: { scopes: DashboardQuer
         </DataTableHead>
         <DataTableBody>
           {scopes.map((scope) => (
-            <DataTableRow key={scope.id} className={scope.expiring_soon ? 'bg-amber-50/40' : undefined}>
+            <DataTableRow key={scope.id} className={scope.expiring_soon ? 'bg-amber-50/40 dark:bg-amber-950/20' : undefined}>
               <DataTableCell className="font-medium">{scope.connection_name || `#${scope.connection_id}`}</DataTableCell>
               <DataTableCell>
                 <span className="font-mono text-[12px]">{scope.database_pattern}.{scope.table_pattern}</span>
@@ -356,7 +356,7 @@ export function DashboardPage() {
   const platform = data.platform
 
   return (
-    <div className="grid gap-4 p-3 sm:p-4">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 p-3 sm:p-4">
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -364,13 +364,13 @@ export function DashboardPage() {
           <h1 className="text-[20px] font-semibold tracking-normal text-ink">Dashboard</h1>
           <p className="mt-1 text-[12px] text-muted">Ticket workload, access boundary, and platform operations.</p>
         </div>
-        <Link to="/tickets/new" className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-slate-800">
+        <Link to="/tickets/new" className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand px-3 text-[12px] font-semibold text-white transition hover:bg-brand/90">
           <FilePlus2 className="h-4 w-4" />
           New Ticket
         </Link>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard title="My Tickets" value={personal.total} helper="All tickets submitted by you" icon={TicketIcon} />
         <KpiCard title="Active" value={personal.active} helper="Waiting for review, execution, or running" icon={Clock3} tone="warning" />
         <KpiCard title="Completed" value={personal.completed} helper="Finished successfully" icon={CheckCircle2} tone="success" />
@@ -424,7 +424,7 @@ export function DashboardPage() {
             <h2 className="text-[15px] font-semibold text-ink">Platform Operations</h2>
           </div>
           <OperationsTrendChart trend={platform.operations_trend} />
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-2 xl:grid-cols-4">
             <KpiCard title="Platform Tickets" value={platform.ticket_summary.total} helper="All visible workflow tickets" icon={TicketIcon} />
             <KpiCard title="Platform Active" value={platform.ticket_summary.active} helper="Queue and executing workload" icon={Clock3} tone="warning" />
             <KpiCard title="Platform Failed" value={platform.ticket_summary.failed} helper="Failed, stopped, or rejected" icon={AlertTriangle} tone="danger" />
@@ -511,7 +511,7 @@ export function DashboardPage() {
               ) : (
                 <div className="grid gap-2">
                   {platform.db_connection_failures.slice(0, 8).map((conn) => (
-                    <Link key={conn.id} to="/db-connections" className="flex items-start gap-3 rounded-lg border border-rose-100 bg-rose-50/60 px-3 py-2 hover:bg-rose-50">
+                    <Link key={conn.id} to="/db-connections" className="flex items-start gap-3 rounded-lg border border-rose-100 bg-rose-50/60 px-3 py-2 hover:bg-rose-50 dark:border-rose-900 dark:bg-rose-950/40 dark:hover:bg-rose-950/60">
                       <AlertTriangle className="mt-0.5 h-4 w-4 text-danger" />
                       <span className="min-w-0">
                         <span className="block truncate text-[12px] font-semibold text-ink">{conn.name}</span>

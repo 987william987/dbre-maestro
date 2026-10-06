@@ -68,6 +68,8 @@ const (
 	settingDBMetadataAccountCron           = "db_metadata_account_cron"
 	settingDBMetadataAccountSyncMins       = "db_metadata_account_sync_interval_minutes"
 	settingDBMetadataCronTimezone          = "db_metadata_cron_timezone"
+	settingDDLGhostEnabled                 = "ddl_ghost_enabled"
+	settingDDLPTOSCEnabled                 = "ddl_ptosc_enabled"
 )
 
 type SettingsRepo struct {
@@ -480,6 +482,20 @@ func (r *SettingsRepo) Get(ctx context.Context) (*model.PlatformSettings, error)
 	if cronTimezone != nil && *cronTimezone != "" {
 		settings.DBMetadataCronTimezone = *cronTimezone
 	}
+	ghostEnabled, err := r.getBool(ctx, settingDDLGhostEnabled)
+	if err != nil {
+		return nil, err
+	}
+	if ghostEnabled != nil {
+		settings.DDLGhostEnabled = *ghostEnabled
+	}
+	ptoscEnabled, err := r.getBool(ctx, settingDDLPTOSCEnabled)
+	if err != nil {
+		return nil, err
+	}
+	if ptoscEnabled != nil {
+		settings.DDLPTOSCEnabled = *ptoscEnabled
+	}
 	return settings, nil
 }
 
@@ -651,6 +667,12 @@ func (r *SettingsRepo) Replace(ctx context.Context, settings *model.PlatformSett
 		return err
 	}
 	if err := upsertString(ctx, tx, settingDBMetadataCronTimezone, settings.DBMetadataCronTimezone); err != nil {
+		return err
+	}
+	if err := upsertBool(ctx, tx, settingDDLGhostEnabled, settings.DDLGhostEnabled); err != nil {
+		return err
+	}
+	if err := upsertBool(ctx, tx, settingDDLPTOSCEnabled, settings.DDLPTOSCEnabled); err != nil {
 		return err
 	}
 	if settings.WorkflowRules != nil {

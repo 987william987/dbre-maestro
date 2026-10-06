@@ -19,6 +19,21 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
+    <script>
+      (() => {
+        try {
+          const storedMode = localStorage.getItem('dbre-theme-mode')
+          const mode = ['light', 'dark', 'system'].includes(storedMode) ? storedMode : 'system'
+          const storedPreset = localStorage.getItem('dbre-theme-preset')
+          const preset = ['default', 'ocean', 'forest', 'amber', 'amethyst'].includes(storedPreset) ? storedPreset : 'default'
+          const isDark = mode === 'dark' || (mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.classList.toggle('dark', isDark)
+          document.documentElement.dataset.theme = preset
+        } catch {
+          // The application provider applies the default when storage is unavailable.
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

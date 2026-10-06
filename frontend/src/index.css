@@ -3,29 +3,182 @@
 @tailwind utilities;
 
 :root {
-  --page:          #ffffff;
-  --panel:         #ffffff;
-  --panel-muted:   #fafafa;
-  --panel-soft:    #f4f4f5;
-  --sidebar:       #ece9e3;
-  --editor:        #fafafa;
-  --editor-border: #e4e4e7;
-  --editor-toolbar:#f4f4f5;
-  --editor-code-bg:#f4f4f5;
-  --editor-code-text:#18181b;
-  --text:          #18181b;
-  --text-secondary:#52525b;
-  --text-muted:    #71717a;
-  --brand:         #18181b;
-  --accent:        #18181b;
-  --accent-soft:   #f4f4f5;
-  --success:       #16a34a;
-  --warning:       #d97706;
-  --danger:        #dc2626;
-  --border:        #e4e4e7;
-  --border-strong: #d4d4d8;
+  --page:          255 255 255;
+  --panel:         255 255 255;
+  --panel-muted:   250 250 250;
+  --panel-soft:    244 244 245;
+  --sidebar:       255 255 255;
+  --editor:        250 250 250;
+  --editor-border: 228 228 231;
+  --editor-toolbar:244 244 245;
+  --editor-code-bg:244 244 245;
+  --editor-code-text:24 24 27;
+  --text:          24 24 27;
+  --text-secondary:82 82 91;
+  --text-muted:    113 113 122;
+  --faint:         161 161 170;
+  --brand:         24 24 27;
+  --accent:        24 24 27;
+  --accent-soft:   244 244 245;
+  --success:       22 163 74;
+  --success-soft:  240 253 244;
+  --warning:       217 119 6;
+  --danger:        220 38 38;
+  --border:        228 228 231;
+  --border-strong: 212 212 216;
+  --chart-ddl:     24 24 27;
+  --chart-dml:     37 99 235;
+  --chart-redis:   217 119 6;
+  --chart-export:  124 58 237;
+  --chart-access:  8 145 178;
+  --chart-sensitive:220 38 38;
+  --chart-query:   22 163 74;
   --shadow:        0 1px 2px rgba(0,0,0,0.04);
   --shadow-soft:   0 1px 2px rgba(0,0,0,0.03);
+}
+
+[data-theme='ocean'] {
+  --page:          248 250 252;
+  --panel-soft:    240 249 255;
+  --sidebar:       248 250 252;
+  --brand:         3 105 161;
+  --accent:        3 105 161;
+  --accent-soft:   224 242 254;
+  --border:        203 213 225;
+  --border-strong: 148 163 184;
+  --chart-ddl:     3 105 161;
+  --chart-dml:     14 165 233;
+  --chart-export:  99 102 241;
+}
+
+[data-theme='forest'] {
+  --page:          250 252 250;
+  --panel-soft:    240 253 244;
+  --sidebar:       248 250 248;
+  --brand:         21 128 61;
+  --accent:        21 128 61;
+  --accent-soft:   220 252 231;
+  --border:        209 224 212;
+  --border-strong: 134 171 141;
+  --chart-ddl:     21 128 61;
+  --chart-dml:     13 148 136;
+  --chart-export:  101 163 13;
+}
+
+[data-theme='amber'] {
+  --page:          255 253 250;
+  --panel-soft:    255 247 237;
+  --sidebar:       255 251 245;
+  --brand:         154 52 18;
+  --accent:        154 52 18;
+  --accent-soft:   255 237 213;
+  --border:        231 219 205;
+  --border-strong: 194 163 128;
+  --chart-ddl:     154 52 18;
+  --chart-dml:     217 119 6;
+  --chart-export:  190 24 93;
+}
+
+[data-theme='amethyst'] {
+  --page:          253 252 255;
+  --panel-soft:    245 243 255;
+  --sidebar:       250 248 255;
+  --brand:         109 40 217;
+  --accent:        109 40 217;
+  --accent-soft:   237 233 254;
+  --border:        221 214 235;
+  --border-strong: 167 139 203;
+  --chart-ddl:     109 40 217;
+  --chart-dml:     79 70 229;
+  --chart-export:  192 38 211;
+}
+
+.dark {
+  color-scheme: dark;
+  --page:          9 9 11;
+  --panel:         24 24 27;
+  --panel-muted:   24 24 27;
+  --panel-soft:    39 39 42;
+  --sidebar:       18 18 20;
+  --editor:        24 24 27;
+  --editor-border: 63 63 70;
+  --editor-toolbar:39 39 42;
+  --editor-code-bg:39 39 42;
+  --editor-code-text:244 244 245;
+  --text:          244 244 245;
+  --text-secondary:212 212 216;
+  --text-muted:    161 161 170;
+  --faint:         113 113 122;
+  --brand:         63 63 70;
+  --accent:        228 228 231;
+  --accent-soft:   39 39 42;
+  --success:       74 222 128;
+  --success-soft:  20 83 45;
+  --warning:       251 191 36;
+  --danger:        248 113 113;
+  --border:        63 63 70;
+  --border-strong: 82 82 91;
+  --chart-ddl:     244 244 245;
+  --chart-dml:     96 165 250;
+  --chart-redis:   251 191 36;
+  --chart-export:  196 181 253;
+  --chart-access:  34 211 238;
+  --chart-sensitive:248 113 113;
+  --chart-query:   74 222 128;
+  --shadow:        0 1px 2px rgba(0,0,0,0.32);
+  --shadow-soft:   0 1px 2px rgba(0,0,0,0.24);
+}
+
+.dark[data-theme='ocean'] {
+  --panel-soft:    12 40 55;
+  --sidebar:       10 22 30;
+  --brand:         3 105 161;
+  --accent:        125 211 252;
+  --accent-soft:   12 40 55;
+  --border:        39 67 82;
+  --border-strong: 71 104 122;
+  --chart-ddl:     125 211 252;
+  --chart-dml:     56 189 248;
+  --chart-export:  165 180 252;
+}
+
+.dark[data-theme='forest'] {
+  --panel-soft:    18 48 31;
+  --sidebar:       11 25 17;
+  --brand:         21 128 61;
+  --accent:        134 239 172;
+  --accent-soft:   18 48 31;
+  --border:        47 76 57;
+  --border-strong: 82 121 95;
+  --chart-ddl:     134 239 172;
+  --chart-dml:     94 234 212;
+  --chart-export:  190 242 100;
+}
+
+.dark[data-theme='amber'] {
+  --panel-soft:    55 35 20;
+  --sidebar:       27 19 13;
+  --brand:         154 52 18;
+  --accent:        253 186 116;
+  --accent-soft:   55 35 20;
+  --border:        79 58 42;
+  --border-strong: 121 88 59;
+  --chart-ddl:     253 186 116;
+  --chart-dml:     251 191 36;
+  --chart-export:  251 113 133;
+}
+
+.dark[data-theme='amethyst'] {
+  --panel-soft:    43 31 65;
+  --sidebar:       22 16 31;
+  --brand:         109 40 217;
+  --accent:        196 181 253;
+  --accent-soft:   43 31 65;
+  --border:        70 57 91;
+  --border-strong: 110 89 140;
+  --chart-ddl:     196 181 253;
+  --chart-dml:     165 180 252;
+  --chart-export:  240 171 252;
 }
 
 * {
@@ -35,8 +188,8 @@
 body {
   margin: 0;
   font-family: 'Inter', 'Noto Sans TC', sans-serif;
-  background: var(--page);
-  color: var(--text);
+  background: rgb(var(--page));
+  color: rgb(var(--text));
   font-size: 13px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -66,11 +219,11 @@ a {
 .cm-tooltip.cm-tooltip-autocomplete,
 .cm-tooltip.cm-completionInfo {
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid rgb(var(--border));
   border-radius: 6px;
-  background: var(--panel);
+  background: rgb(var(--panel));
   box-shadow: 0 14px 32px rgba(24, 24, 27, 0.10), 0 2px 8px rgba(24, 24, 27, 0.05);
-  color: var(--text);
+  color: rgb(var(--text));
   font-family: 'Inter', 'Noto Sans TC', sans-serif;
 }
 
@@ -94,23 +247,23 @@ a {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: var(--text);
+  color: rgb(var(--text));
 }
 
 .cm-tooltip.cm-tooltip-autocomplete > ul > li:hover {
-  background: var(--panel-soft);
+  background: rgb(var(--panel-soft));
 }
 
 .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected],
 .cm-tooltip.cm-tooltip-autocomplete-disabled > ul > li[aria-selected] {
-  background: var(--panel-soft);
-  color: var(--text);
+  background: rgb(var(--panel-soft));
+  color: rgb(var(--text));
 }
 
 .cm-tooltip.cm-tooltip-autocomplete > ul > completion-section {
   margin: 4px 0;
   border-bottom: 0;
-  color: var(--text-muted);
+  color: rgb(var(--text-muted));
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -130,7 +283,7 @@ a {
 }
 
 .cm-completionMatchedText {
-  color: var(--text);
+  color: rgb(var(--text));
   font-weight: 800;
   text-decoration: none;
 }
@@ -140,7 +293,7 @@ a {
   flex: 0 1 auto;
   max-width: 170px;
   margin-left: auto;
-  color: var(--text-muted);
+  color: rgb(var(--text-muted));
   font-size: 11px;
   font-style: normal;
   text-overflow: ellipsis;
@@ -149,7 +302,7 @@ a {
 .cm-tooltip.cm-completionInfo {
   max-width: 320px;
   padding: 8px 10px;
-  color: var(--text-secondary);
+  color: rgb(var(--text-secondary));
   font-size: 12px;
   line-height: 1.45;
 }
@@ -179,16 +332,16 @@ a {
 
 @keyframes attention-pulse-surface {
   0% {
-    background-color: #ffffff;
-    border-color: var(--border);
+    background-color: rgb(var(--panel));
+    border-color: rgb(var(--border));
   }
   22% {
-    background-color: var(--panel-soft);
-    border-color: var(--border-strong);
+    background-color: rgb(var(--panel-soft));
+    border-color: rgb(var(--border-strong));
   }
   100% {
-    background-color: #ffffff;
-    border-color: var(--border);
+    background-color: rgb(var(--panel));
+    border-color: rgb(var(--border));
   }
 }
 
@@ -200,6 +353,6 @@ a {
 
   .attention-pulse > * {
     animation: none;
-    border-color: var(--border-strong);
+    border-color: rgb(var(--border-strong));
   }
 }

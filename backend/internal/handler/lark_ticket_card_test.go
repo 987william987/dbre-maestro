@@ -18,6 +18,20 @@ func TestBuildLarkTicketCardActionsForPendingReview(t *testing.T) {
 	}
 }
 
+func TestLarkTicketCardRenderStateKeepsRoleStagesIndependent(t *testing.T) {
+	reviewState, reviewLabel := larkTicketCardRenderState(larkTicketCardStageReview, model.TicketStatusExecuting)
+	if reviewState != "review_approved" || reviewLabel != "已審批" {
+		t.Fatalf("review projection = (%q, %q)", reviewState, reviewLabel)
+	}
+	executionState, executionLabel := larkTicketCardRenderState(larkTicketCardStageExecution, model.TicketStatusExecuting)
+	if executionState != "executing" || executionLabel != "執行中" {
+		t.Fatalf("execution projection = (%q, %q)", executionState, executionLabel)
+	}
+	if state, _ := larkTicketCardRenderState(larkTicketCardStageExecution, model.TicketStatusPendingReview); state != "" {
+		t.Fatalf("execution card should not project review lifecycle, got %q", state)
+	}
+}
+
 func TestBuildLarkTicketCardActionsForPendingExecution(t *testing.T) {
 	ticket := &model.Ticket{ID: 8, TicketNo: "TK-8", TicketType: model.TicketTypeDDL}
 	actions := buildLarkTicketCardActions(ticket, "ticket_pending_execution")

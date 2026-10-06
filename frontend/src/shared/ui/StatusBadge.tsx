@@ -3,17 +3,17 @@ import { cn } from '@/lib/utils'
 import type { TicketStatus } from '@/shared/types/ticket'
 
 const STATUS_STYLES: Record<TicketStatus, string> = {
-  pending_review: 'border-amber-200 bg-amber-50 text-amber-700',
-  approved: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  rejected: 'border-rose-200 bg-rose-50 text-rose-700',
-  withdrawn: 'border-slate-200 bg-slate-100 text-slate-700',
-  pending_execution: 'border-blue-200 bg-blue-50 text-blue-700',
-  executing: 'border-slate-200 bg-slate-100 text-slate-700',
-  completed: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  failed: 'border-rose-200 bg-rose-50 text-rose-700',
-  stopped: 'border-rose-200 bg-rose-50 text-rose-700',
-  interrupted: 'border-rose-200 bg-rose-50 text-rose-700',
-  needs_admin_attention: 'border-orange-200 bg-orange-50 text-orange-700',
+  pending_review: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
+  approved: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300',
+  rejected: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300',
+  withdrawn: 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  pending_execution: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300',
+  executing: 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  completed: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300',
+  failed: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300',
+  stopped: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300',
+  interrupted: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300',
+  needs_admin_attention: 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-300',
 }
 
 const STATUS_LABELS: Record<TicketStatus, string> = {

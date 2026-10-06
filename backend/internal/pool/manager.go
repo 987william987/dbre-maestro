@@ -16,11 +16,12 @@ import (
 type Profile string
 
 const (
-	ProfileQuery            Profile = "query"
-	ProfileExec             Profile = "exec"
-	ProfileMetadata         Profile = "metadata"
-	ProfileScopedPGQuery    Profile = "scoped_pg_query"
-	ProfileShadowValidation Profile = "shadow_validation"
+	ProfileQuery             Profile = "query"
+	ProfileExec              Profile = "exec"
+	ProfileMetadata          Profile = "metadata"
+	ProfileScopedPGQuery     Profile = "scoped_pg_query"
+	ProfileShadowValidation  Profile = "shadow_validation"
+	ProfileSessionOperations Profile = "session_operations"
 )
 
 type ProfileConfig struct {
@@ -56,6 +57,12 @@ var defaultProfileConfigs = map[Profile]ProfileConfig{
 		ConnMaxIdleTime: 1 * time.Minute,
 	},
 	ProfileShadowValidation: {
+		MaxOpenConns:    1,
+		MaxIdleConns:    1,
+		ConnMaxLifetime: 2 * time.Minute,
+		ConnMaxIdleTime: 1 * time.Minute,
+	},
+	ProfileSessionOperations: {
 		MaxOpenConns:    1,
 		MaxIdleConns:    1,
 		ConnMaxLifetime: 2 * time.Minute,

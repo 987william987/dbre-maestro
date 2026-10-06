@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dbre-maestro/maestro/internal/binlogexport"
 	"github.com/dbre-maestro/maestro/internal/config"
 	"github.com/dbre-maestro/maestro/internal/db"
 	"github.com/dbre-maestro/maestro/internal/handler"
@@ -24,10 +25,13 @@ import (
 	"github.com/dbre-maestro/maestro/internal/netguard"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/oidcbearer"
+	"github.com/dbre-maestro/maestro/internal/onlineddl"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
 	"github.com/dbre-maestro/maestro/internal/secrets"
+	"github.com/dbre-maestro/maestro/internal/sessionmanagement"
+	"github.com/dbre-maestro/maestro/internal/tableschema"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/jmoiron/sqlx"
@@ -237,6 +241,9 @@ func main() {
 
 	ticketRepo := repository.NewTicketRepo(metaDB)
 	ticketRollbackRepo := repository.NewTicketRollbackRepo(metaDB, cfg.EncryptionKey)
+	binlogExportRepo := repository.NewMySQLBinlogExportRepo(metaDB, cfg.EncryptionKey)
+	sessionLoopJobRepo := repository.NewSessionLoopJobRepo(metaDB, cfg.EncryptionKey)
+	tableSchemaSyncRepo := repository.NewTableSchemaSyncRepo(metaDB)
 	auditRepo := repository.NewAuditRepo(metaDB)
 	queryAccessRepo := repository.NewQueryAccessRepo(metaDB)
 	recoveries, err := ticketRepo.RecoverExecutingTickets(context.Background())
@@ -293,6 +300,7 @@ func main() {
 	settingsRepo := repository.NewSettingsRepo(metaDB, cfg.EncryptionKey)
 	dbMetadataRepo := repository.NewDBMetadataRepo(metaDB)
 	scheduledReportRepo := repository.NewScheduledSQLReportRepo(metaDB)
+	onlineDDLRepo := repository.NewOnlineDDLRepo(metaDB)
 
 	larkDispatcher := notification.NewDispatcher(settingsRepo, userRepo, cfg.LarkWebhookURL)
 	if cfg.LarkWebhookURL != "" {
@@ -326,6 +334,17 @@ func main() {
 
 	frontendReloadH := handler.NewFrontendReloadHandler()
 	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL, handler.WithTicketHandlerAppEnv(cfg.AppEnv), handler.WithTicketHandlerDBMetadata(dbMetadataRepo), handler.WithTicketHandlerRollbacks(ticketRollbackRepo), handler.WithTicketHandlerShadowReadonlyPool(pool.ShadowValidationPools(), cfg.ShadowReadonlyPoolEnabled))
+	onlineDDLRunner := ticketH.ConfigureOnlineDDL(onlineDDLRepo, onlineddl.NewController())
+	onlineDDLCtx, cancelOnlineDDL := context.WithCancel(context.Background())
+	onlineDDLDone := make(chan struct{})
+	if onlineDDLRunner != nil {
+		go func() {
+			defer close(onlineDDLDone)
+			onlineDDLRunner.Start(onlineDDLCtx)
+		}()
+	} else {
+		close(onlineDDLDone)
+	}
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo, handler.WithDBConnectionHandlerHostPolicy(dbConnectionHostPolicy), handler.WithDBConnectionHandlerSettings(settingsRepo), handler.WithDBConnectionHandlerMetadata(dbMetadataRepo))
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL, cfg.JWTSecret)
 	auditH := handler.NewAuditHandler(auditRepo)
@@ -352,12 +371,20 @@ func main() {
 		auditRepo,
 		handler.WithSettingsHandlerAppEnv(cfg.AppEnv),
 		handler.WithSettingsHandlerLarkCallbackReloader(larkCardCallbackManager),
+		handler.WithSettingsHandlerOnlineDDLAdapters(handler.OnlineDDLToolAdapters()),
 	)
 	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo, settingsRepo)
+	binlogExportH := handler.NewMySQLBinlogExportHandler(binlogExportRepo, dbConnRepo, userRepo, auditRepo, settingsRepo)
+	sessionManagementService := sessionmanagement.NewService(sessionmanagement.NewAWSDiscoverer(), dbConnectionHostPolicy)
+	sessionManagementH := handler.NewSessionManagementHandler(dbConnRepo, userRepo, settingsRepo, sessionManagementService, auditRepo, sessionLoopJobRepo)
+	tableSchemaH := handler.NewTableSchemaHandler(dbConnRepo, userRepo, auditRepo, tableSchemaSyncRepo)
 	scheduledReportH := handler.NewScheduledSQLReportHandler(scheduledReportRepo, dbConnRepo, userRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, ticketRepo, maskingEngine, auditRepo, larkDispatcher)
 	inventoryJob := job.NewDBMetadataInventoryJob(settingsRepo, dbMetadataRepo, logger)
 	objectJob := job.NewDBMetadataObjectJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
 	accountJob := job.NewDBMetadataAccountJob(settingsRepo, dbConnRepo, dbMetadataRepo, logger)
+	binlogExportWorker := binlogexport.NewWorker(binlogExportRepo, dbConnRepo, settingsRepo, logger)
+	sessionLoopWorker := sessionmanagement.NewLoopWorker(sessionLoopJobRepo, dbConnRepo, settingsRepo, sessionManagementService, auditRepo, logger)
+	tableSchemaSyncWorker := tableschema.NewSyncWorker(tableSchemaSyncRepo, dbConnRepo, auditRepo, logger)
 
 	// Background scheduler: poll every 30s for due scheduled tickets
 	go runScheduler(ticketRepo, dbConnRepo, ticketH)
@@ -365,6 +392,9 @@ func main() {
 	go inventoryJob.Start(context.Background())
 	go objectJob.Start(context.Background())
 	go accountJob.Start(context.Background())
+	go binlogExportWorker.Start(context.Background())
+	go sessionLoopWorker.Start(context.Background())
+	go tableSchemaSyncWorker.Start(context.Background())
 
 	r := chi.NewRouter()
 	r.Use(middleware.SecurityHeaders(cfg.AppEnv == "production"))
@@ -444,6 +474,58 @@ func main() {
 				middleware.RequireActiveUser(userRepo),
 				middleware.InjectPermissions(userRepo),
 			).Get("/{id}/download", exportH.DownloadByID)
+		})
+
+		r.Route("/binlog-exports", func(r chi.Router) {
+			r.Use(requireAuth)
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/", binlogExportH.List)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/connections", binlogExportH.Connections)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/connections/{connectionID}/binlogs", binlogExportH.ListBinlogs)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Post("/connections/{connectionID}/binlogs/timestamps", binlogExportH.ProbeBinlogTimestamps)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/connections/{connectionID}/databases", binlogExportH.ListDatabases)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/connections/{connectionID}/tables", binlogExportH.ListTables)
+			r.With(middleware.RequirePermission("binlog_exports.execute")).Post("/", binlogExportH.Create)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/{id}", binlogExportH.Get)
+			r.With(middleware.RequirePermission("binlog_exports.execute")).Post("/{id}/cancel", binlogExportH.Cancel)
+			r.With(middleware.RequirePermission("binlog_exports.execute")).Post("/{id}/retry", binlogExportH.Retry)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/{id}/artifacts/{kind}", binlogExportH.DownloadArtifact)
+			r.With(middleware.RequirePermission("binlog_exports.read")).Get("/{id}/artifacts/{kind}/preview", binlogExportH.PreviewArtifact)
+		})
+
+		r.Route("/dba-tools/session-management", func(r chi.Router) {
+			r.Use(requireAuth)
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(middleware.RequirePermission("db_sessions.read")).Get("/connections", sessionManagementH.Connections)
+			r.With(middleware.RequirePermission("db_sessions.read")).Get("/aws/clusters", sessionManagementH.AWSClusters)
+			r.With(middleware.RequirePermission("db_sessions.read")).Get("/aws/topology", sessionManagementH.AWSTopology)
+			r.With(middleware.RequirePermission("db_sessions.read")).Post("/sessions", sessionManagementH.Sessions)
+			r.With(middleware.RequirePermission("db_sessions.kill")).Post("/sessions/{id}/cancel", sessionManagementH.CancelSession)
+			r.With(middleware.RequirePermission("db_sessions.kill")).Post("/sessions/{id}/terminate", sessionManagementH.TerminateSession)
+			r.With(middleware.RequirePermission("db_sessions.kill")).Post("/prefix/preview", sessionManagementH.PreviewPrefix)
+			r.With(middleware.RequirePermission("db_sessions.kill")).Post("/prefix/cancel", sessionManagementH.CancelPrefix)
+			r.With(middleware.RequirePermission("db_sessions.read")).Get("/loop-jobs", sessionManagementH.ListLoopJobs)
+			r.With(middleware.RequirePermission("db_sessions.loop_kill")).Post("/loop-jobs", sessionManagementH.CreateLoopJob)
+			r.With(middleware.RequirePermission("db_sessions.loop_kill")).Post("/loop-jobs/{id}/stop", sessionManagementH.StopLoopJob)
+		})
+
+		r.Route("/dba-tools/table-schemas", func(r chi.Router) {
+			r.Use(requireAuth)
+			r.Use(middleware.RequireActiveUser(userRepo))
+			r.Use(middleware.InjectPermissions(userRepo))
+			r.With(middleware.RequirePermission("table_schemas.read")).Get("/connections", tableSchemaH.Connections)
+			r.With(middleware.RequirePermission("table_schemas.read")).Get("/connections/{connectionID}/databases", tableSchemaH.Databases)
+			r.With(middleware.RequirePermission("table_schemas.read")).Get("/connections/{connectionID}/tables", tableSchemaH.Tables)
+			r.With(middleware.RequirePermission("table_schemas.read")).Post("/export/preview", tableSchemaH.ExportPreview)
+			r.With(middleware.RequirePermission("table_schemas.read")).Post("/export", tableSchemaH.Export)
+			r.With(middleware.RequirePermission("table_schemas.sync")).Post("/sync/preview", tableSchemaH.SyncPreview)
+			r.With(middleware.RequirePermission("table_schemas.sync")).Post("/sync/jobs", tableSchemaH.CreateSyncJob)
+			r.With(middleware.RequirePermission("table_schemas.read")).Get("/sync/jobs", tableSchemaH.ListSyncJobs)
+			r.With(middleware.RequirePermission("table_schemas.read")).Get("/sync/jobs/{id}", tableSchemaH.GetSyncJob)
+			r.With(middleware.RequirePermission("table_schemas.sync")).Post("/sync/jobs/{id}/cancel", tableSchemaH.CancelSyncJob)
+			r.With(middleware.RequirePermission("table_schemas.sync")).Post("/sync/jobs/{id}/retry", tableSchemaH.RetrySyncJob)
 		})
 
 		r.Route("/db-connections", func(r chi.Router) {
@@ -626,6 +708,12 @@ func main() {
 
 			r.Route("/{id}", func(r chi.Router) {
 				r.With(requireTicketsRead).Get("/", ticketH.Get)
+			r.With(requireTicketsExecute).Post("/online-ddl/dry-run", ticketH.OnlineDDLDryRun)
+				r.With(requireTicketsRead).Get("/executions/{executionID}/online-ddl", ticketH.GetOnlineDDL)
+				r.With(requireTicketsExecute).Post("/executions/{executionID}/online-ddl/pause", ticketH.PauseOnlineDDL)
+				r.With(requireTicketsExecute).Post("/executions/{executionID}/online-ddl/resume", ticketH.ResumeOnlineDDL)
+				r.With(requireTicketsExecute).Post("/executions/{executionID}/online-ddl/cancel", ticketH.CancelOnlineDDL)
+				r.With(requireTicketsExecute).Patch("/executions/{executionID}/online-ddl/runtime-parameters", ticketH.TuneOnlineDDL)
 				r.With(requireTicketWorkflowReview).Post("/approve", ticketH.Approve)
 				r.With(requireTicketWorkflowReject).Post("/reject", ticketH.Reject)
 				r.With(requireTicketsApply).Post("/withdraw", ticketH.Withdraw)
@@ -687,7 +775,13 @@ func main() {
 		shutdownErr <- srv.Shutdown(ctx)
 	}()
 	larkCardCallbackManager.Stop()
+	cancelOnlineDDL()
 	ticketH.CancelActiveExecutionsForShutdown(ctx)
+	select {
+	case <-onlineDDLDone:
+	case <-ctx.Done():
+		slog.Warn("online ddl runner shutdown timed out")
+	}
 	if err := <-shutdownErr; err != nil {
 		slog.Warn("server shutdown failed", "err", err)
 	}

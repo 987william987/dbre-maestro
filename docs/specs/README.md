@@ -12,6 +12,14 @@
 
 ## 仍有效
 
+### [DDL Online Execution 規格](active/20261005-online-ddl-execution-spec.md)
+
+判定：
+
+- 規劃 MySQL／Aurora MySQL DDL Ticket 的 Native、gh-ost、pt-osc 三種 statement-level execution mode
+- O1-O7 與 O8 本機真實工具 gate 已完成；Aurora Testnet 尚待依驗收手冊執行，本文仍是 rollout 的 canonical 設計基線
+- Application image、API、Settings UI、approved SQL/credential resolver 與 managed runner 已接通；外部工具模式仍預設關閉
+
 ### [20260616 Audit Logs Retention Strategy](active/20260616-audit-logs-retention-strategy.md)
 
 判定：

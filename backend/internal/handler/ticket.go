@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/middleware"
 	"github.com/dbre-maestro/maestro/internal/model"
 	"github.com/dbre-maestro/maestro/internal/notification"
+	"github.com/dbre-maestro/maestro/internal/onlineddl"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
@@ -57,13 +59,21 @@ type TicketHandler struct {
 	activeExecutions   *activeSQLQueryRegistry
 	rollbackJobsMu     sync.Mutex
 	rollbackJobs       map[uint64]*ticketRollbackJobLimiter
+	larkCardSyncMu     sync.Mutex
+	larkCardSyncLocks  map[uint64]*ticketCardSyncLock
 	appBaseURL         string
 	appEnv             string
+	onlineDDL          TicketOnlineDDLService
 }
 
 type ticketRollbackJobLimiter struct {
 	slots chan struct{}
 	refs  int
+}
+
+type ticketCardSyncLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 type ticketResponse struct {
@@ -318,6 +328,10 @@ func WithTicketHandlerShadowReadonlyPool(manager *pool.CredentialPoolManager, en
 	}
 }
 
+func WithTicketHandlerOnlineDDL(service TicketOnlineDDLService) TicketHandlerOption {
+	return func(h *TicketHandler) { h.onlineDDL = service }
+}
+
 func NewTicketHandler(
 	tickets *repository.TicketRepo,
 	queryAccess *repository.QueryAccessRepo,
@@ -358,8 +372,10 @@ func NewTicketHandler(
 		forbiddenLimiter:   newRequestRateLimiter(20, time.Minute),
 		activeExecutions:   newActiveSQLQueryRegistry(),
 		rollbackJobs:       make(map[uint64]*ticketRollbackJobLimiter),
+		larkCardSyncLocks:  make(map[uint64]*ticketCardSyncLock),
 		appBaseURL:         strings.TrimRight(appBaseURL, "/"),
 	}
+	h.notifications.SetTicketCardSentHook(func(_ context.Context, ticketID uint64) { h.queueLarkTicketCardSync(ticketID) })
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -529,6 +545,9 @@ func (h *TicketHandler) dispatchTicketNotification(
 	actorID *uint64,
 	detail string,
 ) {
+	if ticket != nil {
+		h.queueLarkTicketCardSync(ticket.ID)
+	}
 	policy, ok := ticketNotificationPolicies[event]
 	if !ok {
 		return
@@ -1612,6 +1631,37 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if executions == nil {
 		executions = []model.TicketExecution{}
 	}
+	onlineDDLRuns := []model.OnlineDDLRun{}
+	onlineDDLModes := map[string]any{}
+	if h.onlineDDL != nil && ticket.TicketType == model.TicketTypeDDL {
+		if lister, ok := h.onlineDDL.(ticketOnlineDDLRunLister); ok {
+			onlineDDLRuns, err = lister.ListByTicket(r.Context(), id)
+		}
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "get online ddl runs failed")
+			return
+		}
+		var supportsOnlineDDL bool
+		if ticket.DBConnectionID != nil && h.dbConns != nil {
+			connection, connectionErr := h.dbConns.GetByID(r.Context(), *ticket.DBConnectionID)
+			if connectionErr != nil {
+				jsonErr(w, http.StatusInternalServerError, "get ticket connection failed")
+				return
+			}
+			supportsOnlineDDL = onlineDDLSupportsConnection(connection)
+		}
+		if supportsOnlineDDL && h.settings != nil {
+			platformSettings, settingsErr := h.settings.Get(r.Context())
+			if settingsErr != nil {
+				jsonErr(w, http.StatusInternalServerError, "get online ddl settings failed")
+				return
+			}
+			onlineDDLModes = map[string]any{
+				onlineddl.ModeGhost: map[string]any{"enabled": platformSettings.DDLGhostEnabled},
+				onlineddl.ModePTOSC: map[string]any{"enabled": platformSettings.DDLPTOSCEnabled},
+			}
+		}
+	}
 	scopes, _ := h.tickets.ListScopes(r.Context(), id)
 	if scopes == nil {
 		scopes = []model.TicketScope{}
@@ -1729,6 +1779,8 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{
 		"ticket":                    enrichedTicket,
 		"executions":                executions,
+		"online_ddl_runs":           onlineDDLRuns,
+		"online_ddl_modes":          onlineDDLModes,
 		"execution_rollbacks":       rollbackRecords,
 		"review_results":            reviewResults,
 		"activity_logs":             auditLogs,
@@ -2737,6 +2789,7 @@ func (h *TicketHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusConflict, "ticket already taken by another executor")
 		return
 	}
+	h.queueLarkTicketCardSync(id)
 	ticket.ExecutionRunMode = &runMode
 	if dmlExecutionMode != nil {
 		ticket.DMLExecutionMode = dmlExecutionMode
@@ -2774,6 +2827,21 @@ func (h *TicketHandler) ExecuteStatement(w http.ResponseWriter, r *http.Request)
 	executionID, err := strconv.ParseUint(chi.URLParam(r, "executionID"), 10, 64)
 	if err != nil || executionID == 0 {
 		jsonErr(w, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+	var request struct {
+		Mode       string               `json:"mode"`
+		Parameters onlineddl.Parameters `json:"parameters"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil && !errors.Is(err, io.EOF) {
+		jsonErr(w, http.StatusUnprocessableEntity, onlineddl.ErrInvalidParameters.Error())
+		return
+	}
+	if request.Mode == "" {
+		request.Mode = "native"
+	}
+	if request.Mode != "native" && ticket.TicketType != model.TicketTypeDDL {
+		jsonErr(w, http.StatusUnprocessableEntity, onlineddl.ErrUnsupportedStatement.Error())
 		return
 	}
 	if ticket.TicketType != model.TicketTypeDDL && ticket.TicketType != model.TicketTypeDML {
@@ -2829,8 +2897,24 @@ func (h *TicketHandler) ExecuteStatement(w http.ResponseWriter, r *http.Request)
 		jsonErr(w, http.StatusConflict, "ticket is already running by full execution")
 		return
 	}
+	h.queueLarkTicketCardSync(ticket.ID)
 	mode := model.TicketExecutionRunModeManualStatement
 	ticket.ExecutionRunMode = &mode
+	if request.Mode != "native" {
+		queued, queueErr := h.queueOnlineDDL(r.Context(), ticket, execRow, userID, request.Mode, request.Parameters)
+		if queueErr != nil {
+			code := onlineDDLQueueErrorCode(queueErr)
+			_ = h.tickets.MarkExecutionFailedWithOutcome(r.Context(), execRow.ID, nil, code, code, ticketExecutionOutcomeNotSent)
+			h.refreshTicketStatusFromExecutions(r.Context(), ticket.ID)
+			writeOnlineDDLError(w, queueErr)
+			return
+		} else if queued {
+			h.publishTicketUpdateByID(r.Context(), ticket.ID, ticket, &userID)
+			updated, _ := h.tickets.GetByID(r.Context(), ticket.ID)
+			jsonOK(w, updated)
+			return
+		}
+	}
 
 	go h.runTicketStatementExecutionSafely(ticket, *execRow, userID, true)
 	updated, _ := h.tickets.GetByID(r.Context(), ticket.ID)
