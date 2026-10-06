@@ -41,7 +41,7 @@ func TestSettingsResponseKeepsOnlineDDLReadinessAfterMutation(t *testing.T) {
 		appEnv: "development",
 		onlineDDLAdapters: map[string]onlineddl.Adapter{
 			onlineddl.ModeGhost: settingsToolAdapter{mode: onlineddl.ModeGhost, version: "gh-ost version 1.1.6"},
-			onlineddl.ModePTOSC: settingsToolAdapter{mode: onlineddl.ModePTOSC, version: "pt-online-schema-change 3.7.0"},
+			onlineddl.ModePTOSC: settingsToolAdapter{mode: onlineddl.ModePTOSC, version: "pt-online-schema-change 3.7.1"},
 		},
 	}
 	recorder := httptest.NewRecorder()
@@ -54,7 +54,7 @@ func TestSettingsResponseKeepsOnlineDDLReadinessAfterMutation(t *testing.T) {
 	if response.AppEnv != "development" || !response.OnlineDDLTools[onlineddl.ModeGhost].Available || !response.OnlineDDLTools[onlineddl.ModePTOSC].Available {
 		t.Fatalf("mutation response lost runtime readiness: %#v", response)
 	}
-	if response.OnlineDDLTools[onlineddl.ModeGhost].Version != "1.1.6" || response.OnlineDDLTools[onlineddl.ModePTOSC].Version != "3.7.0" {
+	if response.OnlineDDLTools[onlineddl.ModeGhost].Version != "1.1.6" || response.OnlineDDLTools[onlineddl.ModePTOSC].Version != "3.7.1" {
 		t.Fatalf("unexpected versions: %#v", response.OnlineDDLTools)
 	}
 }

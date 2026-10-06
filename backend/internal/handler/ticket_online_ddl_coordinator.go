@@ -221,7 +221,7 @@ func (c *ticketOnlineDDLCoordinator) Tune(ctx context.Context, run *model.Online
 func canonicalOnlineDDLToolVersion(mode, raw string) string {
 	want := "1.1.6"
 	if mode == onlineddl.ModePTOSC {
-		want = "3.7.0"
+		want = "3.7.1"
 	}
 	if strings.Contains(raw, want) {
 		return want

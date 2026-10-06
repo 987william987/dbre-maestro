@@ -67,8 +67,8 @@ func TestAdapterBuildArgsAreTypedSingleArgumentsWithoutPassword(t *testing.T) {
 	if !containsArgument(ptArgs, "--force") {
 		t.Fatalf("pt-osc must be non-interactive after platform preflight: %#v", ptArgs)
 	}
-	if !containsArgumentPair(ptArgs, "--recursion-method", "hosts") {
-		t.Fatalf("pt-osc must discover registered replicas with their reported ports: %#v", ptArgs)
+	if !containsArgumentPair(ptArgs, "--recursion-method", "none") {
+		t.Fatalf("pt-osc must not discover or poll replicas: %#v", ptArgs)
 	}
 	if !containsArgumentPair(ptArgs, "--pause-file", "/tmp/work/pt-osc.pause") {
 		t.Fatalf("pt-osc must use a process-scoped pause file: %#v", ptArgs)

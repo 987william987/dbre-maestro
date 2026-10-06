@@ -172,7 +172,7 @@ Gate：quoted identifiers、explicit database、multi-table/非 ALTER 拒絕、S
 
 Dockerfile 以固定 version/checksum 建置 gh-ost 與 pt-online-schema-change；實作 argv builder、0600 temp config、version detection、bounded/redacted output、process group cleanup 與 fake-binary tests。Native 路徑不改。
 
-Image 固定 gh-ost `1.1.6`（amd64 SHA-256 `5d15547f207e72591fd3a55c9cbea275396880a65a290742287a1ac84d0f4977`；arm64 SHA-256 `12f9d91a77774e85073fdea6bfb26f457424bf65b12043cb330e288231aa3465`）與 Percona Toolkit `3.7.0`（source tarball SHA-256 `cda1058177ad5de4e2c9e8848f3745a911675589599814547f43c4f58a42c464`）。兩個 Dockerfile 使用相同版本與 runtime dependencies。
+Image 固定 gh-ost `1.1.6`（amd64 SHA-256 `5d15547f207e72591fd3a55c9cbea275396880a65a290742287a1ac84d0f4977`；arm64 SHA-256 `12f9d91a77774e85073fdea6bfb26f457424bf65b12043cb330e288231aa3465`）與 Percona Toolkit `3.7.1`（Percona 官方 GitHub tag archive SHA-256 `6ba6b31ec437a6bce10df15a4e577f49f605ff8cb886557d0c7176ba7018b0cb`）。兩個 Dockerfile 使用相同版本與 runtime dependencies。
 
 Adapter 只接受 typed parameters 並直接傳遞 argv，不經 shell。Password 只寫入 `0700` 暫存目錄中的 `0600` client config；args、過濾後的 environment 與回傳 error 不含 password。stdout/stderr 分別硬性限制為 1 MiB 並在回傳前遮罩，timeout/cancel 會終止整個 process group，process 結束後刪除暫存目錄。O3 不註冊 API、不啟動 persistent runner，也不改變 Native execution。
 
@@ -234,9 +234,9 @@ Gate：handler permission/ownership/DB scope/direct API bypass；Native regressi
 
 建立隔離 MySQL source/replica fixtures，真實執行兩工具的 copy、throttle、pause/resume、cancel、cut-over、artifact discovery；Testnet Aurora 分階段開啟 Settings。同步 API/permissions、Settings、Tickets how-to、Docker image、PROJECT_STATUS 與 runbook。
 
-本機 fixture 已驗證固定版本、ROW/FULL async replica、cut-over、小表／65,536-row copy、concurrent DML、pause/resume、cancel/artifact，以及 credential/network failure。真實測試發現 pt-osc 需要平台固定 `--force` 與 `--recursion-method=hosts`，避免非互動 stdin 失敗及 processlist 回傳 `host:socket` 造成 replica lag polling crash；兩項均由 adapter unit test 鎖定，不開放 raw CLI flag。
+本機 fixture 已驗證固定版本、ROW/FULL async replica、cut-over、小表／65,536-row copy、concurrent DML、pause/resume、cancel/artifact，以及 credential/network failure。pt-osc 固定使用 `--force` 避免非互動 stdin 失敗，並固定 `--recursion-method=none`，不自動探索 replica 或執行 replica lag polling；兩項均由 adapter unit test 鎖定，不開放 raw CLI flag。
 
-Gate：小/大表、concurrent DML、replica lag、metadata lock、FK/trigger、tool crash、app shutdown、network loss、credential rotation、disk/process limits；完整 Go/frontend/image gates。Aurora checklist 必須記錄 engine/version/topology、時間、操作者與結果；未跑不得宣稱功能完成。
+Gate：小/大表、concurrent DML、metadata lock、FK/trigger、tool crash、app shutdown、network loss、credential rotation、disk/process limits；gh-ost 另驗證 replica lag，pt-osc 明確不提供 replica lag 保護；完整 Go/frontend/image gates。Aurora checklist 必須記錄 engine/version/topology、時間、操作者與結果；未跑不得宣稱功能完成。
 
 ## NOT in scope
 

@@ -1,8 +1,10 @@
 package onlineddl
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -301,6 +303,7 @@ func TestArtifactDiscoveryAndConservativeOutcomeClassification(t *testing.T) {
 func TestManagedExecutorAlwaysVerifiesOutcomeAndExposesControl(t *testing.T) {
 	t.Run("successful process still requires verified ddl", func(t *testing.T) {
 		process := newFakeControlledProcess(true)
+		process.result = ToolResult{Stdout: "# Done\n"}
 		verified := false
 		executor := &ManagedExecutor{Resolve: func(context.Context, *model.OnlineDDLRun) (*ExecutionPlan, error) {
 			return &ExecutionPlan{Adapter: fakeManagedAdapter{process}, Verify: func(context.Context, ToolResult, error, bool) (OutcomeEvidence, error) {
@@ -310,6 +313,63 @@ func TestManagedExecutorAlwaysVerifiesOutcomeAndExposesControl(t *testing.T) {
 		}}
 		if err := executor.Execute(context.Background(), &model.OnlineDDLRun{ID: 1, Mode: ModeGhost}); !IsTerminalOutcome(err, StatusCompleted) || !verified {
 			t.Fatalf("verified=%v err=%v", verified, err)
+		}
+	})
+	t.Run("ptosc zero exit with explicit failure is not completed", func(t *testing.T) {
+		process := newFakeControlledProcess(true)
+		process.result = ToolResult{
+			Stdout: "`app`.`orders` was not altered.\n",
+			Stderr: "Error copying rows from `app`.`orders` to `app`.`_orders_new`: Lost connection to server during query\n",
+		}
+		executor := &ManagedExecutor{Resolve: func(context.Context, *model.OnlineDDLRun) (*ExecutionPlan, error) {
+			return &ExecutionPlan{
+				Adapter: fakeManagedAdapter{process},
+				Request: ToolRequest{Statement: Statement{Database: "app", Table: "orders"}},
+				Verify: func(_ context.Context, _ ToolResult, processErr error, _ bool) (OutcomeEvidence, error) {
+					if !errors.Is(processErr, ErrToolProcessFailed) {
+						t.Fatalf("processErr=%v", processErr)
+					}
+					return OutcomeEvidence{VerificationComplete: true, OriginalUnchanged: true, Artifacts: ArtifactSummary{Items: []Artifact{{Kind: "new_table", Exists: true}}}}, nil
+				},
+			}, nil
+		}}
+		err := executor.Execute(context.Background(), &model.OnlineDDLRun{ID: 4, Mode: ModePTOSC})
+		if !IsTerminalOutcome(err, StatusFailed) {
+			t.Fatalf("err=%v", err)
+		}
+	})
+	t.Run("ptosc nonzero exit with unchanged source is failed even with artifacts", func(t *testing.T) {
+		process := newFakeControlledProcess(true)
+		process.result = ToolResult{Stdout: "`app`.`orders` was not altered.\n"}
+		process.waitErr = ErrToolProcessFailed
+		executor := &ManagedExecutor{Resolve: func(context.Context, *model.OnlineDDLRun) (*ExecutionPlan, error) {
+			return &ExecutionPlan{
+				Adapter: fakeManagedAdapter{process},
+				Request: ToolRequest{Statement: Statement{Database: "app", Table: "orders"}},
+				Verify: func(context.Context, ToolResult, error, bool) (OutcomeEvidence, error) {
+					return OutcomeEvidence{VerificationComplete: true, OriginalUnchanged: true, Artifacts: ArtifactSummary{Items: []Artifact{{Kind: "new_table", Exists: true}}}}, nil
+				},
+			}, nil
+		}}
+		err := executor.Execute(context.Background(), &model.OnlineDDLRun{ID: 6, Mode: ModePTOSC})
+		if !IsTerminalOutcome(err, StatusFailed) {
+			t.Fatalf("err=%v", err)
+		}
+	})
+	t.Run("zero exit without terminal marker is outcome unknown", func(t *testing.T) {
+		process := newFakeControlledProcess(true)
+		process.result = ToolResult{Stdout: "Swapped original and new tables OK.\n"}
+		executor := &ManagedExecutor{Resolve: func(context.Context, *model.OnlineDDLRun) (*ExecutionPlan, error) {
+			return &ExecutionPlan{
+				Adapter: fakeManagedAdapter{process},
+				Request: ToolRequest{Statement: Statement{Database: "app", Table: "orders"}},
+				Verify: func(context.Context, ToolResult, error, bool) (OutcomeEvidence, error) {
+					return OutcomeEvidence{VerificationComplete: true, TargetDDLApplied: true}, nil
+				},
+			}, nil
+		}}
+		if err := executor.Execute(context.Background(), &model.OnlineDDLRun{ID: 5, Mode: ModePTOSC}); !IsTerminalOutcome(err, StatusOutcomeUnknown) {
+			t.Fatalf("err=%v", err)
 		}
 	})
 	t.Run("cancel during copy uses post-process evidence", func(t *testing.T) {
@@ -355,4 +415,30 @@ func TestManagedExecutorAlwaysVerifiesOutcomeAndExposesControl(t *testing.T) {
 			t.Fatalf("err=%v", err)
 		}
 	})
+}
+
+func TestManagedExecutorLogsBoundedOutputForSuccessfulProcess(t *testing.T) {
+	var logs bytes.Buffer
+	process := newFakeControlledProcess(true)
+	process.result = ToolResult{
+		Stdout: strings.Repeat("x", toolCompletionLogBytes) + "\nSuccessfully altered `app`.`orders`.\n",
+		Stderr: "Swapped original and new tables OK.",
+	}
+	executor := &ManagedExecutor{
+		Logger: slog.New(slog.NewJSONHandler(&logs, nil)),
+		Resolve: func(context.Context, *model.OnlineDDLRun) (*ExecutionPlan, error) {
+			return &ExecutionPlan{Adapter: fakeManagedAdapter{process}, Request: ToolRequest{Statement: Statement{Database: "app", Table: "orders"}}, Verify: func(context.Context, ToolResult, error, bool) (OutcomeEvidence, error) {
+				return OutcomeEvidence{ProcessSucceeded: true, VerificationComplete: true, TargetDDLApplied: true}, nil
+			}}, nil
+		},
+	}
+	if err := executor.Execute(context.Background(), &model.OnlineDDLRun{ID: 21, Mode: ModePTOSC}); !IsTerminalOutcome(err, StatusCompleted) {
+		t.Fatalf("err=%v", err)
+	}
+	output := logs.String()
+	for _, expected := range []string{`"msg":"online ddl: tool process finished"`, `"run_id":21`, `"mode":"pt-osc"`, `"process_succeeded":true`, `"output_truncated":true`, "Successfully altered", "Swapped original and new tables OK"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("log missing %q: %s", expected, output)
+		}
+	}
 }

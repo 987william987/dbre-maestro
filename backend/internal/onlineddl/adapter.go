@@ -156,7 +156,7 @@ func (a *CommandAdapter) buildArgs(req ToolRequest, workDir, configPath string) 
 		return args
 	}
 	p := req.Parameters.PTOSC
-	args := []string{"--defaults-file", configPath, "--alter", req.Statement.AlterClause, "--max-load", "Threads_running=" + strconv.Itoa(p.MaxLoadThreadsRunning), "--critical-load", "Threads_running=" + strconv.Itoa(p.CriticalLoadThreadsRunning), "--max-lag", strconv.Itoa(p.MaxLagSeconds), "--check-interval", strconv.Itoa(p.CheckIntervalSeconds), "--alter-foreign-keys-method", p.AlterForeignKeysMethod, "--recursion-method", "hosts", "--pause-file", filepath.Join(workDir, "pt-osc.pause"), "--force"}
+	args := []string{"--defaults-file", configPath, "--alter", req.Statement.AlterClause, "--max-load", "Threads_running=" + strconv.Itoa(p.MaxLoadThreadsRunning), "--critical-load", "Threads_running=" + strconv.Itoa(p.CriticalLoadThreadsRunning), "--max-lag", strconv.Itoa(p.MaxLagSeconds), "--check-interval", strconv.Itoa(p.CheckIntervalSeconds), "--alter-foreign-keys-method", p.AlterForeignKeysMethod, "--recursion-method", "none", "--pause-file", filepath.Join(workDir, "pt-osc.pause"), "--force"}
 	if p.ChunkSize != nil {
 		args = append(args, "--chunk-size", strconv.Itoa(*p.ChunkSize))
 	} else {

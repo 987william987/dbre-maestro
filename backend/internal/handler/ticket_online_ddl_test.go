@@ -116,7 +116,7 @@ func TestCanonicalOnlineDDLToolVersionOnlyAcceptsPinnedVersionText(t *testing.T)
 	if got := canonicalOnlineDDLToolVersion(onlineddl.ModeGhost, "gh-ost 1.1.6"); got != "1.1.6" {
 		t.Fatalf("ghost=%q", got)
 	}
-	if got := canonicalOnlineDDLToolVersion(onlineddl.ModePTOSC, "pt-online-schema-change 3.7.0"); got != "3.7.0" {
+	if got := canonicalOnlineDDLToolVersion(onlineddl.ModePTOSC, "pt-online-schema-change 3.7.1"); got != "3.7.1" {
 		t.Fatalf("ptosc=%q", got)
 	}
 	if got := canonicalOnlineDDLToolVersion(onlineddl.ModeGhost, "gh-ost 1.1.5"); got != "gh-ost 1.1.5" {
