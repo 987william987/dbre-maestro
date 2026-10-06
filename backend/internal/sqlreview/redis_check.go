@@ -18,7 +18,7 @@ const (
 	redisCategoryUnknown     redisCommandCategory = "unknown"
 )
 
-const maxRedisScanCount = 200
+const defaultRedisQueryLimit = 200
 
 var redisCommandCategories = map[string]redisCommandCategory{
 	"GET":              redisCategoryRead,
@@ -134,7 +134,7 @@ var redisTicketAllowedCommands = map[string]struct{}{
 
 // CheckRedisReadOnly returns an error if the command is not in the read-only whitelist.
 func CheckRedisReadOnly(cmdLine string) error {
-	_, _, err := PrepareRedisReadOnly(cmdLine, maxRedisScanCount)
+	_, _, err := PrepareRedisReadOnly(cmdLine, defaultRedisQueryLimit)
 	return err
 }
 
@@ -158,8 +158,8 @@ func PrepareRedisReadOnly(cmdLine string, limit int) (string, []string, error) {
 	}
 }
 
-func CheckRedisOfficialReadOnly(cmdLine string, officialReadOnly bool) error {
-	if err := CheckRedisReadOnly(cmdLine); err != nil {
+func CheckRedisOfficialReadOnly(cmdLine string, officialReadOnly bool, limit int) error {
+	if _, _, err := PrepareRedisReadOnly(cmdLine, limit); err != nil {
 		return err
 	}
 	if !officialReadOnly {
@@ -169,14 +169,15 @@ func CheckRedisOfficialReadOnly(cmdLine string, officialReadOnly bool) error {
 	return nil
 }
 
-func CheckRedisFallbackReadOnly(cmdLine string) error {
+func CheckRedisFallbackReadOnly(cmdLine string, limit int) error {
 	cmd, _, err := ParseRedisCommand(cmdLine)
 	if err != nil {
 		return err
 	}
 	switch cmd {
 	case "GET", "MGET", "GETRANGE", "STRLEN", "HGET", "HMGET", "HLEN", "HEXISTS", "LLEN", "LINDEX", "SCARD", "SISMEMBER", "SMISMEMBER", "SRANDMEMBER", "ZCARD", "ZSCORE", "ZMSCORE", "ZRANK", "ZCOUNT", "SCAN", "HSCAN", "SSCAN", "ZSCAN", "TYPE", "TTL", "PTTL", "EXISTS", "PING":
-		return CheckRedisReadOnly(cmdLine)
+		_, _, err := PrepareRedisReadOnly(cmdLine, limit)
+		return err
 	default:
 		return fmt.Errorf("command %q requires Redis readonly metadata", cmd)
 	}
@@ -252,8 +253,8 @@ func redisKeyHasSensitivePrefix(key string, prefixes []string) bool {
 }
 
 func normalizeRedisReadOnlyArgs(cmd string, args []string, limit int) ([]string, error) {
-	if limit < 1 || limit > maxRedisScanCount {
-		limit = maxRedisScanCount
+	if limit < 1 {
+		limit = defaultRedisQueryLimit
 	}
 	args = append([]string(nil), args...)
 	switch cmd {

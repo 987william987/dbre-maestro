@@ -1760,9 +1760,9 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 	var readOnlyErr error
 	if metadataErr != nil {
 		slog.Warn("redis command metadata unavailable; using safe fallback", "connection_id", conn.ID, "command", cmd, "err", metadataErr)
-		readOnlyErr = sqlreview.CheckRedisFallbackReadOnly(cmdLine)
+		readOnlyErr = sqlreview.CheckRedisFallbackReadOnly(cmdLine, queryCtx.Limit)
 	} else {
-		readOnlyErr = sqlreview.CheckRedisOfficialReadOnly(cmdLine, commandInfo.ReadOnly)
+		readOnlyErr = sqlreview.CheckRedisOfficialReadOnly(cmdLine, commandInfo.ReadOnly, queryCtx.Limit)
 	}
 	if readOnlyErr != nil {
 		jsonErr(w, http.StatusUnprocessableEntity, "only read-only Redis commands are allowed: "+readOnlyErr.Error())

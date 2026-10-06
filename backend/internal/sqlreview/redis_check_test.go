@@ -179,23 +179,40 @@ func TestPrepareRedisReadOnlyBoundsMultiValueArguments(t *testing.T) {
 }
 
 func TestCheckRedisOfficialReadOnlyRequiresBothPolicies(t *testing.T) {
-	if err := CheckRedisOfficialReadOnly("GET user:1", true); err != nil {
+	if err := CheckRedisOfficialReadOnly("GET user:1", true, 200); err != nil {
 		t.Fatalf("official readonly GET rejected: %v", err)
 	}
-	if err := CheckRedisOfficialReadOnly("GET user:1", false); err == nil {
+	if err := CheckRedisOfficialReadOnly("GET user:1", false, 200); err == nil {
 		t.Fatal("target Redis readonly metadata must be authoritative")
 	}
-	if err := CheckRedisOfficialReadOnly("KEYS *", true); err == nil {
+	if err := CheckRedisOfficialReadOnly("KEYS *", true, 200); err == nil {
 		t.Fatal("official readonly flag must not bypass the local dangerous-command policy")
 	}
 }
 
 func TestCheckRedisFallbackReadOnlyDoesNotEnableNewCommands(t *testing.T) {
-	if err := CheckRedisFallbackReadOnly("GET user:1"); err != nil {
+	if err := CheckRedisFallbackReadOnly("GET user:1", 200); err != nil {
 		t.Fatalf("legacy safe command rejected: %v", err)
 	}
-	if err := CheckRedisFallbackReadOnly("ZRANGE leaderboard 0 10"); err == nil {
+	if err := CheckRedisFallbackReadOnly("ZRANGE leaderboard 0 10", 200); err == nil {
 		t.Fatal("new command must require target Redis readonly metadata")
+	}
+}
+
+func TestPrepareRedisReadOnlyUsesSQLEditorLimitAboveDefault(t *testing.T) {
+	_, args, err := PrepareRedisReadOnly("ZRANGE leaderboard 0 -1", 500)
+	if err != nil || !reflect.DeepEqual(args, []string{"leaderboard", "0", "499"}) {
+		t.Fatalf("args=%#v err=%v", args, err)
+	}
+	_, args, err = PrepareRedisReadOnly("XRANGE events - +", 1000)
+	if err != nil || !reflect.DeepEqual(args, []string{"events", "-", "+", "COUNT", "1000"}) {
+		t.Fatalf("args=%#v err=%v", args, err)
+	}
+	if _, _, err = PrepareRedisReadOnly("SCAN 0 COUNT 500", 500); err != nil {
+		t.Fatalf("SCAN should use SQL Editor limit: %v", err)
+	}
+	if _, _, err = PrepareRedisReadOnly("SCAN 0 COUNT 500", 200); err == nil {
+		t.Fatal("SCAN count above the requested SQL Editor limit must be rejected")
 	}
 }
 

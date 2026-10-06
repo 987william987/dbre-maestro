@@ -163,7 +163,7 @@ SQL Editor 走 `query` pool profile。預設值：
 
 一般 SQL Editor 只執行目標 Redis 以 `COMMAND` metadata 標示為 `readonly`，且通過平台安全政策的命令。metadata 快取五分鐘；若目標 Redis 禁止讀取 metadata，只退回既有安全 allowlist，不放行新或未知命令。
 
-支援 String、Hash、List、Set、Sorted Set、Stream 與 GEO 的常用唯讀命令，包括 `LRANGE`、`ZRANGE`、`XRANGE`、`GEOSEARCH` 與四個安全的 `OBJECT` subcommand。集合型命令依請求 `limit` 限制，Redis 路徑最高為 200；例如 `ZRANGE key 0 -1` 實際執行為 `ZRANGE key 0 199`，`XRANGE` 與 `GEOSEARCH` 缺少 `COUNT` 時會補上 `COUNT 200`。
+支援 String、Hash、List、Set、Sorted Set、Stream 與 GEO 的常用唯讀命令，包括 `LRANGE`、`ZRANGE`、`XRANGE`、`GEOSEARCH` 與四個安全的 `OBJECT` subcommand。集合型命令直接沿用 SQL Editor 請求的 `limit`，預設 200、最高 1000；例如 limit 為 500 時，`ZRANGE key 0 -1` 實際執行為 `ZRANGE key 0 499`，`XRANGE` 與 `GEOSEARCH` 缺少 `COUNT` 時會補上 `COUNT 500`。
 
 `KEYS`、`HGETALL`、`HKEYS`、`HVALS`、`SMEMBERS`、`MEMORY USAGE`、`DBSIZE`、`TIME`、`LASTSAVE`，以及 write、blocking、transaction、scripting、pub/sub、admin 命令不在一般 SQL Editor 開放；具權限的 DBA 可使用獨立 Admin Mode。一般查詢的 history 保留原始輸入，audit details 另存保留參數邊界的實際執行命令與是否套用 limit。
 
