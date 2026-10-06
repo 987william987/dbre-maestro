@@ -91,7 +91,7 @@ func ParseProgress(mode, output string) (ProgressSnapshot, bool) {
 						progress.ETASeconds = &eta
 					}
 				}
-				return enrichProgress(progress, output), true
+				return enrichProgress(progress, latestProgressSnapshot(lines, i, mode)), true
 			}
 		} else if mode == ModePTOSC {
 			if match := ptoscProgress.FindStringSubmatch(line); match != nil {
@@ -101,18 +101,31 @@ func ParseProgress(mode, output string) (ProgressSnapshot, bool) {
 				minutes, _ := strconv.ParseUint(match[4], 10, 64)
 				seconds, _ := strconv.ParseUint(match[5], 10, 64)
 				eta := hours*3600 + minutes*60 + seconds
-				return enrichProgress(ProgressSnapshot{Phase: "copy", CopiedRows: &copied, ProgressPercent: &percent, ETASeconds: &eta}, output), true
+				return enrichProgress(ProgressSnapshot{Phase: "copy", CopiedRows: &copied, ProgressPercent: &percent, ETASeconds: &eta}, latestProgressSnapshot(lines, i, mode)), true
 			}
 			if match := ptoscCopyProgress.FindStringSubmatch(line); match != nil {
 				percent, _ := strconv.ParseFloat(match[1], 64)
 				minutes, _ := strconv.ParseUint(match[2], 10, 64)
 				seconds, _ := strconv.ParseUint(match[3], 10, 64)
 				eta := minutes*60 + seconds
-				return enrichProgress(ProgressSnapshot{Phase: "copy", ProgressPercent: &percent, ETASeconds: &eta}, output), true
+				return enrichProgress(ProgressSnapshot{Phase: "copy", ProgressPercent: &percent, ETASeconds: &eta}, latestProgressSnapshot(lines, i, mode)), true
 			}
 		}
 	}
 	return ProgressSnapshot{}, false
+}
+
+func latestProgressSnapshot(lines []string, latest int, mode string) string {
+	start := 0
+	for i := latest - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if (mode == ModeGhost && ghostProgress.MatchString(line)) ||
+			(mode == ModePTOSC && (ptoscProgress.MatchString(line) || ptoscCopyProgress.MatchString(line))) {
+			start = i + 1
+			break
+		}
+	}
+	return strings.Join(lines[start:], "\n")
 }
 
 func enrichProgress(progress ProgressSnapshot, output string) ProgressSnapshot {

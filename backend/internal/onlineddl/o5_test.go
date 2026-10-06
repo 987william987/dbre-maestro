@@ -44,6 +44,18 @@ func TestParseProgressFixturesAndRejectMalformedOutput(t *testing.T) {
 	if !ok || withoutRuntimeLoad.ThreadsRunning != nil {
 		t.Fatalf("configured max load was treated as runtime load: %+v", withoutRuntimeLoad)
 	}
+	ghostRecovered, ok := ParseProgress(ModeGhost, "MySQL load: Threads_running=12\nCopy: 10/100 10.0%; ETA: 9s; State: migrating; throttled, max-load Threads_running=12 >= 10\nCopy: 20/100 20.0%; ETA: 8s; State: migrating")
+	if !ok || *ghostRecovered.CopiedRows != 20 || ghostRecovered.ThrottleReason != "" || ghostRecovered.ThreadsRunning != nil {
+		t.Fatalf("latest gh-ost snapshot retained stale metrics: %+v", ghostRecovered)
+	}
+	ghostThrottled, ok := ParseProgress(ModeGhost, "Copy: 10/100 10.0%; ETA: 9s\nCopy: 20/100 20.0%; ETA: 8s\nMySQL load: Threads_running=12\nthrottled, max-load Threads_running=12 >= 10")
+	if !ok || ghostThrottled.ThrottleReason == "" || ghostThrottled.ThreadsRunning == nil || *ghostThrottled.ThreadsRunning != 12 {
+		t.Fatalf("latest gh-ost snapshot omitted trailing metrics: %+v", ghostThrottled)
+	}
+	ptoscRecovered, ok := ParseProgress(ModePTOSC, "MySQL load: Threads_running=30\nthrottling because Threads_running=30\n100 rows copied; 10.0% done; 00:00:09 remain\n200 rows copied; 20.0% done; 00:00:08 remain")
+	if !ok || *ptoscRecovered.CopiedRows != 200 || ptoscRecovered.ThrottleReason != "" || ptoscRecovered.ThreadsRunning != nil {
+		t.Fatalf("latest pt-osc snapshot retained stale metrics: %+v", ptoscRecovered)
+	}
 	for _, output := range []string{"", "Copy: broken", "500 rows copied; 25%"} {
 		if _, ok := ParseProgress(ModeGhost, output); ok {
 			t.Fatalf("malformed output parsed: %q", output)
