@@ -124,6 +124,17 @@ func TestCanonicalOnlineDDLToolVersionOnlyAcceptsPinnedVersionText(t *testing.T)
 	}
 }
 
+func TestOnlineDDLOnlySupportsMySQLConnections(t *testing.T) {
+	if !onlineDDLSupportsConnection(&model.DBConnection{DBType: " mysql "}) {
+		t.Fatal("mysql connection must support online DDL tools")
+	}
+	for _, dbType := range []string{"postgres", "postgresql", "redis", "mariadb", ""} {
+		if onlineDDLSupportsConnection(&model.DBConnection{DBType: dbType}) {
+			t.Fatalf("db type %q unexpectedly supports online DDL tools", dbType)
+		}
+	}
+}
+
 func TestOnlineDDLOutcomeEvidenceUsesBaselineOnlyForAmbiguousExit(t *testing.T) {
 	baseline := [32]byte{1}
 	artifacts := onlineddl.ArtifactSummary{Items: []onlineddl.Artifact{{Kind: "ghost_table", Exists: true}}}

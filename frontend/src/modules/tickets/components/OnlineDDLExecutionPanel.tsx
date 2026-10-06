@@ -10,7 +10,7 @@ type Props = {
   ticketRef: string
   execution: TicketExecution
   run?: OnlineDDLRun
-  modes: Record<OnlineDDLMode, { enabled: boolean }>
+  modes: Partial<Record<OnlineDDLMode, { enabled: boolean }>>
   canExecute: boolean
   canStop: boolean
   busy: boolean
@@ -107,7 +107,7 @@ export function OnlineDDLExecutionPanel(props: Props) {
     }
   }
 
-  const modeDisabled = mode !== 'native' && !props.modes[mode].enabled
+  const modeDisabled = mode !== 'native' && props.modes[mode]?.enabled !== true
   return (
     <div className="flex min-w-[250px] items-center gap-2">
       <select
@@ -118,8 +118,8 @@ export function OnlineDDLExecutionPanel(props: Props) {
         className="h-8 min-w-0 flex-1 rounded-md border border-border bg-panel px-2 text-[12px] font-medium text-ink disabled:cursor-not-allowed disabled:opacity-70"
       >
         <option value="native">Native</option>
-        <option value="gh-ost" disabled={!props.modes['gh-ost'].enabled}>gh-ost{props.modes['gh-ost'].enabled ? '' : ' (disabled)'}</option>
-        <option value="pt-osc" disabled={!props.modes['pt-osc'].enabled}>pt-osc{props.modes['pt-osc'].enabled ? '' : ' (disabled)'}</option>
+        {props.modes['gh-ost'] ? <option value="gh-ost" disabled={!props.modes['gh-ost'].enabled}>gh-ost{props.modes['gh-ost'].enabled ? '' : ' (disabled)'}</option> : null}
+        {props.modes['pt-osc'] ? <option value="pt-osc" disabled={!props.modes['pt-osc'].enabled}>pt-osc{props.modes['pt-osc'].enabled ? '' : ' (disabled)'}</option> : null}
       </select>
       {mode !== 'native' ? (
         <button type="button" aria-label={`${run ? 'Manage' : 'Configure'} statement ${props.execution.seq} ${mode}`} onClick={() => setModalOpen(true)} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-panel text-muted transition hover:bg-panel-soft hover:text-ink">

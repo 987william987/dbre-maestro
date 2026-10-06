@@ -126,6 +126,13 @@ func (c *ticketOnlineDDLCoordinator) preparePlan(ctx context.Context, ticket *mo
 	if err := parameters.Validate(mode); err != nil {
 		return onlineddl.Statement{}, "", "", nil, err
 	}
+	conn, err := c.handler.dbConns.GetByID(ctx, *ticket.DBConnectionID)
+	if err != nil {
+		return onlineddl.Statement{}, "", "", nil, err
+	}
+	if !onlineDDLSupportsConnection(conn) {
+		return onlineddl.Statement{}, "", "", nil, onlineddl.ErrUnsupportedStatement
+	}
 	settings, err := c.settings.Get(ctx)
 	if err != nil {
 		return onlineddl.Statement{}, "", "", nil, err
@@ -254,6 +261,9 @@ func (c *ticketOnlineDDLCoordinator) ResolveExecution(ctx context.Context, run *
 	if err != nil || conn == nil {
 		return nil, onlineddl.ErrPreflightChanged
 	}
+	if !onlineDDLSupportsConnection(conn) {
+		return nil, onlineddl.ErrUnsupportedStatement
+	}
 	resolved, password, err := c.handler.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadwrite)
 	if err != nil {
 		return nil, err
@@ -329,6 +339,10 @@ func onlineDDLCreateHash(ctx context.Context, db *sql.DB, database, table string
 }
 
 var onlineDDLAutoIncrement = regexp.MustCompile(`(?i)\s+AUTO_INCREMENT=\d+`)
+
+func onlineDDLSupportsConnection(connection *model.DBConnection) bool {
+	return connection != nil && strings.EqualFold(strings.TrimSpace(connection.DBType), "mysql")
+}
 
 func (c *ticketOnlineDDLCoordinator) HandleTerminal(ctx context.Context, run *model.OnlineDDLRun, status, code, detail string, duration time.Duration) error {
 	durationMs := duration.Milliseconds()

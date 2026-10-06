@@ -111,7 +111,7 @@ func (r *OnlineDDLRepo) Claim(ctx context.Context, id, version uint64) (bool, er
 
 func (r *OnlineDDLRepo) Heartbeat(ctx context.Context, id uint64) (bool, error) {
 	now := timeutil.NowUTC()
-	return execChanged(r.db.ExecContext(ctx, `UPDATE ticket_online_ddl_runs SET heartbeat_at = ?, updated_at = ? WHERE id = ? AND status = 'running'`, now, now, id))
+	return execChanged(r.db.ExecContext(ctx, `UPDATE ticket_online_ddl_runs SET heartbeat_at = ?, updated_at = ? WHERE id = ? AND status IN ('running','paused','cancel_requested')`, now, now, id))
 }
 
 func (r *OnlineDDLRepo) FinishRunning(ctx context.Context, id uint64, status, errorCode string) (bool, error) {

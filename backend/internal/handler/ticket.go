@@ -1641,7 +1641,16 @@ func (h *TicketHandler) Get(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusInternalServerError, "get online ddl runs failed")
 			return
 		}
-		if h.settings != nil {
+		var supportsOnlineDDL bool
+		if ticket.DBConnectionID != nil && h.dbConns != nil {
+			connection, connectionErr := h.dbConns.GetByID(r.Context(), *ticket.DBConnectionID)
+			if connectionErr != nil {
+				jsonErr(w, http.StatusInternalServerError, "get ticket connection failed")
+				return
+			}
+			supportsOnlineDDL = onlineDDLSupportsConnection(connection)
+		}
+		if supportsOnlineDDL && h.settings != nil {
 			platformSettings, settingsErr := h.settings.Get(r.Context())
 			if settingsErr != nil {
 				jsonErr(w, http.StatusInternalServerError, "get online ddl settings failed")

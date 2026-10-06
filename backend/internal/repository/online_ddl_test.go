@@ -93,7 +93,7 @@ func TestOnlineDDLRunnerLifecycleUpdatesAreConditional(t *testing.T) {
 	if err != nil || !claimed {
 		t.Fatalf("claimed=%v err=%v", claimed, err)
 	}
-	mock.ExpectExec("UPDATE ticket_online_ddl_runs SET heartbeat_at").WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE ticket_online_ddl_runs SET heartbeat_at = \\?, updated_at = \\? WHERE id = \\? AND status IN \\('running','paused','cancel_requested'\\)").WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
 	alive, err := repo.Heartbeat(context.Background(), 7)
 	if err != nil || !alive {
 		t.Fatalf("alive=%v err=%v", alive, err)

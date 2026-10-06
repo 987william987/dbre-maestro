@@ -222,6 +222,8 @@ O7-C 將 managed runner 綁定 server lifecycle，resolver 只從持久化 run �
 
 O7-D 在 Ticket Detail 以 manual statement 為單位提供 Native／gh-ost／pt-osc 模式說明、Settings disabled reason、typed parameters 與獨立 dry-run；mode/parameters 只在點 Execute 時送出。Active run 每 2 秒從 canonical GET 刷新，顯示 phase、progress、ETA、lag、load、throttle、heartbeat、outcome 與 artifacts；Pause／Resume／Cancel 使用最新 OCC version，gh-ost 提供單欄位 runtime tuning，pt-osc 啟動後保持唯讀。
 
+gh-ost／pt-osc 僅支援 `db_type=mysql`。Ticket Detail 對其他 connection type 不提供這兩個模式，後端 dry-run、queue 與 worker resolve 皆重新驗證 connection type；PostgreSQL／Redis 等其他類型維持既有 Native 或各自執行路徑。
+
 註冊 dry-run/control APIs，延伸 manual statement Execute，保持 batch、scheduled 與 `auto_after_approval` Native 行為；完成 statement mode selector、參數、dry-run output、progress、controls 與 Settings toggles。Lark 卡片不在本階段增加 Online DDL 摘要。
 
 Gate：handler permission/ownership/DB scope/direct API bypass；Native regression；manual statement mode/parameters；auto workflow unchanged；前端 dry-run success/failure、direct Execute、disabled/error/stale/poll cleanup/permission/outcome states；`npm run lint`、`npm test`、`npm run build`、`go test ./...`。

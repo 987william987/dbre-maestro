@@ -20,6 +20,10 @@ function renderPanel(run?: OnlineDDLRun) {
   return render(<OnlineDDLExecutionPanel ticketRef="TK-3" execution={run ? { ...execution, status: run.status === 'planned' ? 'pending' : 'running' } : execution} run={run} modes={modes} canExecute canStop busy={false} {...callbacks} />)
 }
 
+function renderNativeOnlyPanel() {
+  return render(<OnlineDDLExecutionPanel ticketRef="TK-3" execution={execution} modes={{}} canExecute canStop busy={false} {...callbacks} />)
+}
+
 describe('OnlineDDLExecutionPanel', () => {
   beforeEach(() => vi.clearAllMocks())
 
@@ -28,6 +32,12 @@ describe('OnlineDDLExecutionPanel', () => {
     expect(screen.getByRole('combobox', { name: 'Statement 1 execution mode' })).toHaveValue('native')
     expect(screen.getByRole('option', { name: /pt-osc \(disabled\)/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Execute' })).toBeInTheDocument()
+  })
+
+  it('does not offer MySQL-only tools when the API returns no supported modes', () => {
+	renderNativeOnlyPanel()
+	const options = screen.getAllByRole('option').map((option) => option.textContent)
+	expect(options).toEqual(['Native'])
   })
 
   it('keeps dry run optional and sends the selected mode only when Execute is clicked', async () => {
