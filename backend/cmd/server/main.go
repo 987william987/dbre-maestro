@@ -25,6 +25,7 @@ import (
 	"github.com/dbre-maestro/maestro/internal/netguard"
 	"github.com/dbre-maestro/maestro/internal/notification"
 	"github.com/dbre-maestro/maestro/internal/oidcbearer"
+	"github.com/dbre-maestro/maestro/internal/onlineddl"
 	"github.com/dbre-maestro/maestro/internal/pool"
 	"github.com/dbre-maestro/maestro/internal/realtime"
 	"github.com/dbre-maestro/maestro/internal/repository"
@@ -299,6 +300,7 @@ func main() {
 	settingsRepo := repository.NewSettingsRepo(metaDB, cfg.EncryptionKey)
 	dbMetadataRepo := repository.NewDBMetadataRepo(metaDB)
 	scheduledReportRepo := repository.NewScheduledSQLReportRepo(metaDB)
+	onlineDDLRepo := repository.NewOnlineDDLRepo(metaDB)
 
 	larkDispatcher := notification.NewDispatcher(settingsRepo, userRepo, cfg.LarkWebhookURL)
 	if cfg.LarkWebhookURL != "" {
@@ -332,6 +334,17 @@ func main() {
 
 	frontendReloadH := handler.NewFrontendReloadHandler()
 	ticketH := handler.NewTicketHandler(ticketRepo, queryAccessRepo, exportRepo, auditRepo, settingsRepo, dbConnRepo, userRepo, authGroupRepo, maskingRuleRepo, whitelistRepo, maskingEngine, sqlReviewRuleRepo, shadowValidationDB, larkDispatcher, notifRepo, eventBroker, cfg.AppBaseURL, handler.WithTicketHandlerAppEnv(cfg.AppEnv), handler.WithTicketHandlerDBMetadata(dbMetadataRepo), handler.WithTicketHandlerRollbacks(ticketRollbackRepo), handler.WithTicketHandlerShadowReadonlyPool(pool.ShadowValidationPools(), cfg.ShadowReadonlyPoolEnabled))
+	onlineDDLRunner := ticketH.ConfigureOnlineDDL(onlineDDLRepo, onlineddl.NewController())
+	onlineDDLCtx, cancelOnlineDDL := context.WithCancel(context.Background())
+	onlineDDLDone := make(chan struct{})
+	if onlineDDLRunner != nil {
+		go func() {
+			defer close(onlineDDLDone)
+			onlineDDLRunner.Start(onlineDDLCtx)
+		}()
+	} else {
+		close(onlineDDLDone)
+	}
 	dbConnH := handler.NewDBConnectionHandler(dbConnRepo, userRepo, authGroupRepo, auditRepo, handler.WithDBConnectionHandlerHostPolicy(dbConnectionHostPolicy), handler.WithDBConnectionHandlerSettings(settingsRepo), handler.WithDBConnectionHandlerMetadata(dbMetadataRepo))
 	exportH := handler.NewExportHandler(exportRepo, ticketRepo, dbConnRepo, userRepo, auditRepo, settingsRepo, queryAccessRepo, maskingRuleRepo, whitelistRepo, maskingEngine, notifRepo, eventBroker, larkDispatcher, cfg.AppBaseURL, cfg.JWTSecret)
 	auditH := handler.NewAuditHandler(auditRepo)
@@ -358,6 +371,7 @@ func main() {
 		auditRepo,
 		handler.WithSettingsHandlerAppEnv(cfg.AppEnv),
 		handler.WithSettingsHandlerLarkCallbackReloader(larkCardCallbackManager),
+		handler.WithSettingsHandlerOnlineDDLAdapters(handler.OnlineDDLToolAdapters()),
 	)
 	dbMetadataH := handler.NewDBMetadataHandler(dbMetadataRepo, dbConnRepo, settingsRepo)
 	binlogExportH := handler.NewMySQLBinlogExportHandler(binlogExportRepo, dbConnRepo, userRepo, auditRepo, settingsRepo)
@@ -694,6 +708,12 @@ func main() {
 
 			r.Route("/{id}", func(r chi.Router) {
 				r.With(requireTicketsRead).Get("/", ticketH.Get)
+			r.With(requireTicketsExecute).Post("/online-ddl/dry-run", ticketH.OnlineDDLDryRun)
+				r.With(requireTicketsRead).Get("/executions/{executionID}/online-ddl", ticketH.GetOnlineDDL)
+				r.With(requireTicketsExecute).Post("/executions/{executionID}/online-ddl/pause", ticketH.PauseOnlineDDL)
+				r.With(requireTicketsExecute).Post("/executions/{executionID}/online-ddl/resume", ticketH.ResumeOnlineDDL)
+				r.With(requireTicketsExecute).Post("/executions/{executionID}/online-ddl/cancel", ticketH.CancelOnlineDDL)
+				r.With(requireTicketsExecute).Patch("/executions/{executionID}/online-ddl/runtime-parameters", ticketH.TuneOnlineDDL)
 				r.With(requireTicketWorkflowReview).Post("/approve", ticketH.Approve)
 				r.With(requireTicketWorkflowReject).Post("/reject", ticketH.Reject)
 				r.With(requireTicketsApply).Post("/withdraw", ticketH.Withdraw)
@@ -755,7 +775,13 @@ func main() {
 		shutdownErr <- srv.Shutdown(ctx)
 	}()
 	larkCardCallbackManager.Stop()
+	cancelOnlineDDL()
 	ticketH.CancelActiveExecutionsForShutdown(ctx)
+	select {
+	case <-onlineDDLDone:
+	case <-ctx.Done():
+		slog.Warn("online ddl runner shutdown timed out")
+	}
 	if err := <-shutdownErr; err != nil {
 		slog.Warn("server shutdown failed", "err", err)
 	}

@@ -81,6 +81,8 @@ type PlatformSettings struct {
 	DBMetadataAccountCron                 string           `json:"db_metadata_account_cron"`
 	DBMetadataAccountSyncIntervalMins     int              `json:"db_metadata_account_sync_interval_minutes"`
 	DBMetadataCronTimezone                string           `json:"db_metadata_cron_timezone"`
+	DDLGhostEnabled                       bool             `json:"ddl_ghost_enabled"`
+	DDLPTOSCEnabled                       bool             `json:"ddl_ptosc_enabled"`
 }
 
 type ApprovalWorkflowType string

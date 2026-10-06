@@ -7,7 +7,7 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import { ApiError } from '@/shared/api/client'
 import { formatDateTime } from '@/shared/lib/format'
 import { MAESTRO_REALTIME_EVENT } from '@/shared/realtime/events'
-import type { DMLExecutionMode, QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants, TicketWorkflowResolution, TicketWorkflowTrace } from '@/shared/types/ticket'
+import type { DMLExecutionMode, OnlineDDLRun, QueryAccessTicketItem, Ticket, TicketDetail, TicketScope, TicketWorkflowParticipants, TicketWorkflowResolution, TicketWorkflowTrace } from '@/shared/types/ticket'
 import type { TicketStatus } from '@/shared/types/ticket'
 import type { CurrentUser } from '@/shared/types/auth'
 import type { AuditLog } from '@/shared/types/audit'
@@ -20,6 +20,7 @@ import { LoadingBlock } from '@/shared/ui/LoadingBlock'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useToast } from '@/shared/ui/ToastContext'
 import { approveTicket, createRollbackTicket, downloadTicketExport, executeTicket, executeTicketStatement, getTicket, previewRollbackTicket, rejectTicket, retryWorkflowResolution, revokeTicket, stopTicketStatement, withdrawTicket } from '@/modules/tickets/api'
+import { OnlineDDLExecutionPanel } from '@/modules/tickets/components/OnlineDDLExecutionPanel'
 import type { RollbackPreviewItem } from '@/modules/tickets/api'
 
 function DetailTable({
@@ -722,8 +723,8 @@ function formatExecutionOutcomeMessage(outcome?: string | null, reason?: string 
   }
   if (outcome === 'outcome_unknown') {
     return errorMessage
-      ? `SQL was sent to DB, then the connection was interrupted. DB outcome is unknown; verify on target DB: ${errorMessage}`
-      : 'SQL was sent to DB, then the connection was interrupted. DB outcome is unknown; verify on target DB.'
+      ? `Online DDL failed, but the final DB outcome is unknown; verify on target DB. Tool error: ${errorMessage}`
+      : 'Online DDL failed, but the final DB outcome is unknown; verify on target DB.'
   }
   if (outcome === 'manually_stopped' || reason === 'manually_stopped') {
     return 'Manually stopped.'
@@ -1009,6 +1010,13 @@ export function TicketDetailPage() {
       setDetail(nextDetail)
     })
   }, [id])
+
+  const updateOnlineDDLRun = useCallback((run: OnlineDDLRun) => {
+    setDetail((current) => current ? {
+      ...current,
+      online_ddl_runs: [...(current.online_ddl_runs ?? []).filter((item) => item.execution_id !== run.execution_id), run],
+    } : current)
+  }, [])
 
   useEffect(() => {
     if (!id) {
@@ -1427,7 +1435,7 @@ export function TicketDetailPage() {
                       {showStatementRollback ? <col className="w-[210px]" /> : null}
                       <col className="w-[90px]" />
                       {showErrorMessageColumn ? <col className="w-[220px]" /> : null}
-                      <col className="w-[120px]" />
+                      <col className={ticket.ticket_type === 'ddl' ? 'w-[280px]' : 'w-[120px]'} />
                     </colgroup>
                     <DataTableHead>
                       <tr>
@@ -1453,8 +1461,10 @@ export function TicketDetailPage() {
                         const rowExpanded = expandedStatementSQLs.has(rowKey)
                         const rowExpandable = isExpandableSql(row.sql)
                         const rowActionBusy = actingExecutionID === row.executionID
-                        const rowCanExecute = Boolean(canExecute && !isFullTicketExecutionRunMode(ticket.execution_run_mode) && !isWholeTicketDMLExecutionMode(ticket.dml_execution_mode) && (ticket.ticket_type === 'ddl' || ticket.ticket_type === 'dml') && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
-                        const rowCanStop = Boolean(canStop && row.executionID && row.executionStatus === 'running')
+                        const rowOnlineDDLRun = (detail.online_ddl_runs ?? []).find((run) => run.execution_id === row.executionID)
+                        const rowExecution = detail.executions.find((execution) => execution.id === row.executionID)
+                        const rowCanExecute = Boolean(canExecute && !isFullTicketExecutionRunMode(ticket.execution_run_mode) && !isWholeTicketDMLExecutionMode(ticket.dml_execution_mode) && ticket.ticket_type === 'dml' && ticket.status !== 'completed' && ticket.status !== 'failed' && row.executionID && row.executionStatus === 'pending')
+                        const rowCanStop = Boolean(canStop && !rowOnlineDDLRun && row.executionID && row.executionStatus === 'running')
                         return (
                           <DataTableRow
                             key={rowKey}
@@ -1523,7 +1533,19 @@ export function TicketDetailPage() {
                               <DataTableCell className="break-words align-middle leading-6 text-muted">{row.errorMessage || '—'}</DataTableCell>
                             ) : null}
                             <DataTableCell className="align-middle">
-                              {rowCanExecute && row.executionID ? (
+                              {ticket.ticket_type === 'ddl' && rowExecution && !isFullTicketExecutionRunMode(ticket.execution_run_mode) ? (
+                                <OnlineDDLExecutionPanel
+                                  ticketRef={ticket.ticket_no}
+                                  execution={rowExecution}
+                                  run={rowOnlineDDLRun}
+                                  modes={detail.online_ddl_modes ?? { 'gh-ost': { enabled: false }, 'pt-osc': { enabled: false } }}
+                                  canExecute={canExecute}
+                                  canStop={canStop}
+                                  busy={rowActionBusy}
+                                  onRunChange={updateOnlineDDLRun}
+                                  onExecute={(mode, parameters) => runStatementAction(rowExecution.id, () => executeTicketStatement(ticket.ticket_no, rowExecution.id, mode, parameters))}
+                                />
+                              ) : rowCanExecute && row.executionID ? (
                                 <button
                                   type="button"
                                   onClick={() => void runStatementAction(row.executionID!, () => executeTicketStatement(ticket.ticket_no, row.executionID!))}

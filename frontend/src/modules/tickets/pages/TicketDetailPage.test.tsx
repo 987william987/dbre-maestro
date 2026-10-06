@@ -979,6 +979,43 @@ describe('TicketDetailPage role visibility', () => {
     expect(screen.getByText('1.250s')).toBeInTheDocument()
   })
 
+  it('Online DDL outcome 不明時同時顯示工具錯誤與人工確認提示', async () => {
+    mockedUseAuth.mockReturnValue({
+      status: 'authenticated',
+      isAuthenticated: true,
+      user: { id: 1, username: 'dev', authGroups: ['developer'], authGroupDetails: [], permissions: ['tickets.apply'], dbConnectionIds: [], protected: false, isActive: true },
+      accessToken: 'token',
+      login: vi.fn(),
+      logout: vi.fn(),
+      clearAuth: vi.fn(),
+    })
+    mockedGetTicket.mockResolvedValue(buildDetail({
+      ...baseTicket,
+      ticket_type: 'ddl',
+      status: 'failed',
+      sql_content: 'ALTER TABLE users ADD COLUMN note VARCHAR(255);',
+    }, {
+      executions: [{
+        id: 21,
+        ticket_id: 12,
+        seq: 1,
+        sql_stmt: 'ALTER TABLE users ADD COLUMN note VARCHAR(255);',
+        status: 'failed',
+        rows_affected: null,
+        error_msg: 'Error 1419: You do not have the SUPER privilege',
+        interruption_reason: 'outcome_unknown',
+        outcome_confidence: 'outcome_unknown',
+        started_at: '2026-06-09T10:00:00.000Z',
+        completed_at: '2026-06-09T10:00:05.000Z',
+      }],
+    }))
+
+    renderPage()
+
+    expect(await screen.findByText(/Tool error: Error 1419: You do not have the SUPER privilege/)).toBeInTheDocument()
+    expect(screen.getByText(/final DB outcome is unknown; verify on target DB/)).toBeInTheDocument()
+  })
+
   it('Stop 按鈕由 can_stop 決定，即使該使用者不是 can_execute 的指派執行者', async () => {
     mockedUseAuth.mockReturnValue({
       status: 'authenticated',

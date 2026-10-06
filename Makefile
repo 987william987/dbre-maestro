@@ -1,4 +1,4 @@
-.PHONY: dev dev-backend dev-frontend db-only build test test-frontend test-binlog-export-integration test-session-management-integration test-table-schema-integration migrate lint
+.PHONY: dev dev-backend dev-frontend db-only build test test-frontend test-binlog-export-integration test-session-management-integration test-table-schema-integration test-online-ddl-integration migrate lint
 
 dev:
 	docker compose up --build
@@ -29,6 +29,9 @@ test-session-management-integration:
 
 test-table-schema-integration:
 	bash backend/test/integration/table_schema.sh
+
+test-online-ddl-integration:
+	bash backend/test/integration/online_ddl.sh
 
 lint:
 	cd backend && golangci-lint run ./...

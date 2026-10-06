@@ -99,7 +99,7 @@
 |---|---|---|
 | `GET /api/tickets` | `requireTicketsRead` | 實際結果仍受 ticket access 控制 |
 | `GET /api/tickets/workflow-dashboard-summary` | `requireTicketsRead` | 回傳目前使用者可見的 workflow dashboard 聚合資料 |
-| `GET /api/tickets/{id}` | `requireTicketsRead` | 實際結果仍受 ticket access 控制 |
+| `GET /api/tickets/{id}` | `requireTicketsRead` | 實際結果仍受 ticket access 控制；DDL detail 同時回傳 `online_ddl_runs` 與不含 secret 的 mode enablement |
 | `GET /api/tickets/connections` | `requireTicketsApply` | DB 清單再受 DB Scope 過濾 |
 | `GET /api/tickets/connections/{id}/databases` | `requireTicketsApply` | 目標 DB 或 Redis DB index 選單 |
 | `POST /api/tickets/review` | `requireTicketsApply` | SQL / Redis review、parser、policy、validation |
@@ -110,8 +110,14 @@
 | `POST /api/tickets/{id}/withdraw` | `requireTicketsApply` | 僅 submitter 可於 `pending_review` 收回 |
 | `POST /api/tickets/{id}/execute` | `requireTicketsExecute` | 只適用 DDL / DML / Redis |
 | `POST /api/tickets/{id}/stop` | `requireTicketsExecute` | 停止執行中 ticket |
-| `POST /api/tickets/{id}/executions/{executionID}/execute` | `requireTicketsExecute` | 執行單一 statement；handler 仍會檢查 executor eligibility |
+| `POST /api/tickets/{id}/executions/{executionID}/execute` | `requireTicketsExecute` | 執行單一 statement；無 body 或 `mode=native` 走原生 DDL，`mode=gh-ost/pt-osc` 會驗證 typed parameters 並原子建立 queued run；handler 仍會檢查 executor eligibility |
 | `POST /api/tickets/{id}/executions/{executionID}/stop` | `requireTicketsExecute` | 停止單一執行中的 statement；handler 仍會檢查 executor eligibility |
+| `POST /api/tickets/{id}/online-ddl/dry-run` | `requireTicketsExecute` | body 以 `execution_id` 指定 approved DDL statement；使用 readwrite credential 執行 gh-ost noop 或 pt-osc `--dry-run`，回傳受限且遮罩後的工具輸出；結果不限制正式執行 |
+| `GET /api/tickets/{id}/executions/{executionID}/online-ddl` | `requireTicketsRead` | 實際結果仍受 ticket view access 控制；不存在時回 `404` |
+| `POST /api/tickets/{id}/executions/{executionID}/online-ddl/pause` | `requireTicketsExecute` | handler 仍會重驗 `can_stop` 與 DB Scope |
+| `POST /api/tickets/{id}/executions/{executionID}/online-ddl/resume` | `requireTicketsExecute` | handler 重驗 `can_execute`、DB Scope與 execution owner |
+| `POST /api/tickets/{id}/executions/{executionID}/online-ddl/cancel` | `requireTicketsExecute` | handler 仍會重驗 `can_stop` 與 DB Scope |
+| `PATCH /api/tickets/{id}/executions/{executionID}/online-ddl/runtime-parameters` | `requireTicketsExecute` | handler 重驗 `can_execute`、DB Scope與 execution owner；只接受 typed patch + OCC version |
 | `GET /api/tickets/{id}/rollbacks/preview` | `requireTicketsApply` | 預覽已產生的 MySQL DML rollback SQL |
 | `POST /api/tickets/{id}/rollbacks/create-ticket` | `requireTicketsApply` | 用選定 rollback SQL 建立新的 DML ticket |
 | `POST /api/tickets/{id}/rollbacks/{rollbackID}/create-ticket` | `requireTicketsApply` | legacy 單筆 rollback ticket 建立 API |
@@ -317,7 +323,7 @@ Table Schema Management 已啟用 readonly metadata、Schema Export、Sync Previ
 |---|---|
 | `GET /api/audit-logs` | `requireAuditLogsRead` |
 | `GET /api/audit-logs/export` | `requireAuditLogsWrite` |
-| `GET /api/settings` | `requireSettingsRead` |
+| `GET /api/settings` | `requireSettingsRead` | 回傳 Online DDL enablement，並以 `online_ddl_tools` 顯示 image 內 gh-ost／pt-osc readiness 與 canonical version；不回傳 binary path 或 raw command output |
 | `GET /api/settings/db-connections` | `requireSettingsRead` |
 | `GET /api/settings/users` | `requireSettingsRead` |
 | `GET /api/settings/approval-resolution` | `requireSettingsRead` |

@@ -48,6 +48,8 @@ type SettingsForm = {
   mysqlRollbackMy2SQLPath: string
   mysqlRollbackGenerationTimeoutSeconds: string
   mysqlRollbackMaxSQLBytes: string
+  ddlGhostEnabled: boolean
+  ddlPTOSCEnabled: boolean
   inventoryEnabled: boolean
   inventoryRegions: string
   inventoryEngines: string
@@ -464,6 +466,39 @@ export function SettingsPage({ section = 'workflow' }: { section?: SettingsSecti
                 value={form.sqlEditorPostgresStatementTimeoutMs}
                 onChange={(value) => setForm((current) => current ? { ...current, sqlEditorPostgresStatementTimeoutMs: value } : current)}
               />
+            </div>
+          </section>
+
+          <section className={`${section === 'query-execution' ? '' : 'hidden '}rounded-xl border border-border bg-panel shadow-soft`}>
+            <div className="border-b border-border/80 px-4 py-3">
+              <p className="text-[14px] font-semibold text-ink">Online DDL Tools</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted">Disabling a mode blocks new plans and runs. It does not stop work already queued or running.</p>
+            </div>
+            <div className="grid gap-4 px-4 py-4 md:grid-cols-2">
+              {([
+                ['gh-ost', 'Enable gh-ost DDL execution', form.ddlGhostEnabled] as const,
+                ['pt-osc', 'Enable pt-osc DDL execution', form.ddlPTOSCEnabled] as const,
+              ]).map(([mode, label, checked]) => {
+                const readiness = settings?.online_ddl_tools?.[mode]
+                return (
+                  <div key={mode} className="rounded-lg border border-border bg-panel-soft px-4 py-3">
+                    <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
+                      <Switch
+                        ariaLabel={label}
+                        checked={checked}
+                        onChange={(enabled) => setForm((current) => current ? {
+                          ...current,
+                          ...(mode === 'gh-ost' ? { ddlGhostEnabled: enabled } : { ddlPTOSCEnabled: enabled }),
+                        } : current)}
+                      />
+                      {label}
+                    </label>
+                    <p className={`mt-2 text-[12px] ${readiness?.available ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`}>
+                      {readiness?.available ? `Ready${readiness.version ? ` · ${readiness.version}` : ''}` : 'Binary unavailable in this image'}
+                    </p>
+                  </div>
+                )
+              })}
             </div>
           </section>
 
@@ -1192,6 +1227,8 @@ function toForm(settings: PlatformSettings): SettingsForm {
     mysqlRollbackMy2SQLPath: settings.mysql_rollback_my2sql_path || 'my2sql',
     mysqlRollbackGenerationTimeoutSeconds: String(settings.mysql_rollback_generation_timeout_seconds || 30),
     mysqlRollbackMaxSQLBytes: String(settings.mysql_rollback_max_sql_bytes || 5 * 1024 * 1024),
+    ddlGhostEnabled: settings.ddl_ghost_enabled,
+    ddlPTOSCEnabled: settings.ddl_ptosc_enabled,
     inventoryEnabled: settings.db_metadata_inventory_enabled,
     inventoryRegions: settings.db_metadata_inventory_regions.join(', '),
     inventoryEngines: settings.db_metadata_inventory_engines.join(', '),
@@ -1272,6 +1309,8 @@ function toPayload(
     db_metadata_account_cron: form.accountCron.trim(),
     db_metadata_account_sync_interval_minutes: current?.db_metadata_account_sync_interval_minutes ?? 60,
     db_metadata_cron_timezone: form.cronTimezone.trim(),
+    ddl_ghost_enabled: form.ddlGhostEnabled,
+    ddl_ptosc_enabled: form.ddlPTOSCEnabled,
     approval_policies: form.approvalPolicies,
     workflow_rules: form.workflowRules.map((rule) => {
       const dbType = rule.db_connection_id == null ? null : connectionDBTypes.get(rule.db_connection_id)

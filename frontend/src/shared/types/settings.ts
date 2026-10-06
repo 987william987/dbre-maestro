@@ -56,6 +56,9 @@ export type PlatformSettings = {
   db_metadata_account_cron: string
   db_metadata_account_sync_interval_minutes: number
   db_metadata_cron_timezone: string
+  ddl_ghost_enabled: boolean
+  ddl_ptosc_enabled: boolean
+  online_ddl_tools?: Record<'gh-ost' | 'pt-osc', { available: boolean; version?: string }>
 }
 
 export type ApprovalWorkflowType =

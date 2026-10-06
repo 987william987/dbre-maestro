@@ -12,6 +12,9 @@ import type {
   TicketType,
   WorkflowDashboardSummary,
   TicketExecutionRollback,
+  OnlineDDLMode,
+  OnlineDDLParameters,
+  OnlineDDLRun,
 } from '@/shared/types/ticket'
 
 type TicketsResponse = {
@@ -130,6 +133,11 @@ export async function getTicket(id: string): Promise<TicketDetail> {
   return apiClient.get<TicketDetail>(`/tickets/${id}`).then((response) => ({
     ...response,
     executions: Array.isArray(response.executions) ? response.executions : [],
+    online_ddl_runs: Array.isArray(response.online_ddl_runs) ? response.online_ddl_runs : [],
+    online_ddl_modes: response.online_ddl_modes ?? {
+      'gh-ost': { enabled: false },
+      'pt-osc': { enabled: false },
+    },
     execution_rollbacks: Array.isArray(response.execution_rollbacks) ? response.execution_rollbacks : [],
     review_results: Array.isArray(response.review_results) ? response.review_results : [],
     activity_logs: Array.isArray(response.activity_logs) ? response.activity_logs : [],
@@ -181,12 +189,32 @@ export async function executeTicket(ticketRef: string | number, comment?: string
   })
 }
 
-export async function executeTicketStatement(ticketRef: string | number, executionID: number) {
-  return apiClient.post<Ticket>(`/tickets/${ticketRef}/executions/${executionID}/execute`)
+export async function executeTicketStatement(ticketRef: string | number, executionID: number, mode: 'native' | OnlineDDLMode = 'native', parameters?: OnlineDDLParameters) {
+  return apiClient.post<Ticket>(`/tickets/${ticketRef}/executions/${executionID}/execute`, mode === 'native' ? undefined : { mode, parameters })
 }
 
 export async function stopTicketStatement(ticketRef: string | number, executionID: number) {
   return apiClient.post<void>(`/tickets/${ticketRef}/executions/${executionID}/stop`)
+}
+
+export function dryRunOnlineDDL(ticketRef: string | number, executionID: number, mode: OnlineDDLMode, parameters: OnlineDDLParameters) {
+  return apiClient.post<{ success: boolean; stdout?: string; stderr?: string; output_truncated: boolean; error_code?: string }>(`/tickets/${ticketRef}/online-ddl/dry-run`, {
+    execution_id: executionID,
+    mode,
+    parameters,
+  })
+}
+
+export function getOnlineDDLRun(ticketRef: string | number, executionID: number, signal?: AbortSignal) {
+  return apiClient.get<OnlineDDLRun>(`/tickets/${ticketRef}/executions/${executionID}/online-ddl`, { signal })
+}
+
+export function controlOnlineDDL(ticketRef: string | number, executionID: number, action: 'pause' | 'resume' | 'cancel', version: number) {
+  return apiClient.post<OnlineDDLRun>(`/tickets/${ticketRef}/executions/${executionID}/online-ddl/${action}`, { version })
+}
+
+export function tuneOnlineDDL(ticketRef: string | number, executionID: number, version: number, parameters: Record<string, number>) {
+  return apiClient.patch<OnlineDDLRun>(`/tickets/${ticketRef}/executions/${executionID}/online-ddl/runtime-parameters`, { version, parameters })
 }
 
 export async function previewRollbackTicket(ticketRef: string | number) {

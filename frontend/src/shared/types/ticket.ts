@@ -104,6 +104,55 @@ export type TicketExecution = {
   outcome_confidence?: string | null
 }
 
+export type OnlineDDLMode = 'gh-ost' | 'pt-osc'
+export type OnlineDDLParameters = {
+  schema_version: 'v1'
+  ghost?: {
+    max_load_threads_running: number
+    critical_load_threads_running: number
+    chunk_size: number
+    dml_batch_size: number
+    nice_ratio: number
+    max_lag_millis: number
+    cut_over_lock_timeout_seconds: number
+  }
+  ptosc?: {
+    chunk_size?: number
+    chunk_time?: number
+    max_load_threads_running: number
+    critical_load_threads_running: number
+    max_lag_seconds: number
+    check_interval_seconds: number
+    alter_foreign_keys_method: 'none' | 'auto' | 'rebuild_constraints' | 'drop_swap'
+  }
+}
+
+export type OnlineDDLRun = {
+  id: number
+  ticket_id: number
+  execution_id: number
+  executor_id: number
+  mode: OnlineDDLMode
+  status: string
+  phase?: string | null
+  initial_parameters: OnlineDDLParameters
+  effective_parameters: OnlineDDLParameters
+  tool_version?: string | null
+  progress_percent?: number | null
+  copied_rows?: number | null
+  eta_seconds?: number | null
+  replication_lag_ms?: number | null
+  threads_running?: number | null
+  throttle_reason?: string | null
+  outcome_confidence?: string | null
+  artifact_summary?: Record<string, unknown> | null
+  error_code?: string | null
+  version: number
+  heartbeat_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type TicketExecutionRollback = {
   id: number
   ticket_id: number
@@ -197,6 +246,8 @@ export type TicketWorkflowTrace = {
 export type TicketDetail = {
   ticket: Ticket
   executions: TicketExecution[]
+  online_ddl_runs?: OnlineDDLRun[]
+  online_ddl_modes?: Record<OnlineDDLMode, { enabled: boolean }>
   execution_rollbacks: TicketExecutionRollback[]
   review_results: TicketReviewResult[]
   activity_logs: AuditLog[]

@@ -1,6 +1,6 @@
 # 專案目前狀態
 
-> 最後更新：2026-10-03
+> 最後更新：2026-10-05
 > 本文件提供新 session 的快速上下文，不取代程式碼、reference 文件或 Git history。
 
 ## 專案目的
@@ -51,6 +51,19 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 - Table Schema Management S6 已完成：新增 `090_table_schema_sync_jobs` migration、job/item model 與 repository 狀態機，具同 Target Connection/Database active unique lock、原子 job/items 建立、conditional claim、queued/running cancel、fail-fast item transitions、terminal lock release 與 restart interrupt。bounded worker 依 dependency order 執行、重驗 source DDL、CREATE 後回讀 target hash，並提供 cooperative cancel、持久化終態 structured timing 與 best-effort terminal audit；create/list/detail/cancel lifecycle API 具雙邊 scope 與 ID disclosure 防護。獨立 MySQL 8 fixture 已驗證 dependency order、partial success、preview 後 target race、cancel during blocked DDL 與 parent timeout；fixture 曾抓出 `CREATE` 失敗但因既有 table 可回讀而誤標 created 的 ownership bug，現已限制只有成功執行或 context 結果不確定時才採用回讀判定。
 - Table Schema Management S7 已完成：retry API 只接受 failed／cancelled／interrupted job，並重新驗證 source DDL、dependency、external dependency、target capability、transformation 與 prior-created table ownership/hash；安全時只建立剩餘 items 的 linked job。Job list 具雙邊 connection scope、server-side count/pagination；UI 已完成 Export/Sync、searchable selection、transformation、preview/download、sync confirmation、job history/detail/cancel/retry、active polling 與 stale request cleanup。整合測試涵蓋 success、permission、empty、partial failure、cancel、retry drift、stale response、target conflict 與 dependency cycle。
 - Table Schema Management S8 已完成本機驗收與文件同步：隔離 MySQL 5.7／8.0 fixture 驗證 mixed options、generated columns、indexes、foreign keys、partition，以及同 instance／跨 instance sync preflight；Aurora Testnet 尚未在本機驗證，操作 checklist 已列入使用手冊。
+- DDL Online Execution O1 foundation 已完成：新增預設關閉的 `ddl_ghost_enabled`／`ddl_ptosc_enabled` Settings、run/event migrations、`internal/onlineddl` 狀態機與 stable errors、空 adapter interface，以及具 OCC、同 connection active lock、restart interruption、bounded event retention 的 repository；尚未註冊 tool execution API，也未改變 Native DDL 路徑。
+- DDL Online Execution O2 已完成：TiDB AST 只接受單筆 MySQL `ALTER TABLE`，從 approved SQL 抽取 table identity/alter clause 並綁定原文 SHA-256；`v1` typed parameters 固定 defaults/ranges/互斥規則。原 metadata inspector 與 preflight token 已移除，compatibility 改由工具原生 dry-run／正式執行判定。
+- DDL Online Execution O3 已完成：正式與本機 backend image 以 checksum 固定 gh-ost `1.1.6` 與 Percona Toolkit `3.7.0`；secret-safe adapters 使用 typed argv、0600 暫存 client config、過濾 environment、bounded/redacted output、version detection 與 process-group timeout cleanup。兩個 image 均通過真實 binary/runtime smoke；尚未註冊 API、persistent runner 或改變 Native DDL 路徑。
+- DDL Online Execution O4 已完成：新增全域 concurrency 2、同 connection 串行的 persistent lifecycle runner，以及 conditional claim、heartbeat、phase/terminal persistence、startup recovery、shutdown interruption、panic/heartbeat/error handling 與 best-effort terminal audit。所有 lifecycle 由 fake executor 驗證；runner 尚未在 server 啟動，也未呼叫真實工具或資料庫 mutation。
+- DDL Online Execution O5 已完成：managed executor 已串接受控 process、gh-ost socket pause/resume、pt-osc pause file、graceful/forced cancel、真實格式 progress parser與 2 秒 latest／10 秒 history persistence；所有 process exit 都必須經 read-only DDL/artifact verifier，七種 canonical 終態會原子保存 confidence 與 artifact summary。Restart discovery 保持 `interrupted` 並只回寫查核結果，不自動 resume 或 DROP。O5 階段尚未 production wiring、註冊 API 或提供 runtime tuning。
+- DDL Online Execution O6 已完成：gh-ost 支援六項單欄位 typed runtime tuning，具 range/cross-field validation、per-process control serialization、OCC effective config、原子 before/after event 與持久化失敗反向補償；補償失敗回報 `outcome_unknown`。pt-osc 與 startup-only 參數明確不支援 runtime tuning；尚未 production wiring 或註冊 API。
+- DDL Online Execution O7-A 已完成 handler contract：dry-run、read、pause、resume、cancel、runtime tuning routes 會重驗 ticket/execution 綁定、workflow eligibility、DB Scope、execution owner 與 OCC body，並使用 stable error mapping。
+- DDL Online Execution O7-B 已完成 production coordinator 與 queue wiring：dry-run 直接執行工具原生 noop／`--dry-run`；manual statement Execute 直接攜帶 mode 與 typed parameters，external run 建立與 statement claim 同交易。Native、batch、scheduled 與 `auto_after_approval` 維持既有 Native 行為。
+- DDL Online Execution O7-C 已完成 managed runner production wiring：resolver 綁定 approved SQL、readwrite credential、typed parameters與持久化 tool version；正常 exit 0 與 Native 一樣信任成功結果，cancel／失敗則以忽略 AUTO_INCREMENT counter 的執行前 DDL baseline 加 artifact inventory 分類。Terminal 會更新 execution 並依序接續 mixed batch；graceful shutdown 保存 interrupted/artifact evidence，restart 不 resume。Settings 關閉只阻止新 plan/queue，不中斷已 queued run。
+- DDL Online Execution O7-D 已完成 Ticket Detail 與 Settings UI：每筆 manual DDL statement 可選 Native／gh-ost／pt-osc，external mode 具 typed parameters 與獨立 Dry run，點 Execute 時才送出 mode/parameters；active run 具 2 秒 polling、進度/outcome/artifacts、Pause／Resume／Cancel 及 gh-ost runtime tuning。Settings 顯示 pinned binary readiness/version。
+- DDL Online Execution O8 本機 gate 已完成：隔離 MySQL 8 source/replica fixture 真實驗證 gh-ost／pt-osc 的 cut-over、小表／65,536-row copy、concurrent DML、Pause／Resume、Cancel/artifacts 與 credential/network failure。fixture 發現並修正 pt-osc 非互動確認與 replica discovery 問題；Aurora Testnet checklist 尚未執行，功能仍不得標為完整 Implemented。
+- Online DDL process isolation 已補強：gh-ost throttle/socket/panic 與 pt-osc pause/config 使用每個 process 的獨立 work directory；現行單 replica application 以正規化 readwrite endpoint/port 串行同一 MySQL server 的 Dry run 與正式 run，避免多工單、重複 connection 或多 statement 的 tool files、replication client 與 database artifacts 互相干擾。多 application replica 前必須改為 Meta DB lease。
+- DDL Online Execution 第一版不在 Lark 卡片顯示 mode、progress 或 tool status；既有收件、stage 與簡單工單狀態維持不變，後續需求已移至工程待辦。
 
 ## 已知限制與尚未接入項目
 
@@ -63,10 +76,11 @@ DBRE Maestro 是資料庫治理平台，集中管理 SQL 查詢、DDL／DML／Re
 
 MySQL Binlog Export、Session Management S1-S8 與 Table Schema Management S1-S8 均已完成；Table Schema Management 尚待 Aurora Testnet smoke checklist 的環境驗收，現行基線見 [active spec](specs/active/20261002-table-schema-management-spec.md)。
 
-1. 在 Aurora Testnet 執行 Table Schema Management smoke checklist 並保存驗收結果。
-2. 評估將前端 lint gate 接入 Makefile 與 application image build。
-3. 需要更高 UI 信心時，再分階段導入 Playwright E2E 與視覺回歸。
-4. 長期技術債與部署準備事項見 [工程待辦](TODOS.md)。
+1. 依 [Online DDL 驗收手冊](how-to/verify-online-ddl-execution.md) 執行 Aurora Testnet 分階段驗收並保存可追溯結果。
+2. 在 Aurora Testnet 執行 Table Schema Management smoke checklist 並保存驗收結果。
+3. 評估將前端 lint gate 接入 Makefile 與 application image build。
+4. 需要更高 UI 信心時，再分階段導入 Playwright E2E 與視覺回歸。
+5. 長期技術債與部署準備事項見 [工程待辦](TODOS.md)。
 
 ## Canonical 文件
 
