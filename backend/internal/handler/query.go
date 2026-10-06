@@ -103,6 +103,7 @@ type queryExecutionContext struct {
 	DatabaseName string
 	SchemaName   string
 	RedisDBIndex *int
+	Limit        int
 }
 
 type sqlCancelDBOpener func(ctx context.Context) (*sql.DB, string, func(), error)
@@ -387,6 +388,7 @@ func (h *QueryHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		h.executeRedis(w, r, conn, req.SQL, queryExecutionContext{
 			DatabaseName: strings.TrimSpace(req.Database),
 			RedisDBIndex: req.RedisDBIndex,
+			Limit:        limit,
 		})
 		return
 	}
@@ -1746,8 +1748,29 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 		jsonErr(w, http.StatusUnprocessableEntity, "Query access is temporarily unavailable. Please try again later.")
 		return
 	}
-	if err := sqlreview.CheckRedisReadOnly(cmdLine); err != nil {
-		jsonErr(w, http.StatusUnprocessableEntity, "only read-only Redis commands are allowed: "+err.Error())
+	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	commandInfo, metadataErr := pool.RedisGlobal().CommandInfo(r.Context(), pool.RedisConnOptions{
+		ConnID: resolvedConn.ID, Host: resolvedConn.Host, Port: resolvedConn.Port,
+		Username: resolvedConn.Username, Password: password, SSLMode: resolvedConn.SSLMode,
+	}, cmd)
+	var readOnlyErr error
+	if metadataErr != nil {
+		slog.Warn("redis command metadata unavailable; using safe fallback", "connection_id", conn.ID, "command", cmd, "err", metadataErr)
+		readOnlyErr = sqlreview.CheckRedisFallbackReadOnly(cmdLine)
+	} else {
+		readOnlyErr = sqlreview.CheckRedisOfficialReadOnly(cmdLine, commandInfo.ReadOnly)
+	}
+	if readOnlyErr != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "only read-only Redis commands are allowed: "+readOnlyErr.Error())
+		return
+	}
+	cmd, args, err = sqlreview.PrepareRedisReadOnly(cmdLine, queryCtx.Limit)
+	if err != nil {
+		jsonErr(w, http.StatusUnprocessableEntity, "only bounded read-only Redis commands are allowed: "+err.Error())
 		return
 	}
 	if h.redisPrefixes != nil {
@@ -1764,12 +1787,6 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 			jsonErr(w, http.StatusForbidden, err.Error())
 			return
 		}
-	}
-
-	resolvedConn, password, err := h.dbConns.ResolveCredential(conn, model.DBCredentialRoleReadonly)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal error")
-		return
 	}
 
 	timeoutSettings := h.loadSQLEditorTimeoutSettings(r.Context())
@@ -1801,9 +1818,11 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 
 	connID := conn.ID
 	auditDetails := map[string]any{
-		"sql":         truncate(cmdLine, 500),
-		"row_count":   len(result.Rows),
-		"duration_ms": durationMs,
+		"sql":              truncate(cmdLine, 500),
+		"executed_command": redisCommandForAudit(cmd, args),
+		"limit_applied":    redisCommandArgsChanged(cmdLine, cmd, args),
+		"row_count":        len(result.Rows),
+		"duration_ms":      durationMs,
 	}
 	addAuditConnectionDetails(auditDetails, conn)
 	auditDetails["redis_db_index"] = dbIndex
@@ -1836,6 +1855,28 @@ func (h *QueryHandler) executeRedis(w http.ResponseWriter, r *http.Request, conn
 		"row_count":   len(result.Rows),
 		"duration_ms": durationMs,
 	})
+}
+
+func redisCommandArgsChanged(original, command string, args []string) bool {
+	originalCommand, originalArgs, err := sqlreview.ParseRedisCommand(original)
+	if err != nil || originalCommand != command || len(originalArgs) != len(args) {
+		return true
+	}
+	for i := range args {
+		if originalArgs[i] != args[i] {
+			return true
+		}
+	}
+	return false
+}
+
+func redisCommandForAudit(command string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, command)
+	for _, arg := range args {
+		parts = append(parts, strconv.Quote(arg))
+	}
+	return truncate(strings.Join(parts, " "), 500)
 }
 
 func (h *QueryHandler) auditBlockedQuery(r *http.Request, userID uint64, connID uint64, sqlText string, reason string, extra map[string]any) {

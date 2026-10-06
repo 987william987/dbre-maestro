@@ -38,11 +38,17 @@ type redisClientVariant struct {
 
 // RedisManager holds one Redis client per target Redis instance and mode.
 type RedisManager struct {
-	mu      sync.RWMutex
-	clients map[string]redis.UniversalClient
+	mu           sync.RWMutex
+	clients      map[string]redis.UniversalClient
+	commandCache map[string]redisCommandCacheEntry
 }
 
 var redisGlobal = &RedisManager{clients: make(map[string]redis.UniversalClient)}
+
+type redisCommandCacheEntry struct {
+	expiresAt time.Time
+	commands  map[string]*redis.CommandInfo
+}
 
 func RedisGlobal() *RedisManager { return redisGlobal }
 
@@ -120,6 +126,40 @@ func (m *RedisManager) DoInDB(ctx context.Context, options RedisConnOptions, arg
 	return nil, lastErr
 }
 
+func (m *RedisManager) CommandInfo(ctx context.Context, options RedisConnOptions, command string) (*redis.CommandInfo, error) {
+	addr := BuildRedisAddr(options.Host, options.Port)
+	var lastErr error
+	for _, variant := range buildRedisClientVariants(options) {
+		m.mu.RLock()
+		entry, ok := m.commandCache[variant.cacheKey]
+		m.mu.RUnlock()
+		if ok && time.Now().Before(entry.expiresAt) {
+			if info := entry.commands[strings.ToLower(command)]; info != nil {
+				return info, nil
+			}
+			return nil, fmt.Errorf("redis command %q not found", command)
+		}
+
+		client := m.getOrCreate(options, addr, variant)
+		commands, err := client.Command(ctx).Result()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		m.mu.Lock()
+		if m.commandCache == nil {
+			m.commandCache = make(map[string]redisCommandCacheEntry)
+		}
+		m.commandCache[variant.cacheKey] = redisCommandCacheEntry{expiresAt: time.Now().Add(5 * time.Minute), commands: commands}
+		m.mu.Unlock()
+		if info := commands[strings.ToLower(command)]; info != nil {
+			return info, nil
+		}
+		return nil, fmt.Errorf("redis command %q not found", command)
+	}
+	return nil, lastErr
+}
+
 func (m *RedisManager) getOrCreate(options RedisConnOptions, addr string, variant redisClientVariant) redis.UniversalClient {
 	m.mu.RLock()
 	if c, ok := m.clients[variant.cacheKey]; ok {
@@ -178,6 +218,7 @@ func (m *RedisManager) Invalidate(connID uint64) {
 		if strings.HasPrefix(key, connPrefix) {
 			c.Close()
 			delete(m.clients, key)
+			delete(m.commandCache, key)
 		}
 	}
 }

@@ -97,13 +97,7 @@ func TestCheckRedisReadOnly(t *testing.T) {
 			"HGETALL profile:1",
 			"HKEYS profile:1",
 			"HVALS profile:1",
-			"LRANGE queue 0 -1",
 			"SMEMBERS online-users",
-			"ZRANGE leaderboard 0 -1",
-			"ZRANGEBYSCORE leaderboard -inf +inf",
-			"ZRANGEBYLEX names - +",
-			"ZREVRANGE leaderboard 0 -1",
-			"ZREVRANGEBYSCORE leaderboard +inf -inf",
 		} {
 			if err := CheckRedisReadOnly(cmdLine); err == nil {
 				t.Fatalf("CheckRedisReadOnly(%q) expected error, got nil", cmdLine)
@@ -115,13 +109,23 @@ func TestCheckRedisReadOnly(t *testing.T) {
 		for _, cmdLine := range []string{
 			"INFO",
 			"DBSIZE",
-			"OBJECT ENCODING user:1",
 			"MEMORY USAGE user:1",
 			"TIME",
 		} {
 			if err := CheckRedisReadOnly(cmdLine); err == nil {
 				t.Fatalf("CheckRedisReadOnly(%q) expected error, got nil", cmdLine)
 			}
+		}
+	})
+
+	t.Run("allows only safe object metadata subcommands", func(t *testing.T) {
+		for _, cmdLine := range []string{"OBJECT ENCODING user:1", "OBJECT FREQ user:1", "OBJECT IDLETIME user:1", "OBJECT REFCOUNT user:1"} {
+			if err := CheckRedisReadOnly(cmdLine); err != nil {
+				t.Fatalf("CheckRedisReadOnly(%q) error = %v", cmdLine, err)
+			}
+		}
+		if err := CheckRedisReadOnly("OBJECT HELP"); err == nil {
+			t.Fatal("unsafe OBJECT subcommand unexpectedly allowed")
 		}
 	})
 
@@ -138,6 +142,61 @@ func TestCheckRedisReadOnly(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 	})
+}
+
+func TestPrepareRedisReadOnlyBoundsCollectionCommands(t *testing.T) {
+	tests := []struct {
+		input string
+		want  []string
+	}{
+		{"LRANGE queue 0 -1", []string{"0", "199"}},
+		{"ZRANGE leaderboard 0 -1 WITHSCORES", []string{"0", "199", "WITHSCORES"}},
+		{"ZRANGE leaderboard -inf +inf BYSCORE WITHSCORES", []string{"-inf", "+inf", "BYSCORE", "LIMIT", "0", "200", "WITHSCORES"}},
+		{"ZRANGEBYSCORE leaderboard -inf +inf", []string{"-inf", "+inf", "LIMIT", "0", "200"}},
+		{"XRANGE events - +", []string{"-", "+", "COUNT", "200"}},
+		{"GEOSEARCH places FROMLONLAT 0 0 BYRADIUS 10 km", []string{"FROMLONLAT", "0", "0", "BYRADIUS", "10", "km", "COUNT", "200"}},
+	}
+	for _, tt := range tests {
+		_, args, err := PrepareRedisReadOnly(tt.input, 200)
+		if err != nil {
+			t.Fatalf("PrepareRedisReadOnly(%q): %v", tt.input, err)
+		}
+		if !reflect.DeepEqual(args[1:], tt.want) {
+			t.Fatalf("PrepareRedisReadOnly(%q) args=%#v want tail=%#v", tt.input, args, tt.want)
+		}
+	}
+}
+
+func TestPrepareRedisReadOnlyBoundsMultiValueArguments(t *testing.T) {
+	_, args, err := PrepareRedisReadOnly("MGET a b c", 2)
+	if err != nil || !reflect.DeepEqual(args, []string{"a", "b"}) {
+		t.Fatalf("bounded MGET args=%#v err=%v", args, err)
+	}
+	_, args, err = PrepareRedisReadOnly("GEOPOS places a b c", 2)
+	if err != nil || !reflect.DeepEqual(args, []string{"places", "a", "b"}) {
+		t.Fatalf("bounded GEOPOS args=%#v err=%v", args, err)
+	}
+}
+
+func TestCheckRedisOfficialReadOnlyRequiresBothPolicies(t *testing.T) {
+	if err := CheckRedisOfficialReadOnly("GET user:1", true); err != nil {
+		t.Fatalf("official readonly GET rejected: %v", err)
+	}
+	if err := CheckRedisOfficialReadOnly("GET user:1", false); err == nil {
+		t.Fatal("target Redis readonly metadata must be authoritative")
+	}
+	if err := CheckRedisOfficialReadOnly("KEYS *", true); err == nil {
+		t.Fatal("official readonly flag must not bypass the local dangerous-command policy")
+	}
+}
+
+func TestCheckRedisFallbackReadOnlyDoesNotEnableNewCommands(t *testing.T) {
+	if err := CheckRedisFallbackReadOnly("GET user:1"); err != nil {
+		t.Fatalf("legacy safe command rejected: %v", err)
+	}
+	if err := CheckRedisFallbackReadOnly("ZRANGE leaderboard 0 10"); err == nil {
+		t.Fatal("new command must require target Redis readonly metadata")
+	}
 }
 
 func TestCheckRedisSensitiveKeyPrefixes(t *testing.T) {
@@ -161,6 +220,10 @@ func TestCheckRedisSensitiveKeyPrefixes(t *testing.T) {
 			"ZRANK token:z member",
 			"ZCOUNT token:z 0 10",
 			"ZSCAN token:z 0 COUNT 200",
+			"LRANGE session:queue 0 199",
+			"ZRANGE token:z 0 199",
+			"XRANGE session:events - + COUNT 200",
+			"GEOSEARCH token:places FROMLONLAT 0 0 BYRADIUS 10 km COUNT 200",
 		} {
 			cmd, args, err := ParseRedisCommand(cmdLine)
 			if err != nil {
