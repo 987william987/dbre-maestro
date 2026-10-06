@@ -184,7 +184,7 @@ export function OnlineDDLExecutionPanel(props: Props) {
 function RunStatus({ run }: { run: OnlineDDLRun }) {
   return <div className="mt-3 grid gap-2 rounded-md border border-border bg-panel p-3 text-[12px] sm:grid-cols-2 lg:grid-cols-4">
     <Metric label="Phase" value={run.phase ?? 'Waiting'} /><Metric label="Progress" value={run.progress_percent == null ? 'None' : `${run.progress_percent.toFixed(1)}%`} />
-    <Metric label="ETA" value={run.eta_seconds == null ? 'None' : `${run.eta_seconds}s`} /><Metric label="Copied rows" value={run.copied_rows?.toLocaleString() ?? 'None'} />
+    <Metric label="ETA" value={run.eta_display ?? (run.eta_seconds == null ? 'None' : `${run.eta_seconds}s`)} /><Metric label="Copied rows" value={run.copied_rows?.toLocaleString() ?? 'None'} />
     <Metric label="Replication lag" value={run.replication_lag_ms == null ? 'None' : `${run.replication_lag_ms} ms`} /><Metric label="Threads running" value={run.threads_running?.toString() ?? 'None'} />
     <Metric label="Throttle" value={run.throttle_reason ?? 'None'} /><Metric label="Heartbeat" value={run.heartbeat_at ? new Date(run.heartbeat_at).toLocaleString() : 'Not received'} />
     {run.outcome_confidence ? <Metric label="Outcome" value={run.outcome_confidence} /> : null}{run.error_code ? <Metric label="Error" value={run.error_code} /> : null}

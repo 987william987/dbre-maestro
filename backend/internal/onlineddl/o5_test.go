@@ -15,15 +15,15 @@ import (
 
 func TestParseProgressFixturesAndRejectMalformedOutput(t *testing.T) {
 	ghost, ok := ParseProgress(ModeGhost, "noise\nCopy: 125/1000 12.5%; Applied: 4; Backlog: 0/100; Time: 1m; ETA: 42s\n")
-	if !ok || *ghost.CopiedRows != 125 || *ghost.ProgressPercent != 12.5 || *ghost.ETASeconds != 42 {
+	if !ok || *ghost.CopiedRows != 125 || *ghost.ProgressPercent != 12.5 || *ghost.ETADisplay != "42s" {
 		t.Fatalf("ghost=%+v ok=%v", ghost, ok)
 	}
 	ptosc, ok := ParseProgress(ModePTOSC, "500 rows copied; 25.0% done; 00:01:30 remain")
-	if !ok || *ptosc.CopiedRows != 500 || *ptosc.ETASeconds != 90 {
+	if !ok || *ptosc.CopiedRows != 500 || *ptosc.ETADisplay != "00:01:30" {
 		t.Fatalf("ptosc=%+v ok=%v", ptosc, ok)
 	}
 	common, ok := ParseProgress(ModePTOSC, "Copying `app`.`orders`:  95% 02:03 remain")
-	if !ok || *common.ProgressPercent != 95 || *common.ETASeconds != 123 {
+	if !ok || *common.ProgressPercent != 95 || *common.ETADisplay != "02:03" {
 		t.Fatalf("common ptosc=%+v ok=%v", common, ok)
 	}
 	enriched, ok := ParseProgress(ModeGhost, "MySQL load: Threads_running=7\nCopy: 5/10 50.0%; ETA: 9s; State: migrating; LAG: 0.25s; throttled by replica")
@@ -31,13 +31,19 @@ func TestParseProgressFixturesAndRejectMalformedOutput(t *testing.T) {
 		t.Fatalf("enriched=%+v", enriched)
 	}
 	multiETA, ok := ParseProgress(ModeGhost, "Copy: 5/10 50.0%; ETA: 2m3s")
-	if !ok || *multiETA.ETASeconds != 123 {
+	if !ok || *multiETA.ETADisplay != "2m3s" {
 		t.Fatalf("multi eta=%+v ok=%v", multiETA, ok)
 	}
 	for _, marker := range []string{"N/A", "due"} {
 		progress, ok := ParseProgress(ModeGhost, "Copy: 0/0 100.0%; Applied: 0; ETA: "+marker)
-		if !ok || progress.ProgressPercent == nil || *progress.ProgressPercent != 100 || progress.CopiedRows == nil || *progress.CopiedRows != 0 || progress.ETASeconds != nil {
+		if !ok || progress.ProgressPercent == nil || *progress.ProgressPercent != 100 || progress.CopiedRows == nil || *progress.CopiedRows != 0 || progress.ETADisplay == nil || *progress.ETADisplay != marker {
 			t.Fatalf("marker=%s progress=%+v ok=%v", marker, progress, ok)
+		}
+	}
+	for _, eta := range []string{"59:30", "03:59:30", "2+03:59:30"} {
+		progress, ok := ParseProgress(ModePTOSC, "Copying `app`.`orders`:  3% "+eta+" remain")
+		if !ok || progress.ETADisplay == nil || *progress.ETADisplay != eta {
+			t.Fatalf("pt-osc eta=%s progress=%+v ok=%v", eta, progress, ok)
 		}
 	}
 	withoutRuntimeLoad, ok := ParseProgress(ModeGhost, "# max-load: Threads_running=10\nCopy: 1/2 50.0%; ETA: N/A")

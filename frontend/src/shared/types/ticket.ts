@@ -141,6 +141,7 @@ export type OnlineDDLRun = {
   progress_percent?: number | null
   copied_rows?: number | null
   eta_seconds?: number | null
+  eta_display?: string | null
   replication_lag_ms?: number | null
   threads_running?: number | null
   throttle_reason?: string | null

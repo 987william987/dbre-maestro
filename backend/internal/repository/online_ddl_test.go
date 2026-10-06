@@ -65,7 +65,7 @@ func TestOnlineDDLDoubleConnectionClaimReturnsStableConflict(t *testing.T) {
 
 func TestOnlineDDLInterruptActiveReleasesAllLocks(t *testing.T) {
 	repo, mock := newOnlineDDLRepoTest(t)
-	mock.ExpectExec("UPDATE ticket_online_ddl_runs SET status = 'interrupted', active_connection_id = NULL").WillReturnResult(sqlmock.NewResult(0, 4))
+	mock.ExpectExec("UPDATE ticket_online_ddl_runs SET status = 'interrupted', eta_seconds = NULL, eta_display = NULL, active_connection_id = NULL").WillReturnResult(sqlmock.NewResult(0, 4))
 	count, err := repo.InterruptActive(context.Background())
 	if err != nil || count != 4 {
 		t.Fatalf("count = %d, error = %v", count, err)
@@ -111,13 +111,13 @@ func TestOnlineDDLRunnerLifecycleUpdatesAreConditional(t *testing.T) {
 func TestOnlineDDLSaveProgressUpdatesLatestAndBoundedHistoryAtomically(t *testing.T) {
 	repo, mock := newOnlineDDLRepoTest(t)
 	percent := 25.0
-	copied, eta := uint64(500), uint64(90)
+	copied, eta := uint64(500), "00:01:30"
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE ticket_online_ddl_runs SET phase").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO ticket_online_ddl_events").WithArgs(uint64(8), "copy", &percent, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("DELETE FROM ticket_online_ddl_events").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()
-	ok, err := repo.SaveProgress(context.Background(), 8, onlineddl.ProgressSnapshot{Phase: "copy", ProgressPercent: &percent, CopiedRows: &copied, ETASeconds: &eta}, true)
+	ok, err := repo.SaveProgress(context.Background(), 8, onlineddl.ProgressSnapshot{Phase: "copy", ProgressPercent: &percent, CopiedRows: &copied, ETADisplay: &eta}, true)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}

@@ -53,14 +53,22 @@ describe('OnlineDDLExecutionPanel', () => {
   })
 
   it('uses the latest OCC version for pause and exposes persisted progress', async () => {
-    const run = makeRun('running')
+    const run = { ...makeRun('running'), eta_display: '2+03:59:30' }
     vi.mocked(controlOnlineDDL).mockResolvedValue({ ...run, status: 'paused', version: 5 })
     renderPanel(run)
     fireEvent.click(screen.getByRole('button', { name: 'Manage statement 1 gh-ost' }))
     expect(screen.getByText('42.5%')).toBeInTheDocument()
     expect(screen.getByText('250 ms')).toBeInTheDocument()
+    expect(screen.getByText('2+03:59:30')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /pause/i }))
     await waitFor(() => expect(controlOnlineDDL).toHaveBeenCalledWith('TK-3', 7, 'pause', 4))
+  })
+
+  it('falls back to legacy seconds for runs created before raw ETA storage', () => {
+    const run = { ...makeRun('running'), eta_seconds: 90 }
+    renderPanel(run)
+    fireEvent.click(screen.getByRole('button', { name: 'Manage statement 1 gh-ost' }))
+    expect(screen.getByText('90s')).toBeInTheDocument()
   })
 
   it('shows None when the tool did not provide a metric', () => {

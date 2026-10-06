@@ -251,7 +251,7 @@ func TestLimitedBufferKeepsLatestProgressAfterTruncation(t *testing.T) {
 		t.Fatalf("tail buffer result is not the latest output: truncated=%v suffix=%q", buffer.Truncated(), result[len(result)-80:])
 	}
 	progress, ok := ParseProgress(ModeGhost, result)
-	if !ok || progress.ProgressPercent == nil || *progress.ProgressPercent != 100 || progress.ETASeconds != nil {
+	if !ok || progress.ProgressPercent == nil || *progress.ProgressPercent != 100 || progress.ETADisplay == nil || *progress.ETADisplay != "due" {
 		t.Fatalf("latest progress was not parsed after truncation: ok=%v progress=%+v", ok, progress)
 	}
 }

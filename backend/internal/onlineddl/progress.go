@@ -59,7 +59,7 @@ type ProgressSnapshot struct {
 	Phase            string
 	ProgressPercent  *float64
 	CopiedRows       *uint64
-	ETASeconds       *uint64
+	ETADisplay       *string
 	ReplicationLagMs *uint64
 	ThreadsRunning   *uint
 	ThrottleReason   string
@@ -68,8 +68,8 @@ type ProgressSnapshot struct {
 var (
 	ghostProgress     = regexp.MustCompile(`(?i)Copy:\s*([0-9]+)\/([0-9]+)\s+([0-9]+(?:\.[0-9]+)?)%`)
 	etaProgress       = regexp.MustCompile(`(?i)ETA:\s*([^;\s]+)`)
-	ptoscProgress     = regexp.MustCompile(`(?i)([0-9]+)\s+rows copied;\s*([0-9]+(?:\.[0-9]+)?)%.*?([0-9]+):([0-9]{2}):([0-9]{2})\s+remain`)
-	ptoscCopyProgress = regexp.MustCompile(`(?i)Copying\s+.+:\s*([0-9]+(?:\.[0-9]+)?)%\s+([0-9]+):([0-9]{2})\s+remain`)
+	ptoscProgress     = regexp.MustCompile(`(?i)([0-9]+)\s+rows copied;\s*([0-9]+(?:\.[0-9]+)?)%.*?([0-9]+(?:\+[0-9]{2})?(?::[0-9]{2}){1,2})\s+remain`)
+	ptoscCopyProgress = regexp.MustCompile(`(?i)Copying\s+.+:\s*([0-9]+(?:\.[0-9]+)?)%\s+([0-9]+(?:\+[0-9]{2})?(?::[0-9]{2}){1,2})\s+remain`)
 	lagProgress       = regexp.MustCompile(`(?i)(?:HeartbeatLag|LAG):\s*([0-9]+(?:\.[0-9]+)?)s`)
 	threadsProgress   = regexp.MustCompile(`(?i)MySQL load:[^\n]*Threads_running\s*[=:]\s*([0-9]+)`)
 	stateProgress     = regexp.MustCompile(`(?i)State:\s*([a-z_-]+)`)
@@ -86,10 +86,7 @@ func ParseProgress(mode, output string) (ProgressSnapshot, bool) {
 				percent, _ := strconv.ParseFloat(match[3], 64)
 				progress := ProgressSnapshot{Phase: "copy", CopiedRows: &copied, ProgressPercent: &percent}
 				if etaMatch := etaProgress.FindStringSubmatch(line); etaMatch != nil {
-					if duration, err := time.ParseDuration(etaMatch[1]); err == nil {
-						eta := uint64(duration / time.Second)
-						progress.ETASeconds = &eta
-					}
+					progress.ETADisplay = &etaMatch[1]
 				}
 				return enrichProgress(progress, latestProgressSnapshot(lines, i, mode)), true
 			}
@@ -97,18 +94,11 @@ func ParseProgress(mode, output string) (ProgressSnapshot, bool) {
 			if match := ptoscProgress.FindStringSubmatch(line); match != nil {
 				copied, _ := strconv.ParseUint(match[1], 10, 64)
 				percent, _ := strconv.ParseFloat(match[2], 64)
-				hours, _ := strconv.ParseUint(match[3], 10, 64)
-				minutes, _ := strconv.ParseUint(match[4], 10, 64)
-				seconds, _ := strconv.ParseUint(match[5], 10, 64)
-				eta := hours*3600 + minutes*60 + seconds
-				return enrichProgress(ProgressSnapshot{Phase: "copy", CopiedRows: &copied, ProgressPercent: &percent, ETASeconds: &eta}, latestProgressSnapshot(lines, i, mode)), true
+				return enrichProgress(ProgressSnapshot{Phase: "copy", CopiedRows: &copied, ProgressPercent: &percent, ETADisplay: &match[3]}, latestProgressSnapshot(lines, i, mode)), true
 			}
 			if match := ptoscCopyProgress.FindStringSubmatch(line); match != nil {
 				percent, _ := strconv.ParseFloat(match[1], 64)
-				minutes, _ := strconv.ParseUint(match[2], 10, 64)
-				seconds, _ := strconv.ParseUint(match[3], 10, 64)
-				eta := minutes*60 + seconds
-				return enrichProgress(ProgressSnapshot{Phase: "copy", ProgressPercent: &percent, ETASeconds: &eta}, latestProgressSnapshot(lines, i, mode)), true
+				return enrichProgress(ProgressSnapshot{Phase: "copy", ProgressPercent: &percent, ETADisplay: &match[2]}, latestProgressSnapshot(lines, i, mode)), true
 			}
 		}
 	}

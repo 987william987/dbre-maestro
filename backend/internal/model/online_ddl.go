@@ -22,6 +22,7 @@ type OnlineDDLRun struct {
 	ProgressPercent     *float64         `db:"progress_percent" json:"progress_percent,omitempty"`
 	CopiedRows          *uint64          `db:"copied_rows" json:"copied_rows,omitempty"`
 	ETASeconds          *uint64          `db:"eta_seconds" json:"eta_seconds,omitempty"`
+	ETADisplay          *string          `db:"eta_display" json:"eta_display,omitempty"`
 	ReplicationLagMs    *uint64          `db:"replication_lag_ms" json:"replication_lag_ms,omitempty"`
 	ThreadsRunning      *uint            `db:"threads_running" json:"threads_running,omitempty"`
 	ThrottleReason      *string          `db:"throttle_reason" json:"throttle_reason,omitempty"`
